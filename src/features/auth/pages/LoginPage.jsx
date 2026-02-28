@@ -1,10 +1,11 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import './LoginPage.css';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
 
   const [nombreUsuario, setNombreUsuario] = useState('');
@@ -13,6 +14,15 @@ export default function LoginPage() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // ✅ Si vienes del correo de Supabase con "#access_token=...&type=recovery"
+  // te mandamos a /reset-password conservando el hash.
+  useEffect(() => {
+    const h = location.hash || '';
+    if (h.includes('type=recovery') && h.includes('access_token=')) {
+      navigate(`/reset-password${h}`, { replace: true });
+    }
+  }, [location.hash, navigate]);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -71,9 +81,11 @@ export default function LoginPage() {
                 <label className="mf-label" htmlFor="contrasena">
                   Password
                 </label>
-                <a className="mf-link" href="#" onClick={(e) => e.preventDefault()}>
+
+                {/* ✅ Link real */}
+                <Link className="mf-link" to="/forgot-password">
                   Forgot Password?
-                </a>
+                </Link>
               </div>
 
               <input

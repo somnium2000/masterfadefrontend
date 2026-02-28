@@ -1,5 +1,6 @@
-import { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { http } from '../services/httpClient.js';
+import { setTokenGetter } from '../services/httpClient.js';
 
 const AuthContext = createContext(null);
 
@@ -20,11 +21,23 @@ export function AuthProvider({ children }) {
 
   const [token, setToken] = useState(initialToken);
   const [user, setUser] = useState(initialUser);
+  const tokenRef = useRef(token);
+
+  // Mantener ref sincronizado para que httpClient siempre lea el valor actual
+  useEffect(() => {
+    tokenRef.current = token;
+    setTokenGetter(() => tokenRef.current || null);
+  }, [token]);
+
+  // Registrar getter al montar, limpiar al desmontar
+  useEffect(() => {
+    setTokenGetter(() => tokenRef.current || null);
+    return () => setTokenGetter(null);
+  }, []);
 
   const isAuthenticated = Boolean(token);
 
   async function login(nombre_usuario, contrasena, remember) {
-    // Validación mínima (evita requests innecesarios)
     const username = String(nombre_usuario || '').trim();
     const pass = String(contrasena || '').trim();
 
@@ -33,34 +46,34 @@ export function AuthProvider({ children }) {
     }
 
     try {
-      // Backend: POST /v1/auth/login
       const data = await http.post('/v1/auth/login', {
         nombre_usuario: username,
         contrasena: pass,
       });
 
-      if (!data?.ok || !data?.token) {
-        return { ok: false, message: data?.message || 'Credenciales inválidas.' };
+      // El backend ahora retorna { ok, data: { token, user } }
+      const payload = data?.data || data;
+
+      if (!data?.ok || !payload?.token) {
+        return { ok: false, message: data?.error?.message || data?.message || 'Credenciales inválidas.' };
       }
 
-      // Guardamos en memoria
-      setToken(data.token);
-      setUser(data.user || null);
+      setToken(payload.token);
+      setUser(payload.user || null);
 
-      // Persistencia opcional
       if (remember) {
-        localStorage.setItem(LS_TOKEN_KEY, data.token);
-        localStorage.setItem(LS_USER_KEY, JSON.stringify(data.user || null));
+        localStorage.setItem(LS_TOKEN_KEY, payload.token);
+        localStorage.setItem(LS_USER_KEY, JSON.stringify(payload.user || null));
       } else {
         localStorage.removeItem(LS_TOKEN_KEY);
         localStorage.removeItem(LS_USER_KEY);
       }
 
-      return { ok: true, message: data.message || 'Login exitoso' };
+      return { ok: true, message: 'Login exitoso' };
     } catch (err) {
       return {
         ok: false,
-        message: err?.message || 'Error al intentar iniciar sesión.',
+        message: err?.data?.error?.message || err?.message || 'Error al intentar iniciar sesión.',
       };
     }
   }

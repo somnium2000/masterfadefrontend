@@ -5,6 +5,9 @@ import HomePage from './features/home/pages/HomePage.jsx';
 import ProtectedRoute from './routes/ProtectedRoute.jsx';
 import { useAuth } from './context/AuthContext.jsx';
 
+import ForgotPasswordPage from './features/auth/pages/ForgotPasswordPage.jsx';
+import ResetPasswordPage from './features/auth/pages/ResetPasswordPage.jsx';
+
 function App() {
   const { isAuthenticated } = useAuth();
 
@@ -23,6 +26,10 @@ function App() {
           isAuthenticated ? <Navigate to="/home" replace /> : <LoginPage />
         }
       />
+
+      {/* NUEVAS RUTAS */}
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
 
       <Route
         path="/home"
