@@ -57,7 +57,7 @@ export default function LoginPage() {
 
         <div className="mf-login-card">
           <div className="mf-login-card-header">
-            <h1 className="mf-login-title">Login</h1>
+            <h1 className="text-3xl font-bold underline">Login</h1>
           </div>
 
           <form className="mf-login-form" onSubmit={onSubmit}>
