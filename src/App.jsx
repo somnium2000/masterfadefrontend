@@ -1,9 +1,9 @@
-import './App.css'
 import { Navigate, Route, Routes } from 'react-router-dom';
 import LoginPage from './features/auth/pages/LoginPage.jsx';
 import HomePage from './features/home/pages/HomePage.jsx';
 import ProtectedRoute from './routes/ProtectedRoute.jsx';
 import { useAuth } from './context/AuthContext.jsx';
+import LandingPage from './features/landing/pages/LandingPage.jsx';
 
 import ForgotPasswordPage from './features/auth/pages/ForgotPasswordPage.jsx';
 import ResetPasswordPage from './features/auth/pages/ResetPasswordPage.jsx';
@@ -13,12 +13,7 @@ function App() {
 
   return (
     <Routes>
-      <Route
-        path="/"
-        element={
-          <Navigate to={isAuthenticated ? '/home' : '/login'} replace />
-        }
-      />
+      <Route path="/" element={<LandingPage />} />
 
       <Route
         path="/login"
@@ -40,7 +35,7 @@ function App() {
         }
       />
 
-      <Route path="*" element={<Navigate to="/login" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }

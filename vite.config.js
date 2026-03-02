@@ -16,6 +16,6 @@ export default defineConfig({
     },
   },
   server: {
-    open: "/login",
+    open: "/",
   },
 });
