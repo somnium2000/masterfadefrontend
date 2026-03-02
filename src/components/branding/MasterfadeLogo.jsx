@@ -3,17 +3,11 @@ import { useTheme } from '../../context/ThemeContext.jsx';
 
 const VARIANTS = {
   hero: {
-    title: 'text-[18px] tracking-[0.12em]',
-    subtitle: 'text-[10px] tracking-[0.3em]',
-    lines: 'w-6',
-    gap: 'gap-4',
+    gap: 'gap-0',
     script: 'w-[250px] max-w-[78vw]',
   },
   compact: {
-    title: 'text-[16px] tracking-[0.12em]',
-    subtitle: 'text-[9px] tracking-[0.28em]',
-    lines: 'w-5',
-    gap: 'gap-3',
+    gap: 'gap-0',
     script: 'w-[190px] max-w-[70vw]',
   },
 };
@@ -63,24 +57,6 @@ export default function MasterfadeLogo({ variant = 'hero', className = '', showS
           />
         </div>
       ) : null}
-
-      <div className="space-y-2">
-        <div
-          className={`mf-font-display uppercase leading-none text-[var(--mf-text)] ${styles.title}`}
-          style={{
-            textShadow:
-              '0 0 1px color-mix(in srgb, var(--mf-accent) 50%, transparent), 0 0 10px color-mix(in srgb, var(--mf-accent) 12%, transparent)',
-          }}
-        >
-          MASTERFADE
-        </div>
-
-        <div className="flex items-center justify-center gap-3 text-[var(--mf-accent)]">
-          <span className={`h-px bg-[var(--mf-accent)]/70 ${styles.lines}`} />
-          <span className={`uppercase leading-none ${styles.subtitle}`}>Barber Shop</span>
-          <span className={`h-px bg-[var(--mf-accent)]/70 ${styles.lines}`} />
-        </div>
-      </div>
     </div>
   );
 }
