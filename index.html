@@ -1,10 +1,28 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>masterfade</title>
+    <meta name="theme-color" content="#0D0D0D" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      (() => {
+        const key = 'mf_theme_variant';
+        const raw = window.localStorage.getItem(key);
+        const variant = raw === 'light' ? 'light' : 'dark';
+        const root = document.documentElement;
+
+        root.dataset.theme = variant;
+        root.classList.toggle('dark', variant === 'dark');
+        root.style.colorScheme = variant === 'dark' ? 'dark' : 'light';
+      })();
+    </script>
+    <title>MASTERFADE</title>
   </head>
   <body>
     <div id="root"></div>
