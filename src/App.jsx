@@ -7,6 +7,7 @@ import HomePage from './features/home/pages/HomePage.jsx';
 import HomeRedirectPage from './features/home/pages/HomeRedirectPage.jsx';
 import { ROLE_ROUTE_ALLOWED_ROLES } from './features/home/lib/roleRouting.js';
 import LandingPage from './features/landing/pages/LandingPage.jsx';
+import ServicesPage from './features/public/pages/ServicesPage.jsx';
 import UnauthorizedPage from './features/unauthorized/pages/UnauthorizedPage.jsx';
 import ProtectedRoute from './routes/ProtectedRoute.jsx';
 
@@ -20,6 +21,7 @@ function App() {
       <Route path="/login" element={isAuthenticated ? <Navigate to="/home" replace /> : <LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/servicios" element={<ServicesPage />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
       <Route
