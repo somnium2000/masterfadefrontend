@@ -3,8 +3,8 @@ import { useAuth } from './context/AuthContext.jsx';
 import ForgotPasswordPage from './features/auth/pages/ForgotPasswordPage.jsx';
 import LoginPage from './features/auth/pages/LoginPage.jsx';
 import ResetPasswordPage from './features/auth/pages/ResetPasswordPage.jsx';
-import HomeRedirectPage from './features/home/pages/HomeRedirectPage.jsx';
 import HomePage from './features/home/pages/HomePage.jsx';
+import HomeRedirectPage from './features/home/pages/HomeRedirectPage.jsx';
 import { ROLE_ROUTE_ALLOWED_ROLES } from './features/home/lib/roleRouting.js';
 import LandingPage from './features/landing/pages/LandingPage.jsx';
 import UnauthorizedPage from './features/unauthorized/pages/UnauthorizedPage.jsx';
@@ -32,7 +32,7 @@ function App() {
       />
 
       <Route
-        path="/home/super_admin"
+        path="/home/super/*"
         element={
           <ProtectedRoute allowedRoles={ROLE_ROUTE_ALLOWED_ROLES.super_admin}>
             <HomePage pageRole="super_admin" />
@@ -41,7 +41,7 @@ function App() {
       />
 
       <Route
-        path="/home/admin"
+        path="/home/admin/*"
         element={
           <ProtectedRoute allowedRoles={ROLE_ROUTE_ALLOWED_ROLES.admin}>
             <HomePage pageRole="admin" />
@@ -50,7 +50,7 @@ function App() {
       />
 
       <Route
-        path="/home/barbero"
+        path="/home/barbero/*"
         element={
           <ProtectedRoute allowedRoles={ROLE_ROUTE_ALLOWED_ROLES.barbero}>
             <HomePage pageRole="barbero" />
@@ -59,13 +59,15 @@ function App() {
       />
 
       <Route
-        path="/home/cliente"
+        path="/home/cliente/*"
         element={
           <ProtectedRoute allowedRoles={ROLE_ROUTE_ALLOWED_ROLES.cliente}>
             <HomePage pageRole="cliente" />
           </ProtectedRoute>
         }
       />
+
+      <Route path="/home/super_admin/*" element={<Navigate to="/home/super" replace />} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

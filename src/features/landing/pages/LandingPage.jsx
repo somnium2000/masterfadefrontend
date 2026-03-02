@@ -44,19 +44,19 @@ export default function LandingPage() {
 
   const navItems = [
     { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate('/') },
-    { id: 'servicios', label: 'Servicios', icon: Scissors, disabled: true },
+    { id: 'servicios', label: 'Servicios', icon: Scissors, onClick: () => navigate('/servicios') },
     { id: 'login', label: 'Iniciar sesión', icon: LogIn, onClick: () => navigate('/login') },
     { id: 'promociones', label: 'Promociones', icon: Tag, disabled: true },
   ];
 
   return (
-    <div className="mf-page-gradient min-h-screen">
-      <div className="mf-mobile-frame mf-screen-pad mf-safe-top relative flex min-h-screen flex-col pb-[100px]">
+    <div className="mf-page-gradient h-[100dvh] overflow-hidden">
+      <div className="mf-mobile-frame mf-screen-pad mf-safe-top relative flex h-full flex-col">
         <header className="flex justify-end pt-3">
           <ThemeSwitcher />
         </header>
 
-        <main className="flex min-h-[calc(100dvh-80px)] flex-1 flex-col items-center justify-center pt-7">
+        <main className="flex min-h-0 flex-1 flex-col items-center justify-center py-6">
           <motion.div
             initial={{ scaleX: 0 }}
             animate={{ scaleX: 1 }}
@@ -105,7 +105,7 @@ export default function LandingPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.6, delay: 1.2, ease: 'easeOut' }}
-            className="mt-10 flex items-center gap-3 text-[10px] uppercase tracking-[0.2em] text-[var(--mf-text-2)]"
+            className="mt-8 flex items-center gap-3 text-[10px] uppercase tracking-[0.2em] text-[var(--mf-text-2)]"
           >
             <span className="h-px w-5 bg-[linear-gradient(90deg,transparent,var(--mf-accent))]" />
             <span>Honduras</span>

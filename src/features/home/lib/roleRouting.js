@@ -1,7 +1,7 @@
 export const ROLE_PRIORITY = ['super_admin', 'admin', 'barbero', 'cliente'];
 
 export const ROLE_HOME_PATHS = {
-  super_admin: '/home/super_admin',
+  super_admin: '/home/super',
   admin: '/home/admin',
   barbero: '/home/barbero',
   cliente: '/home/cliente',
@@ -19,6 +19,10 @@ export const ROLE_LABELS = {
   admin: 'Administrador',
   barbero: 'Barbero',
   cliente: 'Cliente',
+};
+
+export const LEGACY_ROLE_HOME_ALIASES = {
+  '/home/super_admin': '/home/super',
 };
 
 export function getPrimaryRole(roles = []) {
