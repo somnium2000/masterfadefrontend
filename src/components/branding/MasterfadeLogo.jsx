@@ -1,4 +1,7 @@
 import { Scissors } from 'lucide-react';
+import scriptDark from '../../assets/branding/masterfade-script-dark.jpeg';
+import scriptLight from '../../assets/branding/masterfade-script-light.jpeg';
+import { useTheme } from '../../context/ThemeContext.jsx';
 
 const VARIANTS = {
   hero: {
@@ -9,6 +12,7 @@ const VARIANTS = {
     subtitle: 'text-[10px] tracking-[0.3em]',
     lines: 'w-6',
     gap: 'gap-5',
+    script: 'w-[250px] max-w-[78vw]',
   },
   compact: {
     outer: 'h-[86px] w-[86px]',
@@ -18,14 +22,33 @@ const VARIANTS = {
     subtitle: 'text-[9px] tracking-[0.28em]',
     lines: 'w-5',
     gap: 'gap-4',
+    script: 'w-[190px] max-w-[70vw]',
   },
 };
 
-export default function MasterfadeLogo({ variant = 'hero', className = '' }) {
+export default function MasterfadeLogo({ variant = 'hero', className = '', showScriptMark = true }) {
+  const { variant: themeVariant } = useTheme();
   const styles = VARIANTS[variant] || VARIANTS.hero;
+  const scriptSrc = themeVariant === 'dark' ? scriptDark : scriptLight;
 
   return (
     <div className={`flex flex-col items-center text-center ${styles.gap} ${className}`.trim()}>
+      {showScriptMark ? (
+        <div className="relative">
+          <img
+            src={scriptSrc}
+            alt="Masterfade script logo"
+            className={`${styles.script} h-auto select-none`}
+            style={{
+              mixBlendMode: themeVariant === 'dark' ? 'screen' : 'multiply',
+              opacity: themeVariant === 'dark' ? 0.96 : 0.95,
+              filter:
+                'drop-shadow(0 0 1px color-mix(in srgb, var(--mf-accent) 85%, transparent)) drop-shadow(0 0 10px color-mix(in srgb, var(--mf-accent) 24%, transparent))',
+            }}
+          />
+        </div>
+      ) : null}
+
       <div
         className={`relative flex items-center justify-center rounded-full border-2 border-[var(--mf-accent)] ${styles.outer}`}
       >
@@ -46,7 +69,13 @@ export default function MasterfadeLogo({ variant = 'hero', className = '' }) {
       </div>
 
       <div className="space-y-2">
-        <div className={`mf-font-display uppercase leading-none text-[var(--mf-text)] ${styles.title}`}>
+        <div
+          className={`mf-font-display uppercase leading-none text-[var(--mf-text)] ${styles.title}`}
+          style={{
+            textShadow:
+              '0 0 1px color-mix(in srgb, var(--mf-accent) 50%, transparent), 0 0 10px color-mix(in srgb, var(--mf-accent) 12%, transparent)',
+          }}
+        >
           MASTERFADE
         </div>
 
