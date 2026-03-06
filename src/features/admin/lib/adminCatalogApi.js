@@ -1,0 +1,42 @@
+// src/features/admin/lib/adminCatalogApi.js
+// A2 — Capa de API para el catálogo de servicios (admin).
+// Usa el wrapper http existente (src/services/httpClient.js).
+
+import { http } from '../../../services/httpClient.js';
+
+/**
+ * Lista servicios del catálogo.
+ * @param {{ id_sucursal?: string }} params
+ */
+export async function listAdminServicios({ id_sucursal } = {}) {
+    const query = id_sucursal ? `?id_sucursal=${encodeURIComponent(id_sucursal)}` : '';
+    return http.get(`/v1/admin/catalog/servicios${query}`);
+}
+
+/**
+ * Crea un nuevo servicio.
+ * @param {object} payload
+ */
+export async function createAdminServicio(payload) {
+    return http.post('/v1/admin/catalog/servicios', payload);
+}
+
+/**
+ * Actualiza un servicio existente (PATCH parcial).
+ * @param {string} id
+ * @param {object} payload
+ */
+export async function updateAdminServicio(id, payload) {
+    return http.patch(`/v1/admin/catalog/servicios/${id}`, payload);
+}
+
+/**
+ * Elimina (inactiva) un servicio.
+ * @param {string} id
+ * @param {string} id_sucursal - Requerido por el scope del endpoint.
+ */
+export async function deleteAdminServicio(id, id_sucursal) {
+    return http.del(
+        `/v1/admin/catalog/servicios/${id}?id_sucursal=${encodeURIComponent(id_sucursal)}`
+    );
+}
