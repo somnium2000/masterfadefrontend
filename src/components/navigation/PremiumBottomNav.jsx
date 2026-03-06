@@ -49,12 +49,13 @@ function SideNavItem({ item, activeId }) {
   );
 }
 
-export default function PremiumBottomNav({ activeId, sideItems, fabItem, className = '' }) {
+export default function PremiumBottomNav({ activeId, sideItems, fabItem, className = '', isDesktop = false }) {
   const FabIcon = fabItem.icon;
+  const frameClass = isDesktop ? 'mx-auto w-full max-w-[420px] px-0 md:max-w-[600px]' : 'mf-mobile-frame px-0';
 
   return (
     <div className={`fixed inset-x-0 bottom-0 z-50 ${className}`.trim()}>
-      <div className="mf-mobile-frame px-0">
+      <div className={frameClass}>
         <nav className="mf-glass-nav mf-safe-bottom flex items-end justify-between px-5 pb-[calc(env(safe-area-inset-bottom,8px)+8px)] pt-1 shadow-[0_-8px_28px_rgba(0,0,0,0.12)]">
           <div className="flex flex-1 items-end justify-between">
             {sideItems.slice(0, 2).map((item) => (

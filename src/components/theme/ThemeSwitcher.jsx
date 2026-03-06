@@ -7,16 +7,18 @@ const LABELS = {
   light: 'Claro Elegante',
 };
 
-export default function ThemeSwitcher({ className = '' }) {
+export default function ThemeSwitcher({ className = '', showLabel = true, labelClassName = '' }) {
   const { variant, setVariant } = useTheme();
   const nextVariant = variant === 'dark' ? 'light' : 'dark';
   const Icon = variant === 'dark' ? Sun : Moon;
 
   return (
     <div className={`flex items-center justify-end gap-3 ${className}`.trim()}>
-      <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--mf-text)]">
-        {LABELS[variant]}
-      </span>
+      {showLabel ? (
+        <span className={`text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--mf-text)] ${labelClassName}`.trim()}>
+          {LABELS[variant]}
+        </span>
+      ) : null}
 
       <motion.button
         type="button"

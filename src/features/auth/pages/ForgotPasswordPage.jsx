@@ -85,7 +85,7 @@ export default function ForgotPasswordPage() {
 
       if (data?.data?.rateLimit) setRateInfo(data.data.rateLimit);
       setRetryAfter(0);
-    } catch (err) {
+    } catch {
       setError('No se pudo conectar con el backend. Verifica que esté corriendo en 3002.');
     } finally {
       setLoading(false);

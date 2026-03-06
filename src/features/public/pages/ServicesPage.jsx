@@ -8,8 +8,10 @@ import {
   Scissors,
   Sparkles,
   Tag,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
@@ -28,7 +30,7 @@ function ServiceCard({ item, compact = false }) {
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="mf-glass-surface rounded-[28px] p-5"
+      className="mf-glass-surface flex w-[320px] shrink-0 snap-start flex-col justify-between rounded-[28px] p-5"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -45,16 +47,18 @@ function ServiceCard({ item, compact = false }) {
         </div>
       </div>
 
-      {item.descripcion ? (
-        <p className="mt-4 text-sm leading-6 text-[var(--mf-text-2)]">{item.descripcion}</p>
-      ) : null}
+      <div className="mt-auto pt-4">
+        {item.descripcion ? (
+          <p className="mb-4 text-sm leading-6 text-[var(--mf-text-2)]">{item.descripcion}</p>
+        ) : null}
 
-      {!compact ? (
-        <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-[var(--mf-nav-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--mf-text-2)]">
-          <Clock3 size={14} strokeWidth={1.8} />
-          <span>{item.duracion_min} min</span>
-        </div>
-      ) : null}
+        {!compact ? (
+          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--mf-nav-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--mf-text-2)]">
+            <Clock3 size={14} strokeWidth={1.8} />
+            <span>{item.duracion_min} min</span>
+          </div>
+        ) : null}
+      </div>
     </motion.article>
   );
 }
@@ -67,7 +71,7 @@ function PackageCard({ item }) {
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="mf-glass-surface rounded-[28px] p-5"
+      className="mf-glass-surface flex w-[340px] shrink-0 snap-start flex-col justify-between rounded-[28px] p-5"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -84,45 +88,84 @@ function PackageCard({ item }) {
         </div>
       </div>
 
-      {item.descripcion ? (
-        <p className="mt-4 text-sm leading-6 text-[var(--mf-text-2)]">{item.descripcion}</p>
-      ) : null}
+      <div className="mt-auto pt-4">
+        {item.descripcion ? (
+          <p className="mb-4 text-sm leading-6 text-[var(--mf-text-2)]">{item.descripcion}</p>
+        ) : null}
 
-      <div className="mt-5">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-text-2)]">
-          Incluye
-        </p>
-        <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--mf-text)]">
-          {details.map((detail) => (
-            <li key={`${item.id_paquete}-${detail.id_servicio}`} className="flex items-start gap-3">
-              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--mf-accent)]" />
-              <span>
-                {detail.nombre_servicio}
-                {detail.cantidad > 1 ? ` x${detail.cantidad}` : ''}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-text-2)]">
+            Incluye
+          </p>
+          <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--mf-text)]">
+            {details.map((detail) => (
+              <li key={`${item.id_paquete}-${detail.id_servicio}`} className="flex items-start gap-3">
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--mf-accent)]" />
+                <span>
+                  {detail.nombre_servicio}
+                  {detail.cantidad > 1 ? ` x${detail.cantidad}` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
     </motion.article>
   );
 }
 
 function CatalogSection({ icon: Icon, title, eyebrow, items, emptyMessage, children }) {
+  const scrollRef = useRef(null);
+
+  const handleScroll = (direction) => {
+    if (scrollRef.current) {
+      const scrollAmount = direction === 'left' ? -340 : 340;
+      scrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
   return (
     <section className="mt-8">
-      <div className="flex items-center gap-3">
-        <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]">
-          <Icon size={18} strokeWidth={1.9} />
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]">
+            <Icon size={18} strokeWidth={1.9} />
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">{eyebrow}</p>
+            <h2 className="mf-font-display text-[26px] leading-[1.1] text-[var(--mf-text)] sm:text-[30px] sm:leading-none">{title}</h2>
+          </div>
         </div>
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">{eyebrow}</p>
-          <h2 className="mf-font-display text-[30px] leading-none text-[var(--mf-text)]">{title}</h2>
-        </div>
+
+        {items.length > 0 && (
+          <div className="hidden shrink-0 items-center gap-2 sm:flex">
+            <button
+              type="button"
+              onClick={() => handleScroll('left')}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)]"
+              aria-label="Desplazar a la izquierda"
+            >
+              <ChevronLeft size={20} strokeWidth={1.5} />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleScroll('right')}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)]"
+              aria-label="Desplazar a la derecha"
+            >
+              <ChevronRight size={20} strokeWidth={1.5} />
+            </button>
+          </div>
+        )}
       </div>
 
       {items.length > 0 ? (
-        <div className="mt-5 grid gap-4">{children}</div>
+        <div
+          ref={scrollRef}
+          className="mt-5 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-6 pt-2 [-ms-overflow-style:none] [scrollbar-width:none] scroll-smooth [&::-webkit-scrollbar]:hidden"
+        >
+          {children}
+        </div>
       ) : (
         <div className="mf-glass-surface mt-5 rounded-[24px] p-5 text-sm leading-6 text-[var(--mf-text-2)]">
           {emptyMessage}

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { http, setTokenGetter } from '../services/httpClient.js';
 
 const AuthContext = createContext(null);
@@ -66,7 +66,7 @@ export function AuthProvider({ children }) {
   const tokenRef = useRef(initialToken);
   const shouldPersistRef = useRef(Boolean(initialToken));
 
-  function writeLocalSession(nextToken, nextUser) {
+  const writeLocalSession = useCallback((nextToken, nextUser) => {
     if (shouldPersistRef.current && nextToken) {
       localStorage.setItem(LS_TOKEN_KEY, nextToken);
       localStorage.setItem(LS_USER_KEY, JSON.stringify(nextUser));
@@ -75,18 +75,18 @@ export function AuthProvider({ children }) {
 
     localStorage.removeItem(LS_TOKEN_KEY);
     localStorage.removeItem(LS_USER_KEY);
-  }
+  }, []);
 
-  function applyUserState(nextUser) {
+  const applyUserState = useCallback((nextUser) => {
     setUser(nextUser);
     setRoles(normalizeRoles(nextUser?.roles));
     setBranchIds(normalizeBranchIds(nextUser?.branch_ids));
     setEmpresaId(nextUser?.empresa_id ?? null);
     setEmpleadoId(nextUser?.empleado_id ?? null);
     setClienteId(nextUser?.cliente_id ?? null);
-  }
+  }, []);
 
-  function clearSessionState() {
+  const clearSessionState = useCallback(() => {
     tokenRef.current = '';
     shouldPersistRef.current = false;
     setToken('');
@@ -95,7 +95,7 @@ export function AuthProvider({ children }) {
     setIsHydrated(true);
     localStorage.removeItem(LS_TOKEN_KEY);
     localStorage.removeItem(LS_USER_KEY);
-  }
+  }, [applyUserState]);
 
   useEffect(() => {
     tokenRef.current = token;
@@ -107,7 +107,7 @@ export function AuthProvider({ children }) {
     return () => setTokenGetter(null);
   }, []);
 
-  async function hydrateSession(options = {}) {
+  const hydrateSession = useCallback(async (options = {}) => {
     const resolvedToken = options.tokenOverride ?? tokenRef.current;
 
     if (!resolvedToken) {
@@ -144,9 +144,9 @@ export function AuthProvider({ children }) {
         message: err?.data?.error?.message || err?.message || 'No se pudo hidratar la sesion.',
       };
     }
-  }
+  }, [applyUserState, clearSessionState, writeLocalSession]);
 
-  async function login(nombre_usuario, contrasena, remember) {
+  const login = useCallback(async (nombre_usuario, contrasena, remember) => {
     const username = String(nombre_usuario || '').trim();
     const password = String(contrasena || '').trim();
 
@@ -193,21 +193,18 @@ export function AuthProvider({ children }) {
         message: err?.data?.error?.message || err?.message || 'Error al intentar iniciar sesion.',
       };
     }
-  }
+  }, [clearSessionState, hydrateSession]);
 
-  function logout() {
+  const logout = useCallback(() => {
     clearSessionState();
-  }
+  }, [clearSessionState]);
 
   useEffect(() => {
-    if (!tokenRef.current) {
-      setIsHydrated(true);
-      setIsHydrating(false);
-      return;
-    }
-
+    if (!tokenRef.current) return;
+    // Hidrata sesión persistida en el arranque (lectura inicial de auth/me).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void hydrateSession();
-  }, []);
+  }, [hydrateSession]);
 
   const value = useMemo(
     () => ({
@@ -225,7 +222,7 @@ export function AuthProvider({ children }) {
       hydrateSession,
       logout,
     }),
-    [token, user, roles, branchIds, empresaId, empleadoId, clienteId, isHydrating, isHydrated]
+    [token, user, roles, branchIds, empresaId, empleadoId, clienteId, isHydrating, isHydrated, login, hydrateSession, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

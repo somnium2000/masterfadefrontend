@@ -336,3 +336,143 @@ select {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── Utilidades premium Figma MasterFade ──────────────────────────── */
+
+/* Ocultar scrollbar manteniendo funcionalidad */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
+/* Tarjeta de datos premium */
+.mf-premium-card {
+  border-radius: 20px;
+  border: 1px solid var(--mf-nav-border);
+  background: color-mix(in srgb, var(--mf-card) 84%, transparent);
+  box-shadow: var(--mf-shadow-soft);
+  transition: box-shadow 0.25s ease, border-color 0.2s ease;
+}
+.mf-premium-card:hover {
+  border-color: var(--mf-btn-border);
+  box-shadow: var(--mf-shadow-card);
+}
+
+/* Badges de estado */
+.mf-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.mf-badge-green  { background: rgba(52,211,153,0.12); color: #34d399; }
+.mf-badge-red    { background: rgba(248,113,113,0.12); color: #f87171; }
+.mf-badge-gold   { background: rgba(201,169,110,0.12); color: var(--mf-accent); }
+.mf-badge-muted  { background: var(--mf-btn-bg); color: var(--mf-text-2); }
+
+/* Shimmer loading skeleton */
+@keyframes mf-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.mf-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--mf-btn-bg) 0%,
+    color-mix(in srgb, var(--mf-btn-bg) 60%, var(--mf-text) 8%) 50%,
+    var(--mf-btn-bg) 100%
+  );
+  background-size: 800px 100%;
+  animation: mf-shimmer 1.6s infinite linear;
+  border-radius: 8px;
+}
+
+/* Separador con gradiente de acento */
+.mf-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--mf-accent), transparent);
+  opacity: 0.25;
+}
+
+/* Input estilo premium */
+.mf-input {
+  width: 100%;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--mf-btn-border);
+  background: var(--mf-btn-bg);
+  color: var(--mf-text);
+  font-size: 14px;
+  padding: 0 14px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  outline: none;
+}
+.mf-input::placeholder { color: var(--mf-text-2); opacity: 0.7; }
+.mf-input:focus {
+  border-color: var(--mf-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mf-accent) 18%, transparent);
+}
+
+/* Select estilo premium */
+.mf-select {
+  appearance: none;
+  width: 100%;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--mf-btn-border);
+  background: var(--mf-btn-bg);
+  color: var(--mf-text);
+  font-size: 14px;
+  padding: 0 36px 0 14px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  outline: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a09a8e' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+}
+.mf-select:focus {
+  border-color: var(--mf-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mf-accent) 18%, transparent);
+}
+.mf-select option { background: var(--mf-card); color: var(--mf-text); }
+
+/* Label premium */
+.mf-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mf-text-2);
+  display: block;
+  margin-bottom: 6px;
+}
+
+/* Tabla con scroll horizontal en mobile */
+.mf-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 20px;
+  border: 1px solid var(--mf-nav-border);
+  background: color-mix(in srgb, var(--mf-card) 84%, transparent);
+}
+.mf-table-wrap table { min-width: 560px; }
+
+/* Contenedor página max-width centrado */
+.mf-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+@media (min-width: 768px) {
+  .mf-page { padding: 36px 32px; }
+}
