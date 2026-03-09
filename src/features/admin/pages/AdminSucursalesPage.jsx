@@ -1,5 +1,5 @@
-// src/features/admin/pages/AdminSucursalesPage.jsx
-// CRUD completo de sucursales con toggle Tabla ↔ Cards.
+﻿// src/features/admin/pages/AdminSucursalesPage.jsx
+// CRUD completo de sucursales con toggle Tabla â†” Cards.
 
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -17,6 +17,7 @@ import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
 import ViewToggle from '../../../components/data/ViewToggle.jsx';
 import DataCard from '../../../components/data/DataCard.jsx';
+import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
@@ -24,6 +25,9 @@ import {
     Table, TableBody, TableCell, TableHead,
     TableHeader, TableRow,
 } from '../../../components/ui/table.jsx';
+import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
+import { removeItemById, replaceItemById } from '../../../lib/collectionState.js';
 
 function extractMessage(err) {
     return err?.data?.error?.message || err?.message || 'Error desconocido.';
@@ -37,7 +41,7 @@ function validateForm(v) {
     return null;
 }
 
-// ── Formulario ───────────────────────────────────────────────────────────
+// â”€â”€ Formulario â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function SucursalForm({ values, onChange, empresas }) {
     return (
         <div className="flex flex-col gap-4 mt-2">
@@ -50,7 +54,7 @@ function SucursalForm({ values, onChange, empresas }) {
                     onChange={(e) => onChange('id_empresa', e.target.value)}
                     className="mf-select"
                 >
-                    <option value="">— Seleccionar empresa —</option>
+                    <option value="">â€” Seleccionar empresa â€”</option>
                     {empresas.map((e) => (
                         <option key={e.id_empresa} value={e.id_empresa}>{e.nombre_empresa}</option>
                     ))}
@@ -70,10 +74,10 @@ function SucursalForm({ values, onChange, empresas }) {
                 />
             </div>
 
-            {/* Dirección */}
+            {/* DirecciÃ³n */}
             <div className="flex flex-col gap-1.5">
                 <Label htmlFor="f-dir" className="mf-label flex items-center gap-1.5">
-                    <MapPin size={12} /> Dirección
+                    <MapPin size={12} /> DirecciÃ³n
                 </Label>
                 <Input
                     id="f-dir"
@@ -85,10 +89,10 @@ function SucursalForm({ values, onChange, empresas }) {
                 />
             </div>
 
-            {/* Teléfono */}
+            {/* TelÃ©fono */}
             <div className="flex flex-col gap-1.5">
                 <Label htmlFor="f-tel" className="mf-label flex items-center gap-1.5">
-                    <Phone size={12} /> Teléfono
+                    <Phone size={12} /> TelÃ©fono
                 </Label>
                 <Input
                     id="f-tel"
@@ -103,14 +107,16 @@ function SucursalForm({ values, onChange, empresas }) {
     );
 }
 
-// ── Vista Cards ──────────────────────────────────────────────────────────
+// â”€â”€ Vista Cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function SucursalCards({ sucursales, isSuperAdmin, onEditar, onDelete }) {
     return (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {sucursales.map((s, i) => (
+        <CardsCarousel
+            items={sucursales}
+            getItemKey={(sucursal) => sucursal?.id_sucursal}
+            renderItem={(s, i, pageIndex) => (
                 <DataCard
                     key={s.id_sucursal}
-                    animationDelay={i * 0.05}
+                    animationDelay={(pageIndex * 0.02) + (i * 0.05)}
                     avatar={<Building2 size={18} />}
                     title={s.nombre_sucursal}
                     subtitle={s.direccion || undefined}
@@ -120,7 +126,7 @@ function SucursalCards({ sucursales, isSuperAdmin, onEditar, onDelete }) {
                         </span>
                     }
                     fields={[
-                        { label: 'Teléfono', value: s.telefono || '—' },
+                        { label: 'Telefono', value: s.telefono || '—' },
                     ]}
                     actions={isSuperAdmin && (
                         <>
@@ -141,19 +147,19 @@ function SucursalCards({ sucursales, isSuperAdmin, onEditar, onDelete }) {
                         </>
                     )}
                 />
-            ))}
-        </div>
+            )}
+        />
     );
 }
 
-// ── Vista Tabla ──────────────────────────────────────────────────────────
+// â”€â”€ Vista Tabla â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function SucursalTable({ sucursales, isSuperAdmin, onEditar, onDelete }) {
     return (
         <div className="mf-table-wrap">
             <Table>
                 <TableHeader>
                     <TableRow className="border-[var(--mf-nav-border)]">
-                        {['Nombre', 'Dirección', 'Teléfono', 'Estado'].map((h) => (
+                        {['Nombre', 'DirecciÃ³n', 'TelÃ©fono', 'Estado'].map((h) => (
                             <TableHead key={h} className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">{h}</TableHead>
                         ))}
                         {isSuperAdmin && <TableHead className="text-right text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acciones</TableHead>}
@@ -168,8 +174,8 @@ function SucursalTable({ sucursales, isSuperAdmin, onEditar, onDelete }) {
                                     {s.nombre_sucursal}
                                 </div>
                             </TableCell>
-                            <TableCell className="text-[var(--mf-text-2)] text-sm max-w-[180px] truncate">{s.direccion || '—'}</TableCell>
-                            <TableCell className="text-[var(--mf-text-2)] text-sm whitespace-nowrap">{s.telefono || '—'}</TableCell>
+                            <TableCell className="text-[var(--mf-text-2)] text-sm max-w-[180px] truncate">{s.direccion || 'â€”'}</TableCell>
+                            <TableCell className="text-[var(--mf-text-2)] text-sm whitespace-nowrap">{s.telefono || 'â€”'}</TableCell>
                             <TableCell>
                                 <span className={`mf-badge ${s.estado ? 'mf-badge-green' : 'mf-badge-red'}`}>
                                     {s.estado ? 'Activa' : 'Inactiva'}
@@ -195,11 +201,12 @@ function SucursalTable({ sucursales, isSuperAdmin, onEditar, onDelete }) {
     );
 }
 
-// ── Página ───────────────────────────────────────────────────────────────
+// â”€â”€ PÃ¡gina â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function AdminSucursalesPage() {
     const navigate = useNavigate();
     const { roles } = useAuth();
     const isSuperAdmin = Array.isArray(roles) && roles.includes('super_admin');
+    const notifications = useNotifications();
 
     const [sucursales, setSucursales] = useState([]);
     const [empresas, setEmpresas] = useState([]);
@@ -220,10 +227,12 @@ export default function AdminSucursalesPage() {
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [deleteLoading, setDeleteLoading] = useState(false);
-    const [deleteError, setDeleteError] = useState('');
 
-    const fetchSucursales = useCallback(async () => {
-        setLoading(true); setListError('');
+    const fetchSucursales = useCallback(async ({ silent = false } = {}) => {
+        if (!silent) {
+            setLoading(true);
+            setListError('');
+        }
         try {
             const data = await listAdminSucursales();
             const p = data?.data ?? data;
@@ -231,8 +240,14 @@ export default function AdminSucursalesPage() {
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
-            setListError(extractMessage(err));
-        } finally { setLoading(false); }
+            if (!silent) {
+                setListError(extractMessage(err));
+            }
+        } finally {
+            if (!silent) {
+                setLoading(false);
+            }
+        }
     }, [navigate]);
 
     const fetchEmpresas = useCallback(async () => {
@@ -273,28 +288,42 @@ export default function AdminSucursalesPage() {
             telefono: formValues.telefono.trim() || null,
         };
         try {
-            if (editTarget) await updateAdminSucursal(editTarget.id_sucursal, payload);
-            else await createAdminSucursal({ ...payload, estado: true });
-            setDialogOpen(false); void fetchSucursales();
+            const response = editTarget
+                ? await updateAdminSucursal(editTarget.id_sucursal, payload)
+                : await createAdminSucursal({ ...payload, estado: true });
+            const result = response?.data ?? response;
+            const nextSucursal = result?.sucursal;
+            if (nextSucursal?.id_sucursal) {
+                setSucursales((prev) => replaceItemById(prev, nextSucursal, (entry) => entry?.id_sucursal));
+            }
+            notifications.success(editTarget ? 'Sucursal actualizada.' : 'Sucursal creada.', { dedupeKey: 'sucursales-save-ok' });
+            setDialogOpen(false);
+            // AM: Refresco silencioso para evitar recarga visible del listado.
+            void fetchSucursales({ silent: true });
         } catch (e) {
             if (e.status === 401) { navigate('/login'); return; }
-            setFormError(extractMessage(e));
+            const message = extractMessage(e);
+            setFormError(message);
+            notifications.error(message, { dedupeKey: 'sucursales-save-error' });
         } finally { setFormLoading(false); }
     }
 
     function openDelete(s) {
-        setDeleteTarget(s); setDeleteError(''); setConfirmOpen(true);
+        setDeleteTarget(s); setConfirmOpen(true);
     }
 
     async function handleConfirmDelete() {
         if (!deleteTarget) return;
-        setDeleteLoading(true); setDeleteError('');
+        setDeleteLoading(true);
         try {
             await deleteAdminSucursal(deleteTarget.id_sucursal);
-            setConfirmOpen(false); void fetchSucursales();
+            setSucursales((prev) => removeItemById(prev, deleteTarget.id_sucursal, (entry) => entry?.id_sucursal));
+            setConfirmOpen(false);
+            notifications.warning('Sucursal eliminada.', { dedupeKey: 'sucursales-delete-ok' });
+            void fetchSucursales({ silent: true });
         } catch (e) {
             if (e.status === 401) { navigate('/login'); return; }
-            setDeleteError(extractMessage(e));
+            notifications.error(extractMessage(e), { dedupeKey: 'sucursales-delete-error' });
         } finally { setDeleteLoading(false); }
     }
 
@@ -304,7 +333,7 @@ export default function AdminSucursalesPage() {
             <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mf-accent)]">
-                        Gestión · Sucursales
+                        GestiÃ³n Â· Sucursales
                     </p>
                     <h1 className="mf-font-display mt-1 text-3xl leading-tight text-[var(--mf-text)]">
                         Sucursales
@@ -312,7 +341,7 @@ export default function AdminSucursalesPage() {
                 </div>
                 <div className="flex items-center gap-3">
                     <span className="text-sm text-[var(--mf-text-2)]">
-                        {loading ? 'Cargando…' : `${sucursales.length} registro(s)`}
+                        {loading ? 'Cargandoâ€¦' : `${sucursales.length} registro(s)`}
                     </span>
                     <ViewToggle defaultView={view} onViewChange={setView} storageKey="sucursales" />
                     {isSuperAdmin && (
@@ -333,7 +362,7 @@ export default function AdminSucursalesPage() {
                 <EmptyState
                     icon={Building2}
                     title="Sin sucursales"
-                    description="No hay sucursales registradas aún."
+                    description="No hay sucursales registradas aÃºn."
                     action={isSuperAdmin && (
                         <Button onClick={openCrear} size="sm" className="gap-2">
                             <Plus size={14} /> Agregar primera
@@ -364,32 +393,34 @@ export default function AdminSucursalesPage() {
                     <DialogFooter className="mt-4">
                         <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>Cancelar</Button>
                         <Button onClick={handleGuardar} disabled={formLoading} className="gap-2 min-w-[100px]">
-                            {formLoading ? 'Guardando…' : 'Guardar'}
+                            {formLoading ? 'Guardandoâ€¦' : 'Guardar'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
 
-            {/* Dialog Confirmar Eliminar */}
-            <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-                <DialogContent className="sm:max-w-sm">
-                    <DialogHeader>
-                        <DialogTitle>Eliminar sucursal</DialogTitle>
-                    </DialogHeader>
-                    <p className="text-sm text-[var(--mf-text-2)] leading-6">
-                        ¿Estás seguro de que deseas eliminar{' '}
-                        <strong className="text-[var(--mf-text)]">{deleteTarget?.nombre_sucursal}</strong>?
-                        Esta acción no se puede deshacer fácilmente.
-                    </p>
-                    {deleteError && <ErrorBanner message={deleteError} />}
-                    <DialogFooter className="mt-4">
-                        <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={deleteLoading}>Cancelar</Button>
-                        <Button variant="destructive" onClick={handleConfirmDelete} disabled={deleteLoading} className="gap-2">
-                            {deleteLoading ? 'Eliminando…' : 'Eliminar'}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <ActionConfirmDialog
+                open={confirmOpen}
+                onOpenChange={(open) => {
+                    if (!open && !deleteLoading) {
+                        setConfirmOpen(false);
+                        setDeleteTarget(null);
+                    }
+                }}
+                tone="danger"
+                title="Eliminar sucursal"
+                description={
+                    deleteTarget
+                        ? `Vas a eliminar ${deleteTarget.nombre_sucursal}. Esta accion no se puede deshacer facilmente.`
+                        : ''
+                }
+                confirmLabel="Eliminar"
+                cancelLabel="Cancelar"
+                loading={deleteLoading}
+                onConfirm={handleConfirmDelete}
+            />
         </div>
     );
 }
+
+

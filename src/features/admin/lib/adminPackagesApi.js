@@ -23,5 +23,6 @@ export async function updateAdminPaquete(id, body) {
 
 /** DELETE /v1/admin/catalog/paquetes/:id */
 export async function deleteAdminPaquete(id) {
-    return http.delete(`${BASE}/${id}`);
+    // AM: El cliente HTTP expone `del` para DELETE; usarlo evita fallo en runtime.
+    return http.del(`${BASE}/${id}`);
 }

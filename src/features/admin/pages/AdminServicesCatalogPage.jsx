@@ -1,6 +1,6 @@
-// src/features/admin/pages/AdminServicesCatalogPage.jsx
-// A3 — Pantalla CRUD de catálogo de servicios (Admin).
-// Lógica de branchIds: 1 => auto, 2+ => selector por nombre, 0 => dropdown de todas.
+﻿// src/features/admin/pages/AdminServicesCatalogPage.jsx
+// A3 â€” Pantalla CRUD de catÃ¡logo de servicios (Admin).
+// LÃ³gica de branchIds: 1 => auto, 2+ => selector por nombre, 0 => dropdown de todas.
 
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -24,16 +24,20 @@ import {
 } from '../../../components/ui/table.jsx';
 import ViewToggle from '../../../components/data/ViewToggle.jsx';
 import DataCard from '../../../components/data/DataCard.jsx';
+import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
+import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
+import { removeItemById, replaceItemById } from '../../../lib/collectionState.js';
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function extractMessage(err) {
     return err?.data?.error?.message || err?.message || 'Error desconocido.';
 }
 
-// ── Selector de sucursal (muestra nombre, no UUID) ───────────────────────────
+// â”€â”€ Selector de sucursal (muestra nombre, no UUID) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * branchIds  = UUIDs del usuario autenticado (de AuthContext)
  * allBranches = [{id_sucursal, nombre_sucursal}] de la API
@@ -48,7 +52,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingB
 
     const selectedBranch = availableBranches.find((s) => s.id_sucursal === selected);
 
-    // 1 sucursal asignada → la mostramos solo como nombre, sin input
+    // 1 sucursal asignada â†’ la mostramos solo como nombre, sin input
     if (branchIds.length === 1 && selectedBranch) {
         return (
             <div className="flex items-center gap-2">
@@ -61,9 +65,9 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingB
         );
     }
 
-    // 2+ sucursales o super_admin → dropdown con nombre
+    // 2+ sucursales o super_admin â†’ dropdown con nombre
     if (loadingBranches) {
-        return <p className="text-xs text-[var(--mf-text-2)] flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Cargando sucursales…</p>;
+        return <p className="text-xs text-[var(--mf-text-2)] flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Cargando sucursalesâ€¦</p>;
     }
 
     return (
@@ -77,7 +81,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingB
                 onChange={(e) => onChange(e.target.value)}
                 className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-sm text-[var(--mf-text)] focus:outline-none focus:ring-2 focus:ring-[var(--mf-accent)]/40"
             >
-                <option value="">— Seleccionar sucursal —</option>
+                <option value="">â€” Seleccionar sucursal â€”</option>
                 {availableBranches.map((s) => (
                     <option key={s.id_sucursal} value={s.id_sucursal}>
                         {s.nombre_sucursal}
@@ -88,7 +92,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingB
     );
 }
 
-// ── Formulario servicio ───────────────────────────────────────────────────────
+// â”€â”€ Formulario servicio â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const FORM_DEFAULTS = {
     nombre_servicio: '',
     descripcion: '',
@@ -106,21 +110,21 @@ function ServicioForm({ values, onChange }) {
                     id="f-nombre"
                     value={values.nombre_servicio}
                     onChange={(e) => onChange('nombre_servicio', e.target.value)}
-                    placeholder="Ej. Corte clásico"
+                    placeholder="Ej. Corte clÃ¡sico"
                 />
             </div>
             <div className="flex flex-col gap-1">
-                <Label htmlFor="f-desc">Descripción</Label>
+                <Label htmlFor="f-desc">DescripciÃ³n</Label>
                 <Input
                     id="f-desc"
                     value={values.descripcion}
                     onChange={(e) => onChange('descripcion', e.target.value)}
-                    placeholder="Descripción opcional"
+                    placeholder="DescripciÃ³n opcional"
                 />
             </div>
             <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1">
-                    <Label htmlFor="f-dur">Duración (min) *</Label>
+                    <Label htmlFor="f-dur">DuraciÃ³n (min) *</Label>
                     <Input
                         id="f-dur"
                         type="number"
@@ -161,7 +165,7 @@ function ServicioForm({ values, onChange }) {
 function validateForm(values) {
     if (!values.nombre_servicio.trim()) return 'El nombre del servicio es requerido.';
     const dur = parseInt(values.duracion_min, 10);
-    if (isNaN(dur) || dur < 1) return 'La duración debe ser al menos 1 minuto.';
+    if (isNaN(dur) || dur < 1) return 'La duraciÃ³n debe ser al menos 1 minuto.';
     const buf = parseInt(values.buffer_min, 10);
     if (isNaN(buf) || buf < 0) return 'El buffer no puede ser negativo.';
     const precio = parseFloat(values.precio_hnl);
@@ -169,13 +173,14 @@ function validateForm(values) {
     return null;
 }
 
-// ── Pantalla principal ────────────────────────────────────────────────────────
+// â”€â”€ Pantalla principal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function AdminServicesCatalogPage() {
     const navigate = useNavigate();
     const { branchIds, roles } = useAuth();
     const isSuperAdmin = Array.isArray(roles) && roles.includes('super_admin');
+    const notifications = useNotifications();
 
-    // Sucursal activa según reglas
+    // Sucursal activa segÃºn reglas
     const [sucursal, setSucursal] = useState(branchIds.length === 1 ? branchIds[0] : '');
     const [allBranches, setAllBranches] = useState([]);
     const [loadingBranches, setLoadingBranches] = useState(false);
@@ -197,9 +202,8 @@ export default function AdminServicesCatalogPage() {
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [deleteLoading, setDeleteLoading] = useState(false);
-    const [deleteError, setDeleteError] = useState('');
 
-    // ── Carga sucursales (para nombres en selector) ─────────────────────────────
+    // â”€â”€ Carga sucursales (para nombres en selector) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     useEffect(() => {
         let cancelled = false;
         setLoadingBranches(true);
@@ -209,16 +213,18 @@ export default function AdminServicesCatalogPage() {
                 const payload = data?.data ?? data;
                 setAllBranches(Array.isArray(payload?.sucursales) ? payload.sucursales : []);
             })
-            .catch(() => { /* silencioso — el selector cae en fallback */ })
+            .catch(() => { /* silencioso â€” el selector cae en fallback */ })
             .finally(() => { if (!cancelled) setLoadingBranches(false); });
         return () => { cancelled = true; };
     }, []);
 
-    // ── Carga datos ─────────────────────────────────────────────────────────────
-    const fetchServicios = useCallback(async () => {
+    // â”€â”€ Carga datos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    const fetchServicios = useCallback(async ({ silent = false } = {}) => {
         if (!isSuperAdmin && !sucursal) return; // No llamar API sin sucursal excepto admin
-        setLoading(true);
-        setListError('');
+        if (!silent) {
+            setLoading(true);
+            setListError('');
+        }
         try {
             const data = await listAdminServicios(sucursal ? { id_sucursal: sucursal } : {});
             const payloadData = data?.data ?? data;
@@ -227,9 +233,13 @@ export default function AdminServicesCatalogPage() {
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
-            setListError(extractMessage(err));
+            if (!silent) {
+                setListError(extractMessage(err));
+            }
         } finally {
-            setLoading(false);
+            if (!silent) {
+                setLoading(false);
+            }
         }
     }, [sucursal, navigate, isSuperAdmin]);
 
@@ -237,7 +247,7 @@ export default function AdminServicesCatalogPage() {
         void fetchServicios();
     }, [fetchServicios]);
 
-    // ── Handlers form ───────────────────────────────────────────────────────────
+    // â”€â”€ Handlers form â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function handleFormChange(field, value) {
         setFormValues((prev) => ({ ...prev, [field]: value }));
     }
@@ -284,61 +294,75 @@ export default function AdminServicesCatalogPage() {
         };
 
         try {
+            const response = editTarget
+                ? await updateAdminServicio(editTarget.id_servicio ?? editTarget.id, payload)
+                : await createAdminServicio(payload);
+            const result = response?.data ?? response;
             if (editTarget) {
-                await updateAdminServicio(editTarget.id_servicio ?? editTarget.id, payload);
+                notifications.success('Servicio actualizado.', { dedupeKey: 'servicios-save-ok' });
             } else {
-                await createAdminServicio(payload);
+                notifications.success('Servicio creado.', { dedupeKey: 'servicios-save-ok' });
+            }
+            if (result?.id_servicio) {
+                setServicios((prev) => replaceItemById(prev, result, (entry) => entry?.id_servicio ?? entry?.id));
             }
             setDialogOpen(false);
-            void fetchServicios();
+            // AM: Revalida silenciosamente para evitar recarga visual brusca en cards/tablas.
+            void fetchServicios({ silent: true });
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
-            setFormError(extractMessage(err));
+            const message = extractMessage(err);
+            setFormError(message);
+            notifications.error(message, { dedupeKey: 'servicios-save-error' });
         } finally {
             setFormLoading(false);
         }
     }
 
-    // ── Handlers delete ─────────────────────────────────────────────────────────
+    // â”€â”€ Handlers delete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function openConfirmDelete(servicio) {
         setDeleteTarget(servicio);
-        setDeleteError('');
         setConfirmOpen(true);
     }
 
     async function handleConfirmDelete() {
         if (!deleteTarget) return;
         if (!sucursal) {
-            setDeleteError('No hay sucursal seleccionada.');
+            notifications.error('No hay sucursal seleccionada.', { dedupeKey: 'servicios-delete-no-branch' });
             return;
         }
         setDeleteLoading(true);
-        setDeleteError('');
         try {
             await deleteAdminServicio(deleteTarget.id_servicio ?? deleteTarget.id, sucursal);
+            setServicios((prev) =>
+                removeItemById(prev, deleteTarget.id_servicio ?? deleteTarget.id, (entry) => entry?.id_servicio ?? entry?.id)
+            );
             setConfirmOpen(false);
-            void fetchServicios();
+            notifications.warning('Servicio inactivado.', { dedupeKey: 'servicios-delete-ok' });
+            void fetchServicios({ silent: true });
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
-            setDeleteError(extractMessage(err));
+            notifications.error(extractMessage(err), { dedupeKey: 'servicios-delete-error' });
         } finally {
             setDeleteLoading(false);
         }
     }
 
-    // ── Render ──────────────────────────────────────────────────────────────────
+    // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const sinSucursal = !isSuperAdmin && !sucursal;
 
-    // ── Vista Cards de servicios ─────────────────────────────────────────────
+    // â”€â”€ Vista Cards de servicios â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function ServicioCards() {
         return (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {servicios.map((s, i) => (
+            <CardsCarousel
+                items={servicios}
+                getItemKey={(servicio) => servicio?.id_servicio ?? servicio?.id}
+                renderItem={(s, i, pageIndex) => (
                     <DataCard
                         key={s.id_servicio ?? s.id}
-                        animationDelay={i * 0.05}
+                        animationDelay={(pageIndex * 0.02) + (i * 0.05)}
                         avatar={<Scissors size={18} />}
                         title={s.nombre_servicio}
                         subtitle={s.descripcion}
@@ -349,7 +373,7 @@ export default function AdminServicesCatalogPage() {
                         }
                         fields={[
                             { label: 'Precio', value: <span className="font-mono font-bold text-[var(--mf-accent)]">L {Number(s.precio_hnl).toFixed(2)}</span> },
-                            { label: 'Duración', value: `${s.duracion_min} min` },
+                            { label: 'Duracion', value: `${s.duracion_min} min` },
                             { label: 'Buffer', value: `${s.buffer_min} min` },
                             { label: 'Tarifa', value: <span className={`mf-badge ${s.tarifa_activa ? 'mf-badge-gold' : 'mf-badge-muted'}`}>{s.tarifa_activa ? 'Activa' : 'Sin tarifa'}</span> },
                         ]}
@@ -364,8 +388,8 @@ export default function AdminServicesCatalogPage() {
                             </>
                         }
                     />
-                ))}
-            </div>
+                )}
+            />
         );
     }
 
@@ -375,7 +399,7 @@ export default function AdminServicesCatalogPage() {
             <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mf-accent)]">
-                        Catálogo · Servicios
+                        CatÃ¡logo Â· Servicios
                     </p>
                     <h1 className="mf-font-display mt-1 text-3xl leading-tight text-[var(--mf-text)]">
                         Servicios
@@ -383,7 +407,7 @@ export default function AdminServicesCatalogPage() {
                 </div>
                 <div className="flex items-center gap-3 flex-wrap justify-end">
                     <p className="text-sm text-[var(--mf-text-2)]">
-                        {loading ? 'Cargando…' : `${servicios.length} servicio(s)`}
+                        {loading ? 'Cargandoâ€¦' : `${servicios.length} servicio(s)`}
                     </p>
                     <ViewToggle defaultView={view} onViewChange={setView} storageKey="servicios" />
                     <Button onClick={openCrear} size="sm" className="gap-2" disabled={!sucursal}>
@@ -408,7 +432,7 @@ export default function AdminServicesCatalogPage() {
             {/* Aviso sin sucursal */}
             {sinSucursal && (
                 <div className="flex items-center gap-3 rounded-[16px] border border-amber-500/30 bg-amber-500/10 px-5 py-4 text-sm text-amber-400">
-                    <span>⚠️ Selecciona una sucursal para cargar y operar el catálogo.</span>
+                    <span>Selecciona una sucursal para cargar y operar el catalogo.</span>
                 </div>
             )}
 
@@ -461,12 +485,12 @@ export default function AdminServicesCatalogPage() {
                                         </TableCell>
                                         <TableCell className="text-center">
                                             <span className={`mf-badge ${s.activo ? 'mf-badge-green' : 'mf-badge-red'}`}>
-                                                {s.activo ? 'Sí' : 'No'}
+                                                {s.activo ? 'SÃ­' : 'No'}
                                             </span>
                                         </TableCell>
                                         <TableCell className="text-center hidden sm:table-cell">
                                             <span className={`mf-badge ${s.tarifa_activa ? 'mf-badge-gold' : 'mf-badge-muted'}`}>
-                                                {s.tarifa_activa ? 'Activa' : '—'}
+                                                {s.tarifa_activa ? 'Activa' : 'â€”'}
                                             </span>
                                         </TableCell>
                                         <TableCell className="text-right">
@@ -511,38 +535,33 @@ export default function AdminServicesCatalogPage() {
                             Cancelar
                         </Button>
                         <Button onClick={handleGuardar} disabled={formLoading} className="gap-2 min-w-[120px]">
-                            {formLoading ? 'Guardando…' : editTarget ? 'Guardar cambios' : 'Crear servicio'}
+                            {formLoading ? 'Guardandoâ€¦' : editTarget ? 'Guardar cambios' : 'Crear servicio'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
 
-            {/* Dialog Confirmar Inactivar */}
-            <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-                <DialogContent className="sm:max-w-sm">
-                    <DialogHeader>
-                        <DialogTitle>¿Inactivar servicio?</DialogTitle>
-                    </DialogHeader>
-                    <p className="text-sm text-[var(--mf-text-2)] leading-6">
-                        Se inactivará <strong className="text-[var(--mf-text)]">{deleteTarget?.nombre_servicio}</strong>.
-                        Esta acción puede revertirse desde el panel de administración.
-                    </p>
-                    {deleteError && <ErrorBanner message={deleteError} />}
-                    <DialogFooter className="mt-4">
-                        <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={deleteLoading}>
-                            Cancelar
-                        </Button>
-                        <Button
-                            variant="destructive"
-                            onClick={handleConfirmDelete}
-                            disabled={deleteLoading}
-                            className="gap-2"
-                        >
-                            {deleteLoading ? 'Inactivando…' : 'Inactivar'}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <ActionConfirmDialog
+                open={confirmOpen}
+                onOpenChange={(open) => {
+                    if (!open && !deleteLoading) {
+                        setConfirmOpen(false);
+                        setDeleteTarget(null);
+                    }
+                }}
+                tone="danger"
+                title="Inactivar servicio"
+                description={
+                    deleteTarget
+                        ? `Se inactivarÃ¡ ${deleteTarget.nombre_servicio}. Esta acciÃ³n puede revertirse desde administraciÃ³n.`
+                        : ''
+                }
+                confirmLabel="Inactivar"
+                cancelLabel="Cancelar"
+                loading={deleteLoading}
+                onConfirm={handleConfirmDelete}
+            />
         </div>
     );
 }
+

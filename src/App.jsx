@@ -17,6 +17,8 @@ import ClienteHomePage from './features/cliente/pages/ClienteHomePage.jsx';
 import SuperAdminHomePage from './features/admin/pages/SuperAdminHomePage.jsx';
 import AdminEmpleadosPage from './features/admin/pages/AdminEmpleadosPage.jsx';
 import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx';
+import AdminClientesPage from './features/admin/pages/AdminClientesPage.jsx';
+import AdminUsuariosPage from './features/admin/pages/AdminUsuariosPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
@@ -56,8 +58,8 @@ function App() {
         <Route path="kpis" element={<UnderConstructionPage title="KPIs" subtitle="Indicadores clave de rendimiento" />} />
         {/* Personas */}
         <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
-        <Route path="clientes" element={<UnderConstructionPage title="Clientes" />} />
-        <Route path="usuarios" element={<UnderConstructionPage title="Usuarios" />} />
+        <Route path="clientes" element={<RouteErrorBoundary><AdminClientesPage /></RouteErrorBoundary>} />
+        <Route path="usuarios" element={<RouteErrorBoundary><AdminUsuariosPage /></RouteErrorBoundary>} />
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
         <Route path="catalog/paquetes" element={<AdminPackagesCatalogPage />} />
@@ -97,8 +99,8 @@ function App() {
         <Route path="kpis" element={<UnderConstructionPage title="KPIs" />} />
         {/* Personas */}
         <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
-        <Route path="clientes" element={<UnderConstructionPage title="Clientes" />} />
-        <Route path="usuarios" element={<UnderConstructionPage title="Usuarios" />} />
+        <Route path="clientes" element={<RouteErrorBoundary><AdminClientesPage /></RouteErrorBoundary>} />
+        <Route path="usuarios" element={<RouteErrorBoundary><AdminUsuariosPage /></RouteErrorBoundary>} />
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
         <Route path="catalog/paquetes" element={<AdminPackagesCatalogPage />} />

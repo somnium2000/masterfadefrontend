@@ -32,6 +32,9 @@ import {
     TableHeader,
     TableRow,
 } from '../../../components/ui/table.jsx';
+import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
+import { removeItemById, replaceItemById } from '../../../lib/collectionState.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function extractMessage(err) {
@@ -175,6 +178,7 @@ function validateForm(values) {
 export default function AdminPackagesCatalogPage() {
     const navigate = useNavigate();
     const { branchIds } = useAuth();
+    const notifications = useNotifications();
 
     // Sucursal activa (para cargar servicios disponibles)
     const sucursal = branchIds.length >= 1 ? branchIds[0] : '';
@@ -196,12 +200,13 @@ export default function AdminPackagesCatalogPage() {
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [deleteLoading, setDeleteLoading] = useState(false);
-    const [deleteError, setDeleteError] = useState('');
 
     // ── Carga datos ─────────────────────────────────────────────────────────────
-    const fetchPaquetes = useCallback(async () => {
-        setLoading(true);
-        setListError('');
+    const fetchPaquetes = useCallback(async ({ silent = false } = {}) => {
+        if (!silent) {
+            setLoading(true);
+            setListError('');
+        }
         try {
             const data = await listAdminPaquetes();
             const payloadData = data?.data ?? data;
@@ -210,9 +215,13 @@ export default function AdminPackagesCatalogPage() {
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
-            setListError(extractMessage(err));
+            if (!silent) {
+                setListError(extractMessage(err));
+            }
         } finally {
-            setLoading(false);
+            if (!silent) {
+                setLoading(false);
+            }
         }
     }, [navigate]);
 
@@ -280,17 +289,27 @@ export default function AdminPackagesCatalogPage() {
         };
 
         try {
+            const response = editTarget
+                ? await updateAdminPaquete(editTarget.id_paquete, payload)
+                : await createAdminPaquete(payload);
+            const result = response?.data ?? response;
             if (editTarget) {
-                await updateAdminPaquete(editTarget.id_paquete, payload);
+                notifications.success('Paquete actualizado.', { dedupeKey: 'paquetes-save-ok' });
             } else {
-                await createAdminPaquete(payload);
+                notifications.success('Paquete creado.', { dedupeKey: 'paquetes-save-ok' });
+            }
+            if (result?.id_paquete) {
+                setPaquetes((prev) => replaceItemById(prev, result, (entry) => entry?.id_paquete));
             }
             setDialogOpen(false);
-            void fetchPaquetes();
+            // AM: Sincronizacion silenciosa para evitar recarga perceptible del listado.
+            void fetchPaquetes({ silent: true });
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
-            setFormError(extractMessage(err));
+            const message = extractMessage(err);
+            setFormError(message);
+            notifications.error(message, { dedupeKey: 'paquetes-save-error' });
         } finally {
             setFormLoading(false);
         }
@@ -299,22 +318,22 @@ export default function AdminPackagesCatalogPage() {
     // ── Handlers delete ─────────────────────────────────────────────────────────
     function openConfirmDelete(paquete) {
         setDeleteTarget(paquete);
-        setDeleteError('');
         setConfirmOpen(true);
     }
 
     async function handleConfirmDelete() {
         if (!deleteTarget) return;
         setDeleteLoading(true);
-        setDeleteError('');
         try {
             await deleteAdminPaquete(deleteTarget.id_paquete);
+            setPaquetes((prev) => removeItemById(prev, deleteTarget.id_paquete, (entry) => entry?.id_paquete));
             setConfirmOpen(false);
-            void fetchPaquetes();
+            notifications.warning('Paquete inactivado.', { dedupeKey: 'paquetes-delete-ok' });
+            void fetchPaquetes({ silent: true });
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
-            setDeleteError(extractMessage(err));
+            notifications.error(extractMessage(err), { dedupeKey: 'paquetes-delete-error' });
         } finally {
             setDeleteLoading(false);
         }
@@ -466,37 +485,26 @@ export default function AdminPackagesCatalogPage() {
                 </DialogContent>
             </Dialog>
 
-            {/* Dialog Confirmar Inactivar */}
-            <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-                <DialogContent className="sm:max-w-sm">
-                    <DialogHeader>
-                        <DialogTitle>¿Inactivar paquete?</DialogTitle>
-                    </DialogHeader>
-                    <p className="text-sm text-[var(--mf-text-2)]">
-                        Se inactivará <strong className="text-[var(--mf-text)]">{deleteTarget?.nombre_paquete}</strong>.
-                        Esta acción puede revertirse.
-                    </p>
-                    {deleteError && (
-                        <p className="flex items-center gap-2 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
-                            <AlertCircle size={15} strokeWidth={2} />{deleteError}
-                        </p>
-                    )}
-                    <DialogFooter className="mt-2">
-                        <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={deleteLoading}>
-                            Cancelar
-                        </Button>
-                        <Button
-                            variant="destructive"
-                            onClick={handleConfirmDelete}
-                            disabled={deleteLoading}
-                            className="gap-2"
-                        >
-                            {deleteLoading && <Loader2 size={15} className="animate-spin" />}
-                            Inactivar
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <ActionConfirmDialog
+                open={confirmOpen}
+                onOpenChange={(open) => {
+                    if (!open && !deleteLoading) {
+                        setConfirmOpen(false);
+                        setDeleteTarget(null);
+                    }
+                }}
+                tone="danger"
+                title="Inactivar paquete"
+                description={
+                    deleteTarget
+                        ? `Se inactivará ${deleteTarget.nombre_paquete}. Esta acción puede revertirse.`
+                        : ''
+                }
+                confirmLabel="Inactivar"
+                cancelLabel="Cancelar"
+                loading={deleteLoading}
+                onConfirm={handleConfirmDelete}
+            />
         </div>
     );
 }
