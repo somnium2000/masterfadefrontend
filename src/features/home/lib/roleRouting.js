@@ -7,11 +7,24 @@ export const ROLE_HOME_PATHS = {
   cliente: '/home/cliente',
 };
 
+// AM: Flag de contingencia; por defecto queda desactivado para permitir super_admin/admin/barbero.
+export const PHASE0_SUPER_ADMIN_ONLY =
+  String(import.meta.env.VITE_PHASE0_SUPER_ADMIN_ONLY ?? 'false').trim().toLowerCase() === 'true';
+
+function getAllowedRolesForPhase(allowedRoles) {
+  if (!PHASE0_SUPER_ADMIN_ONLY) {
+    return allowedRoles;
+  }
+
+  // AM: En contingencia, cualquier shell protegido opera solo con super_admin.
+  return allowedRoles.includes('super_admin') ? ['super_admin'] : [];
+}
+
 export const ROLE_ROUTE_ALLOWED_ROLES = {
-  super_admin: ['super_admin'],
-  admin: ['super_admin', 'admin'],
-  barbero: ['super_admin', 'barbero'],
-  cliente: ['super_admin', 'cliente'],
+  super_admin: getAllowedRolesForPhase(['super_admin']),
+  admin: getAllowedRolesForPhase(['super_admin', 'admin']),
+  barbero: getAllowedRolesForPhase(['super_admin', 'barbero']),
+  cliente: getAllowedRolesForPhase(['super_admin', 'cliente']),
 };
 
 export const ROLE_LABELS = {
@@ -30,6 +43,11 @@ export function getPrimaryRole(roles = []) {
 }
 
 export function resolveHomePath(roles = []) {
+  // AM: Solo en contingencia se restringe el home a SUPER_ADMIN.
+  if (PHASE0_SUPER_ADMIN_ONLY && !roles.includes('super_admin')) {
+    return null;
+  }
+
   const primaryRole = getPrimaryRole(roles);
   return primaryRole ? ROLE_HOME_PATHS[primaryRole] : null;
 }

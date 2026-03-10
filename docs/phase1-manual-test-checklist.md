@@ -3,7 +3,7 @@
 ## Backend /v1/auth/me
 
 1. Inicia el backend con variables JWT validas.
-2. Haz login valido por usuario o email.
+2. Haz login valido por correo.
 3. Copia el token retornado.
 4. Ejecuta `GET /v1/auth/me` con `Authorization: Bearer <token>`.
 5. Verifica:
