@@ -140,7 +140,7 @@ export default function LoginPage() {
               </div>
 
               <div className="mf-login-footer">
-                <span>El acceso te llevará directamente a tu panel en /home.</span>
+                <span aria-hidden="true" />
                 <Link className="mf-link" to="/">
                   Ir al landing
                 </Link>

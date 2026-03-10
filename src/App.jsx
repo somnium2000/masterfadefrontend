@@ -3,7 +3,6 @@ import { useAuth } from './context/AuthContext.jsx';
 import ForgotPasswordPage from './features/auth/pages/ForgotPasswordPage.jsx';
 import LoginPage from './features/auth/pages/LoginPage.jsx';
 import ResetPasswordPage from './features/auth/pages/ResetPasswordPage.jsx';
-import HomePage from './features/home/pages/HomePage.jsx';
 import HomeRedirectPage from './features/home/pages/HomeRedirectPage.jsx';
 import { ROLE_ROUTE_ALLOWED_ROLES } from './features/home/lib/roleRouting.js';
 import LandingPage from './features/landing/pages/LandingPage.jsx';
@@ -12,9 +11,7 @@ import UnauthorizedPage from './features/unauthorized/pages/UnauthorizedPage.jsx
 import ProtectedRoute from './routes/ProtectedRoute.jsx';
 import AdminServicesCatalogPage from './features/admin/pages/AdminServicesCatalogPage.jsx';
 import AdminPackagesCatalogPage from './features/admin/pages/AdminPackagesCatalogPage.jsx';
-import BarberoHomePage from './features/barbero/pages/BarberoHomePage.jsx';
 import ClienteHomePage from './features/cliente/pages/ClienteHomePage.jsx';
-import SuperAdminHomePage from './features/admin/pages/SuperAdminHomePage.jsx';
 import AdminEmpleadosPage from './features/admin/pages/AdminEmpleadosPage.jsx';
 import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
@@ -52,7 +49,7 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<SuperAdminHomePage />} />
+        <Route index element={<UnderConstructionPage title="Inicio" />} />
         <Route path="kpis" element={<UnderConstructionPage title="KPIs" subtitle="Indicadores clave de rendimiento" />} />
         {/* Personas */}
         <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
@@ -76,8 +73,8 @@ function App() {
         <Route path="reportes/ingresos" element={<UnderConstructionPage title="Reporte de Ingresos" />} />
         <Route path="reportes/barberos" element={<UnderConstructionPage title="Productividad Barberos" />} />
         <Route path="reportes/concurrencia" element={<UnderConstructionPage title="Concurrencia de Clientes" />} />
-        {/* Superpuntos */}
-        <Route path="superpuntos" element={<UnderConstructionPage title="Superpuntos" />} />
+        {/* Masterpuntos */}
+        <Route path="superpuntos" element={<UnderConstructionPage title="Masterpuntos" />} />
         {/* Configuración */}
         <Route path="configuracion/notificaciones" element={<UnderConstructionPage title="Notificaciones" />} />
         <Route path="configuracion/perfil" element={<UnderConstructionPage title="Perfil" />} />
@@ -93,7 +90,7 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<HomePage pageRole="admin" />} />
+        <Route index element={<UnderConstructionPage title="Inicio" />} />
         <Route path="kpis" element={<UnderConstructionPage title="KPIs" />} />
         {/* Personas */}
         <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
@@ -117,8 +114,8 @@ function App() {
         <Route path="reportes/ingresos" element={<UnderConstructionPage title="Reporte de Ingresos" />} />
         <Route path="reportes/barberos" element={<UnderConstructionPage title="Productividad Barberos" />} />
         <Route path="reportes/concurrencia" element={<UnderConstructionPage title="Concurrencia de Clientes" />} />
-        {/* Superpuntos */}
-        <Route path="superpuntos" element={<UnderConstructionPage title="Superpuntos" />} />
+        {/* Masterpuntos */}
+        <Route path="superpuntos" element={<UnderConstructionPage title="Masterpuntos" />} />
         {/* Configuración */}
         <Route path="configuracion/notificaciones" element={<UnderConstructionPage title="Notificaciones" />} />
         <Route path="configuracion/perfil" element={<UnderConstructionPage title="Perfil" />} />
@@ -134,7 +131,7 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<BarberoHomePage />} />
+        <Route index element={<UnderConstructionPage title="Inicio" />} />
       </Route>
 
       {/* ── Cliente ─────────────────────────────────────────────────── */}
