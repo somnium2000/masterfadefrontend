@@ -5,14 +5,16 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
+import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import './LoginPage.css';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { login } = useAuth();
+  const notifications = useNotifications();
 
-  const [nombreUsuario, setNombreUsuario] = useState('');
+  const [correo, setCorreo] = useState('');
   const [contrasena, setContrasena] = useState('');
   const [remember, setRemember] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -29,11 +31,21 @@ export default function LoginPage() {
     event.preventDefault();
     setError('');
 
-    const user = nombreUsuario.trim();
+    // AM: Fase 1 usa correo como identificador oficial de login.
+    const user = correo.trim().toLowerCase();
     const pass = contrasena.trim();
 
     if (!user || !pass) {
-      setError('Por favor ingresa usuario y contraseña.');
+      const message = 'Por favor ingresa correo y contrasena.';
+      setError(message);
+      notifications.warning(message, { dedupeKey: 'auth-login-required-fields' });
+      return;
+    }
+
+    if (!user.includes('@')) {
+      const message = 'Ingresa un correo valido.';
+      setError(message);
+      notifications.warning(message, { dedupeKey: 'auth-login-invalid-email' });
       return;
     }
 
@@ -42,10 +54,13 @@ export default function LoginPage() {
     setLoading(false);
 
     if (!result.ok) {
-      setError(result.message || 'No se pudo iniciar sesión.');
+      const message = result.message || 'No se pudo iniciar sesion.';
+      setError(message);
+      notifications.error(message, { dedupeKey: 'auth-login-error' });
       return;
     }
 
+    notifications.success('Sesion iniciada correctamente.', { dedupeKey: 'auth-login-ok' });
     navigate('/home', { replace: true });
   }
 
@@ -78,36 +93,36 @@ export default function LoginPage() {
           >
             <div className="mf-login-card-header">
               <p className="mf-login-kicker">Acceso premium</p>
-              <h1 className="mf-login-title">Iniciar sesión</h1>
+              <h1 className="mf-login-title">Iniciar sesion</h1>
               <p className="mf-login-subtitle">
-                Ingresa con tu usuario y contraseña para continuar a tu experiencia MASTERFADE.
+                Ingresa con tu correo y contrasena para continuar a tu experiencia MASTERFADE.
               </p>
             </div>
 
             <form className="mf-login-form" onSubmit={onSubmit}>
               <div className="mf-form-group">
-                <label className="mf-label" htmlFor="nombre_usuario">
-                  Usuario
+                <label className="mf-label" htmlFor="correo_login">
+                  Correo
                 </label>
                 <input
-                  id="nombre_usuario"
+                  id="correo_login"
                   className="mf-input"
-                  type="text"
-                  autoComplete="username"
-                  value={nombreUsuario}
-                  onChange={(event) => setNombreUsuario(event.target.value)}
-                  placeholder="super_admin"
+                  type="email"
+                  autoComplete="email"
+                  value={correo}
+                  onChange={(event) => setCorreo(event.target.value)}
+                  placeholder="admin@masterfade.hn"
                 />
               </div>
 
               <div className="mf-form-group">
                 <div className="mf-row-between">
                   <label className="mf-label" htmlFor="contrasena">
-                    Contraseña
+                    Contrasena
                   </label>
 
                   <Link className="mf-link" to="/forgot-password">
-                    ¿Olvidaste tu contraseña?
+                    Olvidaste tu contrasena?
                   </Link>
                 </div>
 
@@ -118,7 +133,7 @@ export default function LoginPage() {
                   autoComplete="current-password"
                   value={contrasena}
                   onChange={(event) => setContrasena(event.target.value)}
-                  placeholder="••••••••"
+                  placeholder="********"
                 />
               </div>
 
@@ -135,12 +150,12 @@ export default function LoginPage() {
                 </label>
 
                 <button className="mf-btn" type="submit" disabled={loading}>
-                  {loading ? 'Cargando…' : 'Entrar'}
+                  {loading ? 'Cargando...' : 'Entrar'}
                 </button>
               </div>
 
               <div className="mf-login-footer">
-                <span>El acceso te llevará directamente a tu panel en /home.</span>
+                <span>El acceso te llevara directamente a tu panel en /home.</span>
                 <Link className="mf-link" to="/">
                   Ir al landing
                 </Link>

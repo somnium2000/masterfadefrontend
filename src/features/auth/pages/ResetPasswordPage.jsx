@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../config/supabaseClient.js';
+import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import './LoginPage.css';
 import './PasswordRecovery.css';
 
@@ -19,6 +20,7 @@ function parseHash(hash) {
 export default function ResetPasswordPage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const notifications = useNotifications();
 
   const hashData = useMemo(() => parseHash(location.hash), [location.hash]);
 
@@ -30,7 +32,7 @@ export default function ResetPasswordPage() {
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
 
-  // 1) Asegurar sesión (desde hash) y limpiar URL
+  // 1) Asegurar sesiÃ³n (desde hash) y limpiar URL
   useEffect(() => {
     let cancelled = false;
 
@@ -39,12 +41,12 @@ export default function ResetPasswordPage() {
       setMsg('');
 
       if (!supabase) {
-        setError('Supabase no está configurado (revisa VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY).');
+        setError('Supabase no estÃ¡ configurado (revisa VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY).');
         return;
       }
 
       if (hashData.error) {
-        setError(hashData.error_description || 'Enlace inválido o expirado.');
+        setError(hashData.error_description || 'Enlace invÃ¡lido o expirado.');
         return;
       }
 
@@ -55,7 +57,7 @@ export default function ResetPasswordPage() {
           refresh_token: hashData.refresh_token,
         });
         if (error) {
-          setError(error.message || 'No se pudo validar la sesión de recuperación.');
+          setError(error.message || 'No se pudo validar la sesiÃ³n de recuperaciÃ³n.');
           return;
         }
 
@@ -63,10 +65,10 @@ export default function ResetPasswordPage() {
         if (!cancelled) navigate('/reset-password', { replace: true });
       }
 
-      // Confirmar que existe sesión
+      // Confirmar que existe sesiÃ³n
       const { data } = await supabase.auth.getSession();
       if (!data?.session) {
-        setError('No hay una sesión de recuperación activa. Vuelve a pedir el enlace.');
+        setError('No hay una sesiÃ³n de recuperaciÃ³n activa. Vuelve a pedir el enlace.');
         return;
       }
 
@@ -84,12 +86,17 @@ export default function ResetPasswordPage() {
 
     if (!supabase) return;
 
+    // AM: Feedback global consistente para reset password sin romper validaciones locales.
     if (newPass.length < 8) {
-      setError('La contraseña debe tener al menos 8 caracteres.');
+      const message = 'La contrasena debe tener al menos 8 caracteres.';
+      setError(message);
+      notifications.warning(message, { dedupeKey: 'auth-reset-password-length' });
       return;
     }
     if (newPass !== confirm) {
-      setError('Las contraseñas no coinciden.');
+      const message = 'Las contrasenas no coinciden.';
+      setError(message);
+      notifications.warning(message, { dedupeKey: 'auth-reset-password-match' });
       return;
     }
 
@@ -98,16 +105,19 @@ export default function ResetPasswordPage() {
     setLoading(false);
 
     if (error) {
-      setError(error.message || 'No se pudo actualizar la contraseña.');
+      const message = error.message || 'No se pudo actualizar la contrasena.';
+      setError(message);
+      notifications.error(message, { dedupeKey: 'auth-reset-password-error' });
       return;
     }
 
-    setMsg('Contraseña actualizada. Ahora puedes iniciar sesión con tu nueva contraseña.');
+    const successMessage = 'Contrasena actualizada. Ahora puedes iniciar sesion con tu nueva contrasena.';
+    setMsg(successMessage);
+    notifications.success(successMessage, { dedupeKey: 'auth-reset-password-ok' });
 
     // Opcional: cerrar sesión supabase para limpiar
     await supabase.auth.signOut();
 
-    // Enviar al login después de 1.2s
     setTimeout(() => navigate('/login', { replace: true }), 1200);
   }
 
@@ -120,13 +130,13 @@ export default function ResetPasswordPage() {
 
         <div className="mf-login-card">
           <div className="mf-login-card-header">
-            <h1 className="mf-login-title">Restablecer contraseña</h1>
+            <h1 className="mf-login-title">Restablecer contraseÃ±a</h1>
           </div>
 
           <form className="mf-login-form" onSubmit={onSubmit}>
             {!ready ? (
               <>
-                {error ? <div className="mf-error">{error}</div> : <div className="mf-help">Validando enlace…</div>}
+                {error ? <div className="mf-error">{error}</div> : <div className="mf-help">Validando enlaceâ€¦</div>}
                 <div className="mf-actions">
                   <Link className="mf-link" to="/forgot-password">Volver</Link>
                   <Link className="mf-link" to="/login">Login</Link>
@@ -135,26 +145,26 @@ export default function ResetPasswordPage() {
             ) : (
               <>
                 <div className="mf-form-group">
-                  <label className="mf-label" htmlFor="newPass">Nueva contraseña</label>
+                  <label className="mf-label" htmlFor="newPass">Nueva contraseÃ±a</label>
                   <input
                     id="newPass"
                     className="mf-input"
                     type="password"
                     value={newPass}
                     onChange={(e) => setNewPass(e.target.value)}
-                    placeholder="••••••••"
+                    placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                   />
                 </div>
 
                 <div className="mf-form-group">
-                  <label className="mf-label" htmlFor="confirm">Confirmar contraseña</label>
+                  <label className="mf-label" htmlFor="confirm">Confirmar contraseÃ±a</label>
                   <input
                     id="confirm"
                     className="mf-input"
                     type="password"
                     value={confirm}
                     onChange={(e) => setConfirm(e.target.value)}
-                    placeholder="••••••••"
+                    placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                   />
                 </div>
 
@@ -164,7 +174,7 @@ export default function ResetPasswordPage() {
                 <div className="mf-actions">
                   <Link className="mf-link" to="/login">Volver a login</Link>
                   <button className="mf-btn" type="submit" disabled={loading}>
-                    {loading ? 'Guardando…' : 'Actualizar contraseña'}
+                    {loading ? 'Guardandoâ€¦' : 'Actualizar contraseÃ±a'}
                   </button>
                 </div>
               </>
@@ -175,3 +185,5 @@ export default function ResetPasswordPage() {
     </div>
   );
 }
+
+

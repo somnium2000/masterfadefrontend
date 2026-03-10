@@ -49,6 +49,10 @@ export function getUserDisplayName(user) {
   return nombreCompleto || user?.email || user?.id_usuario || 'Usuario';
 }
 
+function isLikelyEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
 export function AuthProvider({ children }) {
   const initialToken = localStorage.getItem(LS_TOKEN_KEY) || '';
   const initialUser = initialToken ? safeJsonParse(localStorage.getItem(LS_USER_KEY) || 'null') : null;
@@ -146,17 +150,23 @@ export function AuthProvider({ children }) {
     }
   }, [applyUserState, clearSessionState, writeLocalSession]);
 
-  const login = useCallback(async (nombre_usuario, contrasena, remember) => {
-    const username = String(nombre_usuario || '').trim();
+  const login = useCallback(async (identifier, contrasena, remember) => {
+    const normalizedIdentifier = String(identifier || '').trim().toLowerCase();
     const password = String(contrasena || '').trim();
 
-    if (!username || !password) {
-      return { ok: false, message: 'Usuario y contrasena son requeridos.' };
+    if (!normalizedIdentifier || !password) {
+      return { ok: false, message: 'Correo y contrasena son requeridos.' };
+    }
+
+    // AM: Fase 1 exige correo como identificador formal de autenticacion.
+    if (!isLikelyEmail(normalizedIdentifier)) {
+      return { ok: false, message: 'Ingresa un correo valido para iniciar sesion.' };
     }
 
     try {
       const response = await http.post('/v1/auth/login', {
-        nombre_usuario: username,
+        identifier: normalizedIdentifier,
+        email: normalizedIdentifier,
         contrasena: password,
       });
 
