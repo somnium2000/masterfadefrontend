@@ -11,13 +11,14 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { getPublicCatalog } from '../lib/catalogApi.js';
+import { subscribeCatalogSync } from '../../../lib/catalogSync.js';
 
 function formatPrice(value) {
   const amount = Number(value ?? 0);
@@ -27,10 +28,11 @@ function formatPrice(value) {
 function ServiceCard({ item, compact = false }) {
   return (
     <motion.article
+      data-catalog-card="true"
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="mf-glass-surface flex w-[320px] shrink-0 snap-start flex-col justify-between rounded-[28px] p-5"
+      className="mf-glass-surface flex w-[85vw] shrink-0 snap-start flex-col justify-between rounded-[28px] p-5 sm:w-[68vw] lg:w-[calc((100%-2rem)/3)]"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -68,10 +70,11 @@ function PackageCard({ item }) {
 
   return (
     <motion.article
+      data-catalog-card="true"
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="mf-glass-surface flex w-[340px] shrink-0 snap-start flex-col justify-between rounded-[28px] p-5"
+      className="mf-glass-surface flex w-[85vw] shrink-0 snap-start flex-col justify-between rounded-[28px] p-5 sm:w-[68vw] lg:w-[calc((100%-2rem)/3)]"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -118,10 +121,20 @@ function CatalogSection({ icon: Icon, title, eyebrow, items, emptyMessage, child
   const scrollRef = useRef(null);
 
   const handleScroll = (direction) => {
-    if (scrollRef.current) {
-      const scrollAmount = direction === 'left' ? -340 : 340;
-      scrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
-    }
+    if (!scrollRef.current) return;
+
+    const track = scrollRef.current;
+    const firstCard = track.querySelector('[data-catalog-card="true"]');
+    const styles = window.getComputedStyle(track);
+    const gap = Number.parseFloat(styles.columnGap || styles.gap || '16') || 16;
+    const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
+    // AM: En desktop avanza 3 tarjetas por clic; en móvil/tablet avanza 1 para mantener control fino.
+    const cardsPerStep = isDesktop ? 3 : 1;
+    const cardWidth = firstCard ? firstCard.getBoundingClientRect().width : track.clientWidth;
+    const step = (cardWidth + gap) * cardsPerStep;
+    const scrollAmount = direction === 'left' ? -step : step;
+
+    track.scrollBy({ left: scrollAmount, behavior: 'smooth' });
   };
 
   return (
@@ -160,11 +173,15 @@ function CatalogSection({ icon: Icon, title, eyebrow, items, emptyMessage, child
       </div>
 
       {items.length > 0 ? (
-        <div
-          ref={scrollRef}
-          className="mt-5 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-6 pt-2 [-ms-overflow-style:none] [scrollbar-width:none] scroll-smooth [&::-webkit-scrollbar]:hidden"
-        >
-          {children}
+        <div className="relative mt-5">
+          <div className="pointer-events-none absolute inset-y-0 left-0 z-[1] hidden w-14 bg-gradient-to-r from-[var(--mf-bg)]/85 via-[var(--mf-bg)]/35 to-transparent blur-[1px] lg:block" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 z-[1] hidden w-14 bg-gradient-to-l from-[var(--mf-bg)]/85 via-[var(--mf-bg)]/35 to-transparent blur-[1px] lg:block" />
+          <div
+            ref={scrollRef}
+            className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-6 pt-2 [-ms-overflow-style:none] [scrollbar-width:none] scroll-smooth [&::-webkit-scrollbar]:hidden"
+          >
+            {children}
+          </div>
         </div>
       ) : (
         <div className="mf-glass-surface mt-5 rounded-[24px] p-5 text-sm leading-6 text-[var(--mf-text-2)]">
@@ -178,44 +195,51 @@ function CatalogSection({ icon: Icon, title, eyebrow, items, emptyMessage, child
 export default function ServicesPage() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const isMountedRef = useRef(true);
   const [status, setStatus] = useState('loading');
   const [services, setServices] = useState([]);
   const [packages, setPackages] = useState([]);
   const [errorMessage, setErrorMessage] = useState('');
 
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadCatalog() {
+  const loadCatalog = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
       setStatus('loading');
-      setErrorMessage('');
-
-      try {
-        const result = await getPublicCatalog();
-
-        if (!isMounted) {
-          return;
-        }
-
-        setServices(result.services);
-        setPackages(result.packages);
-        setStatus('success');
-      } catch (error) {
-        if (!isMounted) {
-          return;
-        }
-
-        setErrorMessage(error?.data?.error?.message || error?.message || 'No se pudo cargar el catalogo.');
-        setStatus('error');
-      }
     }
+    setErrorMessage('');
 
-    void loadCatalog();
+    try {
+      const result = await getPublicCatalog();
+      if (!isMountedRef.current) return;
+      setServices(result.services);
+      setPackages(result.packages);
+      setStatus('success');
+    } catch (error) {
+      if (!isMountedRef.current) return;
+      setErrorMessage(error?.data?.error?.message || error?.message || 'No se pudo cargar el catalogo.');
+      setStatus('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    // AM: Ejecuta la carga inicial en microtask para evitar setState sincronico dentro del effect.
+    queueMicrotask(() => {
+      if (!isMountedRef.current) return;
+      void loadCatalog();
+    });
+
+    const unsubscribe = subscribeCatalogSync(() => {
+      if (!isMountedRef.current) return;
+      // AM: Refresco silencioso para reflejar cambios admin sin recargar toda la vista publica.
+      void loadCatalog({ silent: true });
+    });
 
     return () => {
-      isMounted = false;
+      isMountedRef.current = false;
+      unsubscribe();
     };
-  }, []);
+  }, [loadCatalog]);
 
   function handleAgendar() {
     navigate(isAuthenticated ? '/home' : '/login');
@@ -229,7 +253,7 @@ export default function ServicesPage() {
     { id: 'servicios', label: 'Servicios', icon: Scissors, onClick: () => navigate('/servicios') },
     {
       id: 'login',
-      label: isAuthenticated ? 'Mi panel' : 'Iniciar sesiÃ³n',
+      label: isAuthenticated ? 'Mi panel' : 'Iniciar sesión',
       icon: LogIn,
       onClick: () => navigate(isAuthenticated ? '/home' : '/login'),
     },
@@ -286,7 +310,7 @@ export default function ServicesPage() {
               <p className="mt-4 text-sm leading-6 text-[var(--mf-text-2)]">{errorMessage}</p>
               <button
                 type="button"
-                onClick={() => window.location.reload()}
+                onClick={() => void loadCatalog()}
                 className="mf-accent-gradient mt-6 inline-flex h-11 items-center justify-center rounded-2xl px-5 text-sm font-semibold shadow-[var(--mf-shadow-accent)]"
               >
                 Reintentar

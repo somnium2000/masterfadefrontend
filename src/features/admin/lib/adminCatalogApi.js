@@ -40,3 +40,12 @@ export async function deleteAdminServicio(id, id_sucursal) {
         `/v1/admin/catalog/servicios/${id}?id_sucursal=${encodeURIComponent(id_sucursal)}`
     );
 }
+
+/**
+ * AM: Controla estado operativo del servicio (activar/inactivar) por sucursal.
+ * @param {string} id
+ * @param {{ activo: boolean, id_sucursal?: string, precio_hnl?: number }} payload
+ */
+export async function setAdminServicioEstado(id, payload) {
+    return http.patch(`/v1/admin/catalog/servicios/${id}/estado`, payload);
+}

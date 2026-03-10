@@ -35,6 +35,7 @@ import {
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
 import { removeItemById, replaceItemById } from '../../../lib/collectionState.js';
+import { emitCatalogSync } from '../../../lib/catalogSync.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function extractMessage(err) {
@@ -299,11 +300,11 @@ export default function AdminPackagesCatalogPage() {
                 notifications.success('Paquete creado.', { dedupeKey: 'paquetes-save-ok' });
             }
             if (result?.id_paquete) {
-                setPaquetes((prev) => replaceItemById(prev, result, (entry) => entry?.id_paquete));
+                setPaquetes((prev) => sortPaquetes(replaceItemById(prev, result, (entry) => entry?.id_paquete)));
             }
+            // AM: Sincroniza de inmediato el catalogo publico al crear/editar paquetes.
+            emitCatalogSync(editTarget ? 'paquete-updated' : 'paquete-created');
             setDialogOpen(false);
-            // AM: Sincronizacion silenciosa para evitar recarga perceptible del listado.
-            void fetchPaquetes({ silent: true });
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
@@ -329,7 +330,8 @@ export default function AdminPackagesCatalogPage() {
             setPaquetes((prev) => removeItemById(prev, deleteTarget.id_paquete, (entry) => entry?.id_paquete));
             setConfirmOpen(false);
             notifications.warning('Paquete inactivado.', { dedupeKey: 'paquetes-delete-ok' });
-            void fetchPaquetes({ silent: true });
+            // AM: Sincroniza catalogo publico al inactivar paquetes.
+            emitCatalogSync('paquete-inactivated');
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
@@ -507,4 +509,8 @@ export default function AdminPackagesCatalogPage() {
             />
         </div>
     );
+}
+
+function sortPaquetes(list = []) {
+    return [...(Array.isArray(list) ? list : [])].sort((a, b) => String(a?.nombre_paquete || '').localeCompare(String(b?.nombre_paquete || ''), 'es'));
 }
