@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Ban, CheckCircle2, Eye, Pencil, Plus, Users } from 'lucide-react';
+import { Ban, Building2, CheckCircle2, Eye, KeyRound, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Users, X } from 'lucide-react';
 import {
   activateAdminPersonaEmpleado,
   createAdminPersonaEmpleado,
@@ -24,6 +24,7 @@ import ViewToggle from '../../../components/data/ViewToggle.jsx';
 import DataCard from '../../../components/data/DataCard.jsx';
 import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import HoverActionButton from '../../../components/data/HoverActionButton.jsx';
+import DetailInfoModalContent from '../../../components/data/DetailInfoModalContent.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
@@ -76,6 +77,25 @@ const FORM_DEFAULTS = {
   salario_base: '',
   rol_principal: 'admin',
 };
+
+const EMPLEADO_FILTER_DEFAULTS = {
+  estadoLaboral: 'all',
+  estadoAcceso: 'all',
+  rol: 'all',
+  idSucursal: 'all',
+};
+
+const EMPLEADO_ESTADO_LABELS = {
+  activo: 'Laboral: Activo',
+  inactivo: 'Laboral: Inactivo',
+};
+
+function quickFilterButtonClass(isActive) {
+  // AM: Estado visual montado para que el usuario identifique filtros rapidos activos al instante.
+  return isActive
+    ? 'rounded-full border-[var(--mf-accent)] bg-[var(--mf-accent)] text-[var(--mf-accent-text)] shadow-[var(--mf-shadow-accent)]'
+    : 'rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_54%,transparent)] text-[var(--mf-text)] hover:border-[var(--mf-accent)]/60';
+}
 
 function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
@@ -194,6 +214,9 @@ export default function AdminEmpleadosPage() {
   const [formError, setFormError] = useState('');
   const [selectedEmpleado, setSelectedEmpleado] = useState(null);
   const [confirmTarget, setConfirmTarget] = useState(null);
+  const [search, setSearch] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState(EMPLEADO_FILTER_DEFAULTS);
   const notifications = useNotifications();
 
   const sucursalNameById = useMemo(() => {
@@ -201,6 +224,84 @@ export default function AdminEmpleadosPage() {
     sucursales.forEach((item) => map.set(item.id_sucursal, item.nombre_sucursal));
     return map;
   }, [sucursales]);
+
+  // AM: Filtro compuesto por submodulo para busqueda y segmentacion sin recargar backend.
+  const filteredEmpleados = useMemo(() => {
+    const searchValue = search.trim().toLowerCase();
+    return empleados.filter((empleado) => {
+      if (searchValue) {
+        const searchable = [
+          empleado?.nombre_completo,
+          empleado?.correo_principal,
+          empleado?.dni,
+          empleado?.telefono_principal,
+          empleado?.nombre_sucursal || sucursalNameById.get(empleado?.id_sucursal),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!searchable.includes(searchValue)) return false;
+      }
+
+      if (filters.estadoLaboral !== 'all') {
+        const expected = filters.estadoLaboral === 'activo';
+        if (Boolean(empleado?.estado_laboral) !== expected) return false;
+      }
+
+      if (filters.estadoAcceso !== 'all' && String(empleado?.estado_acceso || '') !== filters.estadoAcceso) {
+        return false;
+      }
+
+      if (filters.rol !== 'all' && resolvePrimaryRole(empleado?.roles) !== filters.rol) {
+        return false;
+      }
+
+      if (filters.idSucursal !== 'all' && String(empleado?.id_sucursal || '') !== filters.idSucursal) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [empleados, filters, search, sucursalNameById]);
+
+  const activeFilterCount = useMemo(
+    () => Object.values(filters).filter((value) => value !== 'all').length,
+    [filters]
+  );
+
+  const activeFilterChips = useMemo(() => {
+    const chips = [];
+    const trimmedSearch = search.trim();
+    if (trimmedSearch) {
+      chips.push({ key: 'search', label: `Busqueda: ${trimmedSearch}` });
+    }
+    if (filters.estadoLaboral !== 'all') {
+      chips.push({ key: 'estadoLaboral', label: EMPLEADO_ESTADO_LABELS[filters.estadoLaboral] || 'Estado laboral' });
+    }
+    if (filters.estadoAcceso !== 'all') {
+      chips.push({ key: 'estadoAcceso', label: `Acceso: ${ACCESS_LABELS[filters.estadoAcceso] || filters.estadoAcceso}` });
+    }
+    if (filters.rol !== 'all') {
+      chips.push({ key: 'rol', label: `Rol: ${ROLE_LABELS[filters.rol] || filters.rol}` });
+    }
+    if (filters.idSucursal !== 'all') {
+      chips.push({ key: 'idSucursal', label: `Sucursal: ${sucursalNameById.get(filters.idSucursal) || 'Seleccionada'}` });
+    }
+    return chips;
+  }, [filters, search, sucursalNameById]);
+
+  function clearAllFilters() {
+    setSearch('');
+    setFilters(EMPLEADO_FILTER_DEFAULTS);
+  }
+
+  function clearFilterChip(key) {
+    if (key === 'search') {
+      setSearch('');
+      return;
+    }
+    setFilters((prev) => ({ ...prev, [key]: 'all' }));
+  }
 
   const fetchEmpleados = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -391,25 +492,97 @@ export default function AdminEmpleadosPage() {
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mf-accent)]">Personas - Gestion</p>
           <h1 className="mf-font-display mt-1 text-3xl leading-tight text-[var(--mf-text)]">Empleados</h1>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-[var(--mf-text-2)]">{loading ? 'Cargando...' : `${empleados.length} registro(s)`}</span>
+        {/* AM: Header compacto: switch + busqueda + filtros + nuevo en una sola linea responsive. */}
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
+          <span className="text-sm text-[var(--mf-text-2)]">
+            {loading ? 'Cargando...' : `${filteredEmpleados.length} de ${empleados.length} registro(s)`}
+          </span>
           <ViewToggle defaultView={view} onViewChange={setView} storageKey="empleados" />
+          <div className="relative min-w-[190px] flex-1 sm:flex-none sm:w-[260px]">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar por nombre, correo o DNI..."
+              className="h-9 rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_72%,transparent)] pl-9 pr-9 text-sm"
+            />
+            {search.trim() ? (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-[var(--mf-text-2)] transition-colors hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-text)]"
+                aria-label="Limpiar busqueda"
+                title="Limpiar busqueda"
+              >
+                <X size={12} />
+              </button>
+            ) : null}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setFiltersOpen(true)}
+            className="group gap-2 rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_76%,transparent)] transition-all duration-200 hover:-translate-y-0.5"
+          >
+            <SlidersHorizontal size={14} />
+            Filtros
+            {activeFilterCount > 0 ? (
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-[10px] font-semibold text-[var(--mf-bg)]">
+                {activeFilterCount}
+              </span>
+            ) : null}
+          </Button>
+          {(activeFilterCount > 0 || search.trim()) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={clearAllFilters}
+              className="gap-1.5 rounded-full border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_52%,transparent)] text-[var(--mf-text-2)] hover:text-[var(--mf-text)]"
+            >
+              <RotateCcw size={13} />
+              Limpiar
+            </Button>
+          ) : null}
           <Button size="sm" onClick={openCreate} className="gap-2"><Plus size={14} /> Nuevo</Button>
         </div>
       </div>
+
+      {activeFilterChips.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-[14px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_45%,transparent)] px-3 py-2">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Activos</span>
+          {activeFilterChips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              onClick={() => clearFilterChip(chip.key)}
+              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-2.5 py-1 text-xs text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)]/60"
+            >
+              <span>{chip.label}</span>
+              <X size={11} />
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className="mf-divider" />
 
       {listError && <ErrorBanner message={listError} onRetry={fetchEmpleados} />}
       {loading && !listError && <LoadingSpinner />}
 
-      {!loading && !listError && empleados.length === 0 && (
-        <EmptyState icon={Users} title="Sin empleados" description="No hay empleados registrados aun." action={<Button size="sm" onClick={openCreate}>Crear primero</Button>} />
+      {!loading && !listError && filteredEmpleados.length === 0 && (
+        <EmptyState
+          icon={Users}
+          title="Sin resultados"
+          description={empleados.length ? 'No hay coincidencias con la busqueda o filtros actuales.' : 'No hay empleados registrados aun.'}
+          action={<Button size="sm" onClick={openCreate}>Crear primero</Button>}
+        />
       )}
 
-      {!loading && !listError && empleados.length > 0 && view === 'cards' && (
+      {!loading && !listError && filteredEmpleados.length > 0 && view === 'cards' && (
         <CardsCarousel
-          items={empleados}
+          items={filteredEmpleados}
           getItemKey={(empleado) => empleado?.id_empleado}
           renderItem={(empleado, index, pageIndex) => (
             <DataCard
@@ -430,7 +603,7 @@ export default function AdminEmpleadosPage() {
         />
       )}
 
-      {!loading && !listError && empleados.length > 0 && view === 'table' && (
+      {!loading && !listError && filteredEmpleados.length > 0 && view === 'table' && (
         <div className="mf-table-wrap">
           <Table>
             <TableHeader>
@@ -444,7 +617,7 @@ export default function AdminEmpleadosPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {empleados.map((empleado) => (
+              {filteredEmpleados.map((empleado) => (
                 <TableRow key={empleado.id_empleado} className="border-[var(--mf-nav-border)]">
                   <TableCell className="font-medium">{empleado.nombre_completo}</TableCell>
                   <TableCell>{empleado.correo_principal || '-'}</TableCell>
@@ -463,7 +636,7 @@ export default function AdminEmpleadosPage() {
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingId ? 'Editar Empleado' : 'Nuevo Empleado'}</DialogTitle></DialogHeader>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label className="mf-label">Nombres *</Label>
               <Input className="mf-input mt-1" value={formValues.nombres} onChange={(e) => setFormValues((p) => ({ ...p, nombres: e.target.value }))} />
@@ -543,28 +716,58 @@ export default function AdminEmpleadosPage() {
       </Dialog>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-5xl">
           <DialogHeader><DialogTitle>Detalle Empleado</DialogTitle></DialogHeader>
           {selectedEmpleado && (
-            <div className="space-y-2 text-sm">
-              <p><strong>Nombre:</strong> {selectedEmpleado.nombre_completo}</p>
-              <p><strong>Correo:</strong> {selectedEmpleado.correo_principal || '-'}</p>
-              <p><strong>Rol principal:</strong> {ROLE_LABELS[resolvePrimaryRole(selectedEmpleado.roles)] || '-'}</p>
-              <p><strong>Sucursal:</strong> {selectedEmpleado.nombre_sucursal || '-'}</p>
-              <p><strong>Fecha nacimiento:</strong> {selectedEmpleado.fecha_nacimiento ? String(selectedEmpleado.fecha_nacimiento).slice(0, 10) : '-'}</p>
-              <p><strong>DNI:</strong> {selectedEmpleado.dni || '-'}</p>
-              <p><strong>RTN:</strong> {selectedEmpleado.rtn || '-'}</p>
-              <p><strong>Telefono:</strong> {selectedEmpleado.telefono_principal || '-'}</p>
-              <p><strong>Direccion:</strong> {selectedEmpleado.direccion_texto || '-'}</p>
-              <p><strong>Observaciones:</strong> {selectedEmpleado.observaciones || '-'}</p>
-              <p><strong>Fecha ingreso:</strong> {selectedEmpleado.fecha_ingreso ? String(selectedEmpleado.fecha_ingreso).slice(0, 10) : '-'}</p>
-              <p><strong>Salario base:</strong> {selectedEmpleado.salario_base ?? '-'}</p>
-              <p><strong>Es barbero:</strong> {selectedEmpleado.es_barbero ? 'Si' : 'No'}</p>
-              <p><strong>Estado laboral:</strong> {selectedEmpleado.estado_laboral ? 'Activo' : 'Inactivo'}</p>
-              <p><strong>Estado acceso:</strong> <EstadoAccesoBadge estado={selectedEmpleado.estado_acceso} /></p>
-              <p><strong>Credenciales completadas:</strong> {selectedEmpleado.credenciales_completadas_at ? new Date(selectedEmpleado.credenciales_completadas_at).toLocaleString() : 'No'}</p>
-              <p><strong>Ultimo login:</strong> {selectedEmpleado.ultimo_login_at ? new Date(selectedEmpleado.ultimo_login_at).toLocaleString() : 'Sin registro'}</p>
-            </div>
+            /* AM: Vista de detalle premium por secciones para mejorar legibilidad y jerarquia visual. */
+            <DetailInfoModalContent
+              summary={{
+                icon: <Users size={16} />,
+                title: selectedEmpleado.nombre_completo,
+                subtitle: selectedEmpleado.correo_principal || 'Sin correo',
+                badge: <EstadoAccesoBadge estado={selectedEmpleado.estado_acceso} />,
+              }}
+              sections={[
+                {
+                  id: 'identidad',
+                  title: 'Identidad',
+                  icon: <Users size={14} />,
+                  fields: [
+                    { label: 'Nombre', value: selectedEmpleado.nombre_completo || '-' },
+                    { label: 'Correo', value: selectedEmpleado.correo_principal || '-' },
+                    { label: 'DNI', value: selectedEmpleado.dni || '-' },
+                    { label: 'RTN', value: selectedEmpleado.rtn || '-' },
+                    { label: 'Telefono', value: selectedEmpleado.telefono_principal || '-' },
+                    { label: 'Fecha nacimiento', value: selectedEmpleado.fecha_nacimiento ? String(selectedEmpleado.fecha_nacimiento).slice(0, 10) : '-' },
+                    { label: 'Direccion', value: selectedEmpleado.direccion_texto || '-', span: 'full' },
+                    { label: 'Observaciones', value: selectedEmpleado.observaciones || '-', span: 'full' },
+                  ],
+                },
+                {
+                  id: 'laboral',
+                  title: 'Laboral',
+                  icon: <Building2 size={14} />,
+                  fields: [
+                    { label: 'Rol principal', value: ROLE_LABELS[resolvePrimaryRole(selectedEmpleado.roles)] || '-' },
+                    { label: 'Sucursal', value: selectedEmpleado.nombre_sucursal || '-' },
+                    { label: 'Fecha ingreso', value: selectedEmpleado.fecha_ingreso ? String(selectedEmpleado.fecha_ingreso).slice(0, 10) : '-' },
+                    { label: 'Salario base', value: selectedEmpleado.salario_base ?? '-' },
+                    { label: 'Es barbero', value: selectedEmpleado.es_barbero ? 'Si' : 'No' },
+                    { label: 'Estado laboral', value: selectedEmpleado.estado_laboral ? 'Activo' : 'Inactivo' },
+                  ],
+                },
+                {
+                  id: 'acceso',
+                  title: 'Acceso',
+                  icon: <KeyRound size={14} />,
+                  fields: [
+                    { label: 'Estado acceso', value: <EstadoAccesoBadge estado={selectedEmpleado.estado_acceso} /> },
+                    { label: 'Credenciales completadas', value: selectedEmpleado.credenciales_completadas_at ? new Date(selectedEmpleado.credenciales_completadas_at).toLocaleString() : 'No' },
+                    { label: 'Ultimo login', value: selectedEmpleado.ultimo_login_at ? new Date(selectedEmpleado.ultimo_login_at).toLocaleString() : 'Sin registro' },
+                  ],
+                },
+              ]}
+            />
           )}
         </DialogContent>
       </Dialog>
@@ -586,6 +789,108 @@ export default function AdminEmpleadosPage() {
         loading={Boolean(actionLoadingId)}
         onConfirm={handleToggleLifecycle}
       />
+
+      <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Filtros de Empleados</DialogTitle>
+          </DialogHeader>
+          {/* AM: Atajos de filtro para reducir pasos y acelerar la seleccion frecuente. */}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setFilters((prev) => ({ ...prev, estadoLaboral: prev.estadoLaboral === 'activo' ? 'all' : 'activo' }))}
+              className={quickFilterButtonClass(filters.estadoLaboral === 'activo')}
+            >
+              Solo activos
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setFilters((prev) => ({ ...prev, estadoLaboral: prev.estadoLaboral === 'inactivo' ? 'all' : 'inactivo' }))}
+              className={quickFilterButtonClass(filters.estadoLaboral === 'inactivo')}
+            >
+              Solo inactivos
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setFilters((prev) => ({ ...prev, rol: prev.rol === 'barbero' ? 'all' : 'barbero' }))}
+              className={quickFilterButtonClass(filters.rol === 'barbero')}
+            >
+              Solo barberos
+            </Button>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <Label className="mf-label">Estado laboral</Label>
+              <select
+                className="mf-select mt-1"
+                value={filters.estadoLaboral}
+                onChange={(event) => setFilters((prev) => ({ ...prev, estadoLaboral: event.target.value }))}
+              >
+                <option value="all">Todos</option>
+                <option value="activo">Activo</option>
+                <option value="inactivo">Inactivo</option>
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Estado de acceso</Label>
+              <select
+                className="mf-select mt-1"
+                value={filters.estadoAcceso}
+                onChange={(event) => setFilters((prev) => ({ ...prev, estadoAcceso: event.target.value }))}
+              >
+                <option value="all">Todos</option>
+                {Object.keys(ACCESS_LABELS).map((key) => (
+                  <option key={key} value={key}>{ACCESS_LABELS[key]}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Rol principal</Label>
+              <select
+                className="mf-select mt-1"
+                value={filters.rol}
+                onChange={(event) => setFilters((prev) => ({ ...prev, rol: event.target.value }))}
+              >
+                <option value="all">Todos</option>
+                {ROLE_OPTIONS.map((role) => (
+                  <option key={role.value} value={role.value}>{role.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Sucursal</Label>
+              <select
+                className="mf-select mt-1"
+                value={filters.idSucursal}
+                onChange={(event) => setFilters((prev) => ({ ...prev, idSucursal: event.target.value }))}
+              >
+                <option value="all">Todas</option>
+                {sucursales.map((sucursal) => (
+                  <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>
+                    {sucursal.nombre_sucursal}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setFilters(EMPLEADO_FILTER_DEFAULTS)}
+            >
+              Limpiar filtros
+            </Button>
+            <Button onClick={() => setFiltersOpen(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

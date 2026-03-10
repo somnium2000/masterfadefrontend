@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Ban, CheckCircle2, Eye, Pencil, Plus, Users } from 'lucide-react';
+import { Ban, Building2, CheckCircle2, Eye, KeyRound, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Users, X } from 'lucide-react';
 import {
   activateAdminPersonaCliente,
   createAdminPersonaCliente,
@@ -24,6 +24,7 @@ import ViewToggle from '../../../components/data/ViewToggle.jsx';
 import DataCard from '../../../components/data/DataCard.jsx';
 import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import HoverActionButton from '../../../components/data/HoverActionButton.jsx';
+import DetailInfoModalContent from '../../../components/data/DetailInfoModalContent.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
@@ -64,6 +65,30 @@ const FORM_DEFAULTS = {
   consentimiento_marketing: false,
   acepta_terminos: false,
 };
+
+const CLIENTE_FILTER_DEFAULTS = {
+  estadoCliente: 'all',
+  tipoAcceso: 'all',
+  estadoAcceso: 'all',
+  idSucursal: 'all',
+};
+
+const CLIENTE_ESTADO_LABELS = {
+  activo: 'Cliente: Activo',
+  inactivo: 'Cliente: Inactivo',
+};
+
+const CLIENTE_TIPO_ACCESO_LABELS = {
+  con: 'Con acceso',
+  sin: 'Sin acceso',
+};
+
+function quickFilterButtonClass(isActive) {
+  // AM: Estado visual montado para botones rapidos, con feedback inmediato de seleccion.
+  return isActive
+    ? 'rounded-full border-[var(--mf-accent)] bg-[var(--mf-accent)] text-[var(--mf-accent-text)] shadow-[var(--mf-shadow-accent)]'
+    : 'rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_54%,transparent)] text-[var(--mf-text)] hover:border-[var(--mf-accent)]/60';
+}
 
 function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
@@ -195,7 +220,90 @@ export default function AdminClientesPage() {
   const [formLoading, setFormLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState('');
   const [confirmTarget, setConfirmTarget] = useState(null);
+  const [search, setSearch] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState(CLIENTE_FILTER_DEFAULTS);
   const notifications = useNotifications();
+
+  // AM: Filtro compuesto por submodulo para busqueda rapida y filtros funcionales.
+  const filteredClientes = useMemo(() => {
+    const searchValue = search.trim().toLowerCase();
+    return clientes.filter((cliente) => {
+      if (searchValue) {
+        const searchable = [
+          cliente?.nombre_completo,
+          cliente?.correo_principal,
+          cliente?.dni,
+          cliente?.telefono_principal,
+          cliente?.nombre_sucursal,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!searchable.includes(searchValue)) return false;
+      }
+
+      if (filters.estadoCliente !== 'all') {
+        const expected = filters.estadoCliente === 'activo';
+        if (Boolean(cliente?.estado_cliente) !== expected) return false;
+      }
+
+      if (filters.tipoAcceso !== 'all') {
+        const expected = filters.tipoAcceso === 'con';
+        if (Boolean(cliente?.tiene_acceso) !== expected) return false;
+      }
+
+      if (filters.estadoAcceso !== 'all' && String(cliente?.estado_acceso || '') !== filters.estadoAcceso) {
+        return false;
+      }
+
+      if (filters.idSucursal !== 'all' && String(cliente?.id_sucursal_origen || '') !== filters.idSucursal) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [clientes, filters, search]);
+
+  const activeFilterCount = useMemo(
+    () => Object.values(filters).filter((value) => value !== 'all').length,
+    [filters]
+  );
+
+  const activeFilterChips = useMemo(() => {
+    const chips = [];
+    const trimmedSearch = search.trim();
+    if (trimmedSearch) {
+      chips.push({ key: 'search', label: `Busqueda: ${trimmedSearch}` });
+    }
+    if (filters.estadoCliente !== 'all') {
+      chips.push({ key: 'estadoCliente', label: CLIENTE_ESTADO_LABELS[filters.estadoCliente] || 'Estado cliente' });
+    }
+    if (filters.tipoAcceso !== 'all') {
+      chips.push({ key: 'tipoAcceso', label: CLIENTE_TIPO_ACCESO_LABELS[filters.tipoAcceso] || 'Tipo acceso' });
+    }
+    if (filters.estadoAcceso !== 'all') {
+      chips.push({ key: 'estadoAcceso', label: `Acceso: ${ACCESS_LABELS[filters.estadoAcceso] || filters.estadoAcceso}` });
+    }
+    if (filters.idSucursal !== 'all') {
+      const sucursalNombre = sucursales.find((item) => String(item.id_sucursal) === String(filters.idSucursal))?.nombre_sucursal;
+      chips.push({ key: 'idSucursal', label: `Sucursal: ${sucursalNombre || 'Seleccionada'}` });
+    }
+    return chips;
+  }, [filters, search, sucursales]);
+
+  function clearAllFilters() {
+    setSearch('');
+    setFilters(CLIENTE_FILTER_DEFAULTS);
+  }
+
+  function clearFilterChip(key) {
+    if (key === 'search') {
+      setSearch('');
+      return;
+    }
+    setFilters((prev) => ({ ...prev, [key]: 'all' }));
+  }
 
   const fetchClientes = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -386,25 +494,96 @@ export default function AdminClientesPage() {
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mf-accent)]">Personas - Gestion</p>
           <h1 className="mf-font-display mt-1 text-3xl leading-tight text-[var(--mf-text)]">Clientes</h1>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-[var(--mf-text-2)]">{loading ? 'Cargando...' : `${clientes.length} registro(s)`}</span>
+        {/* AM: Header compacto: switch + busqueda + filtros + nuevo en una sola fila responsive. */}
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
+          <span className="text-sm text-[var(--mf-text-2)]">
+            {loading ? 'Cargando...' : `${filteredClientes.length} de ${clientes.length} registro(s)`}
+          </span>
           <ViewToggle defaultView={view} onViewChange={setView} storageKey="clientes" />
+          <div className="relative min-w-[190px] flex-1 sm:flex-none sm:w-[260px]">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar por nombre, correo o DNI..."
+              className="h-9 rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_72%,transparent)] pl-9 pr-9 text-sm"
+            />
+            {search.trim() ? (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-[var(--mf-text-2)] transition-colors hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-text)]"
+                aria-label="Limpiar busqueda"
+                title="Limpiar busqueda"
+              >
+                <X size={12} />
+              </button>
+            ) : null}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setFiltersOpen(true)}
+            className="group gap-2 rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_76%,transparent)] transition-all duration-200 hover:-translate-y-0.5"
+          >
+            <SlidersHorizontal size={14} />
+            Filtros
+            {activeFilterCount > 0 ? (
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-[10px] font-semibold text-[var(--mf-bg)]">
+                {activeFilterCount}
+              </span>
+            ) : null}
+          </Button>
+          {(activeFilterCount > 0 || search.trim()) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={clearAllFilters}
+              className="gap-1.5 rounded-full border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_52%,transparent)] text-[var(--mf-text-2)] hover:text-[var(--mf-text)]"
+            >
+              <RotateCcw size={13} />
+              Limpiar
+            </Button>
+          ) : null}
           <Button onClick={openCreate} size="sm" className="gap-2"><Plus size={14} /> Nuevo</Button>
         </div>
       </div>
+
+      {activeFilterChips.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-[14px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_45%,transparent)] px-3 py-2">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Activos</span>
+          {activeFilterChips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              onClick={() => clearFilterChip(chip.key)}
+              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-2.5 py-1 text-xs text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)]/60"
+            >
+              <span>{chip.label}</span>
+              <X size={11} />
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className="mf-divider" />
 
       {listError && <ErrorBanner message={listError} onRetry={fetchClientes} />}
       {loading && !listError && <LoadingSpinner />}
 
-      {!loading && !listError && clientes.length === 0 && (
-        <EmptyState icon={Users} title="Sin clientes" description="No hay clientes registrados en este momento." />
+      {!loading && !listError && filteredClientes.length === 0 && (
+        <EmptyState
+          icon={Users}
+          title="Sin resultados"
+          description={clientes.length ? 'No hay coincidencias con la busqueda o filtros actuales.' : 'No hay clientes registrados en este momento.'}
+        />
       )}
 
-      {!loading && !listError && clientes.length > 0 && view === 'cards' && (
+      {!loading && !listError && filteredClientes.length > 0 && view === 'cards' && (
         <CardsCarousel
-          items={clientes}
+          items={filteredClientes}
           getItemKey={(cliente) => cliente?.id_cliente}
           renderItem={(cliente, index, pageIndex) => (
             <DataCard
@@ -426,7 +605,7 @@ export default function AdminClientesPage() {
         />
       )}
 
-      {!loading && !listError && clientes.length > 0 && view === 'table' && (
+      {!loading && !listError && filteredClientes.length > 0 && view === 'table' && (
         <div className="mf-table-wrap">
           <Table>
             <TableHeader>
@@ -439,7 +618,7 @@ export default function AdminClientesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {clientes.map((cliente) => (
+              {filteredClientes.map((cliente) => (
                 <TableRow key={cliente.id_cliente} className="border-[var(--mf-nav-border)]">
                   <TableCell className="font-medium">{cliente.nombre_completo || 'Cliente'}</TableCell>
                   <TableCell>{cliente.correo_principal || 'Sin correo'}</TableCell>
@@ -457,7 +636,7 @@ export default function AdminClientesPage() {
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingId ? 'Editar Cliente' : 'Nuevo Cliente'}</DialogTitle></DialogHeader>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label className="mf-label">Nombres *</Label>
               <Input className="mf-input mt-1" value={formValues.nombres} onChange={(e) => setFormValues((p) => ({ ...p, nombres: e.target.value }))} />
@@ -558,27 +737,57 @@ export default function AdminClientesPage() {
       </Dialog>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-5xl">
           <DialogHeader><DialogTitle>Detalle Cliente</DialogTitle></DialogHeader>
           {selectedCliente && (
-            <div className="space-y-2 text-sm">
-              <p><strong>Nombre:</strong> {selectedCliente.nombre_completo || '-'}</p>
-              <p><strong>Correo:</strong> {selectedCliente.correo_principal || 'Sin correo'}</p>
-              <p><strong>Sucursal:</strong> {selectedCliente.nombre_sucursal || 'Sin sucursal'}</p>
-              <p><strong>Acceso:</strong> <AccessBadge cliente={selectedCliente} /></p>
-              <p><strong>Fecha nacimiento:</strong> {selectedCliente.fecha_nacimiento ? String(selectedCliente.fecha_nacimiento).slice(0, 10) : '-'}</p>
-              <p><strong>Fecha de cliente:</strong> {selectedCliente.fecha_ingreso ? String(selectedCliente.fecha_ingreso).slice(0, 10) : '-'}</p>
-              <p><strong>DNI:</strong> {selectedCliente.dni || '-'}</p>
-              <p><strong>RTN:</strong> {selectedCliente.rtn || '-'}</p>
-              <p><strong>Telefono:</strong> {selectedCliente.telefono_principal || '-'}</p>
-              <p><strong>Direccion:</strong> {selectedCliente.direccion_texto || '-'}</p>
-              <p><strong>Observaciones:</strong> {selectedCliente.observaciones || '-'}</p>
-              <p><strong>Consentimiento marketing:</strong> {selectedCliente.consentimiento_marketing ? 'Si' : 'No'}</p>
-              <p><strong>Acepta terminos:</strong> {selectedCliente.acepta_terminos ? 'Si' : 'No'}</p>
-              <p><strong>Estado cliente:</strong> {selectedCliente.estado_cliente ? 'Activo' : 'Inactivo'}</p>
-              <p><strong>Credenciales completadas:</strong> {selectedCliente.credenciales_completadas_at ? new Date(selectedCliente.credenciales_completadas_at).toLocaleString() : 'No'}</p>
-              <p><strong>Ultimo login:</strong> {selectedCliente.ultimo_login_at ? new Date(selectedCliente.ultimo_login_at).toLocaleString() : 'Sin registro'}</p>
-            </div>
+            /* AM: Vista de detalle premium por secciones para mostrar informacion completa sin formato plano. */
+            <DetailInfoModalContent
+              summary={{
+                icon: <Users size={16} />,
+                title: selectedCliente.nombre_completo || '-',
+                subtitle: selectedCliente.correo_principal || 'Sin correo',
+                badge: <AccessBadge cliente={selectedCliente} />,
+              }}
+              sections={[
+                {
+                  id: 'identidad',
+                  title: 'Identidad',
+                  icon: <Users size={14} />,
+                  fields: [
+                    { label: 'Nombre', value: selectedCliente.nombre_completo || '-' },
+                    { label: 'Correo', value: selectedCliente.correo_principal || 'Sin correo' },
+                    { label: 'DNI', value: selectedCliente.dni || '-' },
+                    { label: 'RTN', value: selectedCliente.rtn || '-' },
+                    { label: 'Telefono', value: selectedCliente.telefono_principal || '-' },
+                    { label: 'Fecha nacimiento', value: selectedCliente.fecha_nacimiento ? String(selectedCliente.fecha_nacimiento).slice(0, 10) : '-' },
+                    { label: 'Direccion', value: selectedCliente.direccion_texto || '-', span: 'full' },
+                    { label: 'Observaciones', value: selectedCliente.observaciones || '-', span: 'full' },
+                  ],
+                },
+                {
+                  id: 'cliente',
+                  title: 'Cliente',
+                  icon: <Building2 size={14} />,
+                  fields: [
+                    { label: 'Sucursal', value: selectedCliente.nombre_sucursal || 'Sin sucursal' },
+                    { label: 'Estado cliente', value: selectedCliente.estado_cliente ? 'Activo' : 'Inactivo' },
+                    { label: 'Fecha de cliente', value: selectedCliente.fecha_ingreso ? String(selectedCliente.fecha_ingreso).slice(0, 10) : '-' },
+                    { label: 'Consentimiento marketing', value: selectedCliente.consentimiento_marketing ? 'Si' : 'No' },
+                    { label: 'Acepta terminos', value: selectedCliente.acepta_terminos ? 'Si' : 'No' },
+                  ],
+                },
+                {
+                  id: 'acceso',
+                  title: 'Acceso',
+                  icon: <KeyRound size={14} />,
+                  fields: [
+                    { label: 'Estado acceso', value: <AccessBadge cliente={selectedCliente} /> },
+                    { label: 'Credenciales completadas', value: selectedCliente.credenciales_completadas_at ? new Date(selectedCliente.credenciales_completadas_at).toLocaleString() : 'No' },
+                    { label: 'Ultimo login', value: selectedCliente.ultimo_login_at ? new Date(selectedCliente.ultimo_login_at).toLocaleString() : 'Sin registro' },
+                  ],
+                },
+              ]}
+            />
           )}
         </DialogContent>
       </Dialog>
@@ -600,6 +809,105 @@ export default function AdminClientesPage() {
         loading={Boolean(actionLoadingId)}
         onConfirm={handleToggleLifecycle}
       />
+
+      <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Filtros de Clientes</DialogTitle>
+          </DialogHeader>
+          {/* AM: Atajos para filtrar rapidamente sin configurar todos los campos manualmente. */}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setFilters((prev) => ({ ...prev, estadoCliente: prev.estadoCliente === 'activo' ? 'all' : 'activo' }))}
+              className={quickFilterButtonClass(filters.estadoCliente === 'activo')}
+            >
+              Solo activos
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setFilters((prev) => ({ ...prev, tipoAcceso: prev.tipoAcceso === 'con' ? 'all' : 'con' }))}
+              className={quickFilterButtonClass(filters.tipoAcceso === 'con')}
+            >
+              Con acceso
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setFilters((prev) => ({ ...prev, tipoAcceso: prev.tipoAcceso === 'sin' ? 'all' : 'sin' }))}
+              className={quickFilterButtonClass(filters.tipoAcceso === 'sin')}
+            >
+              Sin acceso
+            </Button>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <Label className="mf-label">Estado cliente</Label>
+              <select
+                className="mf-select mt-1"
+                value={filters.estadoCliente}
+                onChange={(event) => setFilters((prev) => ({ ...prev, estadoCliente: event.target.value }))}
+              >
+                <option value="all">Todos</option>
+                <option value="activo">Activo</option>
+                <option value="inactivo">Inactivo</option>
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Tipo de acceso</Label>
+              <select
+                className="mf-select mt-1"
+                value={filters.tipoAcceso}
+                onChange={(event) => setFilters((prev) => ({ ...prev, tipoAcceso: event.target.value }))}
+              >
+                <option value="all">Todos</option>
+                <option value="con">Con acceso</option>
+                <option value="sin">Sin acceso</option>
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Estado de acceso</Label>
+              <select
+                className="mf-select mt-1"
+                value={filters.estadoAcceso}
+                onChange={(event) => setFilters((prev) => ({ ...prev, estadoAcceso: event.target.value }))}
+              >
+                <option value="all">Todos</option>
+                <option value="pendiente_password">Contrasena pendiente</option>
+                <option value="activo">Activo</option>
+                <option value="bloqueado">Bloqueado</option>
+                <option value="inactivo">Inactivo</option>
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Sucursal</Label>
+              <select
+                className="mf-select mt-1"
+                value={filters.idSucursal}
+                onChange={(event) => setFilters((prev) => ({ ...prev, idSucursal: event.target.value }))}
+              >
+                <option value="all">Todas</option>
+                {sucursales.map((sucursal) => (
+                  <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>
+                    {sucursal.nombre_sucursal}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFilters(CLIENTE_FILTER_DEFAULTS)}>
+              Limpiar filtros
+            </Button>
+            <Button onClick={() => setFiltersOpen(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
