@@ -4,12 +4,21 @@
 
 import { http } from '../../../services/httpClient.js';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeBranchId(value) {
+    const raw = String(value ?? '').trim();
+    return UUID_REGEX.test(raw) ? raw : '';
+}
+
 /**
  * Lista servicios del catálogo.
  * @param {{ id_sucursal?: string }} params
  */
 export async function listAdminServicios({ id_sucursal } = {}) {
-    const query = id_sucursal ? `?id_sucursal=${encodeURIComponent(id_sucursal)}` : '';
+    // AM: Evita enviar placeholders o valores no UUID como id_sucursal.
+    const branchId = normalizeBranchId(id_sucursal);
+    const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
     return http.get(`/v1/admin/catalog/servicios${query}`);
 }
 
@@ -36,8 +45,13 @@ export async function updateAdminServicio(id, payload) {
  * @param {string} id_sucursal - Requerido por el scope del endpoint.
  */
 export async function deleteAdminServicio(id, id_sucursal) {
+    const branchId = normalizeBranchId(id_sucursal);
+    if (!branchId) {
+        // AM: Mensaje claro para evitar inactivaciones ambiguas cuando falta sucursal valida.
+        throw new Error('Debes seleccionar una sucursal valida para inactivar el servicio.');
+    }
     return http.del(
-        `/v1/admin/catalog/servicios/${id}?id_sucursal=${encodeURIComponent(id_sucursal)}`
+        `/v1/admin/catalog/servicios/${id}?id_sucursal=${encodeURIComponent(branchId)}`
     );
 }
 

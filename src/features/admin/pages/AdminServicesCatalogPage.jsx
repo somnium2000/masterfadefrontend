@@ -15,7 +15,7 @@ import {
 import { listAdminSucursales } from '../lib/adminSucursalesApi.js';
 import { Button } from '../../../components/ui/button.jsx';
 import {
-    Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+    Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '../../../components/ui/dialog.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
@@ -48,46 +48,51 @@ function extractMessage(err) {
  * onChange   = cb(uuid)
  */
 function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingBranches }) {
-    // Filtrar solo las sucursales permitidas para este usuario
+    // AM: Replica el selector premium del submodulo Paquetes para consistencia visual total.
     const availableBranches = branchIds.length > 0
-        ? allBranches.filter((s) => branchIds.includes(s.id_sucursal))
-        : allBranches; // super_admin ve todas
+        ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
+        : allBranches;
+    const validBranchIds = new Set(availableBranches.map((branch) => branch.id_sucursal));
+    const selectedBranch = availableBranches.find((branch) => branch.id_sucursal === selected);
 
-    const selectedBranch = availableBranches.find((s) => s.id_sucursal === selected);
-
-    // 1 sucursal asignada â†’ la mostramos solo como nombre, sin input
-    if (branchIds.length === 1 && selectedBranch) {
+    if (availableBranches.length === 1 && selectedBranch) {
         return (
-            <div className="flex items-center gap-2">
-                <Building2 size={15} className="text-[var(--mf-accent)] shrink-0" />
-                <p className="text-sm text-[var(--mf-text-2)]">
-                    Sucursal activa:{' '}
-                    <span className="font-medium text-[var(--mf-text)]">{selectedBranch.nombre_sucursal}</span>
-                </p>
+            <div className="mf-glass-surface flex items-center gap-2 rounded-full px-3 py-1.5 text-xs text-[var(--mf-text-2)]">
+                <Building2 size={13} />
+                <span>Sucursal activa:</span>
+                <span className="font-medium text-[var(--mf-text)]">{selectedBranch.nombre_sucursal}</span>
             </div>
         );
     }
 
-    // 2+ sucursales o super_admin â†’ dropdown con nombre
     if (loadingBranches) {
-        return <p className="text-xs text-[var(--mf-text-2)] flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Cargando sucursalesâ€¦</p>;
+        return (
+            <p className="flex items-center gap-2 text-xs text-[var(--mf-text-2)]">
+                <Loader2 size={14} className="animate-spin" />
+                Cargando sucursales...
+            </p>
+        );
     }
 
     return (
-        <div className="flex flex-col gap-1">
-            <Label htmlFor="sel-sucursal" className="text-xs uppercase tracking-widest text-[var(--mf-text-2)]">
+        <div className="flex w-full flex-col gap-1 sm:w-auto sm:flex-row sm:items-center sm:gap-2">
+            <Label htmlFor="sel-sucursal" className="text-xs uppercase tracking-widest text-[var(--mf-text-2)] sm:shrink-0">
                 Sucursal
             </Label>
             <select
                 id="sel-sucursal"
+                className="mf-select h-10 w-full sm:h-9 sm:min-w-[220px] sm:w-auto"
                 value={selected}
-                onChange={(e) => onChange(e.target.value)}
-                className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-sm text-[var(--mf-text)] focus:outline-none focus:ring-2 focus:ring-[var(--mf-accent)]/40"
+                onChange={(e) => {
+                    const nextValue = String(e.target.value || '').trim();
+                    // AM: Previene enviar placeholders como id_sucursal en llamadas al backend.
+                    onChange(validBranchIds.has(nextValue) ? nextValue : '');
+                }}
             >
-                <option value="">â€” Seleccionar sucursal â€”</option>
-                {availableBranches.map((s) => (
-                    <option key={s.id_sucursal} value={s.id_sucursal}>
-                        {s.nombre_sucursal}
+                <option value="">- Seleccionar sucursal -</option>
+                {availableBranches.map((branch) => (
+                    <option key={branch.id_sucursal} value={branch.id_sucursal}>
+                        {branch.nombre_sucursal}
                     </option>
                 ))}
             </select>
@@ -514,6 +519,8 @@ export default function AdminServicesCatalogPage() {
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
+            // AM: Evita mantener datos viejos cuando falla el filtro por sucursal.
+            setServicios([]);
             if (!silent) {
                 setListError(extractMessage(err));
             }
@@ -695,6 +702,11 @@ export default function AdminServicesCatalogPage() {
 
     // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const sinSucursal = !sucursal;
+    // AM: Bloquea acciones hasta seleccionar sucursal cuando hay multiples disponibles.
+    const actionsLockedByBranch = !sucursal && availableBranches.length > 1;
+    const titleSubtitle = !sucursal && availableBranches.length > 1
+        ? 'Selecciona una sucursal para crear, editar o cambiar estado de servicios.'
+        : 'Gestiona servicios por sucursal con configuracion operativa.';
 
     // â”€â”€ Vista Cards de servicios â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function ServicioCards() {
@@ -706,7 +718,7 @@ export default function AdminServicesCatalogPage() {
                     <DataCard
                         key={s.id_servicio ?? s.id}
                         animationDelay={(pageIndex * 0.02) + (i * 0.05)}
-                        avatar={<Scissors size={18} />}
+                        avatar={<Scissors size={20} />}
                         title={s.nombre_servicio}
                         subtitle={s.descripcion}
                         badge={
@@ -716,32 +728,29 @@ export default function AdminServicesCatalogPage() {
                             { label: 'Precio', value: <span className="font-mono font-bold text-[var(--mf-accent)]">L {Number(s.precio_hnl).toFixed(2)}</span> },
                             { label: 'Duracion', value: `${s.duracion_min} min` },
                             { label: 'Buffer', value: `${s.buffer_min} min` },
-                            { label: 'Grupo', value: <ServiceGroupBadge grupo={s.grupo_catalogo} /> },
-                            { label: 'Agendable', value: <ServiceAgendableBadge agendable={Boolean(s.agendable)} /> },
-                            { label: 'Tarifa', value: <span className={`mf-badge ${s.tarifa_activa ? 'mf-badge-gold' : 'mf-badge-muted'}`}>{s.tarifa_activa ? 'Activa' : 'Sin tarifa'}</span> },
-                            { label: 'Publico', value: <ServiceVisibilityBadge visiblePublico={Boolean(s.visible_publico)} /> },
                         ]}
                         actions={
                             <>
                                 <HoverActionButton
-                                    icon={<Eye size={14} strokeWidth={2} />}
+                                    icon={<Eye size={16} strokeWidth={2} />}
                                     label="Ver detalle"
                                     title="Ver detalle de servicio"
+                                    disabled={actionsLockedByBranch}
                                     onClick={() => openDetail(s)}
                                 />
                                 <HoverActionButton
-                                    icon={<Pencil size={14} strokeWidth={2} />}
+                                    icon={<Pencil size={16} strokeWidth={2} />}
                                     label="Editar"
                                     title="Editar servicio"
-                                    disabled={!resolveMutationBranchId(s)}
+                                    disabled={actionsLockedByBranch || !resolveMutationBranchId(s)}
                                     onClick={() => openEditar(s)}
                                 />
                                 <HoverActionButton
-                                    icon={s.activo ? <ToggleLeft size={14} strokeWidth={2} /> : <ToggleRight size={14} strokeWidth={2} />}
+                                    icon={s.activo ? <ToggleLeft size={16} strokeWidth={2} /> : <ToggleRight size={16} strokeWidth={2} />}
                                     label={s.activo ? 'Inactivar' : 'Activar'}
                                     title={s.activo ? 'Inactivar servicio' : 'Activar servicio'}
                                     tone={s.activo ? 'warning' : 'success'}
-                                    disabled={!resolveMutationBranchId(s)}
+                                    disabled={actionsLockedByBranch || !resolveMutationBranchId(s)}
                                     onClick={() => openConfirmState(s)}
                                 />
                             </>
@@ -753,74 +762,79 @@ export default function AdminServicesCatalogPage() {
     }
 
     return (
-        <div className="mf-page">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mf-accent)]">
-                        Catalogo - Servicios
-                    </p>
-                    <h1 className="mf-font-display mt-1 text-3xl leading-tight text-[var(--mf-text)]">
-                        Servicios
-                    </h1>
-                </div>
-                {/* AM: Header compacto alineado al patron de PERSONAS para mantener consistencia visual y operativa. */}
-                <div className="flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
-                    <span className="text-sm text-[var(--mf-text-2)]">
-                        {loading ? 'Cargando...' : `${filteredServicios.length} de ${servicios.length} servicio(s)`}
-                    </span>
-                    <ViewToggle defaultView={view} onViewChange={setView} storageKey="servicios" />
-                    <div className="relative min-w-[190px] flex-1 sm:flex-none sm:w-[260px]">
-                        <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
-                        <Input
-                            value={search}
-                            onChange={(event) => setSearch(event.target.value)}
-                            placeholder="Buscar por nombre o descripcion..."
-                            className="h-9 rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_72%,transparent)] pl-9 pr-9 text-sm"
+        <div className="space-y-4 px-2 pb-4 sm:px-4 sm:pb-6">
+            <header className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                    <div className="space-y-3">
+                        <div className="space-y-1">
+                            <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Catalogo - Servicios</p>
+                            <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Servicios</h1>
+                            <p className="text-sm text-[var(--mf-text-2)]">{titleSubtitle}</p>
+                        </div>
+                        <SucursalSelector
+                            branchIds={branchIds}
+                            allBranches={allBranches}
+                            selected={sucursal}
+                            onChange={setSucursal}
+                            loadingBranches={loadingBranches}
                         />
-                        {search.trim() ? (
-                            <button
-                                type="button"
-                                onClick={() => setSearch('')}
-                                className="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-[var(--mf-text-2)] transition-colors hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-text)]"
-                                aria-label="Limpiar busqueda"
-                                title="Limpiar busqueda"
-                            >
-                                <X size={12} />
-                            </button>
-                        ) : null}
+                        {branchLoadError && <ErrorBanner message={branchLoadError} />}
                     </div>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setFiltersOpen(true)}
-                        className="group gap-2 rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_76%,transparent)] transition-all duration-200 hover:-translate-y-0.5"
-                    >
-                        <SlidersHorizontal size={14} />
-                        Filtros
-                        {activeFilterCount > 0 ? (
-                            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-[10px] font-semibold text-[var(--mf-bg)]">
-                                {activeFilterCount}
-                            </span>
-                        ) : null}
-                    </Button>
-                    {(activeFilterCount > 0 || search.trim()) ? (
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={clearAllFilters}
-                            className="gap-1.5 rounded-full border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_52%,transparent)] text-[var(--mf-text-2)] hover:text-[var(--mf-text)]"
-                        >
-                            <RotateCcw size={13} />
-                            Limpiar
-                        </Button>
-                    ) : null}
-                    <Button onClick={openCrear} size="sm" className="gap-2">
-                        <Plus size={15} strokeWidth={2.2} /> Nuevo
-                    </Button>
+
+                    <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[560px]">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm text-[var(--mf-text-2)]">
+                                {loading ? 'Cargando...' : `${filteredServicios.length} de ${servicios.length} servicio(s)`}
+                            </p>
+                            <ViewToggle defaultView={view} onViewChange={setView} storageKey="servicios" />
+                        </div>
+
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                            <div className="relative w-full sm:max-w-[320px]">
+                                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
+                                <Input
+                                    value={search}
+                                    onChange={(event) => setSearch(event.target.value)}
+                                    placeholder="Buscar por nombre o descripcion..."
+                                    className="pl-9 pr-9"
+                                />
+                                {search.trim() ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSearch('')}
+                                        className="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-[var(--mf-text-2)] transition-colors hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-text)]"
+                                        aria-label="Limpiar busqueda"
+                                        title="Limpiar busqueda"
+                                    >
+                                        <X size={12} />
+                                    </button>
+                                ) : null}
+                            </div>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="gap-2"
+                                onClick={() => setFiltersOpen(true)}
+                            >
+                                <SlidersHorizontal size={15} /> Filtros
+                                {activeFilterCount > 0 ? (
+                                    <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-xs text-[var(--mf-accent-text)]">
+                                        {activeFilterCount}
+                                    </span>
+                                ) : null}
+                            </Button>
+                            {(activeFilterCount > 0 || search.trim()) ? (
+                                <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={clearAllFilters}>
+                                    <RotateCcw size={13} /> Limpiar
+                                </Button>
+                            ) : null}
+                            <Button onClick={openCrear} className="gap-2" disabled={actionsLockedByBranch}>
+                                <Plus size={15} /> Nuevo
+                            </Button>
+                        </div>
+                    </div>
                 </div>
-            </div>
+            </header>
 
             {activeFilterChips.length > 0 ? (
                 <div className="flex flex-wrap items-center gap-2 rounded-[14px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_45%,transparent)] px-3 py-2">
@@ -838,27 +852,6 @@ export default function AdminServicesCatalogPage() {
                     ))}
                 </div>
             ) : null}
-
-            <div className="mf-divider" />
-
-            {/* Selector de sucursal (por nombre) */}
-            <div className="rounded-[20px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-5">
-                <SucursalSelector
-                    branchIds={branchIds}
-                    allBranches={allBranches}
-                    selected={sucursal}
-                    onChange={setSucursal}
-                    loadingBranches={loadingBranches}
-                />
-            </div>
-
-            {/* Aviso sin sucursal */}
-            {sinSucursal && (
-                <div className="flex items-center gap-3 rounded-[16px] border border-amber-500/30 bg-amber-500/10 px-5 py-4 text-sm text-amber-400">
-                    <span>Selecciona una sucursal para crear, editar o cambiar estado de servicios.</span>
-                </div>
-            )}
-            {branchLoadError && <ErrorBanner message={branchLoadError} />}
 
             {/* Estados */}
             {listError && <ErrorBanner message={listError} onRetry={fetchServicios} />}
@@ -937,24 +930,25 @@ export default function AdminServicesCatalogPage() {
                                         <TableCell className="text-right">
                                             <div className="flex items-center justify-end gap-1.5">
                                                 <HoverActionButton
-                                                    icon={<Eye size={14} strokeWidth={2} />}
+                                                    icon={<Eye size={16} strokeWidth={2} />}
                                                     label="Detalle"
                                                     title="Ver detalle de servicio"
+                                                    disabled={actionsLockedByBranch}
                                                     onClick={() => openDetail(s)}
                                                 />
                                                 <HoverActionButton
-                                                    icon={<Pencil size={14} strokeWidth={2} />}
+                                                    icon={<Pencil size={16} strokeWidth={2} />}
                                                     label="Editar"
                                                     title="Editar servicio"
-                                                    disabled={!resolveMutationBranchId(s)}
+                                                    disabled={actionsLockedByBranch || !resolveMutationBranchId(s)}
                                                     onClick={() => openEditar(s)}
                                                 />
                                                 <HoverActionButton
-                                                    icon={s.activo ? <ToggleLeft size={14} strokeWidth={2} /> : <ToggleRight size={14} strokeWidth={2} />}
+                                                    icon={s.activo ? <ToggleLeft size={16} strokeWidth={2} /> : <ToggleRight size={16} strokeWidth={2} />}
                                                     label={s.activo ? 'Inactivar' : 'Activar'}
                                                     title={s.activo ? 'Inactivar servicio' : 'Activar servicio'}
                                                     tone={s.activo ? 'warning' : 'success'}
-                                                    disabled={!resolveMutationBranchId(s)}
+                                                    disabled={actionsLockedByBranch || !resolveMutationBranchId(s)}
                                                     onClick={() => openConfirmState(s)}
                                                 />
                                             </div>
@@ -971,6 +965,9 @@ export default function AdminServicesCatalogPage() {
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
                         <DialogTitle>{editTarget ? 'Editar servicio' : 'Nuevo servicio'}</DialogTitle>
+                        <DialogDescription className="sr-only">
+                            Configura nombre, duracion, buffer, precio y visibilidad del servicio por sucursal.
+                        </DialogDescription>
                     </DialogHeader>
                     <ServicioForm values={formValues} onChange={handleFormChange} />
                     {formError && (
@@ -991,6 +988,9 @@ export default function AdminServicesCatalogPage() {
                 <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl">
                     <DialogHeader>
                         <DialogTitle>Detalle de servicio</DialogTitle>
+                        <DialogDescription className="sr-only">
+                            Consulta los datos operativos y comerciales del servicio seleccionado.
+                        </DialogDescription>
                     </DialogHeader>
                     {detailTarget && (
                         <DetailInfoModalContent
@@ -1042,6 +1042,9 @@ export default function AdminServicesCatalogPage() {
                 <DialogContent className="sm:max-w-xl">
                     <DialogHeader>
                         <DialogTitle>Filtros de Servicios</DialogTitle>
+                        <DialogDescription className="sr-only">
+                            Ajusta criterios para filtrar servicios por estado, visibilidad, agendable, grupo y sucursal.
+                        </DialogDescription>
                     </DialogHeader>
                     {/* AM: Atajos de filtro para acelerar la operacion del super admin en catalogo. */}
                     <div className="flex flex-wrap gap-2">

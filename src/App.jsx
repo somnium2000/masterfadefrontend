@@ -7,11 +7,13 @@ import HomePage from './features/home/pages/HomePage.jsx';
 import HomeRedirectPage from './features/home/pages/HomeRedirectPage.jsx';
 import { ROLE_ROUTE_ALLOWED_ROLES } from './features/home/lib/roleRouting.js';
 import LandingPage from './features/landing/pages/LandingPage.jsx';
+import MembershipPlansPage from './features/public/pages/MembershipPlansPage.jsx';
 import ServicesPage from './features/public/pages/ServicesPage.jsx';
 import UnauthorizedPage from './features/unauthorized/pages/UnauthorizedPage.jsx';
 import ProtectedRoute from './routes/ProtectedRoute.jsx';
 import AdminServicesCatalogPage from './features/admin/pages/AdminServicesCatalogPage.jsx';
 import AdminPackagesCatalogPage from './features/admin/pages/AdminPackagesCatalogPage.jsx';
+import AdminPlansCatalogPage from './features/admin/pages/AdminPlansCatalogPage.jsx';
 import BarberoHomePage from './features/barbero/pages/BarberoHomePage.jsx';
 import ClienteHomePage from './features/cliente/pages/ClienteHomePage.jsx';
 import SuperAdminHomePage from './features/admin/pages/SuperAdminHomePage.jsx';
@@ -34,6 +36,7 @@ function App() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/servicios" element={<ServicesPage />} />
+      <Route path="/membresias-vip" element={<MembershipPlansPage />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
       <Route
@@ -63,7 +66,7 @@ function App() {
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
         <Route path="catalog/paquetes" element={<AdminPackagesCatalogPage />} />
-        <Route path="catalog/planes" element={<UnderConstructionPage title="Planes" />} />
+        <Route path="catalog/planes" element={<AdminPlansCatalogPage />} />
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
         {/* Citas */}
@@ -104,7 +107,7 @@ function App() {
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
         <Route path="catalog/paquetes" element={<AdminPackagesCatalogPage />} />
-        <Route path="catalog/planes" element={<UnderConstructionPage title="Planes" />} />
+        <Route path="catalog/planes" element={<AdminPlansCatalogPage />} />
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
         {/* Citas */}
