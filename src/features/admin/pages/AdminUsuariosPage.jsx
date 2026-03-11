@@ -361,67 +361,67 @@ export default function AdminUsuariosPage() {
   }
 
   return (
-    <div className="mf-page">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mf-accent)]">Personas - Gestion</p>
-          <h1 className="mf-font-display mt-1 text-3xl leading-tight text-[var(--mf-text)]">Usuarios con Acceso</h1>
-        </div>
-        {/* AM: Header compacto con busqueda y filtros para mantener consistencia visual entre submodulos. */}
-        <div className="flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto">
-          <span className="text-sm text-[var(--mf-text-2)]">
-            {loading ? 'Cargando...' : `${filteredUsuarios.length} de ${usuarios.length} registro(s)`}
-          </span>
-          <ViewToggle defaultView={view} onViewChange={setView} storageKey="usuarios" />
-          <div className="relative min-w-[190px] flex-1 sm:flex-none sm:w-[260px]">
-            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar por nombre, correo o rol..."
-              className="h-9 rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_72%,transparent)] pl-9 pr-9 text-sm"
-            />
-            {search.trim() ? (
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                className="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-[var(--mf-text-2)] transition-colors hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-text)]"
-                aria-label="Limpiar busqueda"
-                title="Limpiar busqueda"
-              >
-                <X size={12} />
-              </button>
-            ) : null}
+    <div className="space-y-4 px-2 pb-4 sm:px-4 sm:pb-6">
+      {/* AM: Replica el header base de Servicios para unificar estructura visual en Personas. */}
+      <header className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Personas - Gestion</p>
+            <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Usuarios con Acceso</h1>
+            <p className="text-sm text-[var(--mf-text-2)]">Gestion de cuentas internas y control de acceso.</p>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setFiltersOpen(true)}
-            className="group gap-2 rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_76%,transparent)] transition-all duration-200 hover:-translate-y-0.5"
-          >
-            <SlidersHorizontal size={14} />
-            Filtros
-            {activeFilterCount > 0 ? (
-              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-[10px] font-semibold text-[var(--mf-bg)]">
-                {activeFilterCount}
+
+          <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[560px]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm text-[var(--mf-text-2)]">
+                {loading ? 'Cargando...' : `${filteredUsuarios.length} de ${usuarios.length} registro(s)`}
               </span>
-            ) : null}
-          </Button>
-          {(activeFilterCount > 0 || search.trim()) ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={clearAllFilters}
-              className="gap-1.5 rounded-full border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_52%,transparent)] text-[var(--mf-text-2)] hover:text-[var(--mf-text)]"
-            >
-              <RotateCcw size={13} />
-              Limpiar
-            </Button>
-          ) : null}
+              <ViewToggle defaultView={view} onViewChange={setView} storageKey="usuarios" />
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+              <div className="relative w-full sm:max-w-[320px]">
+                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Buscar por nombre, correo o rol..."
+                  className="pl-9 pr-9"
+                />
+                {search.trim() ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    className="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-[var(--mf-text-2)] transition-colors hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-text)]"
+                    aria-label="Limpiar busqueda"
+                    title="Limpiar busqueda"
+                  >
+                    <X size={12} />
+                  </button>
+                ) : null}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2"
+                onClick={() => setFiltersOpen(true)}
+              >
+                <SlidersHorizontal size={15} /> Filtros
+                {activeFilterCount > 0 ? (
+                  <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-xs text-[var(--mf-accent-text)]">
+                    {activeFilterCount}
+                  </span>
+                ) : null}
+              </Button>
+              {(activeFilterCount > 0 || search.trim()) ? (
+                <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={clearAllFilters}>
+                  <RotateCcw size={13} /> Limpiar
+                </Button>
+              ) : null}
+            </div>
+          </div>
         </div>
-      </div>
+      </header>
 
       {activeFilterChips.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2 rounded-[14px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_45%,transparent)] px-3 py-2">
@@ -439,8 +439,6 @@ export default function AdminUsuariosPage() {
           ))}
         </div>
       ) : null}
-
-      <div className="mf-divider" />
 
       {listError && <ErrorBanner message={listError} onRetry={fetchUsuarios} />}
       {loading && !listError && <LoadingSpinner />}

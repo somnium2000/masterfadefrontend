@@ -160,8 +160,23 @@ export default function MembershipPlansPage() {
     track.scrollBy({ left: direction === "left" ? -step : step, behavior: "smooth" });
   }
 
-  function handlePlanSelect() {
-    navigate(isAuthenticated ? "/home" : "/login");
+  function handlePlanSelect(plan) {
+    if (isAuthenticated) {
+      navigate("/home");
+      return;
+    }
+
+    const params = new URLSearchParams();
+    // AM: Mantiene retorno al catalogo VIP y contexto de sucursal/plan al pasar por login/registro.
+    params.set("next", "/membresias-vip");
+    params.set("intent", "seleccionar_plan");
+    if (selectedBranchRef.current) {
+      params.set("id_sucursal", selectedBranchRef.current);
+    }
+    if (plan?.id_plan) {
+      params.set("id_plan", plan.id_plan);
+    }
+    navigate(`/login?${params.toString()}`);
   }
   // AM: Flechas y overlays solo cuando hay mas de 3 planes.
   const showCarouselControls = plans.length > 3;

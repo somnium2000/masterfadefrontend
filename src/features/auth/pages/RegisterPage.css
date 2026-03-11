@@ -1,0 +1,95 @@
+/* AM: Ajustes visuales exclusivos del registro para acabado premium sin afectar otras pantallas. */
+.mf-register-benefit-chips {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mf-register-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--mf-btn-border) 82%, var(--mf-accent) 18%);
+  background: color-mix(in srgb, var(--mf-btn-bg) 82%, var(--mf-accent) 8%);
+  padding: 7px 11px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--mf-text) 82%, var(--mf-accent) 18%);
+}
+
+.mf-register-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mf-register-input-wrap {
+  position: relative;
+}
+
+.mf-register-input-icon {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: color-mix(in srgb, var(--mf-text-2) 78%, var(--mf-accent) 22%);
+  pointer-events: none;
+}
+
+.mf-register-input {
+  padding-left: 38px;
+}
+
+.mf-register-help {
+  margin: -4px 0 10px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--mf-text-2) 86%, white 14%);
+}
+
+.mf-register-consent-panel {
+  margin-top: 2px;
+  border: 1px solid color-mix(in srgb, var(--mf-btn-border) 84%, var(--mf-accent) 16%);
+  border-radius: 16px;
+  padding: 12px 12px 10px;
+  background:
+    radial-gradient(circle at 82% -40%, color-mix(in srgb, var(--mf-accent) 12%, transparent), transparent 58%),
+    color-mix(in srgb, var(--mf-btn-bg) 84%, transparent);
+}
+
+.mf-register-consent-title {
+  margin: 0 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--mf-accent) 86%, var(--mf-text) 14%);
+}
+
+.mf-register-checkboxes {
+  gap: 11px;
+}
+
+.mf-register-checkbox-content {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+@media (max-width: 420px) {
+  .mf-register-chip {
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    padding: 6px 10px;
+  }
+
+  .mf-register-consent-panel {
+    padding: 11px 10px 9px;
+  }
+}
