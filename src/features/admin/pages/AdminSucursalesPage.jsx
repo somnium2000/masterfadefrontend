@@ -1,5 +1,5 @@
-﻿// src/features/admin/pages/AdminSucursalesPage.jsx
-// CRUD completo de sucursales con toggle Tabla â†” Cards.
+// src/features/admin/pages/AdminSucursalesPage.jsx
+// CRUD completo de sucursales con toggle Tabla ↔ Cards.
 
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -41,7 +41,7 @@ function validateForm(v) {
     return null;
 }
 
-// â”€â”€ Formulario â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Formulario ───────────────────────────────────────────────────────────
 function SucursalForm({ values, onChange, empresas }) {
     return (
         <div className="flex flex-col gap-4 mt-2">
@@ -54,7 +54,7 @@ function SucursalForm({ values, onChange, empresas }) {
                     onChange={(e) => onChange('id_empresa', e.target.value)}
                     className="mf-select"
                 >
-                    <option value="">â€” Seleccionar empresa â€”</option>
+                    <option value="">— Seleccionar empresa —</option>
                     {empresas.map((e) => (
                         <option key={e.id_empresa} value={e.id_empresa}>{e.nombre_empresa}</option>
                     ))}
@@ -74,10 +74,10 @@ function SucursalForm({ values, onChange, empresas }) {
                 />
             </div>
 
-            {/* DirecciÃ³n */}
+            {/* Dirección */}
             <div className="flex flex-col gap-1.5">
                 <Label htmlFor="f-dir" className="mf-label flex items-center gap-1.5">
-                    <MapPin size={12} /> DirecciÃ³n
+                    <MapPin size={12} /> Dirección
                 </Label>
                 <Input
                     id="f-dir"
@@ -89,10 +89,10 @@ function SucursalForm({ values, onChange, empresas }) {
                 />
             </div>
 
-            {/* TelÃ©fono */}
+            {/* Teléfono */}
             <div className="flex flex-col gap-1.5">
                 <Label htmlFor="f-tel" className="mf-label flex items-center gap-1.5">
-                    <Phone size={12} /> TelÃ©fono
+                    <Phone size={12} /> Teléfono
                 </Label>
                 <Input
                     id="f-tel"
@@ -107,7 +107,7 @@ function SucursalForm({ values, onChange, empresas }) {
     );
 }
 
-// â”€â”€ Vista Cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Vista Cards ──────────────────────────────────────────────────────────
 function SucursalCards({ sucursales, isSuperAdmin, onEditar, onDelete }) {
     return (
         <CardsCarousel
@@ -152,14 +152,14 @@ function SucursalCards({ sucursales, isSuperAdmin, onEditar, onDelete }) {
     );
 }
 
-// â”€â”€ Vista Tabla â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Vista Tabla ──────────────────────────────────────────────────────────
 function SucursalTable({ sucursales, isSuperAdmin, onEditar, onDelete }) {
     return (
         <div className="mf-table-wrap">
             <Table>
                 <TableHeader>
                     <TableRow className="border-[var(--mf-nav-border)]">
-                        {['Nombre', 'DirecciÃ³n', 'TelÃ©fono', 'Estado'].map((h) => (
+                        {['Nombre', 'Dirección', 'Teléfono', 'Estado'].map((h) => (
                             <TableHead key={h} className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">{h}</TableHead>
                         ))}
                         {isSuperAdmin && <TableHead className="text-right text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acciones</TableHead>}
@@ -174,8 +174,8 @@ function SucursalTable({ sucursales, isSuperAdmin, onEditar, onDelete }) {
                                     {s.nombre_sucursal}
                                 </div>
                             </TableCell>
-                            <TableCell className="text-[var(--mf-text-2)] text-sm max-w-[180px] truncate">{s.direccion || 'â€”'}</TableCell>
-                            <TableCell className="text-[var(--mf-text-2)] text-sm whitespace-nowrap">{s.telefono || 'â€”'}</TableCell>
+                            <TableCell className="text-[var(--mf-text-2)] text-sm max-w-[180px] truncate">{s.direccion || '—'}</TableCell>
+                            <TableCell className="text-[var(--mf-text-2)] text-sm whitespace-nowrap">{s.telefono || '—'}</TableCell>
                             <TableCell>
                                 <span className={`mf-badge ${s.estado ? 'mf-badge-green' : 'mf-badge-red'}`}>
                                     {s.estado ? 'Activa' : 'Inactiva'}
@@ -201,7 +201,7 @@ function SucursalTable({ sucursales, isSuperAdmin, onEditar, onDelete }) {
     );
 }
 
-// â”€â”€ PÃ¡gina â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Página ───────────────────────────────────────────────────────────────
 export default function AdminSucursalesPage() {
     const navigate = useNavigate();
     const { roles } = useAuth();
@@ -333,7 +333,7 @@ export default function AdminSucursalesPage() {
             <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mf-accent)]">
-                        GestiÃ³n Â· Sucursales
+                        Gestión · Sucursales
                     </p>
                     <h1 className="mf-font-display mt-1 text-3xl leading-tight text-[var(--mf-text)]">
                         Sucursales
@@ -341,7 +341,7 @@ export default function AdminSucursalesPage() {
                 </div>
                 <div className="flex items-center gap-3">
                     <span className="text-sm text-[var(--mf-text-2)]">
-                        {loading ? 'Cargandoâ€¦' : `${sucursales.length} registro(s)`}
+                        {loading ? 'Cargando…' : `${sucursales.length} registro(s)`}
                     </span>
                     <ViewToggle defaultView={view} onViewChange={setView} storageKey="sucursales" />
                     {isSuperAdmin && (
@@ -362,7 +362,7 @@ export default function AdminSucursalesPage() {
                 <EmptyState
                     icon={Building2}
                     title="Sin sucursales"
-                    description="No hay sucursales registradas aÃºn."
+                    description="No hay sucursales registradas aún."
                     action={isSuperAdmin && (
                         <Button onClick={openCrear} size="sm" className="gap-2">
                             <Plus size={14} /> Agregar primera
@@ -393,7 +393,7 @@ export default function AdminSucursalesPage() {
                     <DialogFooter className="mt-4">
                         <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>Cancelar</Button>
                         <Button onClick={handleGuardar} disabled={formLoading} className="gap-2 min-w-[100px]">
-                            {formLoading ? 'Guardandoâ€¦' : 'Guardar'}
+                            {formLoading ? 'Guardando…' : 'Guardar'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

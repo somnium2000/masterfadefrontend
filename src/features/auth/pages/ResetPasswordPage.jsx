@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../config/supabaseClient.js';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
@@ -32,7 +32,7 @@ export default function ResetPasswordPage() {
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
 
-  // 1) Asegurar sesiÃ³n (desde hash) y limpiar URL
+  // 1) Asegurar sesión (desde hash) y limpiar URL
   useEffect(() => {
     let cancelled = false;
 
@@ -41,12 +41,12 @@ export default function ResetPasswordPage() {
       setMsg('');
 
       if (!supabase) {
-        setError('Supabase no estÃ¡ configurado (revisa VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY).');
+        setError('Supabase no está configurado (revisa VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY).');
         return;
       }
 
       if (hashData.error) {
-        setError(hashData.error_description || 'Enlace invÃ¡lido o expirado.');
+        setError(hashData.error_description || 'Enlace inválido o expirado.');
         return;
       }
 
@@ -57,7 +57,7 @@ export default function ResetPasswordPage() {
           refresh_token: hashData.refresh_token,
         });
         if (error) {
-          setError(error.message || 'No se pudo validar la sesiÃ³n de recuperaciÃ³n.');
+          setError(error.message || 'No se pudo validar la sesión de recuperación.');
           return;
         }
 
@@ -65,10 +65,10 @@ export default function ResetPasswordPage() {
         if (!cancelled) navigate('/reset-password', { replace: true });
       }
 
-      // Confirmar que existe sesiÃ³n
+      // Confirmar que existe sesión
       const { data } = await supabase.auth.getSession();
       if (!data?.session) {
-        setError('No hay una sesiÃ³n de recuperaciÃ³n activa. Vuelve a pedir el enlace.');
+        setError('No hay una sesión de recuperación activa. Vuelve a pedir el enlace.');
         return;
       }
 
@@ -130,13 +130,13 @@ export default function ResetPasswordPage() {
 
         <div className="mf-login-card">
           <div className="mf-login-card-header">
-            <h1 className="mf-login-title">Restablecer contraseÃ±a</h1>
+            <h1 className="mf-login-title">Restablecer contraseña</h1>
           </div>
 
           <form className="mf-login-form" onSubmit={onSubmit}>
             {!ready ? (
               <>
-                {error ? <div className="mf-error">{error}</div> : <div className="mf-help">Validando enlaceâ€¦</div>}
+                {error ? <div className="mf-error">{error}</div> : <div className="mf-help">Validando enlace…</div>}
                 <div className="mf-actions">
                   <Link className="mf-link" to="/forgot-password">Volver</Link>
                   <Link className="mf-link" to="/login">Login</Link>
@@ -145,26 +145,26 @@ export default function ResetPasswordPage() {
             ) : (
               <>
                 <div className="mf-form-group">
-                  <label className="mf-label" htmlFor="newPass">Nueva contraseÃ±a</label>
+                  <label className="mf-label" htmlFor="newPass">Nueva contraseña</label>
                   <input
                     id="newPass"
                     className="mf-input"
                     type="password"
                     value={newPass}
                     onChange={(e) => setNewPass(e.target.value)}
-                    placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                    placeholder="••••••••"
                   />
                 </div>
 
                 <div className="mf-form-group">
-                  <label className="mf-label" htmlFor="confirm">Confirmar contraseÃ±a</label>
+                  <label className="mf-label" htmlFor="confirm">Confirmar contraseña</label>
                   <input
                     id="confirm"
                     className="mf-input"
                     type="password"
                     value={confirm}
                     onChange={(e) => setConfirm(e.target.value)}
-                    placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                    placeholder="••••••••"
                   />
                 </div>
 
@@ -174,7 +174,7 @@ export default function ResetPasswordPage() {
                 <div className="mf-actions">
                   <Link className="mf-link" to="/login">Volver a login</Link>
                   <button className="mf-btn" type="submit" disabled={loading}>
-                    {loading ? 'Guardandoâ€¦' : 'Actualizar contraseÃ±a'}
+                    {loading ? 'Guardando…' : 'Actualizar contraseña'}
                   </button>
                 </div>
               </>
