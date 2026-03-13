@@ -36,7 +36,7 @@ async function parseResponse(response) {
 
 // ── Core request ──
 export async function request(path, options = {}) {
-  const { method = "GET", body, token, headers = {} } = options;
+  const { method = "GET", body, token, headers = {}, signal } = options;
 
   const baseUrl = import.meta.env.VITE_API_URL;
   const url = joinUrl(baseUrl, path);
@@ -59,6 +59,7 @@ export async function request(path, options = {}) {
     method,
     headers: finalHeaders,
     body: hasBody ? JSON.stringify(body) : undefined,
+    signal,
   });
 
   const data = await parseResponse(response);

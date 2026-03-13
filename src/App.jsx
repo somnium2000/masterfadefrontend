@@ -7,6 +7,10 @@ import HomeRedirectPage from './features/home/pages/HomeRedirectPage.jsx';
 import { ROLE_ROUTE_ALLOWED_ROLES } from './features/home/lib/roleRouting.js';
 import LandingPage from './features/landing/pages/LandingPage.jsx';
 import ServicesPage from './features/public/pages/ServicesPage.jsx';
+import PublicBookingFlow from './features/public/booking/PublicBookingFlow.jsx';
+import PublicBookingBarberosStep from './features/public/booking/PublicBookingBarberosStep.jsx';
+import PublicBookingAgendaStep from './features/public/booking/PublicBookingAgendaStep.jsx';
+import PublicBookingConfirmStep from './features/public/booking/PublicBookingConfirmStep.jsx';
 import UnauthorizedPage from './features/unauthorized/pages/UnauthorizedPage.jsx';
 import ProtectedRoute from './routes/ProtectedRoute.jsx';
 import AdminServicesCatalogPage from './features/admin/pages/AdminServicesCatalogPage.jsx';
@@ -16,6 +20,7 @@ import AdminEmpleadosPage from './features/admin/pages/AdminEmpleadosPage.jsx';
 import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx';
 import AdminClientesPage from './features/admin/pages/AdminClientesPage.jsx';
 import AdminUsuariosPage from './features/admin/pages/AdminUsuariosPage.jsx';
+import AdminCitasPage from './features/admin/pages/AdminCitasPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
@@ -31,6 +36,12 @@ function App() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/servicios" element={<ServicesPage />} />
+      <Route path="/agendar" element={<RouteErrorBoundary><PublicBookingFlow /></RouteErrorBoundary>}>
+        <Route index element={<Navigate to="barberos" replace />} />
+        <Route path="barberos" element={<PublicBookingBarberosStep />} />
+        <Route path="agenda" element={<PublicBookingAgendaStep />} />
+        <Route path="confirmar" element={<PublicBookingConfirmStep />} />
+      </Route>
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
       <Route
@@ -64,8 +75,8 @@ function App() {
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
         {/* Citas */}
-        <Route path="citas/preview" element={<UnderConstructionPage title="Vista Previa de Citas" />} />
-        <Route path="citas/config" element={<UnderConstructionPage title="Configuración de Citas" />} />
+        <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
+        <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
         <Route path="seguridad/logs" element={<UnderConstructionPage title="Logs del Sistema" />} />
         <Route path="seguridad/sesiones" element={<UnderConstructionPage title="Sesiones Activas" />} />
@@ -105,8 +116,8 @@ function App() {
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
         {/* Citas */}
-        <Route path="citas/preview" element={<UnderConstructionPage title="Vista Previa de Citas" />} />
-        <Route path="citas/config" element={<UnderConstructionPage title="Configuración de Citas" />} />
+        <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
+        <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
         <Route path="seguridad/logs" element={<UnderConstructionPage title="Logs del Sistema" />} />
         <Route path="seguridad/sesiones" element={<UnderConstructionPage title="Sesiones Activas" />} />
@@ -155,3 +166,4 @@ function App() {
 }
 
 export default App;
+

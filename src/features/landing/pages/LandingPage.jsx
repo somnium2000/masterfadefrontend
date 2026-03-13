@@ -3,7 +3,6 @@ import { CalendarDays, Crown, House, LogIn, Plus, Scissors, Tag, Users } from 'l
 import { useNavigate } from 'react-router-dom';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
-import { useAuth } from '../../../context/AuthContext.jsx';
 
 const ease = [0.25, 0.46, 0.45, 0.94];
 const BG_URL = 'https://images.unsplash.com/photo-1770625467989-465591ffac5b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxsdXh1cnklMjBiYXJiZXJzaG9wJTIwZGFyayUyMGludGVyaW9yJTIwcHJlbWl1bXxlbnwxfHx8fDE3NzI3Njc1NDN8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral';
@@ -99,10 +98,9 @@ function SecondaryCta({ icon: Icon, label, onClick, delay, disabled = false }) {
 
 export default function LandingPage() {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
 
   function handleAgendar() {
-    navigate(isAuthenticated ? '/home' : '/login');
+    navigate('/agendar/barberos');
   }
 
   const navItems = [
