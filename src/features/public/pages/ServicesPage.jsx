@@ -267,7 +267,7 @@ export default function ServicesPage() {
   }
 
   function handleAgendar() {
-    navigate(isAuthenticated ? '/home' : '/login');
+    navigate('/agendar/barberos');
   }
 
   const barberServices = services.filter((item) => item.grupo_catalogo === 'barberia');
