@@ -59,17 +59,20 @@ export function ServiceCard({
 
 export function DayButton({
   cell,
+  minDateKey,
   selectedDate,
   dayInfo,
   onSelect,
 }) {
   const isSelected = selectedDate === cell.key;
   const isAvailable = Boolean(dayInfo?.disponible);
-  const isEnabled = cell.inMonth && isAvailable;
+  const isPastDate = Boolean(minDateKey && cell.key < minDateKey);
+  const isEnabled = cell.inMonth && isAvailable && !isPastDate;
   const classes = [
     'citas-day-btn',
     cell.inMonth ? 'is-in-month' : 'is-outside',
     isAvailable ? 'is-available' : 'is-unavailable',
+    isPastDate ? 'is-past' : '',
     isSelected ? 'is-selected' : '',
   ].join(' ');
 
@@ -80,7 +83,7 @@ export function DayButton({
       className={classes}
       disabled={!isEnabled}
       onClick={() => onSelect(cell.key, isEnabled)}
-      aria-label={`${cell.key} ${isAvailable ? 'disponible' : 'sin disponibilidad'}`}
+      aria-label={`${cell.key} ${isEnabled ? 'disponible' : 'sin disponibilidad'}`}
     >
       {cell.label}
     </button>
@@ -91,11 +94,14 @@ export function SlotButton({
   slot,
   selectedTime,
   onSelect,
+  displayTime,
+  isDisabled = false,
 }) {
   const isSelected = selectedTime === slot.hora;
+  const isUnavailable = !slot.disponible || isDisabled;
   const classes = [
     'citas-slot-btn',
-    slot.disponible ? '' : 'is-unavailable',
+    isUnavailable ? 'is-unavailable' : '',
     isSelected ? 'is-selected' : '',
   ].join(' ');
 
@@ -103,11 +109,11 @@ export function SlotButton({
     <button
       type="button"
       className={classes}
-      disabled={!slot.disponible}
-      onClick={() => onSelect(slot.hora, slot.disponible)}
+      disabled={isUnavailable}
+      onClick={() => onSelect(slot.hora, !isUnavailable)}
       aria-pressed={isSelected}
     >
-      {slot.hora}
+      {displayTime || slot.hora}
     </button>
   );
 }

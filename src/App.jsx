@@ -21,6 +21,7 @@ import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx'
 import AdminClientesPage from './features/admin/pages/AdminClientesPage.jsx';
 import AdminUsuariosPage from './features/admin/pages/AdminUsuariosPage.jsx';
 import AdminCitasPage from './features/admin/pages/AdminCitasPage.jsx';
+import AdminCitasPreviewPage from './features/admin/pages/AdminCitasPreviewPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
@@ -75,7 +76,7 @@ function App() {
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
         {/* Citas */}
-        <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
+        <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPreviewPage /></RouteErrorBoundary>} />
         <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
         <Route path="seguridad/logs" element={<UnderConstructionPage title="Logs del Sistema" />} />
@@ -116,7 +117,7 @@ function App() {
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
         {/* Citas */}
-        <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
+        <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPreviewPage /></RouteErrorBoundary>} />
         <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
         <Route path="seguridad/logs" element={<UnderConstructionPage title="Logs del Sistema" />} />

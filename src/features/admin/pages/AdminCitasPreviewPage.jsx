@@ -1,27 +1,27 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import { ArrowLeft, House } from 'lucide-react';
-import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../../../components/ui/button.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
-import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import PublicBookingBarberosStep from '../../public/booking/PublicBookingBarberosStep.jsx';
+import PublicBookingAgendaStep from '../../public/booking/PublicBookingAgendaStep.jsx';
+import PublicBookingConfirmStep from '../../public/booking/PublicBookingConfirmStep.jsx';
 import {
-  createPublicCitaHold,
+  PublicBookingProvider,
+} from '../../public/booking/PublicBookingFlow.jsx';
+import {
   getPublicBookingContext,
   listPublicAgendaBarberos,
   listPublicAgendaDisponibilidad,
   listPublicAgendaHorarios,
   listPublicCatalogServicios,
-} from './publicBookingApi.js';
+} from '../../public/booking/publicBookingApi.js';
 import {
   ALL_TIME_SLOTS,
   MAX_COMPANIONS,
@@ -32,20 +32,14 @@ import {
   toDateKey,
   toLocalDateTimeWithOffset,
   toMonthStartFromDateKey,
-} from './bookingUtils.js';
-import '../../admin/pages/AdminCitasPage.css';
-import './PublicBookingFlow.css';
+} from '../../public/booking/bookingUtils.js';
+import './AdminCitasPage.css';
+import '../../public/booking/PublicBookingFlow.css';
 
 const EMPTY_CONTEXT = {
   sucursales: [],
   parametros: {},
 };
-
-const PublicBookingContext = createContext(null);
-
-export function PublicBookingProvider({ value, children }) {
-  return <PublicBookingContext.Provider value={value}>{children}</PublicBookingContext.Provider>;
-}
 
 function readBooleanParam(parametros, key, fallback) {
   const value = parametros?.[key];
@@ -142,18 +136,15 @@ function createBookingBlock({ alias = '', idBarbero = '' } = {}) {
   );
 }
 
-export function usePublicBookingFlow() {
-  const context = useContext(PublicBookingContext);
-  if (!context) {
-    throw new Error('usePublicBookingFlow debe usarse dentro de PublicBookingFlow.');
-  }
-  return context;
-}
+const PREVIEW_STEPS = [
+  { id: 'barberos', label: '1. Barberos' },
+  { id: 'agenda', label: '2. Agenda' },
+  { id: 'confirmar', label: '3. Confirmar' },
+];
 
-export default function PublicBookingFlow() {
-  const location = useLocation();
-  const navigate = useNavigate();
+export default function AdminCitasPreviewPage() {
   const notifications = useNotifications();
+  const [previewStep, setPreviewStep] = useState('barberos');
 
   const [contextLoading, setContextLoading] = useState(false);
   const [contextError, setContextError] = useState('');
@@ -316,8 +307,8 @@ export default function PublicBookingFlow() {
   );
 
   const canAddCompanionBlock = useMemo(
-    () => bookingBlocks.length < (MAX_COMPANIONS + 1),
-    [bookingBlocks.length]
+    () => allowCompanions && bookingBlocks.length < (MAX_COMPANIONS + 1),
+    [allowCompanions, bookingBlocks.length]
   );
 
   const monthRange = useMemo(() => {
@@ -329,6 +320,11 @@ export default function PublicBookingFlow() {
   }, [currentMonth]);
 
   const showBlockingAvailabilityLoader = availabilityLoading && Object.keys(availabilityMap).length === 0;
+  const previewCanOpenStep = useMemo(() => ({
+    barberos: true,
+    agenda: Boolean(selectedBranchId && selectedBarberId),
+    confirmar: Boolean(allBlocksComplete),
+  }), [allBlocksComplete, selectedBarberId, selectedBranchId]);
 
   const isPastSlotForToday = useCallback((dateKey, timeKey) => {
     if (!dateKey || !timeKey) return false;
@@ -357,6 +353,7 @@ export default function PublicBookingFlow() {
     setBookingBlocks([createBookingBlock({ alias: 'Titular' })]);
     setActiveBlockIndex(0);
     setHoldResult(null);
+    setPreviewStep('barberos');
     setCurrentMonth(new Date(minBookingMonth.getFullYear(), minBookingMonth.getMonth(), 1));
     clearRequestState();
   }, [clearRequestState, minBookingMonth]);
@@ -829,22 +826,18 @@ export default function PublicBookingFlow() {
   ]);
 
   useEffect(() => {
-    if (!location.pathname.startsWith('/agendar/confirmar')) return;
+    if (previewStep !== 'agenda') return;
     if (!selectedBranchId || !selectedBarberId) {
-      navigate('/agendar/barberos', { replace: true });
-      return;
+      setPreviewStep('barberos');
     }
-    if (!allBlocksComplete) {
-      navigate('/agendar/agenda', { replace: true });
-    }
-  }, [location.pathname, navigate, selectedBranchId, selectedBarberId, allBlocksComplete]);
+  }, [previewStep, selectedBarberId, selectedBranchId]);
 
   useEffect(() => {
-    if (!location.pathname.startsWith('/agendar/agenda')) return;
-    if (!selectedBranchId || !selectedBarberId) {
-      navigate('/agendar/barberos', { replace: true });
+    if (previewStep !== 'confirmar') return;
+    if (!allBlocksComplete) {
+      setPreviewStep('agenda');
     }
-  }, [location.pathname, navigate, selectedBarberId, selectedBranchId]);
+  }, [allBlocksComplete, previewStep]);
 
   useEffect(() => {
     setHoldResult(null);
@@ -855,9 +848,8 @@ export default function PublicBookingFlow() {
       if (!nextBranchId || nextBranchId === selectedBranchId) return;
       resetFlowForBranchChange();
       setSelectedBranchId(nextBranchId);
-      navigate('/agendar/barberos');
     },
-    [navigate, resetFlowForBranchChange, selectedBranchId]
+    [resetFlowForBranchChange, selectedBranchId]
   );
 
   const selectBarber = useCallback((barberId) => {
@@ -885,7 +877,7 @@ export default function PublicBookingFlow() {
 
   const addCompanionBlock = useCallback(() => {
     setBookingBlocks((prev) => {
-      if (prev.length >= (MAX_COMPANIONS + 1)) return prev;
+      if (!allowCompanions || prev.length >= (MAX_COMPANIONS + 1)) return prev;
       const source = prev.length > 0 ? prev : [createBookingBlock({ alias: 'Titular' })];
       const companionNumber = source.length;
       const inheritedBarberId = source[effectiveActiveBlockIndex]?.idBarbero || source[0]?.idBarbero || '';
@@ -901,21 +893,21 @@ export default function PublicBookingFlow() {
     setSlots(buildDefaultSlots());
     setAvailabilityError('');
     clearSlotConflict();
-  }, [clearSlotConflict, effectiveActiveBlockIndex]);
+  }, [allowCompanions, clearSlotConflict, effectiveActiveBlockIndex]);
 
   const goToAgenda = useCallback(() => {
     if (!selectedBranchId || !selectedBarberId) return;
-    navigate('/agendar/agenda');
-  }, [navigate, selectedBarberId, selectedBranchId]);
+    setPreviewStep('agenda');
+  }, [selectedBarberId, selectedBranchId]);
 
   const goToBarberos = useCallback(() => {
-    navigate('/agendar/barberos');
-  }, [navigate]);
+    setPreviewStep('barberos');
+  }, []);
 
   const goToConfirm = useCallback(() => {
     if (!allBlocksComplete) return;
-    navigate('/agendar/confirmar');
-  }, [allBlocksComplete, navigate]);
+    setPreviewStep('confirmar');
+  }, [allBlocksComplete]);
 
   const toggleService = useCallback((serviceId) => {
     if (!serviceId) return;
@@ -1055,17 +1047,17 @@ export default function PublicBookingFlow() {
 
   const submitHold = useCallback(async () => {
     if (!selectedBranchId || !selectedBarberId) {
-      notifications.warning('Debes seleccionar sucursal y barbero.', { dedupeKey: 'public-booking-hold-context' });
-      navigate('/agendar/barberos');
+      notifications.warning('Debes seleccionar sucursal y barbero.', { dedupeKey: 'admin-preview-hold-context' });
+      setPreviewStep('barberos');
       return false;
     }
 
     const blocksToSubmit = bookingBlocksSummary.filter((block) => block.selectedServices.length > 0);
     if (blocksToSubmit.length === 0 || !allBlocksComplete) {
-      notifications.warning('Completa servicios, fecha y hora en todos los bloques antes de confirmar.', {
-        dedupeKey: 'public-booking-blocks-required',
+      notifications.warning('Completa servicios, fecha y hora en todos los bloques antes de simular.', {
+        dedupeKey: 'admin-preview-blocks-required',
       });
-      navigate('/agendar/agenda');
+      setPreviewStep('agenda');
       return false;
     }
 
@@ -1073,10 +1065,10 @@ export default function PublicBookingFlow() {
     for (const block of blocksToSubmit) {
       if (isPastSlotForToday(block.selectedDate, block.selectedTime)) {
         notifications.warning('No puedes confirmar una cita en hora pasada para hoy.', {
-          dedupeKey: 'public-booking-submit-past-time',
+          dedupeKey: 'admin-preview-submit-past-time',
         });
         setActiveBlockIndex(block.index);
-        navigate('/agendar/agenda');
+        setPreviewStep('agenda');
         return false;
       }
 
@@ -1090,10 +1082,10 @@ export default function PublicBookingFlow() {
           conflictingAlias: previous.alias || 'Integrante',
         });
         notifications.warning('Hay integrantes con el mismo barbero, fecha y hora. Debes cambiar uno de ellos.', {
-          dedupeKey: 'public-booking-submit-duplicate-slot',
+          dedupeKey: 'admin-preview-submit-duplicate-slot',
         });
         setActiveBlockIndex(block.index);
-        navigate('/agendar/agenda');
+        setPreviewStep('agenda');
         await loadSlotSuggestions({
           barberId: block.idBarbero,
           dateKey: block.selectedDate,
@@ -1106,70 +1098,70 @@ export default function PublicBookingFlow() {
       selectedSlotMap.set(collisionKey, block);
     }
 
-    const integrantes = [];
+    const bloques = [];
     for (const block of blocksToSubmit) {
       const fechaInicio = toLocalDateTimeWithOffset(block.selectedDate, block.selectedTime);
       if (!fechaInicio) {
         notifications.error('No se pudo construir la fecha y hora de una de las citas del grupo.', {
-          dedupeKey: 'public-booking-datetime-invalid',
+          dedupeKey: 'admin-preview-datetime-invalid',
         });
         return false;
       }
 
-      integrantes.push({
+      bloques.push({
+        id_cita: `sim-${block.id}`,
         orden_integrante: block.index + 1,
         alias: block.alias,
         id_barbero: block.idBarbero || null,
+        nombre_barbero: block.barbero?.nombre_completo || 'Barbero',
+        fecha: block.selectedDate,
+        hora: block.selectedTime,
         fecha_inicio: fechaInicio,
-        servicios: block.selectedServices.map((service) => ({
-          id_servicio: service.id_servicio,
-        })),
+        estado_cita_codigo: 'simulada',
+        monto_total_hnl: block.total_hnl,
+        duracion_total_min: block.selectedServices.reduce((total, item) => total + Number(item?.duracion_min || 0), 0),
+        buffer_total_min: block.selectedServices.reduce((total, item) => total + Number(item?.buffer_min || 0), 0),
       });
     }
 
     setHoldSubmitting(true);
     try {
-      const response = await createPublicCitaHold({
-        id_sucursal: selectedBranchId,
-        integrantes,
+      const expiresAt = new Date(Date.now() + holdDurationMin * 60 * 1000).toISOString();
+      setHoldResult({
+        demo: true,
+        id_grupo_cita: `SIM-${Date.now()}`,
+        estado_grupo_codigo: 'simulada',
+        expires_at: expiresAt,
+        monto_total_hnl: totalToPay,
+        bloques,
       });
-
-      const payload = response?.data ?? response;
-      setHoldResult(payload);
-      notifications.success('Reserva grupal creada correctamente.', { dedupeKey: 'public-booking-hold-success' });
+      notifications.success('Simulacion completada. No se creo ningun hold real.', {
+        dedupeKey: 'admin-preview-hold-success',
+      });
       return true;
-    } catch (err) {
-      notifications.error(extractMessage(err), { dedupeKey: 'public-booking-hold-error' });
-      if (err?.status === 409) {
-        updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
-          ...currentBlock,
-          selectedTime: '',
-        }));
-        void fetchSlots();
-        void fetchAvailability();
-      }
-      return false;
     } finally {
       setHoldSubmitting(false);
     }
   }, [
     allBlocksComplete,
     bookingBlocksSummary,
-    effectiveActiveBlockIndex,
-    fetchAvailability,
-    fetchSlots,
+    holdDurationMin,
     isPastSlotForToday,
     loadSlotSuggestions,
-    navigate,
     notifications,
     selectedBarberId,
     selectedBranchId,
-    updateBlockAtIndex,
+    totalToPay,
   ]);
+
+  const selectPreviewStep = useCallback((stepId) => {
+    if (!previewCanOpenStep[stepId]) return;
+    setPreviewStep(stepId);
+  }, [previewCanOpenStep]);
 
   const contextValue = useMemo(
     () => ({
-      mode: 'public',
+      mode: 'preview',
       activeBlock,
       activeBlockIndex: effectiveActiveBlockIndex,
       addCompanionBlock,
@@ -1249,6 +1241,7 @@ export default function PublicBookingFlow() {
       canGoPrevMonth,
       contextData,
       currentMonth,
+      fetchAvailability,
       goToAgenda,
       goToBarberos,
       goToConfirm,
@@ -1289,60 +1282,44 @@ export default function PublicBookingFlow() {
       updateActiveBlockBarber,
       selectBarber,
       selectBranch,
-      fetchAvailability,
     ]
   );
 
-  if (location.pathname === '/agendar') {
-    return <Navigate to="/agendar/barberos" replace />;
-  }
-
-  const showTopbarBackToBarberos = location.pathname.startsWith('/agendar/agenda');
-
   return (
-    <div className="public-booking-page mf-page-gradient min-h-screen">
-      <div className="public-booking-shell">
-        <header className="public-booking-topbar">
-          <div className="public-booking-topbar-left">
-            <Link to="/" className="public-booking-home">
-              <House size={16} />
-              <span>Inicio</span>
-            </Link>
-            {showTopbarBackToBarberos ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="public-booking-topbar-back gap-2"
-                onClick={goToBarberos}
-              >
-                <ArrowLeft size={15} />
-                Volver a barberos
-              </Button>
-            ) : null}
-          </div>
-          <ThemeSwitcher />
-        </header>
-
-        {contextLoading ? (
-          <div className="public-booking-loading">
-            <LoadingSpinner />
-          </div>
-        ) : null}
-
-        {contextError ? (
-          <div className="public-booking-error">
-            <ErrorBanner message={contextError} onRetry={fetchContext} />
-          </div>
-        ) : null}
-
-        {!contextLoading && !contextError ? (
-          <main className="mf-page citas-page public-booking-main">
-            <PublicBookingProvider value={contextValue}>
-              <Outlet />
-            </PublicBookingProvider>
-          </main>
-        ) : null}
+    <div className="mf-page citas-page public-booking-page public-booking-preview-scope">
+      <div className="citas-toolbar">
+        <span className="citas-mode-pill">Modo Vista Previa - Simulacion (sin hold real)</span>
+        <div className="citas-stepper">
+          {PREVIEW_STEPS.map((step) => (
+            <button
+              key={step.id}
+              type="button"
+              className={`citas-step-btn ${previewStep === step.id ? 'is-active' : ''}`}
+              disabled={!previewCanOpenStep[step.id]}
+              onClick={() => selectPreviewStep(step.id)}
+            >
+              {step.label}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {contextLoading ? (
+        <div className="citas-surface p-6">
+          <LoadingSpinner />
+        </div>
+      ) : null}
+      {contextError ? <ErrorBanner message={contextError} onRetry={fetchContext} /> : null}
+
+      {!contextLoading && !contextError ? (
+        <div className="public-booking-main">
+          <PublicBookingProvider value={contextValue}>
+            {previewStep === 'barberos' ? <PublicBookingBarberosStep /> : null}
+            {previewStep === 'agenda' ? <PublicBookingAgendaStep /> : null}
+            {previewStep === 'confirmar' ? <PublicBookingConfirmStep /> : null}
+          </PublicBookingProvider>
+        </div>
+      ) : null}
     </div>
   );
 }

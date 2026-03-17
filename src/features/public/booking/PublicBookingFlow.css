@@ -17,6 +17,13 @@
   margin-bottom: 14px;
 }
 
+.public-booking-topbar-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .public-booking-home {
   display: inline-flex;
   align-items: center;
@@ -28,6 +35,10 @@
   background: color-mix(in srgb, var(--mf-btn-bg) 72%, var(--mf-card) 28%);
   color: var(--mf-text);
   font-size: 14px;
+}
+
+.public-booking-topbar-back {
+  border-radius: 999px;
 }
 
 .public-booking-main {
@@ -70,9 +81,84 @@
   gap: 6px;
 }
 
+.public-booking-services-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.public-booking-agenda-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(100%, 860px);
+  margin-inline: auto;
+  align-items: stretch;
+}
+
+.public-booking-agenda-stack > * {
+  width: 100%;
+}
+
+.public-booking-block-stepper {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.public-booking-active-block-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 10px;
+  align-items: center;
+}
+
+.public-booking-page .citas-services-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.public-booking-page .citas-timeslots {
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+}
+
+.public-booking-active-block-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mf-text-2);
+  font-size: 13px;
+}
+
+.public-booking-active-barber-select {
+  min-width: 0;
+}
+
+.public-booking-services-count {
+  min-width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--mf-accent) 70%, transparent);
+  background: color-mix(in srgb, var(--mf-accent) 22%, transparent);
+  color: var(--mf-accent);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .public-booking-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.public-booking-agenda-cta {
+  margin-top: 2px;
+}
+
+.public-booking-agenda-secondary-cta {
+  margin-top: -2px;
 }
 
 .public-booking-actions.is-inline {
@@ -82,12 +168,92 @@
   gap: 10px;
 }
 
+.public-booking-page .citas-nav-round:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.public-booking-page .citas-day-btn.is-past {
+  color: color-mix(in srgb, var(--mf-text-2) 55%, transparent);
+}
+
+.public-booking-page .citas-day-btn.is-unavailable,
+.public-booking-preview-scope .citas-day-btn.is-unavailable,
+.public-booking-page .citas-day-btn.is-past,
+.public-booking-preview-scope .citas-day-btn.is-past {
+  opacity: 0.45;
+  filter: saturate(0.35);
+}
+
 .public-booking-slot-hint {
   margin-top: 4px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   color: var(--mf-text-2);
+  font-size: 13px;
+}
+
+.public-booking-slot-conflict {
+  margin: 10px 0 12px;
+  border: 1px solid color-mix(in srgb, #b93c52 36%, var(--mf-nav-border) 64%);
+  border-radius: 14px;
+  background: color-mix(in srgb, #b93c52 11%, var(--mf-card) 89%);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--mf-text);
+  font-size: 13px;
+}
+
+.public-booking-slot-conflict p {
+  margin: 0;
+}
+
+.public-booking-slot-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.public-booking-group-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.public-booking-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.public-booking-summary-card {
+  border: 1px solid var(--mf-nav-border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--mf-card) 88%, transparent);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.public-booking-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.public-booking-summary-alias {
+  font-weight: 700;
+  color: var(--mf-text);
+}
+
+.public-booking-summary-total {
+  color: var(--mf-accent);
+  font-weight: 700;
   font-size: 13px;
 }
 
@@ -129,6 +295,22 @@
 
   .public-booking-title {
     font-size: 28px;
+  }
+
+  .public-booking-topbar {
+    align-items: flex-start;
+  }
+
+  .public-booking-agenda-stack {
+    width: 100%;
+  }
+
+  .public-booking-active-block-row {
+    grid-template-columns: 1fr;
+  }
+
+  .public-booking-summary-grid {
+    grid-template-columns: 1fr;
   }
 
   .public-booking-actions.is-inline {

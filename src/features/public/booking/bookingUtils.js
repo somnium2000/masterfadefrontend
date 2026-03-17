@@ -16,6 +16,8 @@ const BARBER_GRADIENTS = [
 
 export const WEEK_DAYS = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
 export const MAX_COMPANIONS = 4;
+export const HONDURAS_TIME_ZONE = 'America/Tegucigalpa';
+export const HONDURAS_UTC_OFFSET = '-06:00';
 
 export function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
@@ -43,6 +45,55 @@ export function formatDateOnly(dateKey) {
   return new Intl.DateTimeFormat('es-HN', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(
     new Date(`${dateKey}T00:00:00`)
   );
+}
+
+function getTimeZoneDateParts(dateValue, timeZone = HONDURAS_TIME_ZONE) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = formatter.formatToParts(dateValue);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+  if (!year || !month || !day) return null;
+  return { year, month, day };
+}
+
+function getTimeZoneTimeParts(dateValue, timeZone = HONDURAS_TIME_ZONE) {
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = formatter.formatToParts(dateValue);
+  const hour = parts.find((part) => part.type === 'hour')?.value;
+  const minute = parts.find((part) => part.type === 'minute')?.value;
+  if (!hour || !minute) return null;
+  return { hour, minute };
+}
+
+export function getTodayDateKeyInTimeZone(timeZone = HONDURAS_TIME_ZONE) {
+  const parts = getTimeZoneDateParts(new Date(), timeZone);
+  if (!parts) return toDateKey(new Date());
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+export function getCurrentTimeKeyInTimeZone(timeZone = HONDURAS_TIME_ZONE) {
+  const parts = getTimeZoneTimeParts(new Date(), timeZone);
+  if (!parts) return '00:00';
+  return `${parts.hour}:${parts.minute}`;
+}
+
+export function toMonthStartFromDateKey(dateKey) {
+  const normalized = String(dateKey || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
+  const [year, month] = normalized.split('-').map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+  return new Date(year, month - 1, 1);
 }
 
 function addDays(date, days) {
@@ -124,6 +175,19 @@ export function formatCurrencyHnl(value) {
   return new Intl.NumberFormat('es-HN', { style: 'currency', currency: 'HNL', minimumFractionDigits: 2 }).format(amount);
 }
 
+export function formatTime12Hour(rawTime) {
+  const normalized = String(rawTime || '').trim();
+  const match = normalized.match(/^(\d{2}):(\d{2})(?::\d{2})?$/);
+  if (!match) return normalized;
+
+  const hour24 = Number(match[1]);
+  const minute = match[2];
+  if (!Number.isFinite(hour24) || hour24 < 0 || hour24 > 23) return normalized;
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  const period = hour24 >= 12 ? 'PM' : 'AM';
+  return `${hour12}:${minute} ${period}`;
+}
+
 export function getServiceDurationLabel(service) {
   const duration = Number(service?.duracion_min || 0) + Number(service?.buffer_min || 0);
   return `${duration} min`;
@@ -133,20 +197,26 @@ export function toLocalDateTimeWithOffset(dateValue, timeValue) {
   const date = String(dateValue || '').trim();
   const time = String(timeValue || '').trim();
   if (!date || !time) return null;
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  if (!/^\d{2}:\d{2}(:\d{2})?$/.test(time)) return null;
+
   const normalizedTime = time.length === 5 ? `${time}:00` : time;
-  const parsed = new Date(`${date}T${normalizedTime}`);
-  if (Number.isNaN(parsed.getTime())) return null;
+  const [hour, minute, second] = normalizedTime.split(':').map(Number);
+  const [year, month, day] = date.split('-').map(Number);
 
-  const offsetMinutes = -parsed.getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? '+' : '-';
-  const absOffset = Math.abs(offsetMinutes);
-  const offsetHours = String(Math.floor(absOffset / 60)).padStart(2, '0');
-  const offsetMins = String(absOffset % 60).padStart(2, '0');
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || !Number.isFinite(second)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) return null;
 
-  return `${date}T${normalizedTime}${sign}${offsetHours}:${offsetMins}`;
+  const parsedDate = new Date(Date.UTC(year, month - 1, day));
+  const isSameDate = parsedDate.getUTCFullYear() === year
+    && parsedDate.getUTCMonth() === month - 1
+    && parsedDate.getUTCDate() === day;
+  if (!isSameDate) return null;
+
+  return `${date}T${normalizedTime}${HONDURAS_UTC_OFFSET}`;
 }
 
 export function normalizePhone(rawValue) {
   return String(rawValue || '').replace(/[^\d+]/g, '').slice(0, 20);
 }
-

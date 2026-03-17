@@ -10,6 +10,7 @@ export default function PublicBookingBarberosStep() {
     barbers,
     barbersLoading,
     branchList,
+    mode = 'public',
     goToAgenda,
     selectedBarberId,
     selectedBranchId,
@@ -20,10 +21,12 @@ export default function PublicBookingBarberosStep() {
   return (
     <>
       <section className="citas-surface p-5">
-        <p className="public-booking-kicker">Agendamiento publico</p>
+        <p className="public-booking-kicker">{mode === 'preview' ? 'Vista previa admin' : 'Agendamiento publico'}</p>
         <h1 className="public-booking-title">Selecciona sucursal y barbero</h1>
         <p className="public-booking-subtitle">
-          Este flujo esta disponible sin iniciar sesion y no comparte navbar o sidebar del panel interno.
+          {mode === 'preview'
+            ? 'Esta vista replica el flujo publico con reglas guardadas para validar comportamiento antes de publicar.'
+            : 'Este flujo esta disponible sin iniciar sesion y no comparte navbar o sidebar del panel interno.'}
         </p>
 
         <div className="public-booking-form-row mt-4">
