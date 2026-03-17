@@ -51,8 +51,8 @@ const PREVIEW_STEPS = [
 const CONFIG_TABS = [
   { id: 'horario', label: 'Horario Habitual', icon: Clock3 },
   { id: 'bloqueos', label: 'Bloqueos', icon: SlidersHorizontal },
-  { id: 'dias', label: 'DÃ­as Inhabilitados', icon: CalendarDays },
-  { id: 'parametros', label: 'ParÃ¡metros Globales', icon: SlidersHorizontal },
+  { id: 'dias', label: 'Días Inhabilitados', icon: CalendarDays },
+  { id: 'parametros', label: 'Parámetros Globales', icon: SlidersHorizontal },
   { id: 'excepciones', label: 'Excepciones', icon: AlertTriangle },
   { id: 'sucursal', label: 'Por Sucursal', icon: Ban },
 ];
@@ -60,18 +60,18 @@ const CONFIG_TABS = [
 const DAY_ROWS = [
   { code: 1, label: 'Lunes' },
   { code: 2, label: 'Martes' },
-  { code: 3, label: 'MiÃ©rcoles' },
+  { code: 3, label: 'Miércoles' },
   { code: 4, label: 'Jueves' },
   { code: 5, label: 'Viernes' },
-  { code: 6, label: 'SÃ¡bado' },
+  { code: 6, label: 'Sábado' },
   { code: 0, label: 'Domingo' },
 ];
 
-const WEEK_DAYS = ['Dom', 'Lun', 'Mar', 'MiÃ©', 'Jue', 'Vie', 'SÃ¡b'];
+const WEEK_DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 const SERVICE_SPECIALTIES = [
   'Fade & Degradado',
-  'DiseÃ±o & Barba',
-  'Corte ClÃ¡sico & Afeitado',
+  'Diseño & Barba',
+  'Corte Clásico & Afeitado',
   'Urban & Street Style',
   'Perfilado Premium',
 ];
@@ -1004,7 +1004,7 @@ export default function AdminCitasPage() {
 
   function continueFromAgenda() {
     if (!previewServiceSelectionComplete) {
-      notifications.warning('Debes seleccionar servicios del cliente y de cada acompanante para continuar.', {
+      notifications.warning('Debes seleccionar servicios del cliente y de cada acompañante para continuar.', {
         dedupeKey: 'citas-preview-services-required',
       });
       return;
@@ -1064,7 +1064,7 @@ export default function AdminCitasPage() {
     const inicioAt = toDateTimeIso(blockForm.fecha, blockForm.hora_inicio);
     const finAt = toDateTimeIso(blockForm.fecha, blockForm.hora_fin);
     if (!inicioAt || !finAt) {
-      notifications.warning('Completa fecha y rango horario vÃ¡lido.', { dedupeKey: 'citas-block-create-invalid' });
+      notifications.warning('Completa fecha y rango horario válido.', { dedupeKey: 'citas-block-create-invalid' });
       return;
     }
     if (new Date(finAt).getTime() <= new Date(inicioAt).getTime()) {
@@ -1135,7 +1135,7 @@ export default function AdminCitasPage() {
       });
       setDayOffDialogOpen(false);
       setDayOffForm({ fecha: '', motivo: '' });
-      notifications.success('DÃ­a inhabilitado creado.', { dedupeKey: 'citas-dayoff-create-ok' });
+      notifications.success('Día inhabilitado creado.', { dedupeKey: 'citas-dayoff-create-ok' });
       void fetchDaysOff();
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1150,7 +1150,7 @@ export default function AdminCitasPage() {
     setDayOffDeleteId(idBloqueo);
     try {
       await deleteAdminCitasDiaInhabilitado(idBloqueo);
-      notifications.warning('DÃ­a inhabilitado eliminado.', { dedupeKey: 'citas-dayoff-delete-ok' });
+      notifications.warning('Día inhabilitado eliminado.', { dedupeKey: 'citas-dayoff-delete-ok' });
       void fetchDaysOff();
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1193,7 +1193,7 @@ export default function AdminCitasPage() {
       });
       setBranchDayOffDialogOpen(false);
       setBranchDayOffForm({ fecha: '', motivo: '' });
-      notifications.success('DÃ­a inhabilitado por sucursal creado.', { dedupeKey: 'citas-branch-dayoff-create-ok' });
+      notifications.success('Día inhabilitado por sucursal creado.', { dedupeKey: 'citas-branch-dayoff-create-ok' });
       void fetchBranchDaysOff();
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1219,7 +1219,7 @@ export default function AdminCitasPage() {
     const hold = Number(paramsForm.hold_duracion_min);
     const noShow = Number(paramsForm.no_show_min);
     if (!Number.isFinite(hold) || hold <= 0 || !Number.isFinite(noShow) || noShow <= 0) {
-      notifications.warning('Los parÃ¡metros deben ser nÃºmeros positivos.', { dedupeKey: 'citas-params-invalid' });
+      notifications.warning('Los Parámetros deben ser números positivos.', { dedupeKey: 'citas-params-invalid' });
       return;
     }
     setParamsSaving(true);
@@ -1238,7 +1238,7 @@ export default function AdminCitasPage() {
         permitir_acompanantes: Boolean(payload?.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(payload?.parametros?.pago_total_obligatorio ?? true),
       }));
-      notifications.success('ParÃ¡metros guardados.', { dedupeKey: 'citas-params-save-ok' });
+      notifications.success('Parámetros guardados.', { dedupeKey: 'citas-params-save-ok' });
     } catch (err) {
       if (handleAuthError(err)) return;
       notifications.error(extractMessage(err), { dedupeKey: 'citas-params-save-error' });
@@ -1287,7 +1287,7 @@ export default function AdminCitasPage() {
 
     return (
       <>
-        <p className="citas-preview-note">Vista previa del catÃ¡logo de barberos como lo verÃ¡ el cliente:</p>
+        <p className="citas-preview-note">Vista previa del catálogo de barberos como lo verá el cliente:</p>
         <div className="citas-barber-grid">
           {branchBarbers.map((barber) => {
             const meta = getBarberMeta(barber);
@@ -1313,7 +1313,7 @@ export default function AdminCitasPage() {
                 </div>
                 <div className="citas-barber-body">
                   <div className="citas-barber-name">{barber.nombre_completo}</div>
-                  <div className="citas-barber-years">{meta.years} aÃ±os de experiencia</div>
+                  <div className="citas-barber-years">{meta.years} años de experiencia</div>
                   <Button className="mt-2" size="sm">
                     Elegir
                   </Button>
@@ -1386,7 +1386,7 @@ export default function AdminCitasPage() {
             {paramsForm.permitir_acompanantes ? (
               <div className="mt-4">
                 <div className="citas-services-companion-head">
-                  <h3 className="citas-confirm-title">Acompanantes</h3>
+                  <h3 className="citas-confirm-title">Acompañantes</h3>
                   <Input
                     type="number"
                     min={0}
@@ -1401,7 +1401,7 @@ export default function AdminCitasPage() {
                   <div className="mt-3 flex flex-col gap-3">
                     {previewCompanionItems.map((item) => (
                       <div key={`companion-${item.index}`} className="citas-service-companion-row">
-                        <Label className="mf-label">Acompanante {item.index + 1}</Label>
+                        <Label className="mf-label">Acompañante {item.index + 1}</Label>
                         <select
                           className="citas-inline-select"
                           value={item.id_servicio}
@@ -1418,14 +1418,14 @@ export default function AdminCitasPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="citas-selected-date mt-2">Sin acompanantes para esta cita.</p>
+                  <p className="citas-selected-date mt-2">Sin acompañantes para esta cita.</p>
                 )}
               </div>
             ) : null}
 
             <div className="citas-services-summary-row mt-4">
               <span>Servicios cliente: {previewSelectedServices.length}</span>
-              <span>Acompanantes: {paramsForm.permitir_acompanantes ? previewCompanionsCount : 0}</span>
+              <span>Acompañantes: {paramsForm.permitir_acompanantes ? previewCompanionsCount : 0}</span>
               <span>Total a pagar: {formatCurrencyHnl(previewTotalToPay)}</span>
             </div>
           </div>
@@ -1549,7 +1549,7 @@ export default function AdminCitasPage() {
     return (
       <div className="citas-confirm-wrap">
         <div className="citas-surface p-5">
-          <h3 className="citas-confirm-title">Vista previa de confirmaciÃ³n</h3>
+          <h3 className="citas-confirm-title">Vista previa de confirmación</h3>
           <div className="mt-4 flex items-center gap-3">
             <span className="citas-barber-avatar">{getInitials(selectedBarber?.nombre_completo)}</span>
             <div>
@@ -1575,7 +1575,7 @@ export default function AdminCitasPage() {
               <span>{formatCurrencyHnl(previewTotalToPay)}</span>
             </div>
             <div className="citas-confirm-row">
-              <span>Acompanantes</span>
+              <span>Acompañantes</span>
               <span>{paramsForm.permitir_acompanantes ? previewCompanionsCount : 0}</span>
             </div>
           </div>
@@ -1588,20 +1588,20 @@ export default function AdminCitasPage() {
               previewSelectedServices.map((service) => (
                 <div key={`main-${service.id_servicio}`} className="citas-confirm-service-item">
                   <span>{service.nombre_servicio}</span>
-                  <span>{formatCurrencyHnl(service.precio_hnl)} Â· {getServiceDurationLabel(service)}</span>
+                  <span>{formatCurrencyHnl(service.precio_hnl)} · {getServiceDurationLabel(service)}</span>
                 </div>
               ))
             )}
 
             {paramsForm.permitir_acompanantes && previewCompanionsCount > 0 ? (
               <>
-                <h4 className="citas-confirm-subtitle mt-3">Servicios de acompanantes</h4>
+                <h4 className="citas-confirm-subtitle mt-3">Servicios de acompañantes</h4>
                 {previewCompanionItems.map((item) => (
                   <div key={`comp-${item.index}`} className="citas-confirm-service-item">
-                    <span>Acompanante {item.index + 1}</span>
+                    <span>Acompañante {item.index + 1}</span>
                     <span>
                       {item.servicio
-                        ? `${item.servicio.nombre_servicio} Â· ${formatCurrencyHnl(item.servicio.precio_hnl)} Â· ${getServiceDurationLabel(item.servicio)}`
+                        ? `${item.servicio.nombre_servicio} · ${formatCurrencyHnl(item.servicio.precio_hnl)} · ${getServiceDurationLabel(item.servicio)}`
                         : 'Sin servicio seleccionado'}
                     </span>
                   </div>
@@ -1634,7 +1634,7 @@ export default function AdminCitasPage() {
       <div className="citas-surface">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
           <h3 className="mf-font-display text-[22px] md:text-[24px] text-[var(--mf-accent)]">
-            Horario Semanal Â· {selectedBarber.nombre_completo}
+            Horario Semanal · {selectedBarber.nombre_completo}
           </h3>
           <Button onClick={saveSchedule} disabled={scheduleSaving || scheduleLoading} className="gap-2">
             <Save size={14} />
@@ -1648,12 +1648,12 @@ export default function AdminCitasPage() {
             <table className="citas-schedule-table">
               <thead>
                 <tr>
-                  <th>DÃ­a</th>
+                  <th>Día</th>
                   <th>Hora inicio</th>
                   <th>Hora fin</th>
                   <th>Almuerzo ini.</th>
                   <th>Almuerzo fin</th>
-                  <th>DuraciÃ³n</th>
+                  <th>Duración</th>
                   <th>Activo</th>
                 </tr>
               </thead>
@@ -1780,17 +1780,17 @@ export default function AdminCitasPage() {
 
   function renderDaysTab() {
     if (!selectedBarber) {
-      return <EmptyState icon={CalendarDays} title="Selecciona un barbero" description="Primero elige un barbero para administrar dÃ­as inhabilitados." />;
+      return <EmptyState icon={CalendarDays} title="Selecciona un barbero" description="Primero elige un barbero para administrar Días inhabilitados." />;
     }
 
     return (
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[var(--mf-text-2)] text-lg">
-            DÃ­as inhabilitados para <span className="font-semibold text-[var(--mf-text)]">{selectedBarber.nombre_completo}</span>
+            Días inhabilitados para <span className="font-semibold text-[var(--mf-text)]">{selectedBarber.nombre_completo}</span>
           </p>
           <Button className="gap-2" onClick={() => setDayOffDialogOpen(true)}>
-            <Plus size={14} /> Inhabilitar dÃ­a
+            <Plus size={14} /> Inhabilitar Día
           </Button>
         </div>
 
@@ -1799,7 +1799,7 @@ export default function AdminCitasPage() {
         ) : (
           <div className="citas-block-list">
             {daysOff.length === 0 ? (
-              <EmptyState icon={CalendarDays} title="Sin dÃ­as inhabilitados" description="No hay dÃ­as completos bloqueados para este barbero." />
+              <EmptyState icon={CalendarDays} title="Sin Días inhabilitados" description="No hay Días completos bloqueados para este barbero." />
             ) : (
               daysOff.map((item) => (
                 <div key={item.id_bloqueo} className="citas-block-item">
@@ -1807,7 +1807,7 @@ export default function AdminCitasPage() {
                   <div>
                     <p className="text-xl font-semibold text-[var(--mf-text)]">{item.fecha}</p>
                   </div>
-                  <div className="text-[var(--mf-text-2)]">DÃ­a completo</div>
+                  <div className="text-[var(--mf-text-2)]">Día completo</div>
                   <div className="text-[var(--mf-text-2)]">{item.motivo || 'Sin motivo'}</div>
                   <div className="flex items-center justify-end gap-2">
                     <button
@@ -1815,7 +1815,7 @@ export default function AdminCitasPage() {
                       className="text-red-500 disabled:opacity-45"
                       onClick={() => handleDeleteDayOff(item.id_bloqueo)}
                       disabled={dayOffDeleteId === item.id_bloqueo}
-                      aria-label="Eliminar dÃ­a inhabilitado"
+                      aria-label="Eliminar Día inhabilitado"
                     >
                       <Trash2 size={18} />
                     </button>
@@ -1916,8 +1916,8 @@ export default function AdminCitasPage() {
 
             <div className="citas-param-row">
               <div className="citas-param-copy">
-                <h4>Permitir acompanantes</h4>
-                <p>Habilita seleccionar servicios para acompanantes en vista previa.</p>
+                <h4>Permitir acompañantes</h4>
+                <p>Habilita seleccionar servicios para acompañantes en vista previa.</p>
               </div>
               <button
                 type="button"
@@ -2122,29 +2122,62 @@ export default function AdminCitasPage() {
     );
   }
 
-  if (contextLoading) {
-    return (
-      <div className="mf-page citas-page">
-        <LoadingSpinner />
-      </div>
-    );
-  }
-
-  if (contextError) {
-    return (
-      <div className="mf-page citas-page">
-        <ErrorBanner message={contextError} onRetry={fetchContext} />
-      </div>
-    );
-  }
-
   return (
-    <div className="mf-page citas-page">
-      {!servicesLoading && services.length === 0 && isPreviewMode ? (
-        <ErrorBanner message="No hay servicios activos para calcular disponibilidad en vista previa." />
-      ) : null}
+    <div className="space-y-4 px-2 pb-4 sm:px-4 sm:pb-6">
+      {/* Header premium al estilo módulo Personas */}
+      <header className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Citas - {isPreviewMode ? 'Vista Previa' : 'Configuración'}</p>
+            <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Agenda</h1>
+            <p className="text-sm text-[var(--mf-text-2)]">{isPreviewMode ? 'Vista previa del flujo de reserva como lo ve el cliente.' : 'Gestion de horarios, bloqueos y parametros de agenda.'}</p>
+          </div>
 
-      {isPreviewMode ? renderPreviewMode() : renderConfigMode()}
+          <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[420px]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm text-[var(--mf-text-2)]">
+                {contextLoading
+                  ? 'Cargando...'
+                  : branchList.length > 0
+                    ? `${branchBarbers.length} barbero(s) en sucursal`
+                    : 'Sin sucursales configuradas'}
+              </span>
+            </div>
+
+            {branchList.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {branchList.map((branch) => (
+                  <button
+                    key={branch.id_sucursal}
+                    type="button"
+                    onClick={() => setSelectedBranchId(branch.id_sucursal)}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      selectedBranchId === branch.id_sucursal
+                        ? 'border-[var(--mf-accent)] bg-[var(--mf-accent)] text-[var(--mf-accent-text)] shadow-[var(--mf-shadow-accent)]'
+                        : 'border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_54%,transparent)] text-[var(--mf-text)] hover:border-[var(--mf-accent)]/60'
+                    }`}
+                  >
+                    {branch.nombre_sucursal}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </header>
+
+      {contextLoading && <LoadingSpinner />}
+      {contextError && <ErrorBanner message={contextError} onRetry={fetchContext} />}
+
+      {!contextLoading && !contextError && (
+        <div className="citas-page">
+          {!servicesLoading && services.length === 0 && isPreviewMode ? (
+            <ErrorBanner message="No hay servicios activos para calcular disponibilidad en vista previa." />
+          ) : null}
+
+          {isPreviewMode ? renderPreviewMode() : renderConfigMode()}
+        </div>
+      )}
 
       <Dialog open={blockDialogOpen} onOpenChange={setBlockDialogOpen}>
         <DialogContent className="sm:max-w-lg">
@@ -2200,7 +2233,7 @@ export default function AdminCitasPage() {
                 className="mf-input mt-1"
                 value={blockForm.motivo}
                 onChange={(event) => setBlockForm((prev) => ({ ...prev, motivo: event.target.value }))}
-                placeholder="Ej. Cita mÃ©dica"
+                placeholder="Ej. Cita medica"
               />
             </div>
           </div>
@@ -2215,7 +2248,7 @@ export default function AdminCitasPage() {
       <Dialog open={dayOffDialogOpen} onOpenChange={setDayOffDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Inhabilitar dÃ­a completo</DialogTitle>
+            <DialogTitle>Inhabilitar dia completo</DialogTitle>
           </DialogHeader>
 
           <div className="grid grid-cols-1 gap-3">
@@ -2241,7 +2274,7 @@ export default function AdminCitasPage() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDayOffDialogOpen(false)} disabled={dayOffSaving}>Cancelar</Button>
-            <Button onClick={handleCreateDayOff} disabled={dayOffSaving}>{dayOffSaving ? 'Guardando...' : 'Inhabilitar dÃ­a'}</Button>
+            <Button onClick={handleCreateDayOff} disabled={dayOffSaving}>{dayOffSaving ? 'Guardando...' : 'Inhabilitar dia'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2249,7 +2282,7 @@ export default function AdminCitasPage() {
       <Dialog open={branchDayOffDialogOpen} onOpenChange={setBranchDayOffDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Bloquear dÃ­a por sucursal</DialogTitle>
+            <DialogTitle>Bloquear dia por sucursal</DialogTitle>
           </DialogHeader>
 
           <div className="grid grid-cols-1 gap-3">
@@ -2276,7 +2309,7 @@ export default function AdminCitasPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setBranchDayOffDialogOpen(false)} disabled={branchDayOffSaving}>Cancelar</Button>
             <Button onClick={handleCreateBranchDayOff} disabled={branchDayOffSaving}>
-              {branchDayOffSaving ? 'Guardando...' : 'Bloquear dÃ­a'}
+              {branchDayOffSaving ? 'Guardando...' : 'Bloquear dia'}
             </Button>
           </DialogFooter>
         </DialogContent>

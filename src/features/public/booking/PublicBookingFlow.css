@@ -119,6 +119,9 @@
 
 .public-booking-page .citas-timeslots {
   grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 .public-booking-active-block-label {

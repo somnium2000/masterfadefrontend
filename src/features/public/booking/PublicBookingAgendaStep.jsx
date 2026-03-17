@@ -27,7 +27,7 @@ function BookingBlocksSummary({ bookingBlocksSummary, totalToPay }) {
 
       {completedBlocks.length === 0 ? (
         <p className="citas-selected-date mt-2">
-          Aun no hay bloques completos. Selecciona servicio, fecha y hora para titular o acompanantes.
+          Aún no hay bloques completos. Selecciona servicio, fecha y hora para titular o acompañantes.
         </p>
       ) : (
         <div className="public-booking-summary-grid mt-3">
@@ -239,44 +239,60 @@ export default function PublicBookingAgendaStep() {
             <h3 className="citas-side-title">Fechas Disponibles</h3>
           </div>
 
-          <div className="citas-calendar-head">
-            <button
-              type="button"
-              className="citas-nav-round"
-              onClick={() => setMonth(-1)}
-              aria-label="Mes anterior"
-              disabled={!canGoPrevMonth}
-            >
-              <ArrowLeft size={16} />
-            </button>
-            <div className="citas-calendar-month">{formatMonth(currentMonth)}</div>
-            <button type="button" className="citas-nav-round" onClick={() => setMonth(1)} aria-label="Mes siguiente">
-              <ArrowRight size={16} />
-            </button>
-          </div>
+          {activeBlockIndex > 0 ? (
+            <div className="p-5 text-center my-4">
+              <p className="citas-selected-date block mb-2">
+                La fecha para los integrantes esta bloqueada para coincidir con la del titular:
+              </p>
+              <strong className="citas-calendar-profile-name" style={{ display: 'block', fontSize: '16px' }}>
+                {bookingBlocks[0]?.selectedDate ? formatFriendlyDate(bookingBlocks[0].selectedDate) : 'Ninguna'}
+              </strong>
+              <p className="citas-selected-date block mt-4" style={{ fontSize: '13px' }}>
+                Para cambiar la fecha, vuelve a seleccionar al Titular.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="citas-calendar-head" style={{ paddingTop: '0' }}>
+                <button
+                  type="button"
+                  className="citas-nav-round"
+                  onClick={() => setMonth(-1)}
+                  aria-label="Mes anterior"
+                  disabled={!canGoPrevMonth}
+                >
+                  <ArrowLeft size={16} />
+                </button>
+                <div className="citas-calendar-month">{formatMonth(currentMonth)}</div>
+                <button type="button" className="citas-nav-round" onClick={() => setMonth(1)} aria-label="Mes siguiente">
+                  <ArrowRight size={16} />
+                </button>
+              </div>
 
-          <div className="citas-calendar-grid">
-            <div className="citas-weekdays">
-              {WEEK_DAYS.map((day) => (
-                <div key={day} className="citas-weekday">
-                  {day}
+              <div className="citas-calendar-grid">
+                <div className="citas-weekdays">
+                  {WEEK_DAYS.map((day) => (
+                    <div key={day} className="citas-weekday">
+                      {day}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
 
-            <div className="citas-days">
-              {calendarCells.map((cell) => (
-                <DayButton
-                  key={cell.key}
-                  cell={cell}
-                  dayInfo={availabilityMap[cell.key]}
-                  minDateKey={minBookingDateKey}
-                  selectedDate={selectedDate}
-                  onSelect={onSelectDay}
-                />
-              ))}
-            </div>
-          </div>
+                <div className="citas-days">
+                  {calendarCells.map((cell) => (
+                    <DayButton
+                      key={cell.key}
+                      cell={cell}
+                      dayInfo={availabilityMap[cell.key]}
+                      minDateKey={minBookingDateKey}
+                      selectedDate={selectedDate}
+                      onSelect={onSelectDay}
+                    />
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </motion.div>
 
         <AnimatePresence initial={false}>
@@ -359,7 +375,7 @@ export default function PublicBookingAgendaStep() {
 
                 <div className="public-booking-slot-hint">
                   <Clock3 size={14} />
-                  <span>Selecciona una hora para habilitar la pantalla de confirmacion.</span>
+                  <span>Selecciona una hora para habilitar la pantalla de confirmación.</span>
                 </div>
               </div>
             </motion.div>
@@ -394,7 +410,7 @@ export default function PublicBookingAgendaStep() {
           >
             <Plus size={15} />
             {!allowCompanions
-              ? 'Acompanantes no habilitados'
+              ? 'Acompañantes no habilitados'
               : canAddCompanionBlock
                 ? 'Agregar integrante'
                 : 'Limite de integrantes alcanzado'}

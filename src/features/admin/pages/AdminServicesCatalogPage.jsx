@@ -1,6 +1,6 @@
 ﻿// src/features/admin/pages/AdminServicesCatalogPage.jsx
-// A3 â€” Pantalla CRUD de catÃ¡logo de servicios (Admin).
-// LÃ³gica de branchIds: 1 => auto, 2+ => selector por nombre, 0 => dropdown de todas.
+// A3 â€” Pantalla CRUD de catálogo de servicios (Admin).
+// Lógica de branchIds: 1 => auto, 2+ => selector por nombre, 0 => dropdown de todas.
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -147,7 +147,7 @@ const SERVICE_GROUP_FILTER_LABELS = {
 };
 
 function quickFilterButtonClass(isActive) {
-    // AM: Estilo consistente con PERSONAS para que filtros activos sean evidentes en escritorio y mÃ³vil.
+    // AM: Estilo consistente con PERSONAS para que filtros activos sean evidentes en escritorio y móvil.
     return isActive
         ? 'rounded-full border-[var(--mf-accent)] bg-[var(--mf-accent)] text-[var(--mf-accent-text)] shadow-[var(--mf-shadow-accent)]'
         : 'rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_54%,transparent)] text-[var(--mf-text)] hover:border-[var(--mf-accent)]/60';
@@ -162,16 +162,16 @@ function ServicioForm({ values, onChange }) {
                     id="f-nombre"
                     value={values.nombre_servicio}
                     onChange={(e) => onChange('nombre_servicio', e.target.value)}
-                    placeholder="Ej. Corte clÃ¡sico"
+                    placeholder="Ej. Corte clásico"
                 />
             </div>
             <div className="flex flex-col gap-1">
-                <Label htmlFor="f-desc">DescripciÃ³n</Label>
+                <Label htmlFor="f-desc">Descripción</Label>
                 <Input
                     id="f-desc"
                     value={values.descripcion}
                     onChange={(e) => onChange('descripcion', e.target.value)}
-                    placeholder="DescripciÃ³n opcional"
+                    placeholder="Descripción opcional"
                 />
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -204,7 +204,7 @@ function ServicioForm({ values, onChange }) {
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1">
-                    <Label htmlFor="f-dur">DuraciÃ³n (min) *</Label>
+                    <Label htmlFor="f-dur">Duración (min) *</Label>
                     <Input
                         id="f-dur"
                         type="number"
@@ -266,7 +266,7 @@ function ServicioForm({ values, onChange }) {
 function validateForm(values) {
     if (!values.nombre_servicio.trim()) return 'El nombre del servicio es requerido.';
     const dur = parseInt(values.duracion_min, 10);
-    if (isNaN(dur) || dur < 1) return 'La duraciÃ³n debe ser al menos 1 minuto.';
+    if (isNaN(dur) || dur < 1) return 'La Duración debe ser al menos 1 minuto.';
     const buf = parseInt(values.buffer_min, 10);
     if (isNaN(buf) || buf < 0) return 'El buffer no puede ser negativo.';
     const precio = parseFloat(values.precio_hnl);
@@ -329,7 +329,7 @@ export default function AdminServicesCatalogPage() {
     const isSuperAdmin = Array.isArray(roles) && roles.includes('super_admin');
     const notifications = useNotifications();
 
-    // Sucursal activa segÃºn reglas
+    // Sucursal activa según reglas
     const [sucursal, setSucursal] = useState(branchIds.length === 1 ? branchIds[0] : '');
     const [allBranches, setAllBranches] = useState([]);
     const [loadingBranches, setLoadingBranches] = useState(false);
@@ -706,7 +706,7 @@ export default function AdminServicesCatalogPage() {
     const actionsLockedByBranch = !sucursal && availableBranches.length > 1;
     const titleSubtitle = !sucursal && availableBranches.length > 1
         ? 'Selecciona una sucursal para crear, editar o cambiar estado de servicios.'
-        : 'Gestiona servicios por sucursal con configuracion operativa.';
+        : 'Gestiona servicios por sucursal con configuración operativa.';
 
     // â”€â”€ Vista Cards de servicios â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function ServicioCards() {
@@ -1003,7 +1003,7 @@ export default function AdminServicesCatalogPage() {
                             sections={[
                                 {
                                     id: 'operativo',
-                                    title: 'Configuracion operativa',
+                                    title: 'Configuración operativa',
                                     icon: <Tags size={14} />,
                                     fields: [
                                         { label: 'Grupo', value: resolveGrupoLabel(detailTarget.grupo_catalogo) },

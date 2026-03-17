@@ -97,7 +97,7 @@ function areServiceIdsEqual(left, right) {
 }
 
 function normalizeBookingBlock(block, index) {
-  const fallbackAlias = index === 0 ? 'Titular' : `Acompanante ${index}`;
+  const fallbackAlias = index === 0 ? 'Titular' : `Acompañante ${index}`;
   const nextServiceIds = Array.isArray(block?.serviceIds)
     ? Array.from(new Set(block.serviceIds.map((id) => String(id || '').trim()).filter(Boolean)))
     : [];
@@ -281,7 +281,7 @@ export default function AdminCitasPreviewPage() {
         return {
           ...block,
           index,
-          alias: block.alias || (index === 0 ? 'Titular' : `Acompanante ${index}`),
+          alias: block.alias || (index === 0 ? 'Titular' : `Acompañante ${index}`),
           barbero: barbersById.get(block.idBarbero) || null,
           selectedServices: blockServices,
           total_hnl: blockTotal,
@@ -882,7 +882,7 @@ export default function AdminCitasPreviewPage() {
       const companionNumber = source.length;
       const inheritedBarberId = source[effectiveActiveBlockIndex]?.idBarbero || source[0]?.idBarbero || '';
       const nextBlock = createBookingBlock({
-        alias: `Acompanante ${companionNumber}`,
+        alias: `Acompañante ${companionNumber}`,
         idBarbero: inheritedBarberId,
       });
       const nextBlocks = [...source, nextBlock];

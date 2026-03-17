@@ -103,7 +103,7 @@ function areServiceIdsEqual(left, right) {
 }
 
 function normalizeBookingBlock(block, index) {
-  const fallbackAlias = index === 0 ? 'Titular' : `Acompanante ${index}`;
+  const fallbackAlias = index === 0 ? 'Titular' : `Acompañante ${index}`;
   const nextServiceIds = Array.isArray(block?.serviceIds)
     ? Array.from(new Set(block.serviceIds.map((id) => String(id || '').trim()).filter(Boolean)))
     : [];
@@ -290,7 +290,7 @@ export default function PublicBookingFlow() {
         return {
           ...block,
           index,
-          alias: block.alias || (index === 0 ? 'Titular' : `Acompanante ${index}`),
+          alias: block.alias || (index === 0 ? 'Titular' : `Acompañante ${index}`),
           barbero: barbersById.get(block.idBarbero) || null,
           selectedServices: blockServices,
           total_hnl: blockTotal,
@@ -889,10 +889,12 @@ export default function PublicBookingFlow() {
       const source = prev.length > 0 ? prev : [createBookingBlock({ alias: 'Titular' })];
       const companionNumber = source.length;
       const inheritedBarberId = source[effectiveActiveBlockIndex]?.idBarbero || source[0]?.idBarbero || '';
+      const inheritedDate = source[0]?.selectedDate || '';
       const nextBlock = createBookingBlock({
-        alias: `Acompanante ${companionNumber}`,
+        alias: `Acompañante ${companionNumber}`,
         idBarbero: inheritedBarberId,
       });
+      nextBlock.selectedDate = inheritedDate;
       const nextBlocks = [...source, nextBlock];
       setActiveBlockIndex(nextBlocks.length - 1);
       return nextBlocks;
@@ -989,13 +991,35 @@ export default function PublicBookingFlow() {
 
   const onSelectDay = useCallback((dateKey, enabled) => {
     if (!enabled || dateKey < minBookingDateKey) return;
-    updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
-      ...currentBlock,
-      selectedDate: dateKey,
-      selectedTime: '',
-    }));
+
+    if (effectiveActiveBlockIndex > 0) {
+      return;
+    }
+
+    setBookingBlocks((prev) => {
+      const currentBlock = prev[effectiveActiveBlockIndex];
+      if (!currentBlock) return prev;
+      
+      const nextBlocks = [...prev];
+      nextBlocks[effectiveActiveBlockIndex] = normalizeBookingBlock(
+        { ...currentBlock, selectedDate: dateKey, selectedTime: '' },
+        effectiveActiveBlockIndex
+      );
+
+      if (effectiveActiveBlockIndex === 0) {
+        for (let i = 1; i < nextBlocks.length; i++) {
+          nextBlocks[i] = normalizeBookingBlock(
+            { ...nextBlocks[i], selectedDate: dateKey, selectedTime: '' },
+            i
+          );
+        }
+      }
+
+      return nextBlocks;
+    });
+
     clearSlotConflict();
-  }, [clearSlotConflict, effectiveActiveBlockIndex, minBookingDateKey, updateBlockAtIndex]);
+  }, [clearSlotConflict, effectiveActiveBlockIndex, minBookingDateKey]);
 
   const onSelectTime = useCallback(async (time, enabled) => {
     if (!enabled) return;
