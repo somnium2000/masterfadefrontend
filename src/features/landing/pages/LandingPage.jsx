@@ -162,7 +162,7 @@ export default function LandingPage() {
             <div className="flex flex-col gap-3">
               <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} delay={0.7} />
               <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/servicios')} delay={0.82} />
-              <SecondaryCta icon={Crown} label="Planes de Membresía VIP" delay={0.94} disabled />
+              <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} delay={0.94} />
             </div>
           </div>
         </section>
@@ -210,7 +210,7 @@ export default function LandingPage() {
             <div className="w-full space-y-3">
               <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} delay={0.7} />
               <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/servicios')} delay={0.82} />
-              <SecondaryCta icon={Crown} label="Planes de Membresía VIP" delay={0.94} disabled />
+              <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} delay={0.94} />
             </div>
 
             <motion.div

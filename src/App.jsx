@@ -2,10 +2,12 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import ForgotPasswordPage from './features/auth/pages/ForgotPasswordPage.jsx';
 import LoginPage from './features/auth/pages/LoginPage.jsx';
+import RegisterPage from './features/auth/pages/RegisterPage.jsx';
 import ResetPasswordPage from './features/auth/pages/ResetPasswordPage.jsx';
 import HomeRedirectPage from './features/home/pages/HomeRedirectPage.jsx';
 import { ROLE_ROUTE_ALLOWED_ROLES } from './features/home/lib/roleRouting.js';
 import LandingPage from './features/landing/pages/LandingPage.jsx';
+import MembershipPlansPage from './features/public/pages/MembershipPlansPage.jsx';
 import ServicesPage from './features/public/pages/ServicesPage.jsx';
 import PublicBookingFlow from './features/public/booking/PublicBookingFlow.jsx';
 import PublicBookingBarberosStep from './features/public/booking/PublicBookingBarberosStep.jsx';
@@ -15,6 +17,8 @@ import UnauthorizedPage from './features/unauthorized/pages/UnauthorizedPage.jsx
 import ProtectedRoute from './routes/ProtectedRoute.jsx';
 import AdminServicesCatalogPage from './features/admin/pages/AdminServicesCatalogPage.jsx';
 import AdminPackagesCatalogPage from './features/admin/pages/AdminPackagesCatalogPage.jsx';
+import AdminPlansCatalogPage from './features/admin/pages/AdminPlansCatalogPage.jsx';
+import BarberoHomePage from './features/barbero/pages/BarberoHomePage.jsx';
 import ClienteHomePage from './features/cliente/pages/ClienteHomePage.jsx';
 import AdminEmpleadosPage from './features/admin/pages/AdminEmpleadosPage.jsx';
 import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx';
@@ -34,6 +38,7 @@ function App() {
       <Route path="/" element={<LandingPage />} />
 
       <Route path="/login" element={isAuthenticated ? <Navigate to="/home" replace /> : <LoginPage />} />
+      <Route path="/register" element={isAuthenticated ? <Navigate to="/home" replace /> : <RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/servicios" element={<ServicesPage />} />
@@ -43,6 +48,7 @@ function App() {
         <Route path="agenda" element={<PublicBookingAgendaStep />} />
         <Route path="confirmar" element={<PublicBookingConfirmStep />} />
       </Route>
+      <Route path="/membresias-vip" element={<MembershipPlansPage />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
       <Route
@@ -72,7 +78,7 @@ function App() {
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
         <Route path="catalog/paquetes" element={<AdminPackagesCatalogPage />} />
-        <Route path="catalog/planes" element={<UnderConstructionPage title="Planes" />} />
+        <Route path="catalog/planes" element={<AdminPlansCatalogPage />} />
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
         {/* Citas */}
@@ -113,7 +119,7 @@ function App() {
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
         <Route path="catalog/paquetes" element={<AdminPackagesCatalogPage />} />
-        <Route path="catalog/planes" element={<UnderConstructionPage title="Planes" />} />
+        <Route path="catalog/planes" element={<AdminPlansCatalogPage />} />
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
         {/* Citas */}

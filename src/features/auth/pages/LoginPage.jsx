@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
-import { ArrowLeft } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
@@ -8,11 +8,42 @@ import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import './LoginPage.css';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function getSafeNextPath(rawPath) {
+  const value = String(rawPath || '').trim();
+  if (!value.startsWith('/')) return '';
+  if (value.startsWith('//')) return '';
+  return value;
+}
+
+function normalizeBranchId(rawBranchId) {
+  const value = String(rawBranchId || '').trim();
+  return UUID_REGEX.test(value) ? value : '';
+}
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { login } = useAuth();
   const notifications = useNotifications();
+
+  const queryParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const nextPath = useMemo(() => getSafeNextPath(queryParams.get('next')), [queryParams]);
+  const intent = useMemo(() => String(queryParams.get('intent') || '').trim().toLowerCase(), [queryParams]);
+  const branchId = useMemo(() => normalizeBranchId(queryParams.get('id_sucursal')), [queryParams]);
+  const planId = useMemo(() => String(queryParams.get('id_plan') || '').trim(), [queryParams]);
+
+  const registerHref = useMemo(() => {
+    const params = new URLSearchParams();
+    // AM: Conserva intencion de retorno cuando se abre login desde seleccion de plan.
+    if (nextPath) params.set('next', nextPath);
+    if (intent) params.set('intent', intent);
+    if (branchId) params.set('id_sucursal', branchId);
+    if (planId) params.set('id_plan', planId);
+    const query = params.toString();
+    return query ? `/register?${query}` : '/register';
+  }, [nextPath, intent, branchId, planId]);
 
   const [correo, setCorreo] = useState('');
   const [contrasena, setContrasena] = useState('');
@@ -61,7 +92,7 @@ export default function LoginPage() {
     }
 
     notifications.success('Sesion iniciada correctamente.', { dedupeKey: 'auth-login-ok' });
-    navigate('/home', { replace: true });
+    navigate(nextPath || '/home', { replace: true });
   }
 
   return (
@@ -97,6 +128,12 @@ export default function LoginPage() {
               <p className="mf-login-subtitle">
                 Ingresa con tu correo y contrasena para continuar a tu experiencia MASTERFADE.
               </p>
+              {intent === 'seleccionar_plan' ? (
+                <div className="mf-login-intent-note">
+                  <CheckCircle2 size={14} strokeWidth={1.8} />
+                  <span>Inicia sesion o registrate para continuar con tu plan VIP.</span>
+                </div>
+              ) : null}
             </div>
 
             <form className="mf-login-form" onSubmit={onSubmit}>
@@ -154,16 +191,17 @@ export default function LoginPage() {
                 </button>
               </div>
 
-              <div className="mf-login-footer">
-                <span>El acceso te llevara directamente a tu panel en /home.</span>
-                <Link className="mf-link" to="/">
-                  Ir al landing
+              <div className="mf-register-inline">
+                <span>No tienes cuenta?</span>
+                <Link className="mf-link" to={registerHref}>
+                  Registrarte
                 </Link>
               </div>
+
             </form>
           </motion.div>
 
-          <div className="mf-login-copy">MASTERFADE · Honduras</div>
+          <div className="mf-login-copy">MASTERFADE - Honduras</div>
         </div>
       </div>
     </div>

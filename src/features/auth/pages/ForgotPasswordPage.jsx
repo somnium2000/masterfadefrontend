@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import './LoginPage.css';
@@ -12,14 +12,14 @@ export default function ForgotPasswordPage() {
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
 
-  // âœ… Meta de rate limit (por correo)
+  // ✅ Meta de rate limit (por correo)
   // { max, remaining, windowSeconds, resetInSeconds, blockSeconds }
   const [rateInfo, setRateInfo] = useState(null);
 
-  // âœ… Contador de bloqueo (segundos)
+  // ✅ Contador de bloqueo (segundos)
   const [retryAfter, setRetryAfter] = useState(0);
 
-  // âœ… countdown automÃ¡tico cuando estÃ¡ bloqueado
+  // ✅ countdown automático cuando está bloqueado
   useEffect(() => {
     if (retryAfter <= 0) return;
 
@@ -111,7 +111,7 @@ export default function ForgotPasswordPage() {
 
         <div className="mf-login-card">
           <div className="mf-login-card-header">
-            <h1 className="mf-login-title">Recuperar contraseÃ±a</h1>
+            <h1 className="mf-login-title">Recuperar contraseña</h1>
           </div>
 
           <form className="mf-login-form" onSubmit={onSubmit}>
@@ -135,7 +135,7 @@ export default function ForgotPasswordPage() {
             {error ? <div className="mf-error">{error}</div> : null}
             {msg ? <div className="mf-success">{msg}</div> : null}
 
-            {/* âœ… VisualizaciÃ³n del rate limit */}
+            {/* ✅ Visualización del rate limit */}
             {rateInfo ? (
               <div className="mf-help">
                 {retryAfter > 0 ? (
@@ -163,12 +163,12 @@ export default function ForgotPasswordPage() {
                 disabled={loading || retryAfter > 0}
                 title={retryAfter > 0 ? 'Bloqueado temporalmente por demasiados intentos' : 'Enviar enlace'}
               >
-                {loading ? 'Enviandoâ€¦' : retryAfter > 0 ? 'Bloqueado' : 'Enviar enlace'}
+                {loading ? 'Enviando…' : retryAfter > 0 ? 'Bloqueado' : 'Enviar enlace'}
               </button>
             </div>
 
             <div className="mf-help">
-              MantÃ©n tu front corriendo mientras abres el enlace del correo.
+              Mantén tu front corriendo mientras abres el enlace del correo.
             </div>
           </form>
         </div>
