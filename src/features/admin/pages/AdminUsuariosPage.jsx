@@ -289,7 +289,7 @@ export default function AdminUsuariosPage() {
         const response = await sendAdminPersonaUserPasswordSetup(userId, { marcar_pendiente_password: true });
         const payload = response?.data ?? response;
         if (!payload?.setup_password?.enviado) {
-          const errorMessage = payload?.setup_password?.mensaje || 'No se pudo enviar el mensaje de configuracion.';
+          const errorMessage = payload?.setup_password?.mensaje || 'No se pudo enviar el mensaje de configuración.';
           const error = new Error(errorMessage);
           // AM: Normaliza error de servicio SMTP para mantener feedback consistente en UI.
           error.data = { error: { message: errorMessage } };
@@ -299,7 +299,7 @@ export default function AdminUsuariosPage() {
       },
       {
         successMessage: 'Mensaje de nueva contrasena enviado.',
-        loadingMessage: 'Enviando mensaje de configuracion...',
+        loadingMessage: 'Enviando mensaje de configuración...',
         loadingDedupeKey: 'personas-usuarios-resend-loading',
       }
     );

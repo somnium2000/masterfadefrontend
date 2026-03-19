@@ -91,7 +91,7 @@ function buildNavModules(basePath) {
         },
         {
             id: 'superpuntos',
-            label: 'Superpuntos',
+            label: 'Masterpuntos',
             icon: Star,
             path: `${basePath}/superpuntos`,
             subItems: null,

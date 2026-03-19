@@ -267,7 +267,7 @@ export default function ServicesPage() {
   }
 
   function handleAgendar() {
-    navigate(isAuthenticated ? '/home' : '/login');
+    navigate('/agendar/barberos');
   }
 
   const barberServices = services.filter((item) => item.grupo_catalogo === 'barberia');
@@ -309,10 +309,6 @@ export default function ServicesPage() {
             <h1 className="mf-font-display mt-4 text-[42px] leading-[0.92] text-[var(--mf-text)]">
               Servicios y experiencias premium
             </h1>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--mf-text-2)]">
-              Explora barberia, servicios informativos y paquetes. El sistema conserva el tema premium y deja listo el
-              catalogo para la agenda de fases posteriores.
-            </p>
           </div>
 
           {branches.length > 1 ? (

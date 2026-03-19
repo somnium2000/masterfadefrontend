@@ -11,6 +11,10 @@ import { ROLE_ROUTE_ALLOWED_ROLES } from './features/home/lib/roleRouting.js';
 import LandingPage from './features/landing/pages/LandingPage.jsx';
 import MembershipPlansPage from './features/public/pages/MembershipPlansPage.jsx';
 import ServicesPage from './features/public/pages/ServicesPage.jsx';
+import PublicBookingFlow from './features/public/booking/PublicBookingFlow.jsx';
+import PublicBookingBarberosStep from './features/public/booking/PublicBookingBarberosStep.jsx';
+import PublicBookingAgendaStep from './features/public/booking/PublicBookingAgendaStep.jsx';
+import PublicBookingConfirmStep from './features/public/booking/PublicBookingConfirmStep.jsx';
 import UnauthorizedPage from './features/unauthorized/pages/UnauthorizedPage.jsx';
 import ProtectedRoute from './routes/ProtectedRoute.jsx';
 import AdminServicesCatalogPage from './features/admin/pages/AdminServicesCatalogPage.jsx';
@@ -18,7 +22,6 @@ import AdminPackagesCatalogPage from './features/admin/pages/AdminPackagesCatalo
 import AdminPlansCatalogPage from './features/admin/pages/AdminPlansCatalogPage.jsx';
 import BarberoHomePage from './features/barbero/pages/BarberoHomePage.jsx';
 import ClienteHomePage from './features/cliente/pages/ClienteHomePage.jsx';
-import SuperAdminHomePage from './features/admin/pages/SuperAdminHomePage.jsx';
 import AdminEmpleadosPage from './features/admin/pages/AdminEmpleadosPage.jsx';
 import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx';
 import AdminClientesPage from './features/admin/pages/AdminClientesPage.jsx';
@@ -26,6 +29,8 @@ import AdminUsuariosPage from './features/admin/pages/AdminUsuariosPage.jsx';
 import AdminConfiguracionNotificacionesPage from './features/admin/pages/AdminConfiguracionNotificacionesPage.jsx';
 import AdminConfiguracionPerfilPage from './features/admin/pages/AdminConfiguracionPerfilPage.jsx';
 import AdminConfiguracionSpamPage from './features/admin/pages/AdminConfiguracionSpamPage.jsx';
+import AdminCitasPage from './features/admin/pages/AdminCitasPage.jsx';
+import AdminCitasPreviewPage from './features/admin/pages/AdminCitasPreviewPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
@@ -43,6 +48,12 @@ function App() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/servicios" element={<ServicesPage />} />
+      <Route path="/agendar" element={<RouteErrorBoundary><PublicBookingFlow /></RouteErrorBoundary>}>
+        <Route index element={<Navigate to="barberos" replace />} />
+        <Route path="barberos" element={<PublicBookingBarberosStep />} />
+        <Route path="agenda" element={<PublicBookingAgendaStep />} />
+        <Route path="confirmar" element={<PublicBookingConfirmStep />} />
+      </Route>
       <Route path="/membresias-vip" element={<MembershipPlansPage />} />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
@@ -64,7 +75,7 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<SuperAdminHomePage />} />
+        <Route index element={<UnderConstructionPage title="Inicio" />} />
         <Route path="kpis" element={<UnderConstructionPage title="KPIs" subtitle="Indicadores clave de rendimiento" />} />
         {/* Personas */}
         <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
@@ -77,8 +88,8 @@ function App() {
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
         {/* Citas */}
-        <Route path="citas/preview" element={<UnderConstructionPage title="Vista Previa de Citas" />} />
-        <Route path="citas/config" element={<UnderConstructionPage title="Configuración de Citas" />} />
+        <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPreviewPage /></RouteErrorBoundary>} />
+        <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
         <Route path="seguridad/logs" element={<UnderConstructionPage title="Logs del Sistema" />} />
         <Route path="seguridad/sesiones" element={<UnderConstructionPage title="Sesiones Activas" />} />
@@ -88,8 +99,8 @@ function App() {
         <Route path="reportes/ingresos" element={<UnderConstructionPage title="Reporte de Ingresos" />} />
         <Route path="reportes/barberos" element={<UnderConstructionPage title="Productividad Barberos" />} />
         <Route path="reportes/concurrencia" element={<UnderConstructionPage title="Concurrencia de Clientes" />} />
-        {/* Superpuntos */}
-        <Route path="superpuntos" element={<UnderConstructionPage title="Superpuntos" />} />
+        {/* Masterpuntos */}
+        <Route path="superpuntos" element={<UnderConstructionPage title="Masterpuntos" />} />
         {/* Configuración */}
         <Route path="configuracion/notificaciones" element={<RouteErrorBoundary><AdminConfiguracionNotificacionesPage /></RouteErrorBoundary>} />
         <Route path="configuracion/perfil" element={<RouteErrorBoundary><AdminConfiguracionPerfilPage /></RouteErrorBoundary>} />
@@ -105,7 +116,7 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<HomePage pageRole="admin" />} />
+        <Route index element={<UnderConstructionPage title="Inicio" />} />
         <Route path="kpis" element={<UnderConstructionPage title="KPIs" />} />
         {/* Personas */}
         <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
@@ -118,8 +129,8 @@ function App() {
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
         {/* Citas */}
-        <Route path="citas/preview" element={<UnderConstructionPage title="Vista Previa de Citas" />} />
-        <Route path="citas/config" element={<UnderConstructionPage title="Configuración de Citas" />} />
+        <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPreviewPage /></RouteErrorBoundary>} />
+        <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
         <Route path="seguridad/logs" element={<UnderConstructionPage title="Logs del Sistema" />} />
         <Route path="seguridad/sesiones" element={<UnderConstructionPage title="Sesiones Activas" />} />
@@ -129,8 +140,8 @@ function App() {
         <Route path="reportes/ingresos" element={<UnderConstructionPage title="Reporte de Ingresos" />} />
         <Route path="reportes/barberos" element={<UnderConstructionPage title="Productividad Barberos" />} />
         <Route path="reportes/concurrencia" element={<UnderConstructionPage title="Concurrencia de Clientes" />} />
-        {/* Superpuntos */}
-        <Route path="superpuntos" element={<UnderConstructionPage title="Superpuntos" />} />
+        {/* Masterpuntos */}
+        <Route path="superpuntos" element={<UnderConstructionPage title="Masterpuntos" />} />
         {/* Configuración */}
         <Route path="configuracion/notificaciones" element={<UnderConstructionPage title="Notificaciones" />} />
         <Route path="configuracion/perfil" element={<UnderConstructionPage title="Perfil" />} />
@@ -146,7 +157,7 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<BarberoHomePage />} />
+        <Route index element={<UnderConstructionPage title="Inicio" />} />
       </Route>
 
       {/* ── Cliente ─────────────────────────────────────────────────── */}
@@ -168,3 +179,4 @@ function App() {
 }
 
 export default App;
+
