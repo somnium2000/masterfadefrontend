@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { http, setTokenGetter } from '../services/httpClient.js';
+import { supabase } from '../config/supabaseClient.js';
 
 const AuthContext = createContext(null);
 
@@ -176,20 +177,21 @@ export function AuthProvider({ children }) {
         return { ok: false, message: response?.error?.message || response?.message || 'Credenciales invalidas.' };
       }
 
+      const resolvedToken = String(payload.token || '').trim();
       shouldPersistRef.current = Boolean(remember);
-      tokenRef.current = payload.token;
-      setToken(payload.token);
+      tokenRef.current = resolvedToken;
+      setToken(resolvedToken);
       setIsHydrating(true);
       setIsHydrated(false);
 
       if (shouldPersistRef.current) {
-        localStorage.setItem(LS_TOKEN_KEY, payload.token);
+        localStorage.setItem(LS_TOKEN_KEY, resolvedToken);
       } else {
         localStorage.removeItem(LS_TOKEN_KEY);
         localStorage.removeItem(LS_USER_KEY);
       }
 
-      const hydrated = await hydrateSession({ tokenOverride: payload.token });
+      const hydrated = await hydrateSession({ tokenOverride: resolvedToken });
 
       if (!hydrated.ok) {
         return { ok: false, message: hydrated.message || 'La sesion no se pudo completar.' };
@@ -205,8 +207,39 @@ export function AuthProvider({ children }) {
     }
   }, [clearSessionState, hydrateSession]);
 
+  const completeExchangeLogin = useCallback(async (appToken, options = {}) => {
+    const resolvedToken = String(appToken || '').trim();
+    if (!resolvedToken) {
+      return { ok: false, message: 'Token de aplicacion invalido para completar sesion.' };
+    }
+
+    shouldPersistRef.current = options.remember !== false;
+    tokenRef.current = resolvedToken;
+    setToken(resolvedToken);
+    setIsHydrating(true);
+    setIsHydrated(false);
+
+    if (shouldPersistRef.current) {
+      localStorage.setItem(LS_TOKEN_KEY, resolvedToken);
+    } else {
+      localStorage.removeItem(LS_TOKEN_KEY);
+      localStorage.removeItem(LS_USER_KEY);
+    }
+
+    const hydrated = await hydrateSession({ tokenOverride: resolvedToken });
+    if (!hydrated.ok) {
+      return { ok: false, message: hydrated.message || 'No se pudo completar la sesion social.' };
+    }
+
+    return { ok: true };
+  }, [hydrateSession]);
+
   const logout = useCallback(() => {
     clearSessionState();
+    if (supabase) {
+      // AM: Limpieza defensiva de sesion social para evitar efectos residuales en callbacks futuros.
+      void supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+    }
   }, [clearSessionState]);
 
   useEffect(() => {
@@ -229,10 +262,25 @@ export function AuthProvider({ children }) {
       isHydrating,
       isHydrated,
       login,
+      completeExchangeLogin,
       hydrateSession,
       logout,
     }),
-    [token, user, roles, branchIds, empresaId, empleadoId, clienteId, isHydrating, isHydrated, login, hydrateSession, logout]
+    [
+      token,
+      user,
+      roles,
+      branchIds,
+      empresaId,
+      empleadoId,
+      clienteId,
+      isHydrating,
+      isHydrated,
+      login,
+      completeExchangeLogin,
+      hydrateSession,
+      logout,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
