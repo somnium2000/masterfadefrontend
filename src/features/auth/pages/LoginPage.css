@@ -276,6 +276,46 @@
     opacity 0.2s ease;
 }
 
+.mf-btn-google {
+  width: 100%;
+  margin-bottom: 14px;
+  background: color-mix(in srgb, var(--mf-card) 76%, transparent);
+  border: 1.5px solid var(--mf-btn-border);
+  color: var(--mf-text);
+  box-shadow: none;
+}
+
+.mf-btn-google:hover:not(:disabled) {
+  box-shadow: var(--mf-shadow-soft);
+}
+
+.mf-login-divider {
+  margin: 2px 0 16px;
+  text-align: center;
+  position: relative;
+}
+
+.mf-login-divider::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px solid var(--mf-nav-border);
+}
+
+.mf-login-divider span {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  padding: 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mf-text-2);
+  background: color-mix(in srgb, var(--mf-card) 92%, transparent);
+}
+
 .mf-btn:hover:not(:disabled) {
   transform: translateY(-1px) scale(1.01);
   box-shadow: var(--mf-shadow-accent-strong);

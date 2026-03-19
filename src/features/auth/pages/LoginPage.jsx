@@ -6,6 +6,7 @@ import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import { supabase } from '../../../config/supabaseClient.js';
 import './LoginPage.css';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -49,6 +50,7 @@ export default function LoginPage() {
   const [contrasena, setContrasena] = useState('');
   const [remember, setRemember] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingGoogle, setLoadingGoogle] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -95,6 +97,35 @@ export default function LoginPage() {
     navigate(nextPath || '/home', { replace: true });
   }
 
+  async function onContinueWithGoogle() {
+    setError('');
+
+    if (!supabase) {
+      const message = 'Google login no esta disponible: falta configurar Supabase en frontend.';
+      setError(message);
+      notifications.error(message, { dedupeKey: 'auth-google-supabase-missing' });
+      return;
+    }
+
+    try {
+      setLoadingGoogle(true);
+      const redirectTo = `${window.location.origin}/auth/callback`;
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo },
+      });
+
+      if (oauthError) {
+        throw oauthError;
+      }
+    } catch (oauthError) {
+      const message = oauthError?.message || 'No se pudo iniciar autenticacion con Google.';
+      setError(message);
+      notifications.error(message, { dedupeKey: 'auth-google-oauth-error' });
+      setLoadingGoogle(false);
+    }
+  }
+
   return (
     <div className="mf-login-page mf-page-gradient">
       <div className="mf-login-shell mf-mobile-frame mf-screen-pad mf-safe-top">
@@ -137,6 +168,19 @@ export default function LoginPage() {
             </div>
 
             <form className="mf-login-form" onSubmit={onSubmit}>
+              <button
+                className="mf-btn mf-btn-google"
+                type="button"
+                onClick={onContinueWithGoogle}
+                disabled={loading || loadingGoogle}
+              >
+                {loadingGoogle ? 'Redirigiendo a Google...' : 'Continuar con Google'}
+              </button>
+
+              <div className="mf-login-divider" role="separator" aria-label="O continuar con correo">
+                <span>o continuar con correo</span>
+              </div>
+
               <div className="mf-form-group">
                 <label className="mf-label" htmlFor="correo_login">
                   Correo

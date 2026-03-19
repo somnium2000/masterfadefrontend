@@ -4,6 +4,8 @@ import ForgotPasswordPage from './features/auth/pages/ForgotPasswordPage.jsx';
 import LoginPage from './features/auth/pages/LoginPage.jsx';
 import RegisterPage from './features/auth/pages/RegisterPage.jsx';
 import ResetPasswordPage from './features/auth/pages/ResetPasswordPage.jsx';
+import AuthCallbackPage from './features/auth/pages/AuthCallbackPage.jsx';
+import HomePage from './features/home/pages/HomePage.jsx';
 import HomeRedirectPage from './features/home/pages/HomeRedirectPage.jsx';
 import { ROLE_ROUTE_ALLOWED_ROLES } from './features/home/lib/roleRouting.js';
 import LandingPage from './features/landing/pages/LandingPage.jsx';
@@ -24,6 +26,9 @@ import AdminEmpleadosPage from './features/admin/pages/AdminEmpleadosPage.jsx';
 import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx';
 import AdminClientesPage from './features/admin/pages/AdminClientesPage.jsx';
 import AdminUsuariosPage from './features/admin/pages/AdminUsuariosPage.jsx';
+import AdminConfiguracionNotificacionesPage from './features/admin/pages/AdminConfiguracionNotificacionesPage.jsx';
+import AdminConfiguracionPerfilPage from './features/admin/pages/AdminConfiguracionPerfilPage.jsx';
+import AdminConfiguracionSpamPage from './features/admin/pages/AdminConfiguracionSpamPage.jsx';
 import AdminCitasPage from './features/admin/pages/AdminCitasPage.jsx';
 import AdminCitasPreviewPage from './features/admin/pages/AdminCitasPreviewPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
@@ -38,6 +43,7 @@ function App() {
       <Route path="/" element={<LandingPage />} />
 
       <Route path="/login" element={isAuthenticated ? <Navigate to="/home" replace /> : <LoginPage />} />
+      <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route path="/register" element={isAuthenticated ? <Navigate to="/home" replace /> : <RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -96,9 +102,9 @@ function App() {
         {/* Masterpuntos */}
         <Route path="superpuntos" element={<UnderConstructionPage title="Masterpuntos" />} />
         {/* Configuración */}
-        <Route path="configuracion/notificaciones" element={<UnderConstructionPage title="Notificaciones" />} />
-        <Route path="configuracion/perfil" element={<UnderConstructionPage title="Perfil" />} />
-        <Route path="configuracion/spam" element={<UnderConstructionPage title="Spam" />} />
+        <Route path="configuracion/notificaciones" element={<RouteErrorBoundary><AdminConfiguracionNotificacionesPage /></RouteErrorBoundary>} />
+        <Route path="configuracion/perfil" element={<RouteErrorBoundary><AdminConfiguracionPerfilPage /></RouteErrorBoundary>} />
+        <Route path="configuracion/spam" element={<RouteErrorBoundary><AdminConfiguracionSpamPage /></RouteErrorBoundary>} />
       </Route>
 
       {/* ── Admin ────────────────────────────────────────────────────── */}
