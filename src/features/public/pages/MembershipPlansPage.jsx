@@ -111,7 +111,9 @@ export default function MembershipPlansPage() {
           const branchResult = await listPublicCatalogBranches();
           if (!isMountedRef.current) return;
 
-          const nextBranches = Array.isArray(branchResult?.branches) ? branchResult.branches : [];
+          const nextBranches = Array.isArray(branchResult?.branches)
+            ? branchResult.branches.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
+            : [];
           setBranches(nextBranches);
 
           const initialBranchId = nextBranches[0]?.id_sucursal || "";

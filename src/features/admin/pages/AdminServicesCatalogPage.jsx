@@ -113,11 +113,6 @@ const FORM_DEFAULTS = {
     orden_visual: '100',
 };
 
-const GROUP_OPTIONS = [
-    { value: 'barberia', label: 'Barberia' },
-    { value: 'otros', label: 'Otros servicios' },
-];
-
 const SERVICES_FILTER_DEFAULTS = {
     estado: 'all',
     visibilidad: 'all',
@@ -165,43 +160,6 @@ function ServicioForm({ values, onChange }) {
                     placeholder="Ej. Corte clásico"
                 />
             </div>
-            <div className="flex flex-col gap-1">
-                <Label htmlFor="f-desc">Descripción</Label>
-                <Input
-                    id="f-desc"
-                    value={values.descripcion}
-                    onChange={(e) => onChange('descripcion', e.target.value)}
-                    placeholder="Descripción opcional"
-                />
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="flex flex-col gap-1">
-                    <Label htmlFor="f-grupo">Grupo de catalogo *</Label>
-                    <select
-                        id="f-grupo"
-                        value={values.grupo_catalogo}
-                        onChange={(e) => onChange('grupo_catalogo', e.target.value)}
-                        className="mf-select"
-                    >
-                        {GROUP_OPTIONS.map((groupOption) => (
-                            <option key={groupOption.value} value={groupOption.value}>
-                                {groupOption.label}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-                <div className="flex flex-col gap-1">
-                    <Label htmlFor="f-orden">Orden visual *</Label>
-                    <Input
-                        id="f-orden"
-                        type="number"
-                        min="0"
-                        value={values.orden_visual}
-                        onChange={(e) => onChange('orden_visual', e.target.value)}
-                        placeholder="100"
-                    />
-                </div>
-            </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1">
                     <Label htmlFor="f-dur">Duración (min) *</Label>
@@ -225,27 +183,6 @@ function ServicioForm({ values, onChange }) {
                         placeholder="10"
                     />
                 </div>
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {/* AM: Campos operativos explicitos para evitar reglas hardcodeadas por nombre de servicio. */}
-                <label className="flex items-center justify-between rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2.5 text-sm">
-                    <span className="text-[var(--mf-text)]">Visible en catalogo publico</span>
-                    <input
-                        type="checkbox"
-                        checked={Boolean(values.visible_publico)}
-                        onChange={(e) => onChange('visible_publico', e.target.checked)}
-                        className="h-4 w-4 accent-[var(--mf-accent)]"
-                    />
-                </label>
-                <label className="flex items-center justify-between rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2.5 text-sm">
-                    <span className="text-[var(--mf-text)]">Agendable</span>
-                    <input
-                        type="checkbox"
-                        checked={Boolean(values.agendable)}
-                        onChange={(e) => onChange('agendable', e.target.checked)}
-                        className="h-4 w-4 accent-[var(--mf-accent)]"
-                    />
-                </label>
             </div>
             <div className="flex flex-col gap-1">
                 <Label htmlFor="f-precio">Precio HNL *</Label>
@@ -271,8 +208,6 @@ function validateForm(values) {
     if (isNaN(buf) || buf < 0) return 'El buffer no puede ser negativo.';
     const precio = parseFloat(values.precio_hnl);
     if (isNaN(precio) || precio < 0) return 'El precio no puede ser negativo.';
-    const orden = parseInt(values.orden_visual, 10);
-    if (isNaN(orden) || orden < 0) return 'El orden visual no puede ser negativo.';
     return null;
 }
 
@@ -466,11 +401,14 @@ export default function AdminServicesCatalogPage() {
         let cancelled = false;
         setLoadingBranches(true);
         setBranchLoadError('');
-        listAdminSucursales()
+        listAdminSucursales({ soloActivas: true })
             .then((data) => {
                 if (cancelled) return;
                 const payload = data?.data ?? data;
-                setAllBranches(Array.isArray(payload?.sucursales) ? payload.sucursales : []);
+                const nextBranches = Array.isArray(payload?.sucursales)
+                    ? payload.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
+                    : [];
+                setAllBranches(nextBranches);
             })
             .catch((err) => {
                 if (cancelled) return;
@@ -596,23 +534,25 @@ export default function AdminServicesCatalogPage() {
         setFormLoading(true);
         setFormError('');
 
-        const payload = {
+        const createPayload = {
             nombre_servicio: formValues.nombre_servicio.trim(),
-            descripcion: formValues.descripcion.trim() || undefined,
             duracion_min: parseInt(formValues.duracion_min, 10),
             buffer_min: parseInt(formValues.buffer_min, 10),
             precio_hnl: parseFloat(formValues.precio_hnl),
-            grupo_catalogo: formValues.grupo_catalogo,
-            visible_publico: Boolean(formValues.visible_publico),
-            agendable: Boolean(formValues.agendable),
-            orden_visual: parseInt(formValues.orden_visual, 10),
+            id_sucursal: mutationBranchId,
+        };
+        const editPayload = {
+            nombre_servicio: formValues.nombre_servicio.trim(),
+            duracion_min: parseInt(formValues.duracion_min, 10),
+            buffer_min: parseInt(formValues.buffer_min, 10),
+            precio_hnl: parseFloat(formValues.precio_hnl),
             id_sucursal: mutationBranchId,
         };
 
         try {
             const response = editTarget
-                ? await updateAdminServicio(editTarget.id_servicio ?? editTarget.id, payload)
-                : await createAdminServicio(payload);
+                ? await updateAdminServicio(editTarget.id_servicio ?? editTarget.id, editPayload)
+                : await createAdminServicio(createPayload);
             const result = response?.data ?? response;
             if (editTarget) {
                 notifications.success('Servicio actualizado.', { dedupeKey: 'servicios-save-ok' });

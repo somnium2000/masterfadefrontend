@@ -491,8 +491,10 @@ export default function AdminPlansCatalogPage() {
     setBranchLoadError("");
 
     try {
-      const response = await listAdminSucursales();
-      const nextBranches = Array.isArray(response?.data?.sucursales) ? response.data.sucursales.filter((branch) => branch?.id_sucursal) : [];
+      const response = await listAdminSucursales({ soloActivas: true });
+      const nextBranches = Array.isArray(response?.data?.sucursales)
+        ? response.data.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
+        : [];
       setAllBranches(nextBranches);
 
       if (nextBranches.length === 1) {

@@ -100,7 +100,9 @@ function normalizeDigits(value) {
 
 function toDateTimeIso(dateValue) {
   if (!dateValue) return null;
-  return new Date(`${dateValue}T00:00:00`).toISOString();
+  const normalized = String(dateValue).slice(0, 10);
+  // AM: date-time estable en UTC al mediodia para preservar el dia logico seleccionado.
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? `${normalized}T12:00:00.000Z` : null;
 }
 
 function mapClienteToForm(cliente) {
