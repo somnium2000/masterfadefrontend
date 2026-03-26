@@ -22,7 +22,14 @@ import { useAuth } from '../../../context/AuthContext.jsx';
 import { getPublicCatalog, listPublicCatalogBranches } from '../lib/catalogApi.js';
 import { subscribeCatalogSync } from '../../../lib/catalogSync.js';
 
+function formatPriceHnl(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return null;
+  return `L ${amount.toFixed(2)}`;
+}
+
 function ServiceCard({ item, compact = false }) {
+  const displayPrice = formatPriceHnl(item?.precio_hnl);
   return (
     <motion.article
       data-catalog-card="true"
@@ -47,6 +54,13 @@ function ServiceCard({ item, compact = false }) {
           <p className="mb-4 text-sm leading-6 text-[var(--mf-text-2)]">{item.descripcion}</p>
         ) : null}
 
+        {displayPrice ? (
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--mf-nav-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--mf-text)]">
+            <Tag size={14} strokeWidth={1.8} />
+            <span>{displayPrice}</span>
+          </div>
+        ) : null}
+
         {!compact ? (
           <div className="inline-flex items-center gap-2 rounded-full border border-[var(--mf-nav-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--mf-text-2)]">
             <Clock3 size={14} strokeWidth={1.8} />
@@ -60,6 +74,7 @@ function ServiceCard({ item, compact = false }) {
 
 function PackageCard({ item }) {
   const details = Array.isArray(item.items) ? item.items : [];
+  const displayPrice = formatPriceHnl(item?.precio_hnl);
 
   return (
     <motion.article
@@ -83,6 +98,13 @@ function PackageCard({ item }) {
       <div className="mt-auto pt-4">
         {item.descripcion ? (
           <p className="mb-4 text-sm leading-6 text-[var(--mf-text-2)]">{item.descripcion}</p>
+        ) : null}
+
+        {displayPrice ? (
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--mf-nav-border)] px-3 py-2 text-xs uppercase tracking-[0.14em] text-[var(--mf-text)]">
+            <Tag size={14} strokeWidth={1.8} />
+            <span>{displayPrice}</span>
+          </div>
         ) : null}
 
         <div>
@@ -229,7 +251,9 @@ export default function ServicesPage() {
           const branchResult = await listPublicCatalogBranches();
           if (!isMountedRef.current) return;
 
-          const nextBranches = Array.isArray(branchResult?.branches) ? branchResult.branches : [];
+          const nextBranches = Array.isArray(branchResult?.branches)
+            ? branchResult.branches.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
+            : [];
           setBranches(nextBranches);
 
           const initialBranchId = nextBranches[0]?.id_sucursal || '';
@@ -282,7 +306,7 @@ export default function ServicesPage() {
       icon: LogIn,
       onClick: () => navigate(isAuthenticated ? '/home' : '/login'),
     },
-    { id: 'promociones', label: 'Promociones', icon: Tag, disabled: true },
+    { id: 'promociones', label: 'Promociones', icon: Tag, onClick: () => navigate('/promociones') },
   ];
   return (
     <div className="mf-page-gradient min-h-screen pb-[100px]">
@@ -302,12 +326,12 @@ export default function ServicesPage() {
 
         <main className="mx-auto mt-8 w-full max-w-4xl">
           <div className="flex flex-col items-center text-center">
-            <MasterfadeLogo variant="compact" />
+            <MasterfadeLogo variant="publicPromotions" className="-my-6 sm:-my-8 md:-my-10" />
             <p className="mt-8 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">
               Catalogo publico
             </p>
             <h1 className="mf-font-display mt-4 text-[42px] leading-[0.92] text-[var(--mf-text)]">
-              Servicios y experiencias premium
+              Servicios y Experiencias Premium
             </h1>
           </div>
 
@@ -446,6 +470,7 @@ export default function ServicesPage() {
         activeId="servicios"
         sideItems={navItems}
         fabItem={{ id: 'agendar', label: 'Agendar', icon: Plus, onClick: handleAgendar }}
+        isDesktop
       />
     </div>
   );

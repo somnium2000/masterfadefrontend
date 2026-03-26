@@ -518,9 +518,12 @@ export default function AdminPackagesCatalogPage() {
     const fetchBranches = useCallback(async () => {
         setLoadingBranches(true);
         try {
-            const data = await listAdminSucursales();
+            const data = await listAdminSucursales({ soloActivas: true });
             const payloadData = data?.data ?? data;
-            setAllBranches(Array.isArray(payloadData?.sucursales) ? payloadData.sucursales : []);
+            const nextBranches = Array.isArray(payloadData?.sucursales)
+                ? payloadData.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
+                : [];
+            setAllBranches(nextBranches);
         } catch {
             setAllBranches([]);
             notifications.error('No se pudieron cargar las sucursales para operar paquetes.', {

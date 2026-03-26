@@ -105,6 +105,7 @@ function buildNavModules(basePath) {
                 { id: 'conf-notificaciones', label: 'Notificaciones', path: `${basePath}/configuracion/notificaciones` },
                 { id: 'conf-perfil', label: 'Perfil', path: `${basePath}/configuracion/perfil` },
                 { id: 'conf-spam', label: 'Spam', path: `${basePath}/configuracion/spam` },
+                { id: 'conf-promociones', label: 'Promociones', path: `${basePath}/configuracion/promociones` },
             ],
         },
     ];
@@ -292,7 +293,7 @@ export default function DashboardLayout({ pageRole }) {
                     <div className="sticky top-0 flex h-screen flex-col px-3 py-5 overflow-hidden">
 
                         {/* Logo + collapse button */}
-                        <div className="flex items-center justify-between gap-2 mb-6">
+                        <div className="relative flex items-center justify-end gap-2 mb-5">
                             <AnimatePresence initial={false}>
                                 {!isCollapsed && (
                                     <motion.div
@@ -301,9 +302,9 @@ export default function DashboardLayout({ pageRole }) {
                                         animate={{ opacity: 1, x: 0 }}
                                         exit={{ opacity: 0, x: -10 }}
                                         transition={{ duration: 0.2 }}
-                                        className="pl-1"
+                                        className="absolute left-1/2 -translate-x-1/2"
                                     >
-                                        <MasterfadeLogo variant="compact" />
+                                        <MasterfadeLogo variant="sidebar" />
                                     </motion.div>
                                 )}
                             </AnimatePresence>

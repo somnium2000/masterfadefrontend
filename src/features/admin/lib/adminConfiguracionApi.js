@@ -1,6 +1,12 @@
 import { http } from '../../../services/httpClient.js';
 
 const BASE = '/v1/admin/configuracion';
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeBranchId(value) {
+  const raw = String(value ?? '').trim();
+  return UUID_REGEX.test(raw) ? raw : '';
+}
 
 export async function getAdminConfigPerfil() {
   return http.get(`${BASE}/perfil`);
@@ -35,4 +41,26 @@ export async function getAdminConfigParametros({ idSucursal } = {}) {
 
 export async function updateAdminConfigParametros(payload) {
   return http.patch(`${BASE}/parametros`, payload);
+}
+
+export async function listAdminConfigPromociones({ id_sucursal } = {}) {
+  const branchId = normalizeBranchId(id_sucursal);
+  const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
+  return http.get(`${BASE}/promociones${query}`);
+}
+
+export async function getAdminConfigPromocion(id, { id_sucursal } = {}) {
+  const branchId = normalizeBranchId(id_sucursal);
+  if (!branchId) {
+    throw new Error('id_sucursal es requerido para consultar detalle de promocion.');
+  }
+  return http.get(`${BASE}/promociones/${id}?id_sucursal=${encodeURIComponent(branchId)}`);
+}
+
+export async function createAdminConfigPromocion(payload) {
+  return http.post(`${BASE}/promociones`, payload);
+}
+
+export async function updateAdminConfigPromocion(id, payload) {
+  return http.patch(`${BASE}/promociones/${id}`, payload);
 }

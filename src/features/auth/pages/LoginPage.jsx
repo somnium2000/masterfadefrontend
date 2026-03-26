@@ -144,7 +144,7 @@ export default function LoginPage() {
             transition={{ duration: 0.55, delay: 0.15, ease: 'easeOut' }}
             className="mf-login-brand"
           >
-            <MasterfadeLogo variant="compact" />
+            <MasterfadeLogo variant="publicPromotions" className="-my-6 sm:-my-8 md:-my-10" />
           </motion.div>
 
           <motion.div

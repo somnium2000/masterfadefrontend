@@ -10,6 +10,7 @@ import HomeRedirectPage from './features/home/pages/HomeRedirectPage.jsx';
 import { ROLE_ROUTE_ALLOWED_ROLES } from './features/home/lib/roleRouting.js';
 import LandingPage from './features/landing/pages/LandingPage.jsx';
 import MembershipPlansPage from './features/public/pages/MembershipPlansPage.jsx';
+import PromotionsPage from './features/public/pages/PromotionsPage.jsx';
 import ServicesPage from './features/public/pages/ServicesPage.jsx';
 import PublicBookingFlow from './features/public/booking/PublicBookingFlow.jsx';
 import PublicBookingBarberosStep from './features/public/booking/PublicBookingBarberosStep.jsx';
@@ -29,6 +30,7 @@ import AdminUsuariosPage from './features/admin/pages/AdminUsuariosPage.jsx';
 import AdminConfiguracionNotificacionesPage from './features/admin/pages/AdminConfiguracionNotificacionesPage.jsx';
 import AdminConfiguracionPerfilPage from './features/admin/pages/AdminConfiguracionPerfilPage.jsx';
 import AdminConfiguracionSpamPage from './features/admin/pages/AdminConfiguracionSpamPage.jsx';
+import AdminConfiguracionPromocionesPage from './features/admin/pages/AdminConfiguracionPromocionesPage.jsx';
 import AdminCitasPage from './features/admin/pages/AdminCitasPage.jsx';
 import AdminCitasPreviewPage from './features/admin/pages/AdminCitasPreviewPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
@@ -49,6 +51,7 @@ function App() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/servicios" element={<ServicesPage />} />
+      <Route path="/promociones" element={<PromotionsPage />} />
       <Route path="/agendar" element={<RouteErrorBoundary><PublicBookingFlow /></RouteErrorBoundary>}>
         <Route index element={<Navigate to="barberos" replace />} />
         <Route path="barberos" element={<PublicBookingBarberosStep />} />
@@ -106,6 +109,7 @@ function App() {
         <Route path="configuracion/notificaciones" element={<RouteErrorBoundary><AdminConfiguracionNotificacionesPage /></RouteErrorBoundary>} />
         <Route path="configuracion/perfil" element={<RouteErrorBoundary><AdminConfiguracionPerfilPage /></RouteErrorBoundary>} />
         <Route path="configuracion/spam" element={<RouteErrorBoundary><AdminConfiguracionSpamPage /></RouteErrorBoundary>} />
+        <Route path="configuracion/promociones" element={<RouteErrorBoundary><AdminConfiguracionPromocionesPage /></RouteErrorBoundary>} />
       </Route>
 
       {/* ── Admin ────────────────────────────────────────────────────── */}
@@ -147,6 +151,7 @@ function App() {
         <Route path="configuracion/notificaciones" element={<UnderConstructionPage title="Notificaciones" />} />
         <Route path="configuracion/perfil" element={<UnderConstructionPage title="Perfil" />} />
         <Route path="configuracion/spam" element={<UnderConstructionPage title="Spam" />} />
+        <Route path="configuracion/promociones" element={<UnderConstructionPage title="Promociones" />} />
       </Route>
 
       {/* ── Barbero ─────────────────────────────────────────────────── */}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import { supabase } from '../../../config/supabaseClient.js';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import './LoginPage.css';
@@ -124,8 +125,8 @@ export default function ResetPasswordPage() {
   return (
     <div className="mf-login-page">
       <div className="mf-login-container">
-        <div className="mf-login-logo" aria-hidden="true">
-          <span className="mf-login-logo-badge">B</span>
+        <div className="mf-login-brand" aria-hidden="true">
+          <MasterfadeLogo variant="publicPromotions" className="-my-6 sm:-my-8 md:-my-10" />
         </div>
 
         <div className="mf-login-card">

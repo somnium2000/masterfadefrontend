@@ -111,7 +111,9 @@ export default function MembershipPlansPage() {
           const branchResult = await listPublicCatalogBranches();
           if (!isMountedRef.current) return;
 
-          const nextBranches = Array.isArray(branchResult?.branches) ? branchResult.branches : [];
+          const nextBranches = Array.isArray(branchResult?.branches)
+            ? branchResult.branches.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
+            : [];
           setBranches(nextBranches);
 
           const initialBranchId = nextBranches[0]?.id_sucursal || "";
@@ -185,7 +187,7 @@ export default function MembershipPlansPage() {
     { id: "inicio", label: "Inicio", icon: House, onClick: () => navigate("/") },
     { id: "servicios", label: "Servicios", icon: Scissors, onClick: () => navigate("/servicios") },
     { id: "login", label: isAuthenticated ? "Mi panel" : "Iniciar sesion", icon: LogIn, onClick: () => navigate(isAuthenticated ? "/home" : "/login") },
-    { id: "promociones", label: "Promociones", icon: Tag, disabled: true },
+    { id: "promociones", label: "Promociones", icon: Tag, onClick: () => navigate("/promociones") },
   ];
 
   return (
@@ -207,7 +209,7 @@ export default function MembershipPlansPage() {
           <div className="flex flex-col items-center text-center">
             <MasterfadeLogo variant="compact" />
             <p className="mt-8 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Membresias VIP</p>
-            <h1 className="mf-font-display mt-4 text-[42px] leading-[0.92] text-[var(--mf-text)]">Eleva tu estilo cada mes</h1>
+            <h1 className="mf-font-display mt-4 text-[42px] leading-[0.92] text-[var(--mf-text)]">Eleva tu Estilo Cada Mes</h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--mf-text-2)]">
               Selecciona un plan mensual y asegura tus beneficios premium en tu sucursal favorita.
             </p>
@@ -279,7 +281,7 @@ export default function MembershipPlansPage() {
                     </div>
                     <div>
                       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Coleccion VIP</p>
-                      <h2 className="mf-font-display text-[26px] leading-[1.1] text-[var(--mf-text)] sm:text-[30px] sm:leading-none">Planes de membresia</h2>
+                      <h2 className="mf-font-display text-[26px] leading-[1.1] text-[var(--mf-text)] sm:text-[30px] sm:leading-none">Planes de Membresia</h2>
                     </div>
                   </div>
 
@@ -321,6 +323,7 @@ export default function MembershipPlansPage() {
         activeId="servicios"
         sideItems={navItems}
         fabItem={{ id: "agendar", label: "Agendar", icon: Plus, onClick: () => navigate(isAuthenticated ? "/home" : "/login") }}
+        isDesktop
       />
     </div>
   );
