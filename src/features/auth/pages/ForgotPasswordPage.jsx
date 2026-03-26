@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import './LoginPage.css';
 import './PasswordRecovery.css';
@@ -105,8 +106,8 @@ export default function ForgotPasswordPage() {
   return (
     <div className="mf-login-page">
       <div className="mf-login-container">
-        <div className="mf-login-logo" aria-hidden="true">
-          <span className="mf-login-logo-badge">B</span>
+        <div className="mf-login-brand" aria-hidden="true">
+          <MasterfadeLogo variant="publicPromotions" className="-my-6 sm:-my-8 md:-my-10" />
         </div>
 
         <div className="mf-login-card">

@@ -51,7 +51,7 @@ function SideNavItem({ item, activeId }) {
 
 export default function PremiumBottomNav({ activeId, sideItems, fabItem, className = '', isDesktop = false }) {
   const FabIcon = fabItem.icon;
-  const frameClass = isDesktop ? 'mx-auto w-full max-w-[420px] px-0 md:max-w-[600px]' : 'mf-mobile-frame px-0';
+  const frameClass = isDesktop ? 'mf-mobile-frame px-0 md:mx-auto md:w-full md:max-w-[600px] md:px-0' : 'mf-mobile-frame px-0';
 
   return (
     <div className={`fixed inset-x-0 bottom-0 z-50 ${className}`.trim()}>

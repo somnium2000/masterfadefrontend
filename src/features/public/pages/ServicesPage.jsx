@@ -306,7 +306,7 @@ export default function ServicesPage() {
       icon: LogIn,
       onClick: () => navigate(isAuthenticated ? '/home' : '/login'),
     },
-    { id: 'promociones', label: 'Promociones', icon: Tag, disabled: true },
+    { id: 'promociones', label: 'Promociones', icon: Tag, onClick: () => navigate('/promociones') },
   ];
   return (
     <div className="mf-page-gradient min-h-screen pb-[100px]">
@@ -326,12 +326,12 @@ export default function ServicesPage() {
 
         <main className="mx-auto mt-8 w-full max-w-4xl">
           <div className="flex flex-col items-center text-center">
-            <MasterfadeLogo variant="compact" />
+            <MasterfadeLogo variant="publicPromotions" className="-my-6 sm:-my-8 md:-my-10" />
             <p className="mt-8 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">
               Catalogo publico
             </p>
             <h1 className="mf-font-display mt-4 text-[42px] leading-[0.92] text-[var(--mf-text)]">
-              Servicios y experiencias premium
+              Servicios y Experiencias Premium
             </h1>
           </div>
 
@@ -470,6 +470,7 @@ export default function ServicesPage() {
         activeId="servicios"
         sideItems={navItems}
         fabItem={{ id: 'agendar', label: 'Agendar', icon: Plus, onClick: handleAgendar }}
+        isDesktop
       />
     </div>
   );
