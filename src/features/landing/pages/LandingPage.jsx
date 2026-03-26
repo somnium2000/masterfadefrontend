@@ -6,7 +6,7 @@ import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.js
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 
 const ease = [0.25, 0.46, 0.45, 0.94];
-const BG_URL = 'https://images.unsplash.com/photo-1770625467989-465591ffac5b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxsdXh1cnklMjBiYXJiZXJzaG9wJTIwZGFyayUyMGludGVyaW9yJTIwcHJlbWl1bXxlbnwxfHx8fDE3NzI3Njc1NDN8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral';
+const BG_URL = 'https://images.pexels.com/photos/5152514/pexels-photo-5152514.jpeg?auto=compress&cs=tinysrgb&w=1920';
 
 function DecorativeLine({ delay = 0, className = '' }) {
   return (
@@ -111,50 +111,55 @@ export default function LandingPage() {
             <ThemeSwitcher labelClassName="text-[var(--mf-text-2)]" />
           </div>
 
-          <DecorativeLine delay={0.2} className="mt-2 mb-7" />
-          <BrandBlock />
+          <div className="flex w-full flex-1 items-center justify-center">
+            <div className="w-full max-w-[360px]">
+              <div className="flex flex-col items-center text-center">
+                <DecorativeLine delay={0.2} className="mb-7" />
+                <BrandBlock />
 
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.6, ease }}
-            className="mt-5 text-center text-[13px] leading-[1.6] tracking-[0.04em] text-[var(--mf-text-2)]"
-          >
-            Tu estilo, nuestra pasión.
-            <br />
-            La experiencia premium en barbería.
-          </motion.p>
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.6, delay: 0.6, ease }}
+                  className="mt-5 text-center text-[13px] leading-[1.6] tracking-[0.04em] text-[var(--mf-text-2)]"
+                >
+                  Tu estilo, nuestra pasión.
+                  <br />
+                  La experiencia premium en barbería.
+                </motion.p>
 
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 1.2 }}
-            className="mt-8 flex items-center gap-3"
-          >
-            <span className="h-px w-8 bg-[var(--mf-accent)]" />
-            <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--mf-accent)]">Honduras</span>
-            <span className="h-px w-8 bg-[var(--mf-accent)]" />
-          </motion.div>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.6, delay: 1.2 }}
+                  className="mt-8 flex items-center gap-3"
+                >
+                  <span className="h-px w-8 bg-[var(--mf-accent)]" />
+                  <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--mf-accent)]">Honduras</span>
+                  <span className="h-px w-8 bg-[var(--mf-accent)]" />
+                </motion.div>
+              </div>
 
-          <div className="mt-10 w-full max-w-[360px]">
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.5, delay: 0.5 }}
-              className="mb-6 text-[11px] uppercase tracking-[0.15em] text-[var(--mf-text-2)]"
-            >
-              ¿Qué deseas hacer?
-            </motion.p>
+              <div className="mt-10 w-full">
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.5, delay: 0.5 }}
+                  className="mb-6 text-[11px] uppercase tracking-[0.15em] text-[var(--mf-text-2)]"
+                >
+                  ¿Qué deseas hacer?
+                </motion.p>
 
-            <div className="flex flex-col gap-3">
-              <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} delay={0.7} />
-              <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/servicios')} delay={0.82} />
-              <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} delay={0.94} />
+                <div className="flex flex-col gap-3">
+                  <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} delay={0.7} />
+                  <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/servicios')} delay={0.82} />
+                  <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} delay={0.94} />
+                </div>
+              </div>
             </div>
           </div>
         </section>
       </div>
-
       <div className="relative z-10 hidden min-h-[100vh] md:flex items-center justify-center px-12 pt-[60px] pb-[100px]">
         <div className="flex w-full max-w-[1080px] items-center justify-center gap-10 xl:gap-14">
           <div className="flex min-w-0 basis-0 flex-1 flex-col items-center px-2">
@@ -221,4 +226,3 @@ export default function LandingPage() {
     </div>
   );
 }
-
