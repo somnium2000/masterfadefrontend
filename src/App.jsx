@@ -27,6 +27,7 @@ import AdminUsuariosPage from './features/admin/pages/AdminUsuariosPage.jsx';
 import AdminCitasPage from './features/admin/pages/AdminCitasPage.jsx';
 import AdminCitasPreviewPage from './features/admin/pages/AdminCitasPreviewPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
+import AdminMasterPuntosPage from './features/admin/pages/AdminMasterPuntosPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
 
@@ -94,7 +95,7 @@ function App() {
         <Route path="reportes/barberos" element={<UnderConstructionPage title="Productividad Barberos" />} />
         <Route path="reportes/concurrencia" element={<UnderConstructionPage title="Concurrencia de Clientes" />} />
         {/* Masterpuntos */}
-        <Route path="superpuntos" element={<UnderConstructionPage title="Masterpuntos" />} />
+        <Route path="superpuntos" element={<RouteErrorBoundary><AdminMasterPuntosPage /></RouteErrorBoundary>} />
         {/* Configuración */}
         <Route path="configuracion/notificaciones" element={<UnderConstructionPage title="Notificaciones" />} />
         <Route path="configuracion/perfil" element={<UnderConstructionPage title="Perfil" />} />
@@ -135,7 +136,7 @@ function App() {
         <Route path="reportes/barberos" element={<UnderConstructionPage title="Productividad Barberos" />} />
         <Route path="reportes/concurrencia" element={<UnderConstructionPage title="Concurrencia de Clientes" />} />
         {/* Masterpuntos */}
-        <Route path="superpuntos" element={<UnderConstructionPage title="Masterpuntos" />} />
+        <Route path="superpuntos" element={<RouteErrorBoundary><AdminMasterPuntosPage /></RouteErrorBoundary>} />
         {/* Configuración */}
         <Route path="configuracion/notificaciones" element={<UnderConstructionPage title="Notificaciones" />} />
         <Route path="configuracion/perfil" element={<UnderConstructionPage title="Perfil" />} />
