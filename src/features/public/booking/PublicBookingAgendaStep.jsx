@@ -188,6 +188,9 @@ export default function PublicBookingAgendaStep() {
               value={activeBlock?.idBarbero || ''}
               onChange={(event) => updateActiveBlockBarber(event.target.value)}
             >
+              {activeBlockIndex > 0 ? (
+                <option value="">Sin preferencia (asignación automática)</option>
+              ) : null}
               {barbers.map((barber) => (
                 <option key={barber.id_empleado} value={barber.id_empleado}>
                   {barber.nombre_completo}
