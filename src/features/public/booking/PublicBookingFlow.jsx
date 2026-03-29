@@ -346,8 +346,6 @@ export default function PublicBookingFlow() {
     return { from, to };
   }, [currentMonth]);
 
-  const showBlockingAvailabilityLoader = availabilityLoading && Object.keys(availabilityMap).length === 0;
-
   const isPastSlotForToday = useCallback((dateKey, timeKey) => {
     if (!dateKey || !timeKey) return false;
     if (dateKey !== minBookingDateKey) return false;
@@ -360,16 +358,23 @@ export default function PublicBookingFlow() {
     setSlotSuggestionsLoading(false);
   }, []);
 
+  const resetAvailabilityViewState = useCallback((options = {}) => {
+    const { clearError = true } = options;
+    setSlots(buildDefaultSlots());
+    if (clearError) {
+      setAvailabilityError('');
+    }
+    clearSlotConflict();
+  }, [clearSlotConflict]);
+
   const clearRequestState = useCallback(() => {
     if (availabilityAbortRef.current) availabilityAbortRef.current.abort();
     if (slotsAbortRef.current) slotsAbortRef.current.abort();
     availabilityCacheRef.current.clear();
     slotsCacheRef.current.clear();
     setAvailabilityMap({});
-    setSlots(buildDefaultSlots());
-    setAvailabilityError('');
-    clearSlotConflict();
-  }, [clearSlotConflict]);
+    resetAvailabilityViewState();
+  }, [resetAvailabilityViewState]);
 
   const resetFlowForBranchChange = useCallback(() => {
     setBookingBlocks([createBookingBlock({ alias: 'Titular' })]);
@@ -910,11 +915,8 @@ export default function PublicBookingFlow() {
     if (!Number.isFinite(parsed)) return;
     const clamped = Math.max(0, Math.min(bookingBlocks.length - 1, Math.trunc(parsed)));
     setActiveBlockIndex(clamped);
-    setAvailabilityMap({});
-    setSlots(buildDefaultSlots());
-    setAvailabilityError('');
-    clearSlotConflict();
-  }, [bookingBlocks.length, clearSlotConflict]);
+    resetAvailabilityViewState();
+  }, [bookingBlocks.length, resetAvailabilityViewState]);
 
   const addCompanionBlock = useCallback(() => {
     setBookingBlocks((prev) => {
@@ -932,11 +934,8 @@ export default function PublicBookingFlow() {
       setActiveBlockIndex(nextBlocks.length - 1);
       return nextBlocks;
     });
-    setAvailabilityMap({});
-    setSlots(buildDefaultSlots());
-    setAvailabilityError('');
-    clearSlotConflict();
-  }, [clearSlotConflict, effectiveActiveBlockIndex]);
+    resetAvailabilityViewState();
+  }, [effectiveActiveBlockIndex, resetAvailabilityViewState]);
 
   const goToAgenda = useCallback(() => {
     if (!selectedBranchId || !selectedBarberId) return;
@@ -976,11 +975,8 @@ export default function PublicBookingFlow() {
       };
     });
 
-    setAvailabilityMap({});
-    setSlots(buildDefaultSlots());
-    setAvailabilityError('');
-    clearSlotConflict();
-  }, [clearSlotConflict, effectiveActiveBlockIndex, updateBlockAtIndex]);
+    resetAvailabilityViewState();
+  }, [effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
 
   const updateActiveBlockBarber = useCallback((barberId) => {
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
@@ -993,11 +989,8 @@ export default function PublicBookingFlow() {
       selectedTime: '',
     }));
 
-    setAvailabilityMap({});
-    setSlots(buildDefaultSlots());
-    setAvailabilityError('');
-    clearSlotConflict();
-  }, [bookingBlocks, clearSlotConflict, effectiveActiveBlockIndex, updateBlockAtIndex]);
+    resetAvailabilityViewState();
+  }, [bookingBlocks, effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
 
   const selectSuggestedBarber = useCallback((barberId) => {
     const nextBarberId = String(barberId || '').trim();
@@ -1013,13 +1006,10 @@ export default function PublicBookingFlow() {
       selectedTime: preservedTime,
     }));
 
-    setAvailabilityMap({});
-    setSlots(buildDefaultSlots());
-    setAvailabilityError('');
-    clearSlotConflict();
+    resetAvailabilityViewState();
   }, [
-    clearSlotConflict,
     effectiveActiveBlockIndex,
+    resetAvailabilityViewState,
     selectedDate,
     slotConflict,
     updateBlockAtIndex,
@@ -1315,7 +1305,6 @@ export default function PublicBookingFlow() {
       slotConflict,
       slotSuggestions,
       slotSuggestionsLoading,
-      showBlockingAvailabilityLoader,
       slots,
       slotsLoading,
       submitHold,
@@ -1380,7 +1369,6 @@ export default function PublicBookingFlow() {
       slotConflict,
       slotSuggestions,
       slotSuggestionsLoading,
-      showBlockingAvailabilityLoader,
       slots,
       slotsLoading,
       submitHold,
