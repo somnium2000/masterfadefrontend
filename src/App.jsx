@@ -33,6 +33,8 @@ import AdminConfiguracionSpamPage from './features/admin/pages/AdminConfiguracio
 import AdminConfiguracionPromocionesPage from './features/admin/pages/AdminConfiguracionPromocionesPage.jsx';
 import AdminCitasPage from './features/admin/pages/AdminCitasPage.jsx';
 import AdminCitasPreviewPage from './features/admin/pages/AdminCitasPreviewPage.jsx';
+import AdminAgendamientoCitasPage from './features/admin/pages/AdminAgendamientoCitasPage.jsx';
+import AdminAgendamientoHistorialPage from './features/admin/pages/AdminAgendamientoHistorialPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
 import AdminMasterPuntosPage from './features/admin/pages/AdminMasterPuntosPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
@@ -92,6 +94,8 @@ function App() {
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
         {/* Citas */}
+        <Route path="citas" element={<RouteErrorBoundary><AdminAgendamientoCitasPage /></RouteErrorBoundary>} />
+        <Route path="citas/historial" element={<RouteErrorBoundary><AdminAgendamientoHistorialPage /></RouteErrorBoundary>} />
         <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPreviewPage /></RouteErrorBoundary>} />
         <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
@@ -134,6 +138,8 @@ function App() {
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
         {/* Citas */}
+        <Route path="citas" element={<RouteErrorBoundary><AdminAgendamientoCitasPage /></RouteErrorBoundary>} />
+        <Route path="citas/historial" element={<RouteErrorBoundary><AdminAgendamientoHistorialPage /></RouteErrorBoundary>} />
         <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPreviewPage /></RouteErrorBoundary>} />
         <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
@@ -164,6 +170,8 @@ function App() {
         }
       >
         <Route index element={<UnderConstructionPage title="Inicio" />} />
+        <Route path="citas" element={<RouteErrorBoundary><AdminAgendamientoCitasPage /></RouteErrorBoundary>} />
+        <Route path="citas/historial" element={<RouteErrorBoundary><AdminAgendamientoHistorialPage /></RouteErrorBoundary>} />
       </Route>
 
       {/* ── Cliente ─────────────────────────────────────────────────── */}

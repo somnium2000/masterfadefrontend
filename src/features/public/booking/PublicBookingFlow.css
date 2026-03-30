@@ -88,6 +88,19 @@
   gap: 10px;
 }
 
+.public-booking-calendar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.public-booking-calendar-refresh {
+  font-size: 12px;
+  color: var(--mf-text-2);
+  white-space: nowrap;
+}
+
 .public-booking-agenda-stack {
   display: flex;
   flex-direction: column;

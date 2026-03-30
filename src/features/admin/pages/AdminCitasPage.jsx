@@ -363,6 +363,7 @@ export default function AdminCitasPage() {
     horas_minimas: '2',
     permitir_acompanantes: false,
     pago_total_obligatorio: true,
+    simulacion_sin_pago: true,
     confirmacion_automatica: true,
   });
 
@@ -527,6 +528,7 @@ export default function AdminCitasPage() {
         no_show_min: String(nextContext.parametros?.no_show_min ?? prev.no_show_min),
         permitir_acompanantes: Boolean(nextContext.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(nextContext.parametros?.pago_total_obligatorio ?? true),
+        simulacion_sin_pago: Boolean(nextContext.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
       }));
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -768,6 +770,7 @@ export default function AdminCitasPage() {
         no_show_min: String(payload?.parametros?.no_show_min ?? prev.no_show_min),
         permitir_acompanantes: Boolean(payload?.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(payload?.parametros?.pago_total_obligatorio ?? true),
+        simulacion_sin_pago: Boolean(payload?.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
       }));
       return true;
     } catch (err) {
@@ -1229,6 +1232,7 @@ export default function AdminCitasPage() {
         no_show_min: noShow,
         permitir_acompanantes: Boolean(paramsForm.permitir_acompanantes),
         pago_total_obligatorio: true,
+        simulacion_sin_pago: Boolean(paramsForm.simulacion_sin_pago),
       });
       const payload = response?.data ?? response;
       setParamsForm((prev) => ({
@@ -1237,6 +1241,7 @@ export default function AdminCitasPage() {
         no_show_min: String(payload?.parametros?.no_show_min ?? noShow),
         permitir_acompanantes: Boolean(payload?.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(payload?.parametros?.pago_total_obligatorio ?? true),
+        simulacion_sin_pago: Boolean(payload?.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
       }));
       notifications.success('Parámetros guardados.', { dedupeKey: 'citas-params-save-ok' });
     } catch (err) {
@@ -1900,6 +1905,18 @@ export default function AdminCitasPage() {
                 <p>Regla de negocio activa: para agendar se paga el total del servicio.</p>
               </div>
               <button type="button" className="citas-switch-track is-on" disabled />
+            </div>
+
+            <div className="citas-param-row">
+              <div className="citas-param-copy">
+                <h4>Simulación sin pago (temporal)</h4>
+                <p>Permite reservas sin cobro en /agendar mientras se integra la pasarela de pago.</p>
+              </div>
+              <button
+                type="button"
+                className={`citas-switch-track ${paramsForm.simulacion_sin_pago ? 'is-on' : ''}`}
+                onClick={() => setParamsForm((prev) => ({ ...prev, simulacion_sin_pago: !prev.simulacion_sin_pago }))}
+              />
             </div>
 
             <div className="citas-param-row">
