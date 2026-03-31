@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import { supabase } from '../../../config/supabaseClient.js';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import './LoginPage.css';
 import './PasswordRecovery.css';
+
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
 
 function parseHash(hash) {
   const h = (hash || '').startsWith('#') ? hash.slice(1) : (hash || '');
@@ -88,14 +90,14 @@ export default function ResetPasswordPage() {
     if (!supabase) return;
 
     // AM: Feedback global consistente para reset password sin romper validaciones locales.
-    if (newPass.length < 8) {
-      const message = 'La contrasena debe tener al menos 8 caracteres.';
+    if (!PASSWORD_REGEX.test(newPass)) {
+      const message = 'La contrase\u00f1a debe tener al menos 8 caracteres, may\u00fascula, min\u00fascula y n\u00famero.';
       setError(message);
-      notifications.warning(message, { dedupeKey: 'auth-reset-password-length' });
+      notifications.warning(message, { dedupeKey: 'auth-reset-password-policy' });
       return;
     }
     if (newPass !== confirm) {
-      const message = 'Las contrasenas no coinciden.';
+      const message = 'Las contrase\u00f1as no coinciden.';
       setError(message);
       notifications.warning(message, { dedupeKey: 'auth-reset-password-match' });
       return;
@@ -106,13 +108,13 @@ export default function ResetPasswordPage() {
     setLoading(false);
 
     if (error) {
-      const message = error.message || 'No se pudo actualizar la contrasena.';
+      const message = error.message || 'No se pudo actualizar la contraseña.';
       setError(message);
       notifications.error(message, { dedupeKey: 'auth-reset-password-error' });
       return;
     }
 
-    const successMessage = 'Contrasena actualizada. Ahora puedes iniciar sesion con tu nueva contrasena.';
+    const successMessage = 'Contraseña actualizada. Ahora puedes iniciar sesión con tu nueva contraseña.';
     setMsg(successMessage);
     notifications.success(successMessage, { dedupeKey: 'auth-reset-password-ok' });
 
@@ -137,7 +139,7 @@ export default function ResetPasswordPage() {
           <form className="mf-login-form" onSubmit={onSubmit}>
             {!ready ? (
               <>
-                {error ? <div className="mf-error">{error}</div> : <div className="mf-help">Validando enlace…</div>}
+                {error ? <div className="mf-error">{error}</div> : <div className="mf-help">Validando enlace...</div>}
                 <div className="mf-actions">
                   <Link className="mf-link" to="/forgot-password">Volver</Link>
                   <Link className="mf-link" to="/login">Login</Link>
@@ -175,7 +177,7 @@ export default function ResetPasswordPage() {
                 <div className="mf-actions">
                   <Link className="mf-link" to="/login">Volver a login</Link>
                   <button className="mf-btn" type="submit" disabled={loading}>
-                    {loading ? 'Guardando…' : 'Actualizar contraseña'}
+                    {loading ? 'Guardando...' : 'Actualizar contraseña'}
                   </button>
                 </div>
               </>
@@ -186,5 +188,6 @@ export default function ResetPasswordPage() {
     </div>
   );
 }
+
 
 

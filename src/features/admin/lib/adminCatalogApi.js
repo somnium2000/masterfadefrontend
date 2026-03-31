@@ -1,5 +1,5 @@
 // src/features/admin/lib/adminCatalogApi.js
-// A2 — Capa de API para el catálogo de servicios (admin).
+// A2 - Capa de API para el catálogo de servicios (admin).
 // Usa el wrapper http existente (src/services/httpClient.js).
 
 import { http } from '../../../services/httpClient.js';

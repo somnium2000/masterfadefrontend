@@ -1,15 +1,27 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../config/supabaseClient.js';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { http } from '../../../services/httpClient.js';
+
+function isInvalidUserForAuth(errorLike) {
+  const code = String(errorLike?.data?.error?.code || errorLike?.code || '').trim();
+  const message = String(errorLike?.data?.error?.message || errorLike?.message || '').trim().toLowerCase();
+  return (
+    code === 'AUTH_ACCESS_BLOCKED' ||
+    code === 'AUTH_USER_NOT_ONBOARDED' ||
+    /bloqueado|inactivo|perfil interno activo|not onboarded/.test(message)
+  );
+}
 
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
   const { completeExchangeLogin, isAuthenticated } = useAuth();
   const [error, setError] = useState('');
+  const [showInvalidUserAuthBox, setShowInvalidUserAuthBox] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -27,6 +39,7 @@ export default function AuthCallbackPage() {
 
       if (oauthError) {
         const message = oauthErrorDescription || 'Google login no pudo completarse.';
+        setShowInvalidUserAuthBox(false);
         setError(message);
         notifications.error(message, { dedupeKey: 'auth-callback-oauth-query-error' });
         if (supabase) {
@@ -37,6 +50,7 @@ export default function AuthCallbackPage() {
 
       if (!supabase) {
         const message = 'Supabase no esta configurado en frontend.';
+        setShowInvalidUserAuthBox(false);
         setError(message);
         notifications.error(message, { dedupeKey: 'auth-callback-supabase-missing' });
         return;
@@ -77,6 +91,15 @@ export default function AuthCallbackPage() {
         navigate('/home', { replace: true });
       } catch (exchangeError) {
         if (cancelled) return;
+
+        if (isInvalidUserForAuth(exchangeError)) {
+          setShowInvalidUserAuthBox(true);
+          setError('');
+          await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+          return;
+        }
+
+        setShowInvalidUserAuthBox(false);
         const message =
           exchangeError?.data?.error?.message ||
           exchangeError?.message ||
@@ -103,8 +126,17 @@ export default function AuthCallbackPage() {
   }, [completeExchangeLogin, isAuthenticated, navigate, notifications]);
 
   return (
-    <div className="mf-page-gradient flex min-h-screen items-center justify-center px-6">
-      <div className="mf-glass-surface w-full max-w-sm rounded-[28px] p-8 text-center">
+    <div className="mf-page-gradient min-h-screen px-6 py-6">
+      <div className="mx-auto w-full max-w-sm">
+        <Link
+          to="/"
+          className="mb-4 inline-flex items-center gap-2 text-xs font-medium tracking-[0.05em] text-[var(--mf-text-2)] transition-colors hover:text-[var(--mf-accent)]"
+        >
+          <ArrowLeft size={14} strokeWidth={1.9} />
+          <span>Regresar al inicio</span>
+        </Link>
+
+        <div className="mf-glass-surface w-full rounded-[28px] p-8 text-center">
         <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mf-accent)]">
           Autenticacion
         </p>
@@ -113,11 +145,18 @@ export default function AuthCallbackPage() {
         <p className="mt-4 text-sm leading-6 text-[var(--mf-text-2)]">
           Validando identidad con Google y preparando tu acceso en MasterFade.
         </p>
-        {error ? (
+        {showInvalidUserAuthBox ? (
+          <div className="mt-5 rounded-[14px] border border-[rgba(251,113,133,0.22)] bg-[rgba(127,29,29,0.22)] px-4 py-3 text-left text-[13px] text-[#fda29b]">
+            <p className="font-semibold uppercase tracking-[0.08em]">USUARIO INVALIDO</p>
+            <p className="mt-1">Contacta MASTERFADE o escribe al correo soporte@masterfadeapp.com</p>
+          </div>
+        ) : null}
+        {!showInvalidUserAuthBox && error ? (
           <div className="mt-5 rounded-[14px] border border-[rgba(251,113,133,0.22)] bg-[rgba(127,29,29,0.22)] px-4 py-3 text-left text-[13px] text-[#fda29b]">
             {error}
           </div>
         ) : null}
+        </div>
       </div>
     </div>
   );

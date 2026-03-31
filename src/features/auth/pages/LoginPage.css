@@ -180,6 +180,37 @@
   color: color-mix(in srgb, var(--mf-text-2) 74%, transparent);
 }
 
+.mf-password-field {
+  position: relative;
+}
+
+.mf-password-input {
+  padding-right: 44px;
+}
+
+.mf-password-peek {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--mf-text-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.mf-password-peek:hover {
+  color: var(--mf-accent);
+  background: color-mix(in srgb, var(--mf-accent) 10%, transparent);
+}
+
 .mf-link {
   font-size: 12px;
   font-weight: 500;

@@ -1,6 +1,6 @@
 ﻿// src/features/admin/pages/AdminServicesCatalogPage.jsx
-// A3 â€” Pantalla CRUD de catálogo de servicios (Admin).
-// Lógica de branchIds: 1 => auto, 2+ => selector por nombre, 0 => dropdown de todas.
+// A3 - Pantalla CRUD de catalogo de servicios (Admin).
+// Logica de branchIds: 1 => auto, 2+ => selector por nombre, 0 => dropdown de todas.
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -35,12 +35,10 @@ import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialo
 import { replaceItemById } from '../../../lib/collectionState.js';
 import { emitCatalogSync } from '../../../lib/catalogSync.js';
 
-// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function extractMessage(err) {
     return err?.data?.error?.message || err?.message || 'Error desconocido.';
 }
 
-// â”€â”€ Selector de sucursal (muestra nombre, no UUID) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * branchIds  = UUIDs del usuario autenticado (de AuthContext)
  * allBranches = [{id_sucursal, nombre_sucursal}] de la API
@@ -100,7 +98,6 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingB
     );
 }
 
-// â”€â”€ Formulario servicio â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const FORM_DEFAULTS = {
     nombre_servicio: '',
     descripcion: '',
@@ -160,6 +157,15 @@ function ServicioForm({ values, onChange }) {
                     placeholder="Ej. Corte clásico"
                 />
             </div>
+            <div className="flex flex-col gap-1">
+                <Label htmlFor="f-descripcion">Descripción</Label>
+                <Input
+                    id="f-descripcion"
+                    value={values.descripcion}
+                    onChange={(e) => onChange('descripcion', e.target.value)}
+                    placeholder="Ej. Incluye lavado, corte y peinado."
+                />
+            </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1">
                     <Label htmlFor="f-dur">Duración (min) *</Label>
@@ -184,7 +190,8 @@ function ServicioForm({ values, onChange }) {
                     />
                 </div>
             </div>
-            <div className="flex flex-col gap-1">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
                 <Label htmlFor="f-precio">Precio HNL *</Label>
                 <Input
                     id="f-precio"
@@ -195,6 +202,18 @@ function ServicioForm({ values, onChange }) {
                     onChange={(e) => onChange('precio_hnl', e.target.value)}
                     placeholder="250.00"
                 />
+                </div>
+                <div className="flex flex-col gap-1">
+                    <Label htmlFor="f-orden">Orden visual *</Label>
+                    <Input
+                        id="f-orden"
+                        type="number"
+                        min="0"
+                        value={values.orden_visual}
+                        onChange={(e) => onChange('orden_visual', e.target.value)}
+                        placeholder="100"
+                    />
+                </div>
             </div>
         </div>
     );
@@ -208,6 +227,8 @@ function validateForm(values) {
     if (isNaN(buf) || buf < 0) return 'El buffer no puede ser negativo.';
     const precio = parseFloat(values.precio_hnl);
     if (isNaN(precio) || precio < 0) return 'El precio no puede ser negativo.';
+    const orden = parseInt(values.orden_visual, 10);
+    if (isNaN(orden) || orden < 0) return 'El orden visual no puede ser negativo.';
     return null;
 }
 
@@ -257,7 +278,6 @@ function sortServicios(list = []) {
     });
 }
 
-// â”€â”€ Pantalla principal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function AdminServicesCatalogPage() {
     const navigate = useNavigate();
     const { branchIds, roles } = useAuth();
@@ -536,16 +556,20 @@ export default function AdminServicesCatalogPage() {
 
         const createPayload = {
             nombre_servicio: formValues.nombre_servicio.trim(),
+            descripcion: formValues.descripcion.trim() || null,
             duracion_min: parseInt(formValues.duracion_min, 10),
             buffer_min: parseInt(formValues.buffer_min, 10),
             precio_hnl: parseFloat(formValues.precio_hnl),
+            orden_visual: parseInt(formValues.orden_visual, 10),
             id_sucursal: mutationBranchId,
         };
         const editPayload = {
             nombre_servicio: formValues.nombre_servicio.trim(),
+            descripcion: formValues.descripcion.trim() || null,
             duracion_min: parseInt(formValues.duracion_min, 10),
             buffer_min: parseInt(formValues.buffer_min, 10),
             precio_hnl: parseFloat(formValues.precio_hnl),
+            orden_visual: parseInt(formValues.orden_visual, 10),
             id_sucursal: mutationBranchId,
         };
 
@@ -918,7 +942,7 @@ export default function AdminServicesCatalogPage() {
                             Cancelar
                         </Button>
                         <Button onClick={handleGuardar} disabled={formLoading} className="gap-2 min-w-[120px]">
-                            {formLoading ? 'Guardandoâ€¦' : editTarget ? 'Guardar cambios' : 'Crear servicio'}
+                            {formLoading ? 'Guardando...' : editTarget ? 'Guardar cambios' : 'Crear servicio'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -1130,4 +1154,5 @@ export default function AdminServicesCatalogPage() {
         </div>
     );
 }
+
 

@@ -55,7 +55,7 @@ const ROLE_LABELS = {
 };
 
 const ACCESS_LABELS = {
-  pendiente_password: 'Contrasena pendiente',
+  pendiente_password: 'Contraseña pendiente',
   activo: 'Activo',
   bloqueado: 'Bloqueado',
   inactivo: 'Inactivo',
@@ -112,6 +112,10 @@ function normalizeDigits(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
+function normalizeUnicodeText(value) {
+  return String(value || '').normalize('NFC').trim();
+}
+
 function resolvePrimaryRole(roles) {
   const currentRoles = Array.isArray(roles) ? roles : [];
   if (currentRoles.includes('super_admin')) return 'super_admin';
@@ -140,8 +144,8 @@ function mapEmpleadoToForm(empleado) {
 }
 
 function validateForm(values) {
-  if (!values.nombres.trim()) return 'Nombres es obligatorio.';
-  if (!values.apellidos.trim()) return 'Apellidos es obligatorio.';
+  if (!normalizeUnicodeText(values.nombres)) return 'Nombres es obligatorio.';
+  if (!normalizeUnicodeText(values.apellidos)) return 'Apellidos es obligatorio.';
   if (!values.correo_principal.trim() || !values.correo_principal.includes('@')) return 'Correo de acceso invalido.';
   if (!values.id_sucursal) return 'Sucursal es obligatoria.';
 
@@ -161,15 +165,15 @@ function buildPayload(values) {
   const rolPrincipal = values.rol_principal;
   return {
     persona: {
-      nombres: values.nombres.trim(),
-      apellidos: values.apellidos.trim(),
+      nombres: normalizeUnicodeText(values.nombres),
+      apellidos: normalizeUnicodeText(values.apellidos),
       fecha_nacimiento: values.fecha_nacimiento || null,
-      genero_codigo: values.genero_codigo.trim() || null,
+      genero_codigo: normalizeUnicodeText(values.genero_codigo) || null,
       dni: normalizeDigits(values.dni) || null,
       rtn: normalizeDigits(values.rtn) || null,
-      telefono_principal: values.telefono_principal.trim() || null,
-      direccion_texto: values.direccion_texto.trim() || null,
-      observaciones: values.observaciones.trim() || null,
+      telefono_principal: normalizeUnicodeText(values.telefono_principal) || null,
+      direccion_texto: normalizeUnicodeText(values.direccion_texto) || null,
+      observaciones: normalizeUnicodeText(values.observaciones) || null,
     },
     acceso: {
       correo_principal: values.correo_principal.trim().toLowerCase(),

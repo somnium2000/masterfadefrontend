@@ -41,7 +41,7 @@ import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialo
 import { replaceItemById } from '../../../lib/collectionState.js';
 
 const ACCESS_LABELS = {
-  pendiente_password: 'Contrasena pendiente',
+  pendiente_password: 'Contraseña pendiente',
   activo: 'Activo',
   bloqueado: 'Bloqueado',
   inactivo: 'Inactivo',
@@ -105,6 +105,10 @@ function toDateTimeIso(dateValue) {
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? `${normalized}T12:00:00.000Z` : null;
 }
 
+function normalizeUnicodeText(value) {
+  return String(value || '').normalize('NFC').trim();
+}
+
 function mapClienteToForm(cliente) {
   return {
     nombres: cliente?.nombres || '',
@@ -127,8 +131,8 @@ function mapClienteToForm(cliente) {
 }
 
 function validateForm(values, { isEditing, selectedCliente }) {
-  if (!values.nombres.trim()) return 'Nombres es obligatorio.';
-  if (!values.apellidos.trim()) return 'Apellidos es obligatorio.';
+  if (!normalizeUnicodeText(values.nombres)) return 'Nombres es obligatorio.';
+  if (!normalizeUnicodeText(values.apellidos)) return 'Apellidos es obligatorio.';
   if (!values.correo_principal.trim() || !values.correo_principal.includes('@')) {
     return 'Correo principal es obligatorio y debe ser valido.';
   }
@@ -163,15 +167,15 @@ function validateForm(values, { isEditing, selectedCliente }) {
 function buildPayload(values) {
   return {
     persona: {
-      nombres: values.nombres.trim(),
-      apellidos: values.apellidos.trim(),
+      nombres: normalizeUnicodeText(values.nombres),
+      apellidos: normalizeUnicodeText(values.apellidos),
       fecha_nacimiento: values.fecha_nacimiento || null,
-      genero_codigo: values.genero_codigo.trim() || null,
+      genero_codigo: normalizeUnicodeText(values.genero_codigo) || null,
       dni: normalizeDigits(values.dni) || null,
       rtn: normalizeDigits(values.rtn) || null,
-      telefono_principal: values.telefono_principal.trim() || null,
-      direccion_texto: values.direccion_texto.trim() || null,
-      observaciones: values.observaciones.trim() || null,
+      telefono_principal: normalizeUnicodeText(values.telefono_principal) || null,
+      direccion_texto: normalizeUnicodeText(values.direccion_texto) || null,
+      observaciones: normalizeUnicodeText(values.observaciones) || null,
     },
     acceso: {
       habilitar_acceso: Boolean(values.habilitar_acceso),
@@ -715,7 +719,7 @@ export default function AdminClientesPage() {
                     {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
                   </select>
                 </div>
-                <p className="text-xs text-[var(--mf-text-2)]">El cliente creara su propia contrasena con flujo seguro.</p>
+                <p className="text-xs text-[var(--mf-text-2)]">El cliente creará su propia contraseña con flujo seguro.</p>
 
                 <label className="mt-1 flex items-center gap-2">
                   <input type="checkbox" checked={formValues.consentimiento_marketing} onChange={(e) => setFormValues((p) => ({ ...p, consentimiento_marketing: e.target.checked }))} />
@@ -880,7 +884,7 @@ export default function AdminClientesPage() {
                 onChange={(event) => setFilters((prev) => ({ ...prev, estadoAcceso: event.target.value }))}
               >
                 <option value="all">Todos</option>
-                <option value="pendiente_password">Contrasena pendiente</option>
+                <option value="pendiente_password">Contraseña pendiente</option>
                 <option value="activo">Activo</option>
                 <option value="bloqueado">Bloqueado</option>
                 <option value="inactivo">Inactivo</option>

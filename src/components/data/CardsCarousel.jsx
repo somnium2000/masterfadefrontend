@@ -3,12 +3,12 @@ import { ChevronLeft, ChevronRight, Waves } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { cn } from '../../lib/utils.js';
 
-function resolvePageSize() {
+function resolvePageSize(pageSizeByViewport) {
   if (typeof window === 'undefined') return 6;
   const width = window.innerWidth;
-  if (width >= 1280) return 6; // AM: Desktop => 3 columnas x 2 filas.
-  if (width >= 640) return 4; // Tablet => 2x2.
-  return 2; // Mobile => 1x2.
+  if (width >= 1280) return Number(pageSizeByViewport?.desktop ?? 6); // AM: Desktop => 3 columnas x 2 filas.
+  if (width >= 640) return Number(pageSizeByViewport?.tablet ?? 4); // Tablet => 2x2.
+  return Number(pageSizeByViewport?.mobile ?? 2); // Mobile => 1x2.
 }
 
 function chunkItems(items, pageSize) {
@@ -22,7 +22,7 @@ function chunkItems(items, pageSize) {
   return chunks;
 }
 
-function CarouselActionButton({ onClick, icon, label, disabled = false }) {
+function CarouselActionButton({ onClick, icon, label, disabled = false, compact = false }) {
   return (
     <button
       type="button"
@@ -31,7 +31,9 @@ function CarouselActionButton({ onClick, icon, label, disabled = false }) {
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'group inline-flex h-10 items-center justify-center gap-2 rounded-full border px-3',
+        compact
+          ? 'group inline-flex h-8 items-center justify-center gap-1.5 rounded-full border px-2.5'
+          : 'group inline-flex h-10 items-center justify-center gap-2 rounded-full border px-3',
         'border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_72%,transparent)]',
         'backdrop-blur-md text-[var(--mf-text-2)] shadow-[var(--mf-shadow-soft)]',
         'transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--mf-accent)]/45 hover:text-[var(--mf-accent)]',
@@ -40,7 +42,9 @@ function CarouselActionButton({ onClick, icon, label, disabled = false }) {
       )}
     >
       {icon}
-      <span className="hidden text-xs font-semibold uppercase tracking-[0.08em] sm:inline">{label}</span>
+      <span className={cn('text-xs font-semibold uppercase tracking-[0.08em]', compact ? 'hidden lg:inline' : 'hidden sm:inline')}>
+        {label}
+      </span>
     </button>
   );
 }
@@ -50,17 +54,21 @@ export default function CardsCarousel({
   renderItem,
   getItemKey,
   className = '',
+  pageSizeByViewport,
+  gridClassName = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3',
+  compactControls = false,
+  showHeaderTag = true,
 }) {
   const reducedMotion = useReducedMotion();
-  const [pageSize, setPageSize] = useState(() => resolvePageSize());
+  const [pageSize, setPageSize] = useState(() => resolvePageSize(pageSizeByViewport));
   const [pageIndex, setPageIndex] = useState(0);
   const [direction, setDirection] = useState(0);
 
   useEffect(() => {
-    const onResize = () => setPageSize(resolvePageSize());
+    const onResize = () => setPageSize(resolvePageSize(pageSizeByViewport));
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, []);
+  }, [pageSizeByViewport]);
 
   const pages = useMemo(() => chunkItems(items, pageSize), [items, pageSize]);
   const totalPages = pages.length;
@@ -97,22 +105,26 @@ export default function CardsCarousel({
         <div className="absolute bottom-[-54px] left-1/3 h-36 w-36 rounded-full bg-white/8 blur-3xl" />
       </div>
 
-      <div className="relative z-10 mb-3 flex items-center justify-between gap-2">
-        <div className="inline-flex items-center gap-2 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">
-          <Waves size={13} className="text-[var(--mf-accent)]" />
-          <span>Vista Carrusel</span>
-        </div>
+      <div className="relative z-10 mb-3 flex items-center justify-end gap-2">
+        {showHeaderTag ? (
+          <div className="mr-auto inline-flex items-center gap-2 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">
+            <Waves size={13} className="text-[var(--mf-accent)]" />
+            <span>Vista Carrusel</span>
+          </div>
+        ) : null}
         {canMove && (
           <div className="flex items-center gap-2">
             <CarouselActionButton
               label="Anterior"
               onClick={() => movePage(-1)}
               icon={<ChevronLeft size={15} strokeWidth={2.1} />}
+              compact={compactControls}
             />
             <CarouselActionButton
               label="Siguiente"
               onClick={() => movePage(1)}
               icon={<ChevronRight size={15} strokeWidth={2.1} />}
+              compact={compactControls}
             />
           </div>
         )}
@@ -127,7 +139,7 @@ export default function CardsCarousel({
             animate={reducedMotion ? undefined : { opacity: 1, x: 0 }}
             exit={reducedMotion ? undefined : { opacity: 0, x: direction >= 0 ? -22 : 22 }}
             transition={{ duration: 0.24, ease: 'easeOut' }}
-            className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
+            className={gridClassName}
           >
             {activePage.map((item, index) => (
               <motion.div

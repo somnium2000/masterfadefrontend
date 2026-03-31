@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Building2, Eye, Gift, Loader2, Megaphone, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Building2, Eye, Gift, Loader2, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { listAdminSucursales } from '../lib/adminSucursalesApi.js';
 import { createAdminConfigPromocion, getAdminConfigPromocion, listAdminConfigPromociones, updateAdminConfigPromocion } from '../lib/adminConfiguracionApi.js';
+import { emitCatalogSync } from '../../../lib/catalogSync.js';
 import { Button } from '../../../components/ui/button.jsx';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
 import { Input } from '../../../components/ui/input.jsx';
@@ -43,6 +44,25 @@ function serializeParagraphs(rows) {
   return (Array.isArray(rows) ? rows : []).map((line) => String(line || '').trim()).filter(Boolean).join('\n');
 }
 
+function normalizeBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return ['1', 'true', 't', 'yes', 'si', 'on'].includes(normalized);
+}
+
+function toDateInputValue(value) {
+  if (value === undefined || value === null || value === '') return '';
+  const raw = String(value).trim();
+  if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) return raw.slice(0, 10);
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toISOString().slice(0, 10);
+}
+
 function sortPromos(list = []) {
   return [...(Array.isArray(list) ? list : [])].sort((a, b) => {
     if (Boolean(a?.destacada) !== Boolean(b?.destacada)) return a?.destacada ? -1 : 1;
@@ -65,8 +85,21 @@ function ctaLabel(v) { return v === 'interno' ? 'Interno' : v === 'externo' ? 'E
 function PromotionStateBadge({ estado }) { return <span className={`mf-badge ${stateClass(estado)}`}>{stateLabel(estado)}</span>; }
 function PromotionVisibilityBadge({ visible }) { return <span className={`mf-badge ${visible ? 'mf-badge-green' : 'mf-badge-muted'}`}>{visible ? 'Visible' : 'Oculta'}</span>; }
 function PromotionFeaturedBadge({ destacada }) { return <span className={`mf-badge ${destacada ? 'mf-badge-gold' : 'mf-badge-muted'}`}>{destacada ? 'Destacada' : 'Normal'}</span>; }
+function PromotionVigenciaBadge({ vigenciaHasta }) {
+  const endDate = toDateInputValue(vigenciaHasta);
+  if (!endDate) return <span className="mf-badge mf-badge-muted">Sin vigencia</span>;
+  const today = new Date().toISOString().slice(0, 10);
+  const expired = endDate < today;
+  return <span className={`mf-badge ${expired ? 'mf-badge-red' : 'mf-badge-green'}`}>{expired ? 'Vencida' : 'Vigente'}</span>;
+}
 
 function validate(values) {
+  const estado = String(values.estado || 'borrador').trim().toLowerCase();
+  const visiblePublico = normalizeBoolean(values.visible_publico);
+  const destacada = normalizeBoolean(values.destacada);
+  const vigenciaDesde = toDateInputValue(values.vigencia_desde);
+  const vigenciaHasta = toDateInputValue(values.vigencia_hasta);
+
   if (!String(values.id_sucursal || '').trim()) return 'Debes seleccionar una sucursal valida.';
   if (!String(values.titulo || '').trim()) return 'El titulo es requerido.';
   const slug = normalizeSlug(values.titulo);
@@ -75,20 +108,21 @@ function validate(values) {
   if (!parrafos.length) return 'La descripcion es requerida.';
   if (parrafos.length > 8) return 'Solo se permiten hasta 8 parrafos.';
   if (parrafos.some((line) => line.length > 420)) return 'Cada parrafo admite maximo 420 caracteres.';
-  if (values.vigencia_desde && values.vigencia_hasta && values.vigencia_hasta < values.vigencia_desde) return 'vigencia_hasta no puede ser menor que vigencia_desde.';
-  if (values.estado === 'archivada' && values.visible_publico) return 'Una promocion archivada no puede estar visible_publico=true.';
-  if (values.estado === 'publicada') {
-    if (!values.visible_publico) return 'Una promocion publicada debe ser visible_publico=true.';
-    if (!values.vigencia_desde) return 'Una promocion publicada requiere vigencia_desde.';
+  if (vigenciaDesde && vigenciaHasta && vigenciaHasta < vigenciaDesde) return 'vigencia_hasta no puede ser menor que vigencia_desde.';
+  if (estado === 'archivada' && visiblePublico) return 'Una promocion archivada no puede estar visible_publico=true.';
+  if (estado === 'publicada') {
+    if (!vigenciaDesde) return 'Una promocion publicada requiere vigencia_desde.';
     if (!String(values.imagen_principal_url || '').trim()) return 'Una promocion publicada requiere imagen_principal_url.';
   }
-  if (values.destacada && (!values.visible_publico || values.estado !== 'publicada')) return 'Una promocion destacada debe estar publicada y visible al publico.';
+  if (destacada && (!visiblePublico || estado !== 'publicada')) return 'Una promocion destacada debe estar publicada y visible al publico.';
   return '';
 }
 
 function toPayload(values) {
   const titulo = String(values.titulo || '').trim();
   const parrafos = normalizeParagraphs(values.parrafos_texto);
+  const vigenciaDesde = toDateInputValue(values.vigencia_desde);
+  const vigenciaHasta = toDateInputValue(values.vigencia_hasta);
   return {
     id_sucursal: values.id_sucursal,
     titulo,
@@ -101,11 +135,11 @@ function toPayload(values) {
     cta_tipo: 'none',
     cta_texto: null,
     cta_url: null,
-    visible_publico: Boolean(values.visible_publico),
-    destacada: Boolean(values.destacada),
+    visible_publico: normalizeBoolean(values.visible_publico),
+    destacada: normalizeBoolean(values.destacada),
     orden_visual: 100,
-    vigencia_desde: String(values.vigencia_desde || '').trim() || null,
-    vigencia_hasta: String(values.vigencia_hasta || '').trim() || null,
+    vigencia_desde: vigenciaDesde || null,
+    vigencia_hasta: vigenciaHasta || null,
     estado: values.estado,
   };
 }
@@ -116,8 +150,8 @@ function mapToForm(promo, branch = '') {
     titulo: promo?.titulo || '', subtitulo: promo?.subtitulo || '',
     parrafos_texto: serializeParagraphs(promo?.parrafos),
     imagen_principal_url: promo?.imagen_principal_url || '',
-    visible_publico: Boolean(promo?.visible_publico), destacada: Boolean(promo?.destacada),
-    vigencia_desde: promo?.vigencia_desde || '', vigencia_hasta: promo?.vigencia_hasta || '',
+    visible_publico: normalizeBoolean(promo?.visible_publico), destacada: normalizeBoolean(promo?.destacada),
+    vigencia_desde: toDateInputValue(promo?.vigencia_desde), vigencia_hasta: toDateInputValue(promo?.vigencia_hasta),
     estado: promo?.estado || 'borrador',
   };
 }
@@ -358,11 +392,13 @@ export default function AdminConfiguracionPromocionesPage() {
         const response = await updateAdminConfigPromocion(editTarget.id_promocion, payload);
         const data = response?.data || response;
         if (data?.promocion) setPromociones((current) => upsertPromo(current, data.promocion));
+        emitCatalogSync('promocion-updated');
         notifications.success('Promocion actualizada correctamente.', { dedupeKey: 'promos-update-ok' });
       } else {
         const response = await createAdminConfigPromocion(payload);
         const data = response?.data || response;
         if (data?.promocion) setPromociones((current) => upsertPromo(current, data.promocion));
+        emitCatalogSync('promocion-created');
         notifications.success('Promocion creada correctamente.', { dedupeKey: 'promos-create-ok' });
       }
       setDialogOpen(false);
@@ -428,6 +464,7 @@ export default function AdminConfiguracionPromocionesPage() {
       {!loading && !listError && filteredPromociones.length > 0 && view === 'cards' ? (
         <CardsCarousel
           items={filteredPromociones}
+          pageSizeByViewport={{ mobile: 1, tablet: 2, desktop: 3 }}
           getItemKey={(promo) => `${promo?.id_promocion || 'promo'}:${promo?.id_sucursal || 'all'}`}
           renderItem={(promo, index, pageIndex) => (
             <DataCard
@@ -439,11 +476,9 @@ export default function AdminConfiguracionPromocionesPage() {
               badge={<PromotionStateBadge estado={promo.estado} />}
               fields={[
                 ...(!sucursal ? [{ label: 'Sucursal', value: branchNameById[promo.id_sucursal] || 'Sin sucursal' }] : []),
-                { label: 'Slug', value: promo.slug || '-' },
                 { label: 'Publico', value: <PromotionVisibilityBadge visible={Boolean(promo.visible_publico)} /> },
                 { label: 'Destacada', value: <PromotionFeaturedBadge destacada={Boolean(promo.destacada)} /> },
-                { label: 'Orden', value: Number(promo.orden_visual ?? 100) },
-                { label: 'CTA', value: ctaLabel(promo.cta_tipo) },
+                { label: 'Vigencia', value: <PromotionVigenciaBadge vigenciaHasta={promo.vigencia_hasta} /> },
               ]}
               actions={renderActions(promo)}
             />
@@ -454,8 +489,8 @@ export default function AdminConfiguracionPromocionesPage() {
       {!loading && !listError && filteredPromociones.length > 0 && view === 'table' ? (
         <div className="mf-table-wrap">
           <Table>
-            <TableHeader><TableRow className="border-[var(--mf-nav-border)]">{!sucursal ? <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursal</TableHead> : null}<TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Titulo</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden lg:table-cell">Slug</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Estado</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Publico</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Destacada</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden lg:table-cell">Vigencia</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead></TableRow></TableHeader>
-            <TableBody>{filteredPromociones.map((promo) => (<TableRow key={`${promo.id_promocion}:${promo.id_sucursal}`} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">{!sucursal ? <TableCell className="text-[var(--mf-text-2)] text-sm whitespace-nowrap">{branchNameById[promo.id_sucursal] || 'Sin sucursal'}</TableCell> : null}<TableCell className="font-medium text-[var(--mf-text)]"><div>{promo.titulo}</div>{promo.subtitulo ? <div className="text-xs text-[var(--mf-text-2)] mt-0.5">{promo.subtitulo}</div> : null}</TableCell><TableCell className="text-[var(--mf-text-2)] hidden lg:table-cell">{promo.slug || '-'}</TableCell><TableCell className="text-center"><PromotionStateBadge estado={promo.estado} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVisibilityBadge visible={Boolean(promo.visible_publico)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionFeaturedBadge destacada={Boolean(promo.destacada)} /></TableCell><TableCell className="text-center text-[var(--mf-text-2)]">{Number(promo.orden_visual ?? 100)}</TableCell><TableCell className="hidden lg:table-cell text-[var(--mf-text-2)] text-xs whitespace-nowrap">{(promo.vigencia_desde || '-')} {' -> '} {(promo.vigencia_hasta || '-')}</TableCell><TableCell className="text-right"><div className="flex items-center justify-end gap-1.5">{renderActions(promo)}</div></TableCell></TableRow>))}</TableBody>
+            <TableHeader><TableRow className="border-[var(--mf-nav-border)]">{!sucursal ? <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursal</TableHead> : null}<TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Titulo</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden lg:table-cell">Slug</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Estado</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Publico</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Destacada</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Vigencia</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden lg:table-cell">Fechas</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead></TableRow></TableHeader>
+            <TableBody>{filteredPromociones.map((promo) => (<TableRow key={`${promo.id_promocion}:${promo.id_sucursal}`} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">{!sucursal ? <TableCell className="text-[var(--mf-text-2)] text-sm whitespace-nowrap">{branchNameById[promo.id_sucursal] || 'Sin sucursal'}</TableCell> : null}<TableCell className="font-medium text-[var(--mf-text)]"><div>{promo.titulo}</div>{promo.subtitulo ? <div className="text-xs text-[var(--mf-text-2)] mt-0.5">{promo.subtitulo}</div> : null}</TableCell><TableCell className="text-[var(--mf-text-2)] hidden lg:table-cell">{promo.slug || '-'}</TableCell><TableCell className="text-center"><PromotionStateBadge estado={promo.estado} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVisibilityBadge visible={Boolean(promo.visible_publico)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionFeaturedBadge destacada={Boolean(promo.destacada)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVigenciaBadge vigenciaHasta={promo.vigencia_hasta} /></TableCell><TableCell className="text-center text-[var(--mf-text-2)]">{Number(promo.orden_visual ?? 100)}</TableCell><TableCell className="hidden lg:table-cell text-[var(--mf-text-2)] text-xs whitespace-nowrap">{(promo.vigencia_desde || '-')} {' -> '} {(promo.vigencia_hasta || '-')}</TableCell><TableCell className="text-right"><div className="flex items-center justify-end gap-1.5">{renderActions(promo)}</div></TableCell></TableRow>))}</TableBody>
           </Table>
         </div>
       ) : null}
@@ -470,32 +505,27 @@ export default function AdminConfiguracionPromocionesPage() {
       </Dialog>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl">
-          <DialogHeader><DialogTitle>Detalle de promocion</DialogTitle><DialogDescription className="sr-only">Consulta contenido editorial, CTA y estado de publicacion de la promocion.</DialogDescription></DialogHeader>
+        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Detalle de promocion</DialogTitle><DialogDescription className="sr-only">Consulta campos basicos de la promocion y su estado de publicacion.</DialogDescription></DialogHeader>
           {detailLoading ? <LoadingSpinner label="Cargando detalle..." /> : null}
           {!detailLoading && detailTarget ? (
             <DetailInfoModalContent
               summary={{ icon: <Gift size={16} />, title: detailTarget.titulo || '-', subtitle: detailTarget.subtitulo || detailTarget.slug || '-', badge: <PromotionStateBadge estado={detailTarget.estado} /> }}
               sections={[
-                { id: 'publicacion', title: 'Publicacion', icon: <Megaphone size={14} />, fields: [
-                  { label: 'Slug', value: detailTarget.slug || '-' },
+                { id: 'publicacion', title: 'Publicacion', icon: <Gift size={14} />, fields: [
+                  { label: 'Sucursal', value: branchNameById[detailTarget.id_sucursal] || detailTarget.id_sucursal || '-' },
                   { label: 'Visible publico', value: <PromotionVisibilityBadge visible={Boolean(detailTarget.visible_publico)} /> },
+                  { label: 'Estado', value: <PromotionStateBadge estado={detailTarget.estado} /> },
                   { label: 'Destacada', value: <PromotionFeaturedBadge destacada={Boolean(detailTarget.destacada)} /> },
-                  { label: 'Orden visual', value: Number(detailTarget.orden_visual ?? 100) },
+                  { label: 'Vigencia', value: <PromotionVigenciaBadge vigenciaHasta={detailTarget.vigencia_hasta} /> },
                   { label: 'Vigencia desde', value: detailTarget.vigencia_desde || '-' },
                   { label: 'Vigencia hasta', value: detailTarget.vigencia_hasta || '-' },
                 ]},
-                { id: 'contenido', title: 'Contenido y CTA', icon: <Gift size={14} />, fields: [
-                  { label: 'Parrafos', value: Array.isArray(detailTarget.parrafos) && detailTarget.parrafos.length ? <div className="space-y-1 text-left">{detailTarget.parrafos.map((line, index) => (<p key={`${index}-${line}`} className="text-sm">{line}</p>))}</div> : 'Sin parrafos', span: 'full' },
-                  { label: 'CTA tipo', value: ctaLabel(detailTarget.cta_tipo) },
-                  { label: 'CTA texto', value: detailTarget.cta_texto || '-' },
-                  { label: 'CTA URL', value: detailTarget.cta_url || '-', span: 'full' },
+                { id: 'contenido', title: 'Contenido', icon: <Building2 size={14} />, fields: [
+                  { label: 'Titulo', value: detailTarget.titulo || '-' },
+                  { label: 'Subtitulo', value: detailTarget.subtitulo || '-' },
+                  { label: 'Descripcion', value: Array.isArray(detailTarget.parrafos) && detailTarget.parrafos.length ? <div className="space-y-1 text-left">{detailTarget.parrafos.map((line, index) => (<p key={`${index}-${line}`} className="text-sm">{line}</p>))}</div> : 'Sin descripcion', span: 'full' },
                   { label: 'Imagen principal', value: detailTarget.imagen_principal_url || '-', span: 'full' },
-                  { label: 'Imagen mobile', value: detailTarget.imagen_mobile_url || '-', span: 'full' },
-                ]},
-                { id: 'trazabilidad', title: 'Trazabilidad', icon: <Building2 size={14} />, fields: [
-                  { label: 'Sucursal', value: branchNameById[detailTarget.id_sucursal] || detailTarget.id_sucursal || '-' },
-                  { label: 'ID promocion', value: detailTarget.id_promocion || '-', span: 'full' },
                 ]},
               ]}
             />

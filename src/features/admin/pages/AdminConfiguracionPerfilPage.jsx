@@ -19,6 +19,10 @@ function formatDateTime(value) {
   return date.toLocaleString();
 }
 
+function normalizeUnicodeText(value) {
+  return String(value || '').normalize('NFC').trim();
+}
+
 const FORM_DEFAULTS = {
   nombres: '',
   apellidos: '',
@@ -66,8 +70,8 @@ export default function AdminConfiguracionPerfilPage() {
   }
 
   async function handleSave() {
-    const nombres = String(form.nombres || '').trim();
-    const apellidos = String(form.apellidos || '').trim();
+    const nombres = normalizeUnicodeText(form.nombres);
+    const apellidos = normalizeUnicodeText(form.apellidos);
 
     if (!nombres) {
       notifications.warning('El nombre es requerido.', { dedupeKey: 'config-perfil-nombre-required' });
@@ -83,9 +87,9 @@ export default function AdminConfiguracionPerfilPage() {
       const response = await updateAdminConfigPerfil({
         nombres,
         apellidos,
-        telefono_principal: String(form.telefono_principal || '').trim() || null,
-        direccion_texto: String(form.direccion_texto || '').trim() || null,
-        observaciones: String(form.observaciones || '').trim() || null,
+        telefono_principal: normalizeUnicodeText(form.telefono_principal) || null,
+        direccion_texto: normalizeUnicodeText(form.direccion_texto) || null,
+        observaciones: normalizeUnicodeText(form.observaciones) || null,
       });
       const payload = response?.data || response;
       setPerfil(payload?.perfil || null);

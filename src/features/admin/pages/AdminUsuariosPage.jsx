@@ -38,7 +38,7 @@ import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialo
 import { replaceItemById } from '../../../lib/collectionState.js';
 
 const ACCESS_LABELS = {
-  pendiente_password: 'Contrasena pendiente',
+  pendiente_password: 'Contraseña pendiente',
   activo: 'Activo',
   bloqueado: 'Bloqueado',
   inactivo: 'Inactivo',
@@ -298,7 +298,7 @@ export default function AdminUsuariosPage() {
         return response;
       },
       {
-        successMessage: 'Mensaje de nueva contrasena enviado.',
+        successMessage: 'Mensaje de nueva contraseña enviado.',
         loadingMessage: 'Enviando mensaje de configuración...',
         loadingDedupeKey: 'personas-usuarios-resend-loading',
       }
@@ -352,7 +352,7 @@ export default function AdminUsuariosPage() {
         <HoverActionButton
           icon={<RefreshCw size={14} strokeWidth={2} />}
           label={loadingActions ? 'Procesando...' : 'Mandar mensaje'}
-          title="Mandar mensaje para nueva contrasena"
+          title="Mandar mensaje para nueva contraseña"
           disabled={loadingActions}
           onClick={() => handleResendSetup(usuario.id_usuario)}
         />
@@ -582,7 +582,7 @@ export default function AdminUsuariosPage() {
               onClick={() => setFilters((prev) => ({ ...prev, estadoAcceso: prev.estadoAcceso === 'pendiente_password' ? 'all' : 'pendiente_password' }))}
               className={quickFilterButtonClass(filters.estadoAcceso === 'pendiente_password')}
             >
-              Contrasena pendiente
+              Contraseña pendiente
             </Button>
           </div>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">

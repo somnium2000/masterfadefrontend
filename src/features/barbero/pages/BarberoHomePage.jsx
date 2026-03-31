@@ -1,6 +1,6 @@
 // src/features/barbero/pages/BarberoHomePage.jsx
 // Pantalla Home dedicada para rol Barbero.
-// Sin Figma disponible → Placeholder premium con agenda futura.
+// Sin Figma disponible - Placeholder premium con agenda futura.
 
 import { motion } from 'framer-motion';
 import { CalendarDays, Clock, House, LogOut, Plus, Scissors, Tag } from 'lucide-react';

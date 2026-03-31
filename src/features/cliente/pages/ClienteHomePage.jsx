@@ -1,6 +1,6 @@
 // src/features/cliente/pages/ClienteHomePage.jsx
 // Pantalla Home dedicada para rol Cliente.
-// Sin Figma disponible → Placeholder premium con acciones previstas.
+// Sin Figma disponible - Placeholder premium con acciones previstas.
 
 import { motion } from 'framer-motion';
 import { CalendarDays, ClipboardList, House, LogOut, Plus, Scissors, Tag, User } from 'lucide-react';
