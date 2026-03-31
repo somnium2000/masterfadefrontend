@@ -14,9 +14,26 @@ import { getUserDisplayName, useAuth } from '../../context/AuthContext.jsx';
 import { getRoleLabel, resolveHomePath } from '../../features/home/lib/roleRouting.js';
 import PremiumBottomNav from '../navigation/PremiumBottomNav.jsx';
 
-// â”€â”€ Definición de módulos del sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function buildNavModules(basePath, pageRole) {
-    const configSubItems = pageRole === 'super_admin'
+// ── Definición de módulos del sidebar ────────────────────────────────────────────────────────
+function buildNavModules(basePath, role) {
+    const isBarbero = role === 'barbero';
+    const isCliente = role === 'cliente';
+    
+    // Sub-items de agendamiento basados en el rol (provenientes de dev)
+    const agendamientoSubItems = isBarbero
+        ? [
+            { id: 'agendamiento-citas', label: 'Citas', path: `${basePath}/citas` },
+            { id: 'agendamiento-historial', label: 'Historial', path: `${basePath}/citas/historial` },
+        ]
+        : [
+            { id: 'agendamiento-citas', label: 'Citas', path: `${basePath}/citas` },
+            { id: 'agendamiento-historial', label: 'Historial', path: `${basePath}/citas/historial` },
+            { id: 'agendamiento-preview', label: 'Vista previa', path: `${basePath}/citas/preview` },
+            { id: 'agendamiento-config', label: 'Configuración', path: `${basePath}/citas/config` },
+        ];
+
+    // Sub-items de configuración basados en el rol (provenientes de PersonasF)
+    const configSubItems = role === 'super_admin'
         ? [
             { id: 'conf-comunicacion', label: 'Comunicación', path: `${basePath}/configuracion/comunicacion` },
             { id: 'conf-promociones', label: 'Promociones', path: `${basePath}/configuracion/promociones` },
@@ -25,7 +42,7 @@ function buildNavModules(basePath, pageRole) {
             { id: 'conf-promociones', label: 'Promociones', path: `${basePath}/configuracion/promociones` },
         ];
 
-    return [
+    const modules = [
         {
             id: 'inicio',
             label: 'Inicio',
@@ -63,17 +80,14 @@ function buildNavModules(basePath, pageRole) {
             label: 'Sucursales',
             icon: Building2,
             path: `${basePath}/sucursales`,
-            subItems: null, // sin submenú → navegación directa
+            subItems: null,
         },
         {
             id: 'citas',
-            label: 'Citas',
+            label: 'Agendamiento',
             icon: CalendarDays,
             path: `${basePath}/citas`,
-            subItems: [
-                { id: 'citas-preview', label: 'Vista Previa', path: `${basePath}/citas/preview` },
-                { id: 'citas-config', label: 'Panel de Configuración', path: `${basePath}/citas/config` },
-            ],
+            subItems: agendamientoSubItems,
         },
         {
             id: 'seguridad',
@@ -113,6 +127,16 @@ function buildNavModules(basePath, pageRole) {
             subItems: configSubItems,
         },
     ];
+
+    if (isBarbero) {
+        return modules.filter((module) => ['inicio', 'citas'].includes(module.id));
+    }
+
+    if (isCliente) {
+        return modules.filter((module) => ['inicio'].includes(module.id));
+    }
+
+    return modules;
 }
 
 function normalizePath(path) {
@@ -150,7 +174,7 @@ function resolveActiveModule(modules, pathname) {
     return bestModule || modules[0] || null;
 }
 
-// â”€â”€ Sidebar Item â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Sidebar Item ─────────────────────────────────────────────────────────────────────────────
 function SidebarItem({ module, isActive, isCollapsed, onClick }) {
     const Icon = module.icon;
     return (
@@ -201,7 +225,7 @@ function SidebarItem({ module, isActive, isCollapsed, onClick }) {
     );
 }
 
-// â”€â”€ Topbar submenú pills â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Topbar submenú pills ─────────────────────────────────────────────────────────────────────
 function TopbarSubMenu({ subItems, currentPath }) {
     const navigate = useNavigate();
     if (!subItems || subItems.length === 0) return null;
@@ -231,7 +255,7 @@ function TopbarSubMenu({ subItems, currentPath }) {
     );
 }
 
-// â”€â”€ Main Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Main Layout ──────────────────────────────────────────────────────────────────────────────
 export const ROLE_META = {
     super_admin: { kicker: 'Panel global', title: 'Visión total' },
     admin: { kicker: 'Operación', title: 'Panel Admin' },
@@ -252,7 +276,7 @@ export default function DashboardLayout({ pageRole }) {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     const basePath = resolvedHomePath;
-    const modules = buildNavModules(basePath, pageRole);
+    const modules = buildNavModules(basePath, currentRole);
 
     // Módulo activo: el que cuya path coincide más con la ubicación actual
     const activeModule = resolveActiveModule(modules, location.pathname);
@@ -274,20 +298,28 @@ export default function DashboardLayout({ pageRole }) {
     const sidebarWidth = isCollapsed ? 72 : 260;
 
     // Mobile nav items
-    const mobileItems = [
-        { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate(basePath) },
-        { id: 'personas', label: 'Personas', icon: Users, onClick: () => navigate(`${basePath}/empleados`) },
-        { id: 'servicios', label: 'Servicios', icon: Scissors, onClick: () => navigate(`${basePath}/catalog/servicios`) },
-        { id: 'sucursales', label: 'Sucursales', icon: Building2, onClick: () => navigate(`${basePath}/sucursales`) },
-        { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
-    ];
+    const mobileItems = currentRole === 'barbero'
+        ? [
+            { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate(basePath) },
+            { id: 'agendamiento', label: 'Agendamiento', icon: CalendarDays, onClick: () => navigate(`${basePath}/citas`) },
+            { id: 'historial', label: 'Historial', icon: CalendarDays, onClick: () => navigate(`${basePath}/citas/historial`) },
+            { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
+        ]
+        : [
+            { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate(basePath) },
+            { id: 'personas', label: 'Personas', icon: Users, onClick: () => navigate(`${basePath}/empleados`) },
+            { id: 'servicios', label: 'Servicios', icon: Scissors, onClick: () => navigate(`${basePath}/catalog/servicios`) },
+            { id: 'sucursales', label: 'Sucursales', icon: Building2, onClick: () => navigate(`${basePath}/sucursales`) },
+            { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
+        ];
+    const mobileSideItems = currentRole === 'barbero' ? mobileItems.slice(0, 3) : mobileItems.slice(0, 4);
 
     return (
         <div className="min-h-screen bg-[var(--mf-bg)] text-[var(--mf-text)]">
-            {/* â”€â”€ DESKTOP LAYOUT â”€â”€ */}
+            {/* ── DESKTOP LAYOUT ── */}
             <div className="hidden lg:flex min-h-screen">
 
-                {/* â”€â”€ Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+                {/* ── Sidebar ────────────────────────────────────────────────────────────── */}
                 <motion.aside
                     animate={{ width: sidebarWidth }}
                     transition={{ type: 'spring', stiffness: 300, damping: 30 }}
@@ -375,13 +407,13 @@ export default function DashboardLayout({ pageRole }) {
                     </div>
                 </motion.aside>
 
-                {/* â”€â”€ Content Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+                {/* ── Content Area ─────────────────────────────────────────────────────────── */}
                 <div className="flex min-h-screen flex-1 flex-col min-w-0">
 
-                    {/* â”€â”€ Topbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+                    {/* ── Topbar ─────────────────────────────────────────────────────────────── */}
                     <header className="sticky top-0 z-30 border-b border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-bg)_82%,transparent)] backdrop-blur-xl">
                         <div className="flex items-center gap-4 px-6 py-3">
-                            {/* Módulo activo label */}
+                            {/* Módulo activo */}
                             <div className="flex items-center gap-2 shrink-0">
                                 {activeModule && (() => {
                                     const Icon = activeModule.icon;
@@ -421,7 +453,7 @@ export default function DashboardLayout({ pageRole }) {
                 </div>
             </div>
 
-            {/* â”€â”€ MOBILE LAYOUT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+            {/* ── MOBILE LAYOUT ──────────────────────────────────────────────────────────── */}
             <div className="mf-page-gradient min-h-screen pb-[100px] lg:hidden">
                 <div className="mf-mobile-frame mf-screen-pad mf-safe-top">
                     <header className="flex items-center justify-between pt-3">
@@ -516,7 +548,7 @@ export default function DashboardLayout({ pageRole }) {
                 <PremiumBottomNav
                     className="lg:hidden"
                     activeId={activeModule?.id || 'inicio'}
-                    sideItems={mobileItems.slice(0, 4)}
+                    sideItems={mobileSideItems}
                     fabItem={{ id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout }}
                 />
             </div>

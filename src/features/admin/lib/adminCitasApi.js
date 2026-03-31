@@ -14,6 +14,34 @@ export async function getAdminCitasContexto() {
   return http.get('/v1/admin/citas/contexto');
 }
 
+export async function getAdminCitasOperativasContexto() {
+  return http.get('/v1/admin/citas/operativas/contexto');
+}
+
+export async function listAdminCitasOperativas(params = {}) {
+  return http.get(`/v1/admin/citas/operativas${toQueryString(params)}`);
+}
+
+export async function listAdminCitasHistorial(params = {}) {
+  return http.get(`/v1/admin/citas/historial${toQueryString(params)}`);
+}
+
+export async function patchAdminCitaEstado(idCita, payload) {
+  return http.patch(`/v1/admin/citas/${encodeURIComponent(idCita)}/estado`, payload);
+}
+
+export async function listAdminCitasAfectadasReagendacion(params = {}) {
+  return http.get(`/v1/admin/citas/reagendacion/afectadas${toQueryString(params)}`);
+}
+
+export async function postAdminCitaReagendarEmergencia(idCita, payload) {
+  return http.post(`/v1/admin/citas/${encodeURIComponent(idCita)}/reagendar-emergencia`, payload);
+}
+
+export async function postAdminCitasReagendarEmergenciaLote(payload) {
+  return http.post('/v1/admin/citas/reagendar-emergencia/lote', payload);
+}
+
 export async function getAdminCitasHorarios(idEmpleado) {
   return http.get(`/v1/admin/citas/horarios/${encodeURIComponent(idEmpleado)}`);
 }
