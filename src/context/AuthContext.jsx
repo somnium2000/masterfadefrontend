@@ -54,6 +54,15 @@ function isLikelyEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
 
+function resolveLoginErrorMessage(rawMessage) {
+  const fallback = 'Correo o contraseña incorrecta, inténtalo de nuevo.';
+  const normalized = String(rawMessage || '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized.includes('invalid login credentials')) return fallback;
+  if (normalized.includes('credenciales invalidas') || normalized.includes('credenciales inválidas')) return fallback;
+  return String(rawMessage).trim();
+}
+
 export function AuthProvider({ children }) {
   const initialToken = localStorage.getItem(LS_TOKEN_KEY) || '';
   const initialUser = initialToken ? safeJsonParse(localStorage.getItem(LS_USER_KEY) || 'null') : null;
@@ -156,7 +165,7 @@ export function AuthProvider({ children }) {
     const password = String(contrasena || '').trim();
 
     if (!normalizedIdentifier || !password) {
-      return { ok: false, message: 'Correo y contrasena son requeridos.' };
+      return { ok: false, message: 'Correo y contraseña son requeridos.' };
     }
 
     // AM: Fase 1 exige correo como identificador formal de autenticacion.
@@ -174,7 +183,11 @@ export function AuthProvider({ children }) {
       const payload = response?.data || response;
 
       if (!response?.ok || !payload?.token) {
-        return { ok: false, message: response?.error?.message || response?.message || 'Credenciales invalidas.' };
+        return {
+          ok: false,
+          code: response?.error?.code || response?.data?.error?.code || null,
+          message: resolveLoginErrorMessage(response?.error?.message || response?.message),
+        };
       }
 
       const resolvedToken = String(payload.token || '').trim();
@@ -202,7 +215,8 @@ export function AuthProvider({ children }) {
       clearSessionState();
       return {
         ok: false,
-        message: err?.data?.error?.message || err?.message || 'Error al intentar iniciar sesion.',
+        code: err?.data?.error?.code || null,
+        message: resolveLoginErrorMessage(err?.data?.error?.message || err?.message),
       };
     }
   }, [clearSessionState, hydrateSession]);

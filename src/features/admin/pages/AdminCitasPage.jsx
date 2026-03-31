@@ -1949,7 +1949,7 @@ export default function AdminCitasPage() {
             Excepciones de horario para <span className="font-semibold text-[var(--mf-text)]">{selectedBarber.nombre_completo}</span>
           </p>
           <Button className="gap-2" onClick={() => setBlockDialogOpen(true)}>
-            <Plus size={15} /> Nueva excepciï¿½n
+            <Plus size={15} /> Nueva excepción
           </Button>
         </div>
 
@@ -1976,8 +1976,8 @@ export default function AdminCitasPage() {
                     type="button"
                     className="citas-icon-action"
                     onClick={handleEditException}
-                    aria-label="Editar excepciï¿½n"
-                    title="Editar excepciï¿½n"
+                    aria-label="Editar excepción"
+                    title="Editar excepción"
                   >
                     <Pencil size={18} />
                   </button>
@@ -1986,8 +1986,8 @@ export default function AdminCitasPage() {
                     className="citas-icon-action is-danger disabled:opacity-45"
                     onClick={() => handleDeleteBlock(item.id_bloqueo)}
                     disabled={blockDeleteId === item.id_bloqueo}
-                    aria-label="Eliminar excepciï¿½n"
-                    title="Eliminar excepciï¿½n"
+                    aria-label="Eliminar excepción"
+                    title="Eliminar excepción"
                   >
                     <Trash2 size={18} />
                   </button>
@@ -2005,10 +2005,10 @@ export default function AdminCitasPage() {
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[var(--mf-text-2)] text-lg">
-            Inhabilitar un dï¿½a completo por sucursal
+            Inhabilitar un día completo por sucursal
           </p>
           <Button className="gap-2" onClick={() => setBranchDayOffDialogOpen(true)}>
-            <Plus size={15} /> Bloquear dï¿½a
+            <Plus size={15} /> Bloquear día
           </Button>
         </div>
 
@@ -2018,7 +2018,7 @@ export default function AdminCitasPage() {
           <EmptyState
             icon={Ban}
             title="Sin bloqueos por sucursal"
-            description="No hay dï¿½as completos bloqueados en la sucursal seleccionada."
+            description="No hay días completos bloqueados en la sucursal seleccionada."
           />
         ) : (
           <div className="citas-block-list">

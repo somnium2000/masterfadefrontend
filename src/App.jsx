@@ -27,9 +27,7 @@ import AdminEmpleadosPage from './features/admin/pages/AdminEmpleadosPage.jsx';
 import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx';
 import AdminClientesPage from './features/admin/pages/AdminClientesPage.jsx';
 import AdminUsuariosPage from './features/admin/pages/AdminUsuariosPage.jsx';
-import AdminConfiguracionNotificacionesPage from './features/admin/pages/AdminConfiguracionNotificacionesPage.jsx';
-import AdminConfiguracionPerfilPage from './features/admin/pages/AdminConfiguracionPerfilPage.jsx';
-import AdminConfiguracionSpamPage from './features/admin/pages/AdminConfiguracionSpamPage.jsx';
+import AdminConfiguracionComunicacionPage from './features/admin/pages/AdminConfiguracionComunicacionPage.jsx';
 import AdminConfiguracionPromocionesPage from './features/admin/pages/AdminConfiguracionPromocionesPage.jsx';
 import AdminCitasPage from './features/admin/pages/AdminCitasPage.jsx';
 import AdminCitasPreviewPage from './features/admin/pages/AdminCitasPreviewPage.jsx';
@@ -69,7 +67,7 @@ function App() {
         }
       />
 
-      {/* ── Super Admin ─────────────────────────────────────────────── */}
+      {/* Super Admin */}
       <Route
         path="/home/super"
         element={
@@ -105,13 +103,14 @@ function App() {
         {/* Masterpuntos */}
         <Route path="superpuntos" element={<UnderConstructionPage title="Masterpuntos" />} />
         {/* Configuración */}
-        <Route path="configuracion/notificaciones" element={<RouteErrorBoundary><AdminConfiguracionNotificacionesPage /></RouteErrorBoundary>} />
-        <Route path="configuracion/perfil" element={<RouteErrorBoundary><AdminConfiguracionPerfilPage /></RouteErrorBoundary>} />
-        <Route path="configuracion/spam" element={<RouteErrorBoundary><AdminConfiguracionSpamPage /></RouteErrorBoundary>} />
+        <Route path="configuracion/notificaciones" element={<Navigate to="configuracion/comunicacion" replace />} />
+        <Route path="configuracion/perfil" element={<Navigate to="configuracion/comunicacion" replace />} />
+        <Route path="configuracion/spam" element={<Navigate to="configuracion/comunicacion" replace />} />
+        <Route path="configuracion/comunicacion" element={<RouteErrorBoundary><AdminConfiguracionComunicacionPage /></RouteErrorBoundary>} />
         <Route path="configuracion/promociones" element={<RouteErrorBoundary><AdminConfiguracionPromocionesPage /></RouteErrorBoundary>} />
       </Route>
 
-      {/* ── Admin ────────────────────────────────────────────────────── */}
+      {/* Admin */}
       <Route
         path="/home/admin"
         element={
@@ -147,13 +146,14 @@ function App() {
         {/* Masterpuntos */}
         <Route path="superpuntos" element={<UnderConstructionPage title="Masterpuntos" />} />
         {/* Configuración */}
-        <Route path="configuracion/notificaciones" element={<UnderConstructionPage title="Notificaciones" />} />
-        <Route path="configuracion/perfil" element={<UnderConstructionPage title="Perfil" />} />
-        <Route path="configuracion/spam" element={<UnderConstructionPage title="Spam" />} />
+        <Route path="configuracion/notificaciones" element={<Navigate to="configuracion/promociones" replace />} />
+        <Route path="configuracion/perfil" element={<Navigate to="configuracion/promociones" replace />} />
+        <Route path="configuracion/spam" element={<Navigate to="configuracion/promociones" replace />} />
+        <Route path="configuracion/comunicacion" element={<Navigate to="configuracion/promociones" replace />} />
         <Route path="configuracion/promociones" element={<UnderConstructionPage title="Promociones" />} />
       </Route>
 
-      {/* ── Barbero ─────────────────────────────────────────────────── */}
+      {/* Barbero */}
       <Route
         path="/home/barbero"
         element={
@@ -165,7 +165,7 @@ function App() {
         <Route index element={<UnderConstructionPage title="Inicio" />} />
       </Route>
 
-      {/* ── Cliente ─────────────────────────────────────────────────── */}
+      {/* Cliente */}
       <Route
         path="/home/cliente"
         element={

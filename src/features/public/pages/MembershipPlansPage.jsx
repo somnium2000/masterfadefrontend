@@ -207,7 +207,7 @@ export default function MembershipPlansPage() {
 
         <main className="mx-auto mt-8 w-full max-w-4xl">
           <div className="flex flex-col items-center text-center">
-            <MasterfadeLogo variant="compact" />
+            <MasterfadeLogo variant="publicPromotions" className="-my-6 sm:-my-8 md:-my-10" />
             <p className="mt-8 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Membresias VIP</p>
             <h1 className="mf-font-display mt-4 text-[42px] leading-[0.92] text-[var(--mf-text)]">Eleva tu Estilo Cada Mes</h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--mf-text-2)]">

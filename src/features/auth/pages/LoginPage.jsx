@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Eye } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
@@ -21,6 +21,16 @@ function getSafeNextPath(rawPath) {
 function normalizeBranchId(rawBranchId) {
   const value = String(rawBranchId || '').trim();
   return UUID_REGEX.test(value) ? value : '';
+}
+
+function isInvalidUserForAuth(result) {
+  const code = String(result?.code || '').trim();
+  const message = String(result?.message || '').trim().toLowerCase();
+  return (
+    code === 'AUTH_ACCESS_BLOCKED' ||
+    code === 'AUTH_USER_NOT_ONBOARDED' ||
+    /bloqueado|inactivo|perfil interno activo|not onboarded/.test(message)
+  );
 }
 
 export default function LoginPage() {
@@ -52,6 +62,8 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [loadingGoogle, setLoadingGoogle] = useState(false);
   const [error, setError] = useState('');
+  const [showInvalidUserAuthBox, setShowInvalidUserAuthBox] = useState(false);
+  const [showPasswordWhilePress, setShowPasswordWhilePress] = useState(false);
 
   useEffect(() => {
     const hash = location.hash || '';
@@ -63,13 +75,14 @@ export default function LoginPage() {
   async function onSubmit(event) {
     event.preventDefault();
     setError('');
+    setShowInvalidUserAuthBox(false);
 
     // AM: Fase 1 usa correo como identificador oficial de login.
     const user = correo.trim().toLowerCase();
     const pass = contrasena.trim();
 
     if (!user || !pass) {
-      const message = 'Por favor ingresa correo y contrasena.';
+      const message = 'Por favor ingresa correo y contraseña.';
       setError(message);
       notifications.warning(message, { dedupeKey: 'auth-login-required-fields' });
       return;
@@ -87,6 +100,12 @@ export default function LoginPage() {
     setLoading(false);
 
     if (!result.ok) {
+      if (isInvalidUserForAuth(result)) {
+        setShowInvalidUserAuthBox(true);
+        setError('');
+        return;
+      }
+
       const message = result.message || 'No se pudo iniciar sesion.';
       setError(message);
       notifications.error(message, { dedupeKey: 'auth-login-error' });
@@ -99,6 +118,7 @@ export default function LoginPage() {
 
   async function onContinueWithGoogle() {
     setError('');
+    setShowInvalidUserAuthBox(false);
 
     if (!supabase) {
       const message = 'Google login no esta disponible: falta configurar Supabase en frontend.';
@@ -124,6 +144,15 @@ export default function LoginPage() {
       notifications.error(message, { dedupeKey: 'auth-google-oauth-error' });
       setLoadingGoogle(false);
     }
+  }
+
+  function handlePasswordRevealStart(event) {
+    event.preventDefault();
+    setShowPasswordWhilePress(true);
+  }
+
+  function handlePasswordRevealEnd() {
+    setShowPasswordWhilePress(false);
   }
 
   return (
@@ -155,9 +184,9 @@ export default function LoginPage() {
           >
             <div className="mf-login-card-header">
               <p className="mf-login-kicker">Acceso premium</p>
-              <h1 className="mf-login-title">Iniciar sesion</h1>
+              <h1 className="mf-login-title">Iniciar Sesión</h1>
               <p className="mf-login-subtitle">
-                Ingresa con tu correo y contrasena para continuar a tu experiencia MASTERFADE.
+                Ingresa con tu correo y contraseña para continuar a tu experiencia MASTERFADE.
               </p>
               {intent === 'seleccionar_plan' ? (
                 <div className="mf-login-intent-note">
@@ -177,8 +206,8 @@ export default function LoginPage() {
                 {loadingGoogle ? 'Redirigiendo a Google...' : 'Continuar con Google'}
               </button>
 
-              <div className="mf-login-divider" role="separator" aria-label="O continuar con correo">
-                <span>o continuar con correo</span>
+              <div className="mf-login-divider" role="separator" aria-label="O CONTINUAR CON USUARIO">
+                <span>O CONTINUAR CON USUARIO</span>
               </div>
 
               <div className="mf-form-group">
@@ -199,26 +228,47 @@ export default function LoginPage() {
               <div className="mf-form-group">
                 <div className="mf-row-between">
                   <label className="mf-label" htmlFor="contrasena">
-                    Contrasena
+                    Contraseña
                   </label>
 
                   <Link className="mf-link" to="/forgot-password">
-                    Olvidaste tu contrasena?
+                    Olvidaste tu contraseña?
                   </Link>
                 </div>
 
-                <input
-                  id="contrasena"
-                  className="mf-input"
-                  type="password"
-                  autoComplete="current-password"
-                  value={contrasena}
-                  onChange={(event) => setContrasena(event.target.value)}
-                  placeholder="********"
-                />
+                <div className="mf-password-field">
+                  <input
+                    id="contrasena"
+                    className="mf-input mf-password-input"
+                    type={showPasswordWhilePress ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    value={contrasena}
+                    onChange={(event) => setContrasena(event.target.value)}
+                    placeholder="********"
+                  />
+                  <button
+                    type="button"
+                    className="mf-password-peek"
+                    aria-label="Mantén presionado para ver la contraseña"
+                    title="Mantén presionado para ver la contraseña"
+                    onPointerDown={handlePasswordRevealStart}
+                    onPointerUp={handlePasswordRevealEnd}
+                    onPointerLeave={handlePasswordRevealEnd}
+                    onPointerCancel={handlePasswordRevealEnd}
+                    onBlur={handlePasswordRevealEnd}
+                  >
+                    <Eye size={16} />
+                  </button>
+                </div>
               </div>
 
-              {error ? <div className="mf-error">{error}</div> : null}
+              {showInvalidUserAuthBox ? (
+                <div className="mf-error">
+                  <p className="font-semibold uppercase tracking-[0.08em]">USUARIO INVALIDO</p>
+                  <p className="mt-1">Contacta MASTERFADE o escribe al correo soporte@masterfadeapp.com</p>
+                </div>
+              ) : null}
+              {!showInvalidUserAuthBox && error ? <div className="mf-error">{error}</div> : null}
 
               <div className="mf-actions">
                 <label className="mf-checkbox">

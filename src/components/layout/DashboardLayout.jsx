@@ -14,8 +14,17 @@ import { getUserDisplayName, useAuth } from '../../context/AuthContext.jsx';
 import { getRoleLabel, resolveHomePath } from '../../features/home/lib/roleRouting.js';
 import PremiumBottomNav from '../navigation/PremiumBottomNav.jsx';
 
-// ── Definición de módulos del sidebar ───────────────────────────────────────
-function buildNavModules(basePath) {
+// â”€â”€ Definición de módulos del sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function buildNavModules(basePath, pageRole) {
+    const configSubItems = pageRole === 'super_admin'
+        ? [
+            { id: 'conf-comunicacion', label: 'Comunicación', path: `${basePath}/configuracion/comunicacion` },
+            { id: 'conf-promociones', label: 'Promociones', path: `${basePath}/configuracion/promociones` },
+        ]
+        : [
+            { id: 'conf-promociones', label: 'Promociones', path: `${basePath}/configuracion/promociones` },
+        ];
+
     return [
         {
             id: 'inicio',
@@ -100,13 +109,8 @@ function buildNavModules(basePath) {
             id: 'configuracion',
             label: 'Configuración',
             icon: Settings,
-            path: `${basePath}/configuracion`,
-            subItems: [
-                { id: 'conf-notificaciones', label: 'Notificaciones', path: `${basePath}/configuracion/notificaciones` },
-                { id: 'conf-perfil', label: 'Perfil', path: `${basePath}/configuracion/perfil` },
-                { id: 'conf-spam', label: 'Spam', path: `${basePath}/configuracion/spam` },
-                { id: 'conf-promociones', label: 'Promociones', path: `${basePath}/configuracion/promociones` },
-            ],
+            path: configSubItems[0].path,
+            subItems: configSubItems,
         },
     ];
 }
@@ -146,7 +150,7 @@ function resolveActiveModule(modules, pathname) {
     return bestModule || modules[0] || null;
 }
 
-// ── Sidebar Item ─────────────────────────────────────────────────────────────
+// â”€â”€ Sidebar Item â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function SidebarItem({ module, isActive, isCollapsed, onClick }) {
     const Icon = module.icon;
     return (
@@ -197,7 +201,7 @@ function SidebarItem({ module, isActive, isCollapsed, onClick }) {
     );
 }
 
-// ── Topbar submenú pills ─────────────────────────────────────────────────────
+// â”€â”€ Topbar submenú pills â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function TopbarSubMenu({ subItems, currentPath }) {
     const navigate = useNavigate();
     if (!subItems || subItems.length === 0) return null;
@@ -227,7 +231,7 @@ function TopbarSubMenu({ subItems, currentPath }) {
     );
 }
 
-// ── Main Layout ──────────────────────────────────────────────────────────────
+// â”€â”€ Main Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const ROLE_META = {
     super_admin: { kicker: 'Panel global', title: 'Visión total' },
     admin: { kicker: 'Operación', title: 'Panel Admin' },
@@ -248,7 +252,7 @@ export default function DashboardLayout({ pageRole }) {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     const basePath = resolvedHomePath;
-    const modules = buildNavModules(basePath);
+    const modules = buildNavModules(basePath, pageRole);
 
     // Módulo activo: el que cuya path coincide más con la ubicación actual
     const activeModule = resolveActiveModule(modules, location.pathname);
@@ -280,10 +284,10 @@ export default function DashboardLayout({ pageRole }) {
 
     return (
         <div className="min-h-screen bg-[var(--mf-bg)] text-[var(--mf-text)]">
-            {/* ── DESKTOP LAYOUT ── */}
+            {/* â”€â”€ DESKTOP LAYOUT â”€â”€ */}
             <div className="hidden lg:flex min-h-screen">
 
-                {/* ── Sidebar ─────────────────────────────────────────── */}
+                {/* â”€â”€ Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                 <motion.aside
                     animate={{ width: sidebarWidth }}
                     transition={{ type: 'spring', stiffness: 300, damping: 30 }}
@@ -371,10 +375,10 @@ export default function DashboardLayout({ pageRole }) {
                     </div>
                 </motion.aside>
 
-                {/* ── Content Area ─────────────────────────────────────── */}
+                {/* â”€â”€ Content Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                 <div className="flex min-h-screen flex-1 flex-col min-w-0">
 
-                    {/* ── Topbar ──────────────────────────────────────── */}
+                    {/* â”€â”€ Topbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                     <header className="sticky top-0 z-30 border-b border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-bg)_82%,transparent)] backdrop-blur-xl">
                         <div className="flex items-center gap-4 px-6 py-3">
                             {/* Módulo activo label */}
@@ -417,7 +421,7 @@ export default function DashboardLayout({ pageRole }) {
                 </div>
             </div>
 
-            {/* ── MOBILE LAYOUT ─────────────────────────────────────────── */}
+            {/* â”€â”€ MOBILE LAYOUT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
             <div className="mf-page-gradient min-h-screen pb-[100px] lg:hidden">
                 <div className="mf-mobile-frame mf-screen-pad mf-safe-top">
                     <header className="flex items-center justify-between pt-3">

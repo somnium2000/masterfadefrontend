@@ -101,9 +101,6 @@ function PromotionCard({ promotion, onAction }) {
               Destacada
             </span>
           ) : null}
-          <span className="inline-flex items-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">
-            Orden {Number(promotion?.orden_visual ?? 100)}
-          </span>
         </div>
       </div>
 
@@ -127,8 +124,8 @@ function PromotionCard({ promotion, onAction }) {
           </div>
         ) : null}
 
-        <div className="mt-5 flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-2 rounded-full border border-[var(--mf-nav-border)] px-3 py-2 text-[11px] uppercase tracking-[0.13em] text-[var(--mf-text)]">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--mf-nav-border)]/80 px-2.5 py-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--mf-text)]">
             <CalendarDays size={13} strokeWidth={1.8} />
             {dateRangeLabel}
           </span>

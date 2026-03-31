@@ -4,10 +4,10 @@ const NotificationsContext = createContext(null);
 
 const MAX_NOTIFICATIONS = 5;
 const DEFAULT_DURATION_MS = {
-  success: 2800,
-  info: 3600,
+  success: 5000,
+  info: 5000,
   warning: 5000,
-  error: 7000,
+  error: 5000,
   loading: 0,
 };
 
