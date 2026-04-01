@@ -32,7 +32,6 @@ import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
-import { replaceItemById } from '../../../lib/collectionState.js';
 import { emitCatalogSync } from '../../../lib/catalogSync.js';
 
 function extractMessage(err) {
@@ -102,11 +101,10 @@ const FORM_DEFAULTS = {
     nombre_servicio: '',
     descripcion: '',
     duracion_min: '',
-    buffer_min: '',
     precio_hnl: '',
     grupo_catalogo: 'barberia',
     visible_publico: true,
-    agendable: true,
+    servicio_informativo: false,
     orden_visual: '100',
 };
 
@@ -178,17 +176,6 @@ function ServicioForm({ values, onChange }) {
                         placeholder="30"
                     />
                 </div>
-                <div className="flex flex-col gap-1">
-                    <Label htmlFor="f-buf">Buffer (min) *</Label>
-                    <Input
-                        id="f-buf"
-                        type="number"
-                        min="0"
-                        value={values.buffer_min}
-                        onChange={(e) => onChange('buffer_min', e.target.value)}
-                        placeholder="10"
-                    />
-                </div>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1">
@@ -215,6 +202,17 @@ function ServicioForm({ values, onChange }) {
                     />
                 </div>
             </div>
+            <label className="mf-checkbox flex items-start gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_48%,transparent)] px-3 py-2.5">
+                <input
+                    type="checkbox"
+                    checked={Boolean(values.servicio_informativo)}
+                    onChange={(event) => onChange('servicio_informativo', event.target.checked)}
+                />
+                <span className="space-y-0.5 text-xs text-[var(--mf-text-2)]">
+                    <span className="block font-semibold uppercase tracking-[0.08em] text-[var(--mf-text)]">Servicio informativo</span>
+                    <span className="block">Visible en catálogo público informativo y excluido de agendamiento.</span>
+                </span>
+            </label>
         </div>
     );
 }
@@ -223,8 +221,6 @@ function validateForm(values) {
     if (!values.nombre_servicio.trim()) return 'El nombre del servicio es requerido.';
     const dur = parseInt(values.duracion_min, 10);
     if (isNaN(dur) || dur < 1) return 'La Duración debe ser al menos 1 minuto.';
-    const buf = parseInt(values.buffer_min, 10);
-    if (isNaN(buf) || buf < 0) return 'El buffer no puede ser negativo.';
     const precio = parseFloat(values.precio_hnl);
     if (isNaN(precio) || precio < 0) return 'El precio no puede ser negativo.';
     const orden = parseInt(values.orden_visual, 10);
@@ -260,6 +256,14 @@ function ServiceAgendableBadge({ agendable }) {
     );
 }
 
+function ServiceTypeBadge({ informativo }) {
+    return (
+        <span className={`mf-badge ${informativo ? 'mf-badge-green' : 'mf-badge-gold'}`}>
+            {informativo ? 'Informativo' : 'Agendable'}
+        </span>
+    );
+}
+
 function ServiceGroupBadge({ grupo }) {
     const normalized = String(grupo || '').trim().toLowerCase() === 'otros' ? 'otros' : 'barberia';
     return (
@@ -269,13 +273,10 @@ function ServiceGroupBadge({ grupo }) {
     );
 }
 
-function sortServicios(list = []) {
-    return [...(Array.isArray(list) ? list : [])].sort((a, b) => {
-        const orderA = Number(a?.orden_visual ?? 100);
-        const orderB = Number(b?.orden_visual ?? 100);
-        if (orderA !== orderB) return orderA - orderB;
-        return String(a?.nombre_servicio || '').localeCompare(String(b?.nombre_servicio || ''), 'es');
-    });
+function buildServicioScopeKey(servicio) {
+    const serviceId = String(servicio?.id_servicio ?? servicio?.id ?? '').trim() || 'servicio';
+    const branchId = String(servicio?.id_sucursal ?? '').trim() || 'all';
+    return `${serviceId}:${branchId}`;
 }
 
 export default function AdminServicesCatalogPage() {
@@ -298,6 +299,7 @@ export default function AdminServicesCatalogPage() {
     const [search, setSearch] = useState('');
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [filters, setFilters] = useState(() => ({ ...SERVICES_FILTER_DEFAULTS }));
+    const [showInformativos, setShowInformativos] = useState(false);
 
     // Dialogo crear/editar
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -530,11 +532,10 @@ export default function AdminServicesCatalogPage() {
             nombre_servicio: servicio.nombre_servicio ?? '',
             descripcion: servicio.descripcion ?? '',
             duracion_min: String(servicio.duracion_min ?? ''),
-            buffer_min: String(servicio.buffer_min ?? ''),
             precio_hnl: String(servicio.precio_hnl ?? ''),
             grupo_catalogo: String(servicio.grupo_catalogo || 'barberia').trim().toLowerCase() === 'otros' ? 'otros' : 'barberia',
             visible_publico: Boolean(servicio.visible_publico),
-            agendable: Boolean(servicio.agendable),
+            servicio_informativo: Boolean(servicio.servicio_informativo),
             orden_visual: String(servicio.orden_visual ?? 100),
         });
         setFormError('');
@@ -558,36 +559,35 @@ export default function AdminServicesCatalogPage() {
             nombre_servicio: formValues.nombre_servicio.trim(),
             descripcion: formValues.descripcion.trim() || null,
             duracion_min: parseInt(formValues.duracion_min, 10),
-            buffer_min: parseInt(formValues.buffer_min, 10),
             precio_hnl: parseFloat(formValues.precio_hnl),
             orden_visual: parseInt(formValues.orden_visual, 10),
+            servicio_informativo: Boolean(formValues.servicio_informativo),
             id_sucursal: mutationBranchId,
         };
         const editPayload = {
             nombre_servicio: formValues.nombre_servicio.trim(),
             descripcion: formValues.descripcion.trim() || null,
             duracion_min: parseInt(formValues.duracion_min, 10),
-            buffer_min: parseInt(formValues.buffer_min, 10),
             precio_hnl: parseFloat(formValues.precio_hnl),
             orden_visual: parseInt(formValues.orden_visual, 10),
+            servicio_informativo: Boolean(formValues.servicio_informativo),
             id_sucursal: mutationBranchId,
         };
 
         try {
-            const response = editTarget
-                ? await updateAdminServicio(editTarget.id_servicio ?? editTarget.id, editPayload)
-                : await createAdminServicio(createPayload);
-            const result = response?.data ?? response;
+            if (editTarget) {
+                await updateAdminServicio(editTarget.id_servicio ?? editTarget.id, editPayload);
+            } else {
+                await createAdminServicio(createPayload);
+            }
             if (editTarget) {
                 notifications.success('Servicio actualizado.', { dedupeKey: 'servicios-save-ok' });
             } else {
                 notifications.success('Servicio creado.', { dedupeKey: 'servicios-save-ok' });
             }
-            if (result?.id_servicio) {
-                setServicios((prev) => sortServicios(replaceItemById(prev, result, (entry) => entry?.id_servicio ?? entry?.id)));
-            }
             // AM: Publica sincronizacion para que catalogo publico y otras vistas refresquen al instante.
             emitCatalogSync(editTarget ? 'servicio-updated' : 'servicio-created');
+            await fetchServicios();
             setDialogOpen(false);
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
@@ -641,18 +641,14 @@ export default function AdminServicesCatalogPage() {
                 payload.precio_hnl = Number(stateTarget.precio_hnl);
             }
 
-            const response = await setAdminServicioEstado(stateTarget.id_servicio ?? stateTarget.id, payload);
-            const result = response?.data ?? response;
-
-            if (result?.id_servicio) {
-                setServicios((prev) => sortServicios(replaceItemById(prev, result, (entry) => entry?.id_servicio ?? entry?.id)));
-            }
+            await setAdminServicioEstado(stateTarget.id_servicio ?? stateTarget.id, payload);
 
             notifications.success(payload.activo ? 'Servicio activado.' : 'Servicio inactivado.', {
                 dedupeKey: 'servicios-state-ok',
             });
             // AM: Publica sincronizacion para reflejar activacion/inactivacion en catalogo publico de inmediato.
             emitCatalogSync(payload.activo ? 'servicio-activated' : 'servicio-inactivated');
+            await fetchServicios();
             setConfirmOpen(false);
             setStateTarget(null);
         } catch (err) {
@@ -671,27 +667,37 @@ export default function AdminServicesCatalogPage() {
     const titleSubtitle = !sucursal && availableBranches.length > 1
         ? 'Selecciona una sucursal para crear, editar o cambiar estado de servicios.'
         : 'Gestiona servicios por sucursal con configuración operativa.';
+    const visibleServicios = useMemo(
+        () => filteredServicios.filter((servicio) => Boolean(servicio?.servicio_informativo) === showInformativos),
+        [filteredServicios, showInformativos]
+    );
+    const modeLabel = showInformativos ? 'informativos' : 'agendables';
 
     // â”€â”€ Vista Cards de servicios â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function ServicioCards() {
         return (
             <CardsCarousel
-                items={filteredServicios}
-                getItemKey={(servicio) => servicio?.id_servicio ?? servicio?.id}
+                items={visibleServicios}
+                getItemKey={(servicio) => buildServicioScopeKey(servicio)}
+                showHeaderTag={false}
                 renderItem={(s, i, pageIndex) => (
                     <DataCard
-                        key={s.id_servicio ?? s.id}
+                        key={buildServicioScopeKey(s)}
                         animationDelay={(pageIndex * 0.02) + (i * 0.05)}
                         avatar={<Scissors size={20} />}
                         title={s.nombre_servicio}
                         subtitle={s.descripcion}
                         badge={
-                            <ServiceStatusBadge activo={Boolean(s.activo)} />
+                            <div className="flex items-center gap-1.5">
+                                <ServiceTypeBadge informativo={Boolean(s.servicio_informativo)} />
+                                <ServiceStatusBadge activo={Boolean(s.activo)} />
+                            </div>
                         }
                         fields={[
+                            { label: 'Tipo', value: s.servicio_informativo ? 'Informativo' : 'Agendable' },
                             { label: 'Precio', value: <span className="font-mono font-bold text-[var(--mf-accent)]">L {Number(s.precio_hnl).toFixed(2)}</span> },
                             { label: 'Duracion', value: `${s.duracion_min} min` },
-                            { label: 'Buffer', value: `${s.buffer_min} min` },
+                            { label: 'Orden visual', value: Number(s.orden_visual ?? 100) },
                         ]}
                         actions={
                             <>
@@ -748,9 +754,32 @@ export default function AdminServicesCatalogPage() {
                     <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[560px]">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                             <p className="text-sm text-[var(--mf-text-2)]">
-                                {loading ? 'Cargando...' : `${filteredServicios.length} de ${servicios.length} servicio(s)`}
+                                {loading ? 'Cargando...' : `${visibleServicios.length} de ${filteredServicios.length} ${modeLabel}`}
                             </p>
-                            <ViewToggle defaultView={view} onViewChange={setView} storageKey="servicios" />
+                            <div className="flex items-center gap-3">
+                                <label className="inline-flex items-center gap-2 text-xs text-[var(--mf-text-2)]">
+                                    <button
+                                        type="button"
+                                        role="switch"
+                                        aria-checked={showInformativos}
+                                        aria-label="Mostrar servicios informativos"
+                                        onClick={() => setShowInformativos((prev) => !prev)}
+                                        className={`relative inline-flex h-6 w-11 items-center rounded-full border transition-colors ${
+                                            showInformativos
+                                                ? 'border-[var(--mf-accent)] bg-[var(--mf-accent)]/35'
+                                                : 'border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)]'
+                                        }`}
+                                    >
+                                        <span
+                                            className={`inline-block h-4 w-4 transform rounded-full bg-[var(--mf-text)] transition-transform ${
+                                                showInformativos ? 'translate-x-6' : 'translate-x-1'
+                                            }`}
+                                        />
+                                    </button>
+                                    <span>{showInformativos ? 'Informativos' : 'Agendables'}</span>
+                                </label>
+                                <ViewToggle defaultView={view} onViewChange={setView} storageKey="servicios" />
+                            </div>
                         </div>
 
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -828,12 +857,12 @@ export default function AdminServicesCatalogPage() {
                     description={sinSucursal ? 'No hay servicios registrados aun.' : 'No hay servicios registrados para esta sucursal.'}
                 />
             )}
-            {!loading && !listError && servicios.length > 0 && filteredServicios.length === 0 && (
+            {!loading && !listError && servicios.length > 0 && visibleServicios.length === 0 && (
                 <EmptyState icon={Search} title="Sin resultados" description="No hay coincidencias con la busqueda o filtros actuales." />
             )}
 
             {/* Datos */}
-            {!loading && !listError && filteredServicios.length > 0 && (
+            {!loading && !listError && visibleServicios.length > 0 && (
                 view === 'cards' ? <ServicioCards /> :
                     <div className="mf-table-wrap">
                         <Table>
@@ -841,10 +870,11 @@ export default function AdminServicesCatalogPage() {
                                 <TableRow className="border-[var(--mf-nav-border)]">
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
                                     {!sucursal && <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursal</TableHead>}
+                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Tipo</TableHead>
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Grupo</TableHead>
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden lg:table-cell">Agendable</TableHead>
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Dur (min)</TableHead>
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Buffer</TableHead>
+                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead>
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Precio HNL</TableHead>
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Publico</TableHead>
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Estado</TableHead>
@@ -853,10 +883,14 @@ export default function AdminServicesCatalogPage() {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {filteredServicios.map((s) => (
+                                {visibleServicios.map((s) => (
                                     <TableRow
-                                        key={s.id_servicio ?? s.id}
-                                        className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors"
+                                        key={buildServicioScopeKey(s)}
+                                        className={`border-[var(--mf-nav-border)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] ${
+                                            s.servicio_informativo
+                                                ? 'bg-[color:color-mix(in_srgb,#2a405f_16%,var(--mf-card))]'
+                                                : ''
+                                        }`}
                                     >
                                         <TableCell className="font-medium text-[var(--mf-text)]">
                                             <div>{s.nombre_servicio}</div>
@@ -869,6 +903,9 @@ export default function AdminServicesCatalogPage() {
                                                 {branchNameById[s.id_sucursal] || <span className="opacity-50">Global</span>}
                                             </TableCell>
                                         )}
+                                        <TableCell className="text-center">
+                                            <ServiceTypeBadge informativo={Boolean(s.servicio_informativo)} />
+                                        </TableCell>
                                         <TableCell className="text-[var(--mf-text-2)] text-sm">
                                             {resolveGrupoLabel(s.grupo_catalogo)}
                                         </TableCell>
@@ -876,7 +913,7 @@ export default function AdminServicesCatalogPage() {
                                             <ServiceAgendableBadge agendable={Boolean(s.agendable)} />
                                         </TableCell>
                                         <TableCell className="text-center text-[var(--mf-text-2)]">{s.duracion_min}</TableCell>
-                                        <TableCell className="text-center text-[var(--mf-text-2)]">{s.buffer_min}</TableCell>
+                                        <TableCell className="text-center text-[var(--mf-text-2)]">{Number(s.orden_visual ?? 100)}</TableCell>
                                         <TableCell className="text-right font-mono font-semibold text-[var(--mf-accent)]">
                                             L {Number(s.precio_hnl).toFixed(2)}
                                         </TableCell>
@@ -930,7 +967,7 @@ export default function AdminServicesCatalogPage() {
                     <DialogHeader>
                         <DialogTitle>{editTarget ? 'Editar servicio' : 'Nuevo servicio'}</DialogTitle>
                         <DialogDescription className="sr-only">
-                            Configura nombre, duracion, buffer, precio y visibilidad del servicio por sucursal.
+                            Configura nombre, duracion, precio y visibilidad del servicio por sucursal.
                         </DialogDescription>
                     </DialogHeader>
                     <ServicioForm values={formValues} onChange={handleFormChange} />
@@ -970,6 +1007,7 @@ export default function AdminServicesCatalogPage() {
                                     title: 'Configuración operativa',
                                     icon: <Tags size={14} />,
                                     fields: [
+                                        { label: 'Tipo', value: detailTarget.servicio_informativo ? 'Informativo' : 'Agendable' },
                                         { label: 'Grupo', value: resolveGrupoLabel(detailTarget.grupo_catalogo) },
                                         { label: 'Agendable', value: detailTarget.agendable ? 'Si' : 'No' },
                                         { label: 'Visible publico', value: detailTarget.visible_publico ? 'Si' : 'No' },
@@ -982,7 +1020,6 @@ export default function AdminServicesCatalogPage() {
                                     icon: <ToggleRight size={14} />,
                                     fields: [
                                         { label: 'Duracion', value: `${detailTarget.duracion_min ?? 0} min` },
-                                        { label: 'Buffer', value: `${detailTarget.buffer_min ?? 0} min` },
                                         { label: 'Precio HNL', value: `L ${Number(detailTarget.precio_hnl ?? 0).toFixed(2)}` },
                                         { label: 'Tarifa activa', value: detailTarget.tarifa_activa ? 'Si' : 'No' },
                                     ],

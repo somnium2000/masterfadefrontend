@@ -18,10 +18,14 @@ import DetailInfoModalContent from '../../../components/data/DetailInfoModalCont
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
+import ImageUploaderField from '../../../components/data/ImageUploaderField.jsx';
 
 const FORM_DEFAULTS = {
   id_sucursal: '', titulo: '', subtitulo: '', parrafos_texto: '',
   imagen_principal_url: '',
+  imagen_mobile_url: '',
+  imagen_principal_asset_id: null,
+  imagen_mobile_asset_id: null,
   visible_publico: false, destacada: false,
   vigencia_desde: '', vigencia_hasta: '', estado: 'borrador',
 };
@@ -112,7 +116,9 @@ function validate(values) {
   if (estado === 'archivada' && visiblePublico) return 'Una promocion archivada no puede estar visible_publico=true.';
   if (estado === 'publicada') {
     if (!vigenciaDesde) return 'Una promocion publicada requiere vigencia_desde.';
-    if (!String(values.imagen_principal_url || '').trim()) return 'Una promocion publicada requiere imagen_principal_url.';
+    if (!String(values.imagen_principal_url || '').trim() && !values.imagen_principal_asset_id) {
+      return 'Una promocion publicada requiere imagen principal (URL o upload).';
+    }
   }
   if (destacada && (!visiblePublico || estado !== 'publicada')) return 'Una promocion destacada debe estar publicada y visible al publico.';
   return '';
@@ -129,8 +135,10 @@ function toPayload(values) {
     slug: normalizeSlug(titulo),
     subtitulo: String(values.subtitulo || '').trim() || null,
     parrafos,
+    imagen_principal_asset_id: values.imagen_principal_asset_id || null,
+    imagen_mobile_asset_id: values.imagen_mobile_asset_id || null,
     imagen_principal_url: String(values.imagen_principal_url || '').trim() || null,
-    imagen_mobile_url: null,
+    imagen_mobile_url: String(values.imagen_mobile_url || '').trim() || null,
     imagen_alt: titulo || null,
     cta_tipo: 'none',
     cta_texto: null,
@@ -150,6 +158,9 @@ function mapToForm(promo, branch = '') {
     titulo: promo?.titulo || '', subtitulo: promo?.subtitulo || '',
     parrafos_texto: serializeParagraphs(promo?.parrafos),
     imagen_principal_url: promo?.imagen_principal_url || '',
+    imagen_mobile_url: promo?.imagen_mobile_url || '',
+    imagen_principal_asset_id: promo?.imagen_principal_asset_id || null,
+    imagen_mobile_asset_id: promo?.imagen_mobile_asset_id || null,
     visible_publico: normalizeBoolean(promo?.visible_publico), destacada: normalizeBoolean(promo?.destacada),
     vigencia_desde: toDateInputValue(promo?.vigencia_desde), vigencia_hasta: toDateInputValue(promo?.vigencia_hasta),
     estado: promo?.estado || 'borrador',
@@ -186,7 +197,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loading 
   );
 }
 
-function PromotionForm({ values, onChange, branchLabel }) {
+function PromotionForm({ values, onChange, branchLabel, promotionId }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2.5 text-sm text-[var(--mf-text-2)]">
@@ -205,8 +216,51 @@ function PromotionForm({ values, onChange, branchLabel }) {
       </div>
 
       <div className="space-y-1.5">
-        <Label>URL imagen principal</Label>
+        <ImageUploaderField
+          label="Imagen principal"
+          helperText="Sube imagen publica para la promocion. El backend genera path unico y URL final."
+          scopeKey="public_promotion_main"
+          entityType="promocion"
+          entityId={promotionId || null}
+          idSucursal={values.id_sucursal || null}
+          valueAssetId={values.imagen_principal_asset_id}
+          initialPreviewUrl={values.imagen_principal_url}
+          onChange={(payload) => {
+            onChange('imagen_principal_asset_id', payload?.asset_id || null);
+            if (payload?.public_url) {
+              onChange('imagen_principal_url', payload.public_url);
+            }
+          }}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>URL imagen principal (legacy)</Label>
         <Input value={values.imagen_principal_url} onChange={(e) => onChange('imagen_principal_url', e.target.value)} />
+      </div>
+
+      <div className="space-y-1.5">
+        <ImageUploaderField
+          label="Imagen mobile"
+          helperText="Opcional para vista mobile de promociones publicas."
+          scopeKey="public_promotion_mobile"
+          entityType="promocion"
+          entityId={promotionId || null}
+          idSucursal={values.id_sucursal || null}
+          valueAssetId={values.imagen_mobile_asset_id}
+          initialPreviewUrl={values.imagen_mobile_url}
+          onChange={(payload) => {
+            onChange('imagen_mobile_asset_id', payload?.asset_id || null);
+            if (payload?.public_url) {
+              onChange('imagen_mobile_url', payload.public_url);
+            }
+          }}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>URL imagen mobile (legacy)</Label>
+        <Input value={values.imagen_mobile_url} onChange={(e) => onChange('imagen_mobile_url', e.target.value)} />
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -498,7 +552,12 @@ export default function AdminConfiguracionPromocionesPage() {
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading) setDialogOpen(open); }}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editTarget ? 'Editar promocion' : 'Nueva promocion'}</DialogTitle><DialogDescription className="sr-only">Configura contenido, publicacion, CTA y vigencia de la promocion por sucursal.</DialogDescription></DialogHeader>
-          <PromotionForm values={formValues} onChange={handleFormChange} branchLabel={branchNameById[formValues.id_sucursal]} />
+          <PromotionForm
+            values={formValues}
+            onChange={handleFormChange}
+            branchLabel={branchNameById[formValues.id_sucursal]}
+            promotionId={editTarget?.id_promocion || null}
+          />
           {formError ? <ErrorBanner message={formError} /> : null}
           <DialogFooter className="mt-2"><Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>Cancelar</Button><Button onClick={() => void handleGuardar()} disabled={formLoading} className="gap-2 min-w-[140px]">{formLoading ? <Loader2 size={15} className="animate-spin" /> : null}{editTarget ? 'Guardar cambios' : 'Crear promocion'}</Button></DialogFooter>
         </DialogContent>

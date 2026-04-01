@@ -1,4 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
+import { Eye } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import { supabase } from '../../../config/supabaseClient.js';
@@ -29,13 +30,14 @@ export default function ResetPasswordPage() {
 
   const [newPass, setNewPass] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [showNewPasswordWhilePress, setShowNewPasswordWhilePress] = useState(false);
+  const [showConfirmPasswordWhilePress, setShowConfirmPasswordWhilePress] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const [ready, setReady] = useState(false);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
 
-  // 1) Asegurar sesión (desde hash) y limpiar URL
   useEffect(() => {
     let cancelled = false;
 
@@ -53,22 +55,19 @@ export default function ResetPasswordPage() {
         return;
       }
 
-      // Si el link trae tokens (recovery), setSession para poder hacer updateUser()
       if (hashData.access_token && hashData.refresh_token) {
-        const { error } = await supabase.auth.setSession({
+        const { error: setSessionError } = await supabase.auth.setSession({
           access_token: hashData.access_token,
           refresh_token: hashData.refresh_token,
         });
-        if (error) {
-          setError(error.message || 'No se pudo validar la sesión de recuperación.');
+        if (setSessionError) {
+          setError(setSessionError.message || 'No se pudo validar la sesión de recuperación.');
           return;
         }
 
-        // Limpia el hash del navegador (para no dejar tokens visibles)
         if (!cancelled) navigate('/reset-password', { replace: true });
       }
 
-      // Confirmar que existe sesión
       const { data } = await supabase.auth.getSession();
       if (!data?.session) {
         setError('No hay una sesión de recuperación activa. Vuelve a pedir el enlace.');
@@ -79,8 +78,27 @@ export default function ResetPasswordPage() {
     }
 
     init();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [hashData.access_token, hashData.refresh_token, hashData.error, hashData.error_description, navigate]);
+
+  function handlePasswordRevealStart(field, event) {
+    event.preventDefault();
+    if (field === 'new') {
+      setShowNewPasswordWhilePress(true);
+      return;
+    }
+    setShowConfirmPasswordWhilePress(true);
+  }
+
+  function handlePasswordRevealEnd(field) {
+    if (field === 'new') {
+      setShowNewPasswordWhilePress(false);
+      return;
+    }
+    setShowConfirmPasswordWhilePress(false);
+  }
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -89,26 +107,25 @@ export default function ResetPasswordPage() {
 
     if (!supabase) return;
 
-    // AM: Feedback global consistente para reset password sin romper validaciones locales.
     if (!PASSWORD_REGEX.test(newPass)) {
-      const message = 'La contrase\u00f1a debe tener al menos 8 caracteres, may\u00fascula, min\u00fascula y n\u00famero.';
+      const message = 'La contraseña debe tener al menos 8 caracteres, mayúscula, minúscula y número.';
       setError(message);
       notifications.warning(message, { dedupeKey: 'auth-reset-password-policy' });
       return;
     }
     if (newPass !== confirm) {
-      const message = 'Las contrase\u00f1as no coinciden.';
+      const message = 'Las contraseñas no coinciden.';
       setError(message);
       notifications.warning(message, { dedupeKey: 'auth-reset-password-match' });
       return;
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password: newPass });
+    const { error: updateError } = await supabase.auth.updateUser({ password: newPass });
     setLoading(false);
 
-    if (error) {
-      const message = error.message || 'No se pudo actualizar la contraseña.';
+    if (updateError) {
+      const message = updateError.message || 'No se pudo actualizar la contraseña.';
       setError(message);
       notifications.error(message, { dedupeKey: 'auth-reset-password-error' });
       return;
@@ -118,9 +135,7 @@ export default function ResetPasswordPage() {
     setMsg(successMessage);
     notifications.success(successMessage, { dedupeKey: 'auth-reset-password-ok' });
 
-    // Opcional: cerrar sesión supabase para limpiar
     await supabase.auth.signOut();
-
     setTimeout(() => navigate('/login', { replace: true }), 1200);
   }
 
@@ -149,26 +164,56 @@ export default function ResetPasswordPage() {
               <>
                 <div className="mf-form-group">
                   <label className="mf-label" htmlFor="newPass">Nueva contraseña</label>
-                  <input
-                    id="newPass"
-                    className="mf-input"
-                    type="password"
-                    value={newPass}
-                    onChange={(e) => setNewPass(e.target.value)}
-                    placeholder="••••••••"
-                  />
+                  <div className="mf-password-field">
+                    <input
+                      id="newPass"
+                      className="mf-input mf-password-input"
+                      type={showNewPasswordWhilePress ? 'text' : 'password'}
+                      value={newPass}
+                      onChange={(e) => setNewPass(e.target.value)}
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      className="mf-password-peek"
+                      aria-label="Mantén presionado para ver la contraseña"
+                      title="Mantén presionado para ver la contraseña"
+                      onPointerDown={(event) => handlePasswordRevealStart('new', event)}
+                      onPointerUp={() => handlePasswordRevealEnd('new')}
+                      onPointerLeave={() => handlePasswordRevealEnd('new')}
+                      onPointerCancel={() => handlePasswordRevealEnd('new')}
+                      onBlur={() => handlePasswordRevealEnd('new')}
+                    >
+                      <Eye size={16} />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="mf-form-group">
                   <label className="mf-label" htmlFor="confirm">Confirmar contraseña</label>
-                  <input
-                    id="confirm"
-                    className="mf-input"
-                    type="password"
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
-                    placeholder="••••••••"
-                  />
+                  <div className="mf-password-field">
+                    <input
+                      id="confirm"
+                      className="mf-input mf-password-input"
+                      type={showConfirmPasswordWhilePress ? 'text' : 'password'}
+                      value={confirm}
+                      onChange={(e) => setConfirm(e.target.value)}
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      className="mf-password-peek"
+                      aria-label="Mantén presionado para ver la contraseña"
+                      title="Mantén presionado para ver la contraseña"
+                      onPointerDown={(event) => handlePasswordRevealStart('confirm', event)}
+                      onPointerUp={() => handlePasswordRevealEnd('confirm')}
+                      onPointerLeave={() => handlePasswordRevealEnd('confirm')}
+                      onPointerCancel={() => handlePasswordRevealEnd('confirm')}
+                      onBlur={() => handlePasswordRevealEnd('confirm')}
+                    >
+                      <Eye size={16} />
+                    </button>
+                  </div>
                 </div>
 
                 {error ? <div className="mf-error">{error}</div> : null}
@@ -188,6 +233,3 @@ export default function ResetPasswordPage() {
     </div>
   );
 }
-
-
-

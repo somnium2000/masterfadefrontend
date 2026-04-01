@@ -294,8 +294,8 @@ export default function ServicesPage() {
     navigate('/agendar/barberos');
   }
 
-  const barberServices = services.filter((item) => item.grupo_catalogo === 'barberia');
-  const otherServices = services.filter((item) => item.grupo_catalogo === 'otros');
+  const agendableServices = services.filter((item) => item?.servicio_informativo !== true);
+  const informativeServices = services.filter((item) => item?.servicio_informativo === true);
 
   const navItems = [
     { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate('/') },
@@ -427,12 +427,12 @@ export default function ServicesPage() {
             <>
               <CatalogSection
                 icon={Scissors}
-                eyebrow="Barberia"
-                title="Servicios"
-                items={barberServices}
-                emptyMessage="Aun no hay servicios de barberia visibles."
+                eyebrow="Servicios"
+                title="Servicios agendables"
+                items={agendableServices}
+                emptyMessage="Aun no hay servicios agendables visibles."
               >
-                {barberServices.map((item) => (
+                {agendableServices.map((item) => (
                   <ServiceCard key={item.id_servicio} item={item} />
                 ))}
               </CatalogSection>
@@ -440,11 +440,11 @@ export default function ServicesPage() {
               <CatalogSection
                 icon={Sparkles}
                 eyebrow="Informativo"
-                title="Otros servicios"
-                items={otherServices}
-                emptyMessage="Aun no hay otros servicios visibles."
+                title="Servicios informativos"
+                items={informativeServices}
+                emptyMessage="Aun no hay servicios informativos visibles."
               >
-                {otherServices.map((item) => (
+                {informativeServices.map((item) => (
                   <ServiceCard key={item.id_servicio} item={item} compact />
                 ))}
               </CatalogSection>

@@ -79,6 +79,14 @@ export async function listAdminPersonasCatalogos() {
   return http.get(`${BASE}/catalogos`);
 }
 
+export async function listAdminPersonasRoles() {
+  return http.get(`${BASE}/roles`);
+}
+
+export async function createAdminPersonaRol(payload) {
+  return http.post(`${BASE}/roles`, payload);
+}
+
 export async function createAdminUsuarioInterno(payload) {
   return http.post(`${BASE}/usuarios-internos`, payload);
 }

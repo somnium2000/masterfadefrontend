@@ -811,6 +811,7 @@ export default function AdminPlansCatalogPage() {
                 ...(!sucursal ? [{ label: "Sucursal", value: branchNameById[plan.id_sucursal] || "Sin sucursal" }] : []),
                 { label: "Periodo", value: <PlanPeriodBadge period={plan.periodo_membresia_codigo} /> },
                 { label: "Precio", value: <span className="font-mono font-bold text-[var(--mf-accent)]">L {Number(plan.precio_hnl ?? 0).toFixed(2)}</span> },
+                { label: "Orden visual", value: Number(plan.orden_visual ?? 100) },
                 { label: "Publico", value: <PlanVisibilityBadge visible={Boolean(plan.visible_publico)} /> },
                 { label: "Beneficios", value: Array.isArray(plan?.beneficios) ? plan.beneficios.length : 0 },
               ]}
@@ -829,6 +830,7 @@ export default function AdminPlansCatalogPage() {
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Periodo</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Precio HNL</TableHead>
+                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Beneficios</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Publico</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Estado</TableHead>
@@ -845,6 +847,7 @@ export default function AdminPlansCatalogPage() {
                   </TableCell>
                   <TableCell className="text-center"><PlanPeriodBadge period={plan.periodo_membresia_codigo} /></TableCell>
                   <TableCell className="text-right font-mono font-semibold text-[var(--mf-accent)]">L {Number(plan.precio_hnl ?? 0).toFixed(2)}</TableCell>
+                  <TableCell className="text-center text-[var(--mf-text-2)]">{Number(plan.orden_visual ?? 100)}</TableCell>
                   <TableCell className="text-center hidden md:table-cell text-[var(--mf-text-2)]">{Array.isArray(plan?.beneficios) ? plan.beneficios.length : 0}</TableCell>
                   <TableCell className="text-center hidden md:table-cell"><PlanVisibilityBadge visible={Boolean(plan.visible_publico)} /></TableCell>
                   <TableCell className="text-center"><PlanStatusBadge activo={Boolean(plan.activo)} /></TableCell>
