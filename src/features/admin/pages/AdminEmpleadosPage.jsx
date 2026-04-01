@@ -41,14 +41,8 @@ import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialo
 import { replaceItemById } from '../../../lib/collectionState.js';
 
 const DNI_PATTERN = /^\d{13}$/;
-
-const ROLE_OPTIONS = [
-  { value: 'super_admin', label: 'Super Admin' },
-  { value: 'admin', label: 'Administrador' },
-  { value: 'barbero', label: 'Barbero' },
-];
-
-const ROLE_LABELS = {
+const ACTIVE_ROLE_CODES = ['super_admin', 'admin', 'barbero'];
+const DEFAULT_ROLE_LABELS = {
   super_admin: 'Super Admin',
   admin: 'Administrador',
   barbero: 'Barbero',
@@ -200,6 +194,7 @@ export default function AdminEmpleadosPage() {
   const navigate = useNavigate();
   const [empleados, setEmpleados] = useState([]);
   const [sucursales, setSucursales] = useState([]);
+  const [rolesCatalog, setRolesCatalog] = useState([]);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState('');
   const [actionLoadingId, setActionLoadingId] = useState('');
@@ -230,6 +225,25 @@ export default function AdminEmpleadosPage() {
     sucursales.forEach((item) => map.set(item.id_sucursal, item.nombre_sucursal));
     return map;
   }, [sucursales]);
+
+  const roleOptions = useMemo(() => {
+    const catalogRoles = Array.isArray(rolesCatalog)
+      ? rolesCatalog
+        .map((role) => String(role?.nombre || '').trim().toLowerCase())
+        .filter((role) => ACTIVE_ROLE_CODES.includes(role))
+      : [];
+    const unique = [...new Set(catalogRoles)];
+    if (!unique.length) return ACTIVE_ROLE_CODES.map((role) => ({ value: role, label: DEFAULT_ROLE_LABELS[role] || role }));
+    return unique.map((role) => ({ value: role, label: DEFAULT_ROLE_LABELS[role] || role }));
+  }, [rolesCatalog]);
+
+  const roleLabelByCode = useMemo(() => {
+    const map = { ...DEFAULT_ROLE_LABELS };
+    roleOptions.forEach((role) => {
+      map[role.value] = role.label;
+    });
+    return map;
+  }, [roleOptions]);
 
   // AM: Filtro compuesto por submodulo para busqueda y segmentacion sin recargar backend.
   const filteredEmpleados = useMemo(() => {
@@ -288,13 +302,13 @@ export default function AdminEmpleadosPage() {
       chips.push({ key: 'estadoAcceso', label: `Acceso: ${ACCESS_LABELS[filters.estadoAcceso] || filters.estadoAcceso}` });
     }
     if (filters.rol !== 'all') {
-      chips.push({ key: 'rol', label: `Rol: ${ROLE_LABELS[filters.rol] || filters.rol}` });
+      chips.push({ key: 'rol', label: `Rol: ${roleLabelByCode[filters.rol] || filters.rol}` });
     }
     if (filters.idSucursal !== 'all') {
       chips.push({ key: 'idSucursal', label: `Sucursal: ${sucursalNameById.get(filters.idSucursal) || 'Seleccionada'}` });
     }
     return chips;
-  }, [filters, search, sucursalNameById]);
+  }, [filters, search, roleLabelByCode, sucursalNameById]);
 
   function clearAllFilters() {
     setSearch('');
@@ -336,8 +350,10 @@ export default function AdminEmpleadosPage() {
       const response = await listAdminPersonasCatalogos();
       const payload = response?.data ?? response;
       setSucursales(Array.isArray(payload?.sucursales) ? payload.sucursales : []);
+      setRolesCatalog(Array.isArray(payload?.roles) ? payload.roles : []);
     } catch {
       setSucursales([]);
+      setRolesCatalog([]);
     }
   }, []);
 
@@ -600,7 +616,7 @@ export default function AdminEmpleadosPage() {
               badge={<EstadoAccesoBadge estado={empleado.estado_acceso} />}
               fields={[
                 { label: 'Sucursal', value: empleado.nombre_sucursal || sucursalNameById.get(empleado.id_sucursal) || 'Sin sucursal' },
-                { label: 'Rol principal', value: ROLE_LABELS[resolvePrimaryRole(empleado.roles)] || '-' },
+                { label: 'Rol principal', value: roleLabelByCode[resolvePrimaryRole(empleado.roles)] || '-' },
                 { label: 'Estado laboral', value: empleado.estado_laboral ? 'Activo' : 'Inactivo' },
               ]}
               actions={renderActions(empleado)}
@@ -627,7 +643,7 @@ export default function AdminEmpleadosPage() {
                 <TableRow key={empleado.id_empleado} className="border-[var(--mf-nav-border)]">
                   <TableCell className="font-medium">{empleado.nombre_completo}</TableCell>
                   <TableCell>{empleado.correo_principal || '-'}</TableCell>
-                  <TableCell className="hidden md:table-cell">{ROLE_LABELS[resolvePrimaryRole(empleado.roles)] || '-'}</TableCell>
+                  <TableCell className="hidden md:table-cell">{roleLabelByCode[resolvePrimaryRole(empleado.roles)] || '-'}</TableCell>
                   <TableCell className="hidden md:table-cell">{empleado.nombre_sucursal || '-'}</TableCell>
                   <TableCell className="text-center"><EstadoAccesoBadge estado={empleado.estado_acceso} /></TableCell>
                   <TableCell className="text-center">{renderActions(empleado)}</TableCell>
@@ -677,7 +693,7 @@ export default function AdminEmpleadosPage() {
                 value={formValues.rol_principal}
                 onChange={(e) => setFormValues((p) => ({ ...p, rol_principal: e.target.value }))}
               >
-                {ROLE_OPTIONS.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
+                {roleOptions.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
               </select>
               <p className="mt-1 text-xs text-[var(--mf-text-2)]">Si el rol es barbero, el sistema marca es_barbero automaticamente.</p>
             </div>
@@ -754,7 +770,7 @@ export default function AdminEmpleadosPage() {
                   title: 'Laboral',
                   icon: <Building2 size={14} />,
                   fields: [
-                    { label: 'Rol principal', value: ROLE_LABELS[resolvePrimaryRole(selectedEmpleado.roles)] || '-' },
+                    { label: 'Rol principal', value: roleLabelByCode[resolvePrimaryRole(selectedEmpleado.roles)] || '-' },
                     { label: 'Sucursal', value: selectedEmpleado.nombre_sucursal || '-' },
                     { label: 'Fecha ingreso', value: selectedEmpleado.fecha_ingreso ? String(selectedEmpleado.fecha_ingreso).slice(0, 10) : '-' },
                     { label: 'Salario base', value: selectedEmpleado.salario_base ?? '-' },
@@ -865,7 +881,7 @@ export default function AdminEmpleadosPage() {
                 onChange={(event) => setFilters((prev) => ({ ...prev, rol: event.target.value }))}
               >
                 <option value="all">Todos</option>
-                {ROLE_OPTIONS.map((role) => (
+                {roleOptions.map((role) => (
                   <option key={role.value} value={role.value}>{role.label}</option>
                 ))}
               </select>

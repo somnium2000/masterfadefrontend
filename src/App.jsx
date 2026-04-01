@@ -21,8 +21,12 @@ import ProtectedRoute from './routes/ProtectedRoute.jsx';
 import AdminServicesCatalogPage from './features/admin/pages/AdminServicesCatalogPage.jsx';
 import AdminPackagesCatalogPage from './features/admin/pages/AdminPackagesCatalogPage.jsx';
 import AdminPlansCatalogPage from './features/admin/pages/AdminPlansCatalogPage.jsx';
-import BarberoHomePage from './features/barbero/pages/BarberoHomePage.jsx';
 import ClienteHomePage from './features/cliente/pages/ClienteHomePage.jsx';
+import ClienteAppShell from './features/cliente/layouts/ClienteAppShell.jsx';
+import ClienteCatalogoPage from './features/cliente/pages/ClienteCatalogoPage.jsx';
+import ClienteHistorialCitasPage from './features/cliente/pages/ClienteHistorialCitasPage.jsx';
+import ClientePerfilPage from './features/cliente/pages/ClientePerfilPage.jsx';
+import ClientePlanesPage from './features/cliente/pages/ClientePlanesPage.jsx';
 import AdminEmpleadosPage from './features/admin/pages/AdminEmpleadosPage.jsx';
 import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx';
 import AdminClientesPage from './features/admin/pages/AdminClientesPage.jsx';
@@ -35,6 +39,7 @@ import AdminAgendamientoCitasPage from './features/admin/pages/AdminAgendamiento
 import AdminAgendamientoHistorialPage from './features/admin/pages/AdminAgendamientoHistorialPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
 import AdminMasterPuntosPage from './features/admin/pages/AdminMasterPuntosPage.jsx';
+import AdminServiciosCatalogoPublicoPage from './features/admin/pages/AdminServiciosCatalogoPublicoPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
 
@@ -87,6 +92,7 @@ function App() {
         <Route path="usuarios" element={<RouteErrorBoundary><AdminUsuariosPage /></RouteErrorBoundary>} />
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
+        <Route path="catalog/servicios/publico" element={<RouteErrorBoundary><AdminServiciosCatalogoPublicoPage /></RouteErrorBoundary>} />
         <Route path="catalog/paquetes" element={<AdminPackagesCatalogPage />} />
         <Route path="catalog/planes" element={<AdminPlansCatalogPage />} />
         {/* Sucursales */}
@@ -132,6 +138,7 @@ function App() {
         <Route path="usuarios" element={<RouteErrorBoundary><AdminUsuariosPage /></RouteErrorBoundary>} />
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
+        <Route path="catalog/servicios/publico" element={<RouteErrorBoundary><AdminServiciosCatalogoPublicoPage /></RouteErrorBoundary>} />
         <Route path="catalog/paquetes" element={<AdminPackagesCatalogPage />} />
         <Route path="catalog/planes" element={<AdminPlansCatalogPage />} />
         {/* Sucursales */}
@@ -179,11 +186,15 @@ function App() {
         path="/home/cliente"
         element={
           <ProtectedRoute allowedRoles={ROLE_ROUTE_ALLOWED_ROLES.cliente}>
-            <DashboardLayout pageRole="cliente" />
+            <ClienteAppShell />
           </ProtectedRoute>
         }
       >
         <Route index element={<ClienteHomePage />} />
+        <Route path="citas" element={<ClienteHistorialCitasPage />} />
+        <Route path="perfil" element={<ClientePerfilPage />} />
+        <Route path="catalogo" element={<ClienteCatalogoPage />} />
+        <Route path="planes" element={<ClientePlanesPage />} />
       </Route>
 
       <Route path="/home/super_admin/*" element={<Navigate to="/home/super" replace />} />

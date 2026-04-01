@@ -34,12 +34,22 @@ export async function updateAdminConfigComunicacion(payload) {
   return http.patch(`${BASE}/comunicacion`, payload);
 }
 
-export async function listAdminConfigComunicacionCampanias({ q, tipo_campania, estado, estado_operativo, limit, offset, sort } = {}) {
+export async function listAdminConfigComunicacionCampanias({
+  q,
+  tipo_campania,
+  estado,
+  estado_operativo,
+  incluir_canceladas,
+  limit,
+  offset,
+  sort,
+} = {}) {
   const params = new URLSearchParams();
   if (q) params.set('q', String(q).trim());
   if (tipo_campania) params.set('tipo_campania', String(tipo_campania));
   if (estado) params.set('estado', String(estado));
   if (estado_operativo) params.set('estado_operativo', String(estado_operativo));
+  if (incluir_canceladas !== undefined) params.set('incluir_canceladas', incluir_canceladas ? 'true' : 'false');
   if (Number.isFinite(Number(limit))) params.set('limit', String(Math.max(1, Math.min(100, Number(limit)))));
   if (Number.isFinite(Number(offset))) params.set('offset', String(Math.max(0, Math.min(10000, Number(offset)))));
   if (sort) params.set('sort', String(sort));

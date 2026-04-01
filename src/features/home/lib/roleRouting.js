@@ -1,4 +1,5 @@
 export const ROLE_PRIORITY = ['super_admin', 'admin', 'barbero', 'cliente'];
+export const ACTIVE_SCREEN_ROLES = ['super_admin', 'admin', 'barbero', 'cliente'];
 
 export const ROLE_HOME_PATHS = {
   super_admin: '/home/super',
@@ -12,12 +13,13 @@ export const PHASE0_SUPER_ADMIN_ONLY =
   String(import.meta.env.VITE_PHASE0_SUPER_ADMIN_ONLY ?? 'false').trim().toLowerCase() === 'true';
 
 function getAllowedRolesForPhase(allowedRoles) {
+  const activeAllowed = allowedRoles.filter((role) => ACTIVE_SCREEN_ROLES.includes(role));
   if (!PHASE0_SUPER_ADMIN_ONLY) {
-    return allowedRoles;
+    return activeAllowed;
   }
 
   // AM: En contingencia, cualquier shell protegido opera solo con super_admin.
-  return allowedRoles.includes('super_admin') ? ['super_admin'] : [];
+  return activeAllowed.includes('super_admin') ? ['super_admin'] : [];
 }
 
 export const ROLE_ROUTE_ALLOWED_ROLES = {
@@ -39,7 +41,8 @@ export const LEGACY_ROLE_HOME_ALIASES = {
 };
 
 export function getPrimaryRole(roles = []) {
-  return ROLE_PRIORITY.find((role) => roles.includes(role)) || null;
+  const activeRoles = ROLE_PRIORITY.filter((role) => ACTIVE_SCREEN_ROLES.includes(role));
+  return activeRoles.find((role) => roles.includes(role)) || null;
 }
 
 export function resolveHomePath(roles = []) {

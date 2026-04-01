@@ -130,6 +130,7 @@ function formatReasonLabel(reason) {
   if (key === 'inactivo') return 'Cliente inactivo';
   if (key === 'sin_aceptacion_terminos') return 'Sin aceptacion de terminos';
   if (key === 'sin_consentimiento_marketing') return 'Sin consentimiento marketing';
+  if (key === 'exclusion_manual') return 'Exclusion manual';
   return key || 'Sin motivo';
 }
 
@@ -186,6 +187,7 @@ export default function AdminConfiguracionComunicacionPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterOperationalState, setFilterOperationalState] = useState('');
+  const [showCancelledCampaigns, setShowCancelledCampaigns] = useState(false);
   const [sortKey, setSortKey] = useState('updated_desc');
   const [showFilters, setShowFilters] = useState(false);
 
@@ -255,8 +257,9 @@ export default function AdminConfiguracionComunicacionPage() {
     if (normalizeRequiredText(searchQuery)) count += 1;
     if (filterType) count += 1;
     if (filterOperationalState) count += 1;
+    if (showCancelledCampaigns) count += 1;
     return count;
-  }, [searchQuery, filterType, filterOperationalState]);
+  }, [searchQuery, filterType, filterOperationalState, showCancelledCampaigns]);
   const eligibleRecipientIds = useMemo(
     () => eligibleRecipients.map((row) => String(row.id_cliente)),
     [eligibleRecipients]
@@ -278,6 +281,25 @@ export default function AdminConfiguracionComunicacionPage() {
     [effectiveEligibleRecipients, selectedEligibleIdSet]
   );
   const derivedExcludedByManual = useMemo(() => manuallyExcludedIds.length, [manuallyExcludedIds]);
+  const persistedExclusionsSnapshot = useMemo(() => {
+    const rawSnapshot = selectedCampaign?.exclusiones_snapshot;
+    if (!rawSnapshot || typeof rawSnapshot !== 'object') {
+      return { generatedAt: null, byReason: [], rows: [] };
+    }
+
+    const byReason = Array.isArray(rawSnapshot?.resumen_por_motivo)
+      ? rawSnapshot.resumen_por_motivo
+      : [];
+    const rows = Array.isArray(rawSnapshot?.excluidos)
+      ? rawSnapshot.excluidos
+      : [];
+
+    return {
+      generatedAt: rawSnapshot?.generado_at || null,
+      byReason,
+      rows,
+    };
+  }, [selectedCampaign]);
 
   const fetchCampaigns = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -289,6 +311,7 @@ export default function AdminConfiguracionComunicacionPage() {
         q: searchQuery || undefined,
         tipo_campania: filterType || undefined,
         estado_operativo: filterOperationalState || undefined,
+        incluir_canceladas: showCancelledCampaigns,
         sort: sortKey,
         limit: CAMPAIGNS_PAGE_SIZE,
         offset: campaignsOffset,
@@ -305,7 +328,7 @@ export default function AdminConfiguracionComunicacionPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [notifications, searchQuery, filterType, filterOperationalState, sortKey, campaignsOffset]);
+  }, [notifications, searchQuery, filterType, filterOperationalState, showCancelledCampaigns, sortKey, campaignsOffset]);
 
   const fetchEligibilityPreview = useCallback(async (idCampaign) => {
     const id = String(idCampaign || '').trim();
@@ -706,8 +729,8 @@ export default function AdminConfiguracionComunicacionPage() {
     <div className="space-y-4 px-2 pb-4 sm:px-4 sm:pb-6">
       <header className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5">
         <div className="space-y-1">
-          <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Configuracion - Comunicacion</p>
-          <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Comunicacion</h1>
+          <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Configuracion - Correos informativos</p>
+          <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Correos informativos</h1>
           <p className="text-sm text-[var(--mf-text-2)]">Gestion operativa de campañas por correo para super administrador.</p>
         </div>
       </header>
@@ -762,7 +785,11 @@ export default function AdminConfiguracionComunicacionPage() {
                     className="mf-select"
                     value={filterOperationalState}
                     onChange={(event) => {
-                      setFilterOperationalState(event.target.value);
+                      const nextState = event.target.value;
+                      setFilterOperationalState(nextState);
+                      if (nextState === 'cancelada') {
+                        setShowCancelledCampaigns(true);
+                      }
                       setCampaignsOffset(0);
                     }}
                   >
@@ -796,6 +823,7 @@ export default function AdminConfiguracionComunicacionPage() {
                       setSearchQuery('');
                       setFilterType('');
                       setFilterOperationalState('');
+                      setShowCancelledCampaigns(false);
                       setSortKey('updated_desc');
                       setCampaignsOffset(0);
                     }}
@@ -826,9 +854,27 @@ export default function AdminConfiguracionComunicacionPage() {
 
           {!loading && !listError && campaigns.length > 0 ? (
             <div className="mt-4 space-y-3">
-              <p className="text-xs text-[var(--mf-text-2)]">
-                Mostrando {visibleRangeStart}-{visibleRangeEnd} de {campaignsTotal} campañas
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-[var(--mf-text-2)]">
+                  Mostrando {visibleRangeStart}-{visibleRangeEnd} de {campaignsTotal} campañas
+                </p>
+                <label className="inline-flex items-center gap-2 text-xs text-[var(--mf-text-2)]">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5"
+                    checked={showCancelledCampaigns}
+                    onChange={(event) => {
+                      const checked = Boolean(event.target.checked);
+                      setShowCancelledCampaigns(checked);
+                      if (!checked && filterOperationalState === 'cancelada') {
+                        setFilterOperationalState('');
+                      }
+                      setCampaignsOffset(0);
+                    }}
+                  />
+                  Ver canceladas
+                </label>
+              </div>
               <CardsCarousel
                 items={campaigns}
                 pageSizeByViewport={{ mobile: 2, tablet: 2, desktop: 2 }}
@@ -1284,6 +1330,30 @@ export default function AdminConfiguracionComunicacionPage() {
                                       </Button>
                                     </div>
                                   ))}
+                              </div>
+                            ) : null}
+
+                            {persistedExclusionsSnapshot.rows.length > 0 ? (
+                              <div className="space-y-1.5 pt-2">
+                                <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">
+                                  Exclusiones persistidas
+                                  {persistedExclusionsSnapshot.generatedAt ? ` · ${formatDateTime(persistedExclusionsSnapshot.generatedAt)}` : ''}
+                                </p>
+                                {persistedExclusionsSnapshot.byReason.map((row) => (
+                                  <div key={`persisted-summary-${row.motivo}`} className="flex items-center justify-between rounded-md border border-[var(--mf-nav-border)] px-2.5 py-2">
+                                    <p className="text-sm text-[var(--mf-text)]">{formatReasonLabel(row.motivo)}</p>
+                                    <p className="text-xs font-semibold text-[var(--mf-text-2)]">{Number(row.total || 0)}</p>
+                                  </div>
+                                ))}
+                                <div className="space-y-1.5">
+                                  {persistedExclusionsSnapshot.rows.slice(0, 8).map((row, index) => (
+                                    <div key={`persisted-row-${row.id_cliente || 'sin-id'}-${index}`} className="rounded-md border border-[var(--mf-nav-border)] px-2.5 py-2">
+                                      <p className="text-sm text-[var(--mf-text)]">{row.nombre_cliente || row.id_cliente || 'Cliente sin nombre'}</p>
+                                      <p className="text-xs text-[var(--mf-text-2)]">{row.correo_destino || '-'}</p>
+                                      <p className="text-xs text-[var(--mf-text-2)]">{formatReasonLabel(row.motivo_exclusion)}</p>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             ) : null}
                           </div>

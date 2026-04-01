@@ -984,6 +984,7 @@ export default function AdminPackagesCatalogPage() {
                                     label: 'Precio',
                                     value: <span className="font-mono font-bold text-[var(--mf-accent)]">L {Number(paquete.precio_hnl ?? 0).toFixed(2)}</span>,
                                 },
+                                { label: 'Orden visual', value: Number(paquete.orden_visual ?? 100) },
                                 { label: 'Servicios', value: getItemsCount(paquete) },
                                 { label: 'Composicion', value: <PackageCompositionBadge itemsCount={getItemsCount(paquete)} /> },
                                 { label: 'Publico', value: <PackageVisibilityBadge visiblePublico={Boolean(paquete.visible_publico)} /> },
@@ -1004,6 +1005,7 @@ export default function AdminPackagesCatalogPage() {
                                 ) : null}
                                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
                                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Precio HNL</TableHead>
+                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead>
                                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Servicios</TableHead>
                                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Composicion</TableHead>
                                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Publico</TableHead>
@@ -1027,6 +1029,9 @@ export default function AdminPackagesCatalogPage() {
                                     </TableCell>
                                     <TableCell className="text-right font-mono font-semibold text-[var(--mf-accent)]">
                                         L {Number(paquete.precio_hnl ?? 0).toFixed(2)}
+                                    </TableCell>
+                                    <TableCell className="text-center text-[var(--mf-text-2)]">
+                                        {Number(paquete.orden_visual ?? 100)}
                                     </TableCell>
                                     <TableCell className="text-center text-[var(--mf-text-2)]">
                                         {getItemsCount(paquete)}

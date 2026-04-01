@@ -16,6 +16,46 @@ function isInvalidUserForAuth(errorLike) {
   );
 }
 
+function readHashParams() {
+  const rawHash = String(window.location.hash || '');
+  const normalizedHash = rawHash.startsWith('#') ? rawHash.slice(1) : rawHash;
+  return new URLSearchParams(normalizedHash);
+}
+
+async function resolveOAuthSessionToken(supabase) {
+  const query = new URLSearchParams(window.location.search);
+  const hash = readHashParams();
+  const authCode = String(query.get('code') || '').trim();
+
+  if (authCode) {
+    const { data, error } = await supabase.auth.exchangeCodeForSession(authCode);
+    if (error) throw error;
+    const codeToken = String(data?.session?.access_token || '').trim();
+    if (codeToken) return codeToken;
+  }
+
+  const hashAccessToken = String(hash.get('access_token') || '').trim();
+  const hashRefreshToken = String(hash.get('refresh_token') || '').trim();
+  if (hashAccessToken && hashRefreshToken) {
+    const { data, error } = await supabase.auth.setSession({
+      access_token: hashAccessToken,
+      refresh_token: hashRefreshToken,
+    });
+    if (error) throw error;
+    const hashToken = String(data?.session?.access_token || '').trim();
+    if (hashToken) return hashToken;
+  }
+
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const supabaseToken = String(sessionData?.session?.access_token || '').trim();
+  if (!supabaseToken) {
+    throw new Error('No se encontro sesion de Supabase para completar el exchange.');
+  }
+
+  return supabaseToken;
+}
+
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
@@ -34,11 +74,17 @@ export default function AuthCallbackPage() {
 
     async function runExchange() {
       const query = new URLSearchParams(window.location.search);
+      const hash = readHashParams();
       const oauthError = String(query.get('error') || '').trim();
       const oauthErrorDescription = String(query.get('error_description') || '').trim();
+      const oauthHashError = String(hash.get('error') || '').trim();
+      const oauthHashErrorDescription = String(hash.get('error_description') || '').trim();
 
-      if (oauthError) {
-        const message = oauthErrorDescription || 'Google login no pudo completarse.';
+      if (oauthError || oauthHashError) {
+        const message =
+          oauthErrorDescription ||
+          oauthHashErrorDescription ||
+          'Google login no pudo completarse.';
         setShowInvalidUserAuthBox(false);
         setError(message);
         notifications.error(message, { dedupeKey: 'auth-callback-oauth-query-error' });
@@ -57,15 +103,7 @@ export default function AuthCallbackPage() {
       }
 
       try {
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError) {
-          throw sessionError;
-        }
-
-        const supabaseToken = sessionData?.session?.access_token;
-        if (!supabaseToken) {
-          throw new Error('No se encontro sesion de Supabase para completar el exchange.');
-        }
+        const supabaseToken = await resolveOAuthSessionToken(supabase);
 
         if (window.location.hash || window.location.search) {
           window.history.replaceState({}, document.title, window.location.pathname);

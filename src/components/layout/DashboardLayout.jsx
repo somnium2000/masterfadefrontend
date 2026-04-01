@@ -35,7 +35,7 @@ function buildNavModules(basePath, role) {
     // Sub-items de configuración basados en el rol (provenientes de PersonasF)
     const configSubItems = role === 'super_admin'
         ? [
-            { id: 'conf-comunicacion', label: 'Comunicación', path: `${basePath}/configuracion/comunicacion` },
+            { id: 'conf-comunicacion', label: 'Correos informativos', path: `${basePath}/configuracion/comunicacion` },
             { id: 'conf-promociones', label: 'Promociones', path: `${basePath}/configuracion/promociones` },
         ]
         : [
@@ -73,6 +73,7 @@ function buildNavModules(basePath, role) {
                 { id: 'cat-servicios', label: 'Servicios', path: `${basePath}/catalog/servicios` },
                 { id: 'paquetes', label: 'Paquetes', path: `${basePath}/catalog/paquetes` },
                 { id: 'planes', label: 'Planes', path: `${basePath}/catalog/planes` },
+                { id: 'cat-publico', label: 'Catálogo público', path: `${basePath}/catalog/servicios/publico` },
             ],
         },
         {

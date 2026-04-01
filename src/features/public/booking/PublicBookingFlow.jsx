@@ -13,6 +13,7 @@ import { Button } from '../../../components/ui/button.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
+import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
   createPublicCitaHold,
@@ -154,6 +155,7 @@ export default function PublicBookingFlow() {
   const location = useLocation();
   const navigate = useNavigate();
   const notifications = useNotifications();
+  const { isAuthenticated, roles } = useAuth();
 
   const [contextLoading, setContextLoading] = useState(false);
   const [contextError, setContextError] = useState('');
@@ -459,8 +461,13 @@ export default function PublicBookingFlow() {
       const barbersPayload = barbersResponse?.data ?? barbersResponse;
       const servicesPayload = servicesResponse?.data ?? servicesResponse;
       const nextBarbers = Array.isArray(barbersPayload?.barberos) ? barbersPayload.barberos : [];
-      const nextServices = Array.isArray(servicesPayload?.servicios) ? servicesPayload.servicios : [];
+      const nextServices = Array.isArray(servicesPayload?.servicios)
+        ? servicesPayload.servicios.filter(
+          (service) => service?.agendable && !service?.servicio_informativo
+        )
+        : [];
       const validBarberIds = new Set(nextBarbers.map((barber) => barber.id_empleado));
+      const validServiceIds = new Set(nextServices.map((service) => service.id_servicio));
       const fallbackBarberId = nextBarbers[0]?.id_empleado || '';
 
       setBarbers(nextBarbers);
@@ -478,8 +485,9 @@ export default function PublicBookingFlow() {
           const nextBarberId = validBarberIds.has(block.idBarbero)
             ? block.idBarbero
             : fallbackBarberId;
+          const nextServiceIds = block.serviceIds.filter((serviceId) => validServiceIds.has(serviceId));
 
-          if (block.idBarbero === nextBarberId) {
+          if (block.idBarbero === nextBarberId && areServiceIdsEqual(block.serviceIds, nextServiceIds)) {
             return block;
           }
 
@@ -487,6 +495,7 @@ export default function PublicBookingFlow() {
           return {
             ...block,
             idBarbero: nextBarberId,
+            serviceIds: nextServiceIds,
             selectedDate: '',
             selectedTime: '',
           };
@@ -1387,16 +1396,30 @@ export default function PublicBookingFlow() {
   }
 
   const showTopbarBackToBarberos = location.pathname.startsWith('/agendar/agenda');
+  const isClienteSession = isAuthenticated && Array.isArray(roles) && roles.includes('cliente');
+  const homePath = isClienteSession ? '/home/cliente' : '/';
+  const homeLabel = isClienteSession ? 'Inicio cliente' : 'Inicio';
 
   return (
     <div className="public-booking-page mf-page-gradient min-h-screen">
       <div className="public-booking-shell">
         <header className="public-booking-topbar">
           <div className="public-booking-topbar-left">
-            <Link to="/" className="public-booking-home">
+            <Link to={homePath} className="public-booking-home">
               <House size={16} />
-              <span>Inicio</span>
+              <span>{homeLabel}</span>
             </Link>
+            {isClienteSession ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="public-booking-topbar-back gap-2"
+                onClick={() => navigate('/home/cliente')}
+              >
+                <ArrowLeft size={15} />
+                Volver al inicio
+              </Button>
+            ) : null}
             {showTopbarBackToBarberos ? (
               <Button
                 variant="outline"
