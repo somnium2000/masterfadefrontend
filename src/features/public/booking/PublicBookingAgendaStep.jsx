@@ -98,6 +98,7 @@ export default function PublicBookingAgendaStep() {
     toggleService,
     totalToPay,
     updateActiveBlockBarber,
+    updateActiveBlockContact,
     currentMonth,
   } = usePublicBookingFlow();
 
@@ -105,6 +106,13 @@ export default function PublicBookingAgendaStep() {
   const canGoToConfirm = Boolean(allBlocksComplete);
   const selectedServicesCount = selectedServices.length;
   const hasSelectedDate = Boolean(selectedDate);
+  const activeContactName = String(activeBlock?.contactName || '');
+  const activeContactEmail = String(activeBlock?.contactEmail || '');
+  const activeContactPhone = String(activeBlock?.contactPhone || '');
+  const contactNameRequiredMessage = activeBlockIndex === 0
+    ? 'Ingresa el nombre del titular para continuar con la selección de servicios.'
+    : 'Ingresa el nombre del acompañante antes de elegir servicios.';
+  const canSelectServices = Boolean(activeContactName.trim());
 
   useEffect(() => {
     syncServicesScrollState();
@@ -193,6 +201,69 @@ export default function PublicBookingAgendaStep() {
             </select>
           </div>
 
+          <div className="public-booking-contact-card">
+            <div className="public-booking-form-grid">
+              <div className="public-booking-form-row">
+                <label className="mf-label" htmlFor="booking-contact-name">
+                  {activeBlockIndex === 0 ? 'Nombre del titular *' : 'Nombre del acompañante *'}
+                </label>
+                <input
+                  id="booking-contact-name"
+                  type="text"
+                  className="mf-input"
+                  value={activeContactName}
+                  onChange={(event) => updateActiveBlockContact({ contactName: event.target.value })}
+                  placeholder={activeBlockIndex === 0 ? 'Ej. Carlos Ramírez' : 'Ej. José López'}
+                />
+                {activeBlockIndex > 0 ? (
+                  <p className="citas-selected-date">
+                    Este nombre se usa para llamarle correctamente en la barbería y evitar confusiones.
+                  </p>
+                ) : null}
+              </div>
+              <div className="public-booking-form-row">
+                <label className="mf-label" htmlFor="booking-contact-email">
+                  {activeBlockIndex === 0 ? 'Correo del titular *' : 'Correo del acompañante (opcional)'}
+                </label>
+                <input
+                  id="booking-contact-email"
+                  type="email"
+                  className="mf-input"
+                  value={activeContactEmail}
+                  onChange={(event) => updateActiveBlockContact({ contactEmail: event.target.value })}
+                  placeholder={activeBlockIndex === 0 ? 'titular@correo.com' : 'acompanante@correo.com'}
+                />
+                {activeBlockIndex > 0 ? (
+                  <p className="citas-selected-date">
+                    Si lo indicas, enviaremos la información de la cita a este correo.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+            {activeBlockIndex === 0 ? (
+              <div className="public-booking-form-row mt-2">
+                <label className="mf-label" htmlFor="booking-contact-phone">
+                  Teléfono del titular (opcional)
+                </label>
+                <input
+                  id="booking-contact-phone"
+                  type="tel"
+                  className="mf-input"
+                  value={activeContactPhone}
+                  onChange={(event) => updateActiveBlockContact({ contactPhone: event.target.value })}
+                  placeholder="Ej. +504 9999-9999"
+                />
+                <p className="citas-selected-date">
+                  Lo usaremos para avisarte si hay cambios extraordinarios en fecha u hora.
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          {!canSelectServices ? (
+            <p className="citas-selected-date">{contactNameRequiredMessage}</p>
+          ) : null}
+
           <div className="citas-services-scroll scrollbar-hide" ref={servicesScrollRef}>
             <div className="citas-services-grid">
               {services.map((service) => (
@@ -200,6 +271,7 @@ export default function PublicBookingAgendaStep() {
                   key={service.id_servicio}
                   service={service}
                   isSelected={serviceIds.includes(service.id_servicio)}
+                  disabled={!canSelectServices}
                   onToggle={() => toggleService(service.id_servicio)}
                 />
               ))}
@@ -241,60 +313,46 @@ export default function PublicBookingAgendaStep() {
             ) : null}
           </div>
 
-          {activeBlockIndex > 0 ? (
-            <div className="p-5 text-center my-4">
-              <p className="citas-selected-date block mb-2">
-                La fecha para los integrantes esta bloqueada para coincidir con la del titular:
-              </p>
-              <strong className="citas-calendar-profile-name" style={{ display: 'block', fontSize: '16px' }}>
-                {bookingBlocks[0]?.selectedDate ? formatFriendlyDate(bookingBlocks[0].selectedDate) : 'Ninguna'}
-              </strong>
-              <p className="citas-selected-date block mt-4" style={{ fontSize: '13px' }}>
-                Para cambiar la fecha, vuelve a seleccionar al Titular.
-              </p>
+          <>
+            <div className="citas-calendar-head" style={{ paddingTop: '0' }}>
+              <button
+                type="button"
+                className="citas-nav-round"
+                onClick={() => setMonth(-1)}
+                aria-label="Mes anterior"
+                disabled={!canGoPrevMonth}
+              >
+                <ArrowLeft size={16} />
+              </button>
+              <div className="citas-calendar-month">{formatMonth(currentMonth)}</div>
+              <button type="button" className="citas-nav-round" onClick={() => setMonth(1)} aria-label="Mes siguiente">
+                <ArrowRight size={16} />
+              </button>
             </div>
-          ) : (
-            <>
-              <div className="citas-calendar-head" style={{ paddingTop: '0' }}>
-                <button
-                  type="button"
-                  className="citas-nav-round"
-                  onClick={() => setMonth(-1)}
-                  aria-label="Mes anterior"
-                  disabled={!canGoPrevMonth}
-                >
-                  <ArrowLeft size={16} />
-                </button>
-                <div className="citas-calendar-month">{formatMonth(currentMonth)}</div>
-                <button type="button" className="citas-nav-round" onClick={() => setMonth(1)} aria-label="Mes siguiente">
-                  <ArrowRight size={16} />
-                </button>
+
+            <div className="citas-calendar-grid">
+              <div className="citas-weekdays">
+                {WEEK_DAYS.map((day) => (
+                  <div key={day} className="citas-weekday">
+                    {day}
+                  </div>
+                ))}
               </div>
 
-              <div className="citas-calendar-grid">
-                <div className="citas-weekdays">
-                  {WEEK_DAYS.map((day) => (
-                    <div key={day} className="citas-weekday">
-                      {day}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="citas-days">
-                  {calendarCells.map((cell) => (
-                    <DayButton
-                      key={cell.key}
-                      cell={cell}
-                      dayInfo={availabilityMap[cell.key]}
-                      minDateKey={minBookingDateKey}
-                      selectedDate={selectedDate}
-                      onSelect={onSelectDay}
-                    />
-                  ))}
-                </div>
+              <div className="citas-days">
+                {calendarCells.map((cell) => (
+                  <DayButton
+                    key={cell.key}
+                    cell={cell}
+                    dayInfo={availabilityMap[cell.key]}
+                    minDateKey={minBookingDateKey}
+                    selectedDate={selectedDate}
+                    onSelect={onSelectDay}
+                  />
+                ))}
               </div>
-            </>
-          )}
+            </div>
+          </>
         </motion.div>
 
         <AnimatePresence initial={false}>

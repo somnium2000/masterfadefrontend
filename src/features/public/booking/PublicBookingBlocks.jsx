@@ -36,6 +36,7 @@ export function ServiceCard({
   service,
   isSelected,
   onToggle,
+  disabled = false,
 }) {
   return (
     <button
@@ -43,6 +44,7 @@ export function ServiceCard({
       className={`citas-service-card ${isSelected ? 'is-selected' : ''}`}
       onClick={onToggle}
       aria-pressed={isSelected}
+      disabled={disabled}
     >
       <div className="citas-service-name">{service?.nombre_servicio || 'Servicio'}</div>
       <div className="citas-service-meta">

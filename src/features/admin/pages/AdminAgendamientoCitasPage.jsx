@@ -18,10 +18,13 @@ import {
   listAdminCitasAfectadasReagendacion,
   listAdminCitasHistorial,
   listAdminCitasOperativas,
+  listPublicAgendaHorarios,
   patchAdminCitaEstado,
   postAdminCitaReagendarEmergencia,
   postAdminCitasReagendarEmergenciaLote,
 } from '../lib/adminCitasApi.js';
+import { buildTimeSlots } from '../../public/booking/bookingUtils.js';
+import { supabase } from '../../../config/supabaseClient.js';
 
 const FILTER_DEFAULTS = {
   idSucursal: 'all',
@@ -69,6 +72,27 @@ function formatDateTime(isoValue) {
   const parsed = new Date(isoValue || '');
   if (Number.isNaN(parsed.getTime())) return '-';
   return new Intl.DateTimeFormat('es-HN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(parsed);
+}
+
+function toDateKey(isoValue) {
+  const parsed = new Date(isoValue || '');
+  if (Number.isNaN(parsed.getTime())) return '';
+  const y = parsed.getFullYear();
+  const m = String(parsed.getMonth() + 1).padStart(2, '0');
+  const d = String(parsed.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function buildSlotsForPicker(payload) {
+  const horarios = Array.isArray(payload?.horarios) ? payload.horarios : [];
+  const available = new Set(horarios.map((item) => String(item?.hora || '').slice(0, 5)).filter(Boolean));
+  const fallbackStart = String(payload?.hora_inicio || '08:00').slice(0, 5);
+  const fallbackEnd = String(payload?.hora_fin || '18:30').slice(0, 5);
+  const timeline = buildTimeSlots(fallbackStart, fallbackEnd);
+  return timeline.map((hora) => ({
+    hora,
+    disponible: available.has(hora),
+  }));
 }
 
 function formatCurrencyHnl(value) {
@@ -170,12 +194,17 @@ export default function AdminAgendamientoCitasPage() {
   const [singleTarget, setSingleTarget] = useState(null);
   const [singleForm, setSingleForm] = useState({ fecha_inicio_nueva: '', id_empleado_barbero_nuevo: '', motivo: '' });
   const [singleSaving, setSingleSaving] = useState(false);
+  const [singlePickerDate, setSinglePickerDate] = useState('');
+  const [singlePickerLoading, setSinglePickerLoading] = useState(false);
+  const [singlePickerSlots, setSinglePickerSlots] = useState([]);
+  const [singlePickerOpen, setSinglePickerOpen] = useState(false);
 
   const [batchDialogOpen, setBatchDialogOpen] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchSaving, setBatchSaving] = useState(false);
   const [batchForm, setBatchForm] = useState({ id_empleado_barbero: '', fecha: '', motivo: '' });
   const [batchItems, setBatchItems] = useState([]);
+  const [batchPickerLoadingId, setBatchPickerLoadingId] = useState('');
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const sucursales = Array.isArray(context?.sucursales) ? context.sucursales : [];
@@ -294,10 +323,22 @@ export default function AdminAgendamientoCitasPage() {
   }, [fetchCitas]);
 
   useEffect(() => {
-    const intervalId = setInterval(() => {
-      void fetchCitas();
-    }, 30000);
-    return () => clearInterval(intervalId);
+    if (!supabase) return undefined;
+    const channel = supabase
+      .channel('admin-agendamiento-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, () => { void fetchCitas(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_holds' }, () => { void fetchCitas(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bloqueos_agenda' }, () => { void fetchCitas(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_reagendaciones' }, () => { void fetchCitas(); })
+      .subscribe();
+
+    return () => {
+      try {
+        supabase.removeChannel(channel);
+      } catch {
+        // ignore teardown errors
+      }
+    };
   }, [fetchCitas]);
 
   function clearAllFilters() {
@@ -333,7 +374,38 @@ export default function AdminAgendamientoCitasPage() {
   function openSingleReschedule(cita) {
     setSingleTarget(cita);
     setSingleForm({ fecha_inicio_nueva: toInputDateTime(cita?.inicio_at), id_empleado_barbero_nuevo: '', motivo: 'Reagendación por emergencia operativa.' });
+    setSinglePickerDate(toDateKey(cita?.inicio_at));
+    setSinglePickerSlots([]);
+    setSinglePickerOpen(false);
     setSingleDialogOpen(true);
+  }
+
+  async function loadSingleSlots(dateKey, forcedBarberId = '') {
+    if (!singleTarget?.id_sucursal || !Array.isArray(singleTarget?.servicios) || singleTarget.servicios.length === 0 || !dateKey) {
+      setSinglePickerSlots([]);
+      return;
+    }
+    setSinglePickerLoading(true);
+    try {
+      const response = await listPublicAgendaHorarios({
+        id_sucursal: singleTarget.id_sucursal,
+        id_barbero: forcedBarberId || singleForm.id_empleado_barbero_nuevo || singleTarget.id_empleado_barbero || undefined,
+        servicios: singleTarget.servicios.join(','),
+        fecha: dateKey,
+      });
+      const payload = response?.data ?? response;
+      setSinglePickerSlots(buildSlotsForPicker(payload));
+    } catch {
+      setSinglePickerSlots([]);
+    } finally {
+      setSinglePickerLoading(false);
+    }
+  }
+
+  function assignSingleSlot(dateKey, timeKey) {
+    if (!dateKey || !timeKey) return;
+    setSingleForm((prev) => ({ ...prev, fecha_inicio_nueva: `${dateKey}T${timeKey}` }));
+    setSinglePickerOpen(false);
   }
 
   async function submitSingleReschedule() {
@@ -378,11 +450,19 @@ export default function AdminAgendamientoCitasPage() {
       setBatchItems(affected.map((item) => ({
         id_cita: item.id_cita,
         nombre_cliente: item.nombre_cliente || 'Cliente',
+        telefono_cliente: item.telefono_cliente || '',
         alias_integrante: item.alias_integrante || 'Titular',
+        id_sucursal: item.id_sucursal,
+        id_barbero_actual: item.id_empleado_barbero,
+        servicios: Array.isArray(item.servicios) ? item.servicios : [],
+        selected: false,
         inicio_actual: item.inicio_at,
         fecha_inicio_nueva: toInputDateTime(item.inicio_at),
         id_empleado_barbero_nuevo: '',
         motivo: '',
+        picker_open: false,
+        picker_date: toDateKey(item.inicio_at),
+        picker_slots: [],
       })));
     } catch (err) {
       notifications.error(extractMessage(err), { dedupeKey: 'agendamiento-citas-batch-fetch-error' });
@@ -391,11 +471,69 @@ export default function AdminAgendamientoCitasPage() {
     }
   }
 
+  async function loadBatchRowSlots(item, dateKey, forcedBarberId = '') {
+    if (!item?.id_sucursal || !Array.isArray(item?.servicios) || item.servicios.length === 0 || !dateKey) {
+      return;
+    }
+    setBatchPickerLoadingId(item.id_cita);
+    try {
+      const response = await listPublicAgendaHorarios({
+        id_sucursal: item.id_sucursal,
+        id_barbero: forcedBarberId || item.id_empleado_barbero_nuevo || batchForm.id_empleado_barbero || item.id_barbero_actual || undefined,
+        servicios: item.servicios.join(','),
+        fecha: dateKey,
+      });
+      const payload = response?.data ?? response;
+      const slots = buildSlotsForPicker(payload);
+      setBatchItems((prev) => prev.map((entry) => (
+        entry.id_cita === item.id_cita
+          ? { ...entry, picker_slots: slots, picker_date: dateKey }
+          : entry
+      )));
+    } catch {
+      setBatchItems((prev) => prev.map((entry) => (
+        entry.id_cita === item.id_cita
+          ? { ...entry, picker_slots: [], picker_date: dateKey }
+          : entry
+      )));
+    } finally {
+      setBatchPickerLoadingId('');
+    }
+  }
+
+  function toggleBatchRowSelected(idCita) {
+    setBatchItems((prev) => prev.map((entry) => (
+      entry.id_cita === idCita ? { ...entry, selected: !entry.selected } : entry
+    )));
+  }
+
+  function toggleBatchRowPicker(idCita) {
+    setBatchItems((prev) => prev.map((entry) => (
+      entry.id_cita === idCita ? { ...entry, picker_open: !entry.picker_open } : { ...entry, picker_open: false }
+    )));
+  }
+
+  function assignBatchRowSlot(idCita, dateKey, timeKey) {
+    setBatchItems((prev) => prev.map((entry) => (
+      entry.id_cita === idCita
+        ? { ...entry, fecha_inicio_nueva: `${dateKey}T${timeKey}`, picker_open: false }
+        : entry
+    )));
+  }
+
   async function submitBatchReschedule() {
-    if (!batchItems.length) return;
-    const hasInvalid = batchItems.some((item) => !toIsoDateTime(item.fecha_inicio_nueva));
+    const selectedItems = batchItems.filter((item) => item.selected);
+    if (!selectedItems.length) {
+      notifications.warning('Selecciona al menos una cita para reagendar.', {
+        dedupeKey: 'agendamiento-citas-batch-none-selected',
+      });
+      return;
+    }
+    const hasInvalid = selectedItems.some((item) => !toIsoDateTime(item.fecha_inicio_nueva));
     if (hasInvalid) {
-      notifications.warning('Todas las filas deben tener fecha y hora nueva válida.', { dedupeKey: 'agendamiento-citas-batch-invalid' });
+      notifications.warning('Todas las filas seleccionadas deben tener fecha y hora nueva válida.', {
+        dedupeKey: 'agendamiento-citas-batch-invalid',
+      });
       return;
     }
     setBatchSaving(true);
@@ -404,7 +542,7 @@ export default function AdminAgendamientoCitasPage() {
         id_empleado_barbero: batchForm.id_empleado_barbero,
         fecha: batchForm.fecha,
         motivo: batchForm.motivo || null,
-        items: batchItems.map((item) => ({
+        items: selectedItems.map((item) => ({
           id_cita: item.id_cita,
           fecha_inicio_nueva: toIsoDateTime(item.fecha_inicio_nueva),
           id_empleado_barbero_nuevo: item.id_empleado_barbero_nuevo || null,
@@ -412,8 +550,7 @@ export default function AdminAgendamientoCitasPage() {
         })),
       });
       notifications.success('Reagendación masiva completada sin cobro adicional.', { dedupeKey: 'agendamiento-citas-batch-ok' });
-      setBatchDialogOpen(false);
-      setBatchItems([]);
+      setBatchItems((prev) => prev.filter((item) => !item.selected));
       void fetchCitas();
     } catch (err) {
       notifications.error(extractMessage(err), { dedupeKey: 'agendamiento-citas-batch-error' });
@@ -464,6 +601,7 @@ function renderCardsList(items, emptyText) {
               fields={[
                 { label: 'Sucursal', value: cita.nombre_sucursal || '-' },
                 { label: 'Integrante', value: cita.alias_integrante || 'Titular' },
+                { label: 'Teléfono', value: cita.telefono_cliente || '-' },
                 { label: 'Inicio', value: formatDateTime(cita.inicio_at) },
                 { label: 'Monto', value: formatCurrencyHnl(cita.total_pagar_hnl) },
               ]}
@@ -491,7 +629,11 @@ function renderCardsList(items, emptyText) {
           <TableBody>
             {items.map((cita) => (
               <TableRow key={cita.id_cita} className="border-[var(--mf-nav-border)]">
-                <TableCell className="font-medium">{cita.nombre_cliente || 'Cliente'}{cita.alias_integrante ? <p className="text-xs text-[var(--mf-text-2)]">{cita.alias_integrante}</p> : null}</TableCell>
+                <TableCell className="font-medium">
+                  {cita.nombre_cliente || 'Cliente'}
+                  {cita.alias_integrante ? <p className="text-xs text-[var(--mf-text-2)]">{cita.alias_integrante}</p> : null}
+                  {cita.telefono_cliente ? <p className="text-xs text-[var(--mf-text-2)]">{cita.telefono_cliente}</p> : null}
+                </TableCell>
                 <TableCell>{cita.nombre_barbero || '-'}<p className="text-xs text-[var(--mf-text-2)]">{cita.nombre_sucursal || '-'}</p></TableCell>
                 <TableCell>{formatDateTime(cita.inicio_at)}<p className="text-xs text-[var(--mf-text-2)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p></TableCell>
                 <TableCell className="text-right">{renderItemActions(cita)}</TableCell>
@@ -638,17 +780,78 @@ function renderCardsList(items, emptyText) {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader><DialogTitle>Reagendación de emergencia</DialogTitle></DialogHeader>
           <div className="grid grid-cols-1 gap-3">
-            <p className="text-sm text-[var(--mf-text-2)]">{singleTarget?.nombre_cliente || '-'} - {singleTarget?.nombre_barbero || '-'} ({formatDateTime(singleTarget?.inicio_at)})</p>
+            <p className="text-sm text-[var(--mf-text-2)]">
+              {singleTarget?.nombre_cliente || '-'} - {singleTarget?.nombre_barbero || '-'} ({formatDateTime(singleTarget?.inicio_at)})
+            </p>
+            {singleTarget?.telefono_cliente ? (
+              <p className="text-sm text-[var(--mf-text-2)]">Teléfono cliente: {singleTarget.telefono_cliente}</p>
+            ) : null}
             <div>
               <Label className="mf-label">Nueva fecha y hora *</Label>
               <Input type="datetime-local" className="mf-input mt-1" value={singleForm.fecha_inicio_nueva} onChange={(event) => setSingleForm((prev) => ({ ...prev, fecha_inicio_nueva: event.target.value }))} />
             </div>
             <div>
               <Label className="mf-label">Nuevo barbero</Label>
-              <select className="mf-select mt-1" value={singleForm.id_empleado_barbero_nuevo} onChange={(event) => setSingleForm((prev) => ({ ...prev, id_empleado_barbero_nuevo: event.target.value }))}>
+              <select className="mf-select mt-1" value={singleForm.id_empleado_barbero_nuevo} onChange={(event) => {
+                const value = event.target.value;
+                setSingleForm((prev) => ({ ...prev, id_empleado_barbero_nuevo: value }));
+                if (singlePickerOpen && singlePickerDate) {
+                  void loadSingleSlots(singlePickerDate, value);
+                }
+              }}>
                 <option value="">Asignación aleatoria</option>
                 {barberos.map((barbero) => <option key={barbero.id_empleado} value={barbero.id_empleado}>{barbero.nombre_completo}</option>)}
               </select>
+            </div>
+            <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    const nextOpen = !singlePickerOpen;
+                    setSinglePickerOpen(nextOpen);
+                    if (nextOpen) {
+                      const dateToLoad = singlePickerDate || toDateKey(singleTarget?.inicio_at) || '';
+                      setSinglePickerDate(dateToLoad);
+                      await loadSingleSlots(dateToLoad);
+                    }
+                  }}
+                >
+                  {singlePickerOpen ? 'Ocultar selector de horario' : 'Elegir horario disponible'}
+                </Button>
+                {singlePickerLoading ? <span className="text-xs text-[var(--mf-text-2)]">Cargando horarios...</span> : null}
+              </div>
+              {singlePickerOpen ? (
+                <div className="mt-3 space-y-2">
+                  <div>
+                    <Label className="mf-label">Fecha</Label>
+                    <Input
+                      type="date"
+                      className="mf-input mt-1"
+                      value={singlePickerDate}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setSinglePickerDate(value);
+                        void loadSingleSlots(value);
+                      }}
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {singlePickerSlots.map((slot) => (
+                      <button
+                        key={slot.hora}
+                        type="button"
+                        className={`citas-slot-btn ${slot.disponible ? '' : 'is-unavailable'}`}
+                        disabled={!slot.disponible}
+                        onClick={() => assignSingleSlot(singlePickerDate, slot.hora)}
+                      >
+                        {slot.hora}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
             <div>
               <Label className="mf-label">Motivo</Label>
@@ -686,10 +889,11 @@ function renderCardsList(items, emptyText) {
             <div className="flex justify-end"><Button variant="outline" onClick={fetchBatchAffected} disabled={batchLoading}>{batchLoading ? 'Buscando...' : 'Buscar afectadas'}</Button></div>
 
             {batchItems.length > 0 ? (
-              <div className="mf-table-wrap">
+              <div className="mf-table-wrap max-h-[440px] overflow-y-auto">
                 <Table>
                   <TableHeader>
                     <TableRow className="border-[var(--mf-nav-border)]">
+                      <TableHead>Seleccionar</TableHead>
                       <TableHead>Cliente</TableHead>
                       <TableHead>Inicio actual</TableHead>
                       <TableHead>Nueva fecha y hora</TableHead>
@@ -699,19 +903,83 @@ function renderCardsList(items, emptyText) {
                   <TableBody>
                     {batchItems.map((item) => (
                       <TableRow key={item.id_cita} className="border-[var(--mf-nav-border)]">
-                        <TableCell>{item.nombre_cliente} <p className="text-xs text-[var(--mf-text-2)]">{item.alias_integrante}</p></TableCell>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(item.selected)}
+                            onChange={() => toggleBatchRowSelected(item.id_cita)}
+                            aria-label={`Seleccionar ${item.nombre_cliente}`}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          {item.nombre_cliente}
+                          <p className="text-xs text-[var(--mf-text-2)]">{item.alias_integrante}</p>
+                          {item.telefono_cliente ? <p className="text-xs text-[var(--mf-text-2)]">{item.telefono_cliente}</p> : null}
+                        </TableCell>
                         <TableCell>{formatDateTime(item.inicio_actual)}</TableCell>
-                        <TableCell><Input type="datetime-local" value={item.fecha_inicio_nueva} onChange={(event) => {
-                          const value = event.target.value;
-                          setBatchItems((prev) => prev.map((entry) => (entry.id_cita === item.id_cita ? { ...entry, fecha_inicio_nueva: value } : entry)));
-                        }} /></TableCell>
-                        <TableCell><select className="mf-select" value={item.id_empleado_barbero_nuevo} onChange={(event) => {
-                          const value = event.target.value;
-                          setBatchItems((prev) => prev.map((entry) => (entry.id_cita === item.id_cita ? { ...entry, id_empleado_barbero_nuevo: value } : entry)));
-                        }}>
-                          <option value="">Asignación aleatoria</option>
-                          {barberos.map((barbero) => <option key={barbero.id_empleado} value={barbero.id_empleado}>{barbero.nombre_completo}</option>)}
-                        </select></TableCell>
+                        <TableCell>
+                          <Input type="datetime-local" value={item.fecha_inicio_nueva} onChange={(event) => {
+                            const value = event.target.value;
+                            setBatchItems((prev) => prev.map((entry) => (entry.id_cita === item.id_cita ? { ...entry, fecha_inicio_nueva: value } : entry)));
+                          }} />
+                          <div className="mt-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={async () => {
+                                toggleBatchRowPicker(item.id_cita);
+                                const nextDate = item.picker_date || toDateKey(item.inicio_actual);
+                                await loadBatchRowSlots(item, nextDate);
+                              }}
+                            >
+                              {item.picker_open ? 'Cerrar horarios' : 'Elegir horario disponible'}
+                            </Button>
+                          </div>
+                          {item.picker_open ? (
+                            <div className="mt-2 rounded-md border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-2">
+                              <Input
+                                type="date"
+                                value={item.picker_date || ''}
+                                onChange={(event) => {
+                                  const value = event.target.value;
+                                  setBatchItems((prev) => prev.map((entry) => (
+                                    entry.id_cita === item.id_cita ? { ...entry, picker_date: value } : entry
+                                  )));
+                                  void loadBatchRowSlots(item, value);
+                                }}
+                              />
+                              {batchPickerLoadingId === item.id_cita ? (
+                                <p className="mt-2 text-xs text-[var(--mf-text-2)]">Cargando horarios...</p>
+                              ) : (
+                                <div className="mt-2 grid grid-cols-3 gap-2">
+                                  {item.picker_slots.map((slot) => (
+                                    <button
+                                      key={`${item.id_cita}-${slot.hora}`}
+                                      type="button"
+                                      className={`citas-slot-btn ${slot.disponible ? '' : 'is-unavailable'}`}
+                                      disabled={!slot.disponible}
+                                      onClick={() => assignBatchRowSlot(item.id_cita, item.picker_date, slot.hora)}
+                                    >
+                                      {slot.hora}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>
+                          <select className="mf-select" value={item.id_empleado_barbero_nuevo} onChange={(event) => {
+                            const value = event.target.value;
+                            setBatchItems((prev) => prev.map((entry) => (entry.id_cita === item.id_cita ? { ...entry, id_empleado_barbero_nuevo: value } : entry)));
+                            if (item.picker_open && item.picker_date) {
+                              void loadBatchRowSlots({ ...item, id_empleado_barbero_nuevo: value }, item.picker_date, value);
+                            }
+                          }}>
+                            <option value="">Asignación aleatoria</option>
+                            {barberos.map((barbero) => <option key={barbero.id_empleado} value={barbero.id_empleado}>{barbero.nombre_completo}</option>)}
+                          </select>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -721,7 +989,9 @@ function renderCardsList(items, emptyText) {
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setBatchDialogOpen(false)} disabled={batchSaving}>Cerrar</Button>
-              <Button onClick={submitBatchReschedule} disabled={batchSaving || batchItems.length === 0}>{batchSaving ? 'Procesando...' : 'Reagendar lote sin cobro'}</Button>
+              <Button onClick={submitBatchReschedule} disabled={batchSaving || batchItems.filter((item) => item.selected).length === 0}>
+                {batchSaving ? 'Procesando...' : 'Reagendar seleccionadas'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

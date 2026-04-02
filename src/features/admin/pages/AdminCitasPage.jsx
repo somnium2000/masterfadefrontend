@@ -50,10 +50,8 @@ const PREVIEW_STEPS = [
 
 const CONFIG_TABS = [
   { id: 'horario', label: 'Horario Habitual', icon: Clock3 },
-  { id: 'bloqueos', label: 'Bloqueos', icon: SlidersHorizontal },
-  { id: 'dias', label: 'Días Inhabilitados', icon: CalendarDays },
+  { id: 'restricciones', label: 'Bloqueos y Excepciones', icon: AlertTriangle },
   { id: 'parametros', label: 'Parámetros Globales', icon: SlidersHorizontal },
-  { id: 'excepciones', label: 'Excepciones', icon: AlertTriangle },
   { id: 'sucursal', label: 'Por Sucursal', icon: Ban },
 ];
 
@@ -243,7 +241,6 @@ function buildDefaultScheduleRows() {
       hora_fin: isWeekend ? '17:00' : '19:00',
       almuerzo_inicio: '12:00',
       almuerzo_fin: '13:00',
-      duracion_min: 30,
       activo: item.code !== 0,
     };
   });
@@ -359,11 +356,13 @@ export default function AdminCitasPage() {
   const [paramsForm, setParamsForm] = useState({
     hold_duracion_min: '5',
     no_show_min: '10',
+    agenda_buffer_global_min: '0',
     dias_anticipacion: '30',
     horas_minimas: '2',
     permitir_acompanantes: false,
     pago_total_obligatorio: true,
     simulacion_sin_pago: true,
+    masterpuntos_migracion_manual_habilitada: false,
     confirmacion_automatica: true,
   });
 
@@ -497,12 +496,7 @@ export default function AdminCitasPage() {
     if (tabId === 'parametros') return 'params:global';
     if (tabId === 'sucursal') return selectedBranchId ? `branchDays:${selectedBranchId}` : '';
     if (tabId === 'horario') return selectedBarberId ? `schedule:${selectedBarberId}` : '';
-    if (tabId === 'bloqueos' || tabId === 'excepciones') return selectedBarberId ? `blocks:${selectedBarberId}` : '';
-    if (tabId === 'dias') {
-      const barberKey = selectedBarberId ? `days:${selectedBarberId}` : '';
-      const branchKey = selectedBranchId ? `branchDays:${selectedBranchId}` : '';
-      return [barberKey, branchKey].filter(Boolean).join('|');
-    }
+    if (tabId === 'restricciones') return selectedBarberId ? `restricciones:${selectedBarberId}` : '';
     return '';
   }, [selectedBarberId, selectedBranchId]);
 
@@ -526,9 +520,16 @@ export default function AdminCitasPage() {
         ...prev,
         hold_duracion_min: String(nextContext.parametros?.hold_duracion_min ?? prev.hold_duracion_min),
         no_show_min: String(nextContext.parametros?.no_show_min ?? prev.no_show_min),
+        agenda_buffer_global_min: String(
+          nextContext.parametros?.agenda_buffer_global_min ?? prev.agenda_buffer_global_min
+        ),
         permitir_acompanantes: Boolean(nextContext.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(nextContext.parametros?.pago_total_obligatorio ?? true),
         simulacion_sin_pago: Boolean(nextContext.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
+        masterpuntos_migracion_manual_habilitada: Boolean(
+          nextContext.parametros?.masterpuntos_migracion_manual_habilitada
+            ?? prev.masterpuntos_migracion_manual_habilitada
+        ),
       }));
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -768,9 +769,14 @@ export default function AdminCitasPage() {
         ...prev,
         hold_duracion_min: String(payload?.parametros?.hold_duracion_min ?? prev.hold_duracion_min),
         no_show_min: String(payload?.parametros?.no_show_min ?? prev.no_show_min),
+        agenda_buffer_global_min: String(payload?.parametros?.agenda_buffer_global_min ?? prev.agenda_buffer_global_min),
         permitir_acompanantes: Boolean(payload?.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(payload?.parametros?.pago_total_obligatorio ?? true),
         simulacion_sin_pago: Boolean(payload?.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
+        masterpuntos_migracion_manual_habilitada: Boolean(
+          payload?.parametros?.masterpuntos_migracion_manual_habilitada
+            ?? prev.masterpuntos_migracion_manual_habilitada
+        ),
       }));
       return true;
     } catch (err) {
@@ -898,27 +904,15 @@ export default function AdminCitasPage() {
     };
 
     async function loadConfigData() {
-      if (selectedConfigTab === 'dias') {
-        const dayKey = selectedBarberId ? `days:${selectedBarberId}` : '';
-        const branchKey = selectedBranchId ? `branchDays:${selectedBranchId}` : '';
-
-        if (dayKey && !configLoadCacheRef.current.has(dayKey)) {
-          const ok = await fetchDaysOff();
-          if (ok) markLoaded(dayKey);
-        }
-        if (branchKey && !configLoadCacheRef.current.has(branchKey)) {
-          const ok = await fetchBranchDaysOff();
-          if (ok) markLoaded(branchKey);
-        }
-        return;
-      }
-
       const cacheKey = getConfigDataCacheKey(selectedConfigTab);
       if (cacheKey && configLoadCacheRef.current.has(cacheKey)) return;
 
       let loaded = false;
       if (selectedConfigTab === 'horario') loaded = await fetchSchedule();
-      else if (selectedConfigTab === 'bloqueos' || selectedConfigTab === 'excepciones') loaded = await fetchBlocks();
+      else if (selectedConfigTab === 'restricciones') {
+        const [okBlocks, okDays] = await Promise.all([fetchBlocks(), fetchDaysOff()]);
+        loaded = Boolean(okBlocks || okDays);
+      }
       else if (selectedConfigTab === 'parametros') loaded = await fetchParams();
       else if (selectedConfigTab === 'sucursal') loaded = await fetchBranchDaysOff();
 
@@ -1221,8 +1215,15 @@ export default function AdminCitasPage() {
   async function handleSaveParams() {
     const hold = Number(paramsForm.hold_duracion_min);
     const noShow = Number(paramsForm.no_show_min);
-    if (!Number.isFinite(hold) || hold <= 0 || !Number.isFinite(noShow) || noShow <= 0) {
-      notifications.warning('Los Parámetros deben ser números positivos.', { dedupeKey: 'citas-params-invalid' });
+    const globalBuffer = Number(paramsForm.agenda_buffer_global_min);
+    if (
+      !Number.isFinite(hold) || hold <= 0
+      || !Number.isFinite(noShow) || noShow <= 0
+      || !Number.isFinite(globalBuffer) || globalBuffer < 0
+    ) {
+      notifications.warning('Hold y no-show deben ser positivos, y buffer global debe ser 0 o mayor.', {
+        dedupeKey: 'citas-params-invalid',
+      });
       return;
     }
     setParamsSaving(true);
@@ -1230,18 +1231,29 @@ export default function AdminCitasPage() {
       const response = await patchAdminCitasParametros({
         hold_duracion_min: hold,
         no_show_min: noShow,
+        agenda_buffer_global_min: globalBuffer,
         permitir_acompanantes: Boolean(paramsForm.permitir_acompanantes),
         pago_total_obligatorio: true,
         simulacion_sin_pago: Boolean(paramsForm.simulacion_sin_pago),
+        masterpuntos_migracion_manual_habilitada: Boolean(
+          paramsForm.masterpuntos_migracion_manual_habilitada
+        ),
       });
       const payload = response?.data ?? response;
       setParamsForm((prev) => ({
         ...prev,
         hold_duracion_min: String(payload?.parametros?.hold_duracion_min ?? hold),
         no_show_min: String(payload?.parametros?.no_show_min ?? noShow),
+        agenda_buffer_global_min: String(
+          payload?.parametros?.agenda_buffer_global_min ?? globalBuffer
+        ),
         permitir_acompanantes: Boolean(payload?.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(payload?.parametros?.pago_total_obligatorio ?? true),
         simulacion_sin_pago: Boolean(payload?.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
+        masterpuntos_migracion_manual_habilitada: Boolean(
+          payload?.parametros?.masterpuntos_migracion_manual_habilitada
+            ?? prev.masterpuntos_migracion_manual_habilitada
+        ),
       }));
       notifications.success('Parámetros guardados.', { dedupeKey: 'citas-params-save-ok' });
     } catch (err) {
@@ -1658,7 +1670,6 @@ export default function AdminCitasPage() {
                   <th>Hora fin</th>
                   <th>Almuerzo ini.</th>
                   <th>Almuerzo fin</th>
-                  <th>Duración</th>
                   <th>Activo</th>
                 </tr>
               </thead>
@@ -1697,15 +1708,6 @@ export default function AdminCitasPage() {
                         value={row.almuerzo_fin}
                         onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_fin: event.target.value })}
                       />
-                    </td>
-                    <td>
-                      <select
-                        className="citas-inline-select"
-                        value={row.duracion_min}
-                        onChange={(event) => updateScheduleRow(row.dia_semana, { duracion_min: Number(event.target.value) })}
-                      >
-                        <option value={30}>30 min</option>
-                      </select>
                     </td>
                     <td>
                       <div className="citas-switch-inline">
@@ -1834,6 +1836,25 @@ export default function AdminCitasPage() {
     );
   }
 
+  function renderRestriccionesTab() {
+    if (!selectedBarber) {
+      return (
+        <EmptyState
+          icon={AlertTriangle}
+          title="Selecciona un barbero"
+          description="Primero elige un barbero para administrar bloqueos, días inhabilitados y excepciones."
+        />
+      );
+    }
+    return (
+      <div className="flex flex-col gap-6">
+        {renderBloqueosTab()}
+        {renderDaysTab()}
+        {renderExceptionsTab()}
+      </div>
+    );
+  }
+
   function renderParamsTab() {
     return (
       <div className="citas-surface citas-params-card">
@@ -1868,6 +1889,20 @@ export default function AdminCitasPage() {
                 className="citas-inline-input citas-param-value"
                 value={paramsForm.no_show_min}
                 onChange={(event) => setParamsForm((prev) => ({ ...prev, no_show_min: event.target.value }))}
+              />
+            </div>
+
+            <div className="citas-param-row">
+              <div className="citas-param-copy">
+                <h4>Buffer global entre citas (minutos)</h4>
+                <p>Tiempo de preparación aplicado a todas las citas de forma global.</p>
+              </div>
+              <Input
+                type="number"
+                min={0}
+                className="citas-inline-input citas-param-value"
+                value={paramsForm.agenda_buffer_global_min}
+                onChange={(event) => setParamsForm((prev) => ({ ...prev, agenda_buffer_global_min: event.target.value }))}
               />
             </div>
 
@@ -1940,6 +1975,21 @@ export default function AdminCitasPage() {
                 type="button"
                 className={`citas-switch-track ${paramsForm.permitir_acompanantes ? 'is-on' : ''}`}
                 onClick={() => setParamsForm((prev) => ({ ...prev, permitir_acompanantes: !prev.permitir_acompanantes }))}
+              />
+            </div>
+
+            <div className="citas-param-row">
+              <div className="citas-param-copy">
+                <h4>Migración manual de puntos legacy</h4>
+                <p>Habilita en MasterPuntos la carga manual única para clientes pendientes de migración.</p>
+              </div>
+              <button
+                type="button"
+                className={`citas-switch-track ${paramsForm.masterpuntos_migracion_manual_habilitada ? 'is-on' : ''}`}
+                onClick={() => setParamsForm((prev) => ({
+                  ...prev,
+                  masterpuntos_migracion_manual_habilitada: !prev.masterpuntos_migracion_manual_habilitada,
+                }))}
               />
             </div>
           </>
@@ -2125,15 +2175,13 @@ export default function AdminCitasPage() {
         </div>
 
         <div className="citas-config-rail" />
-        {['horario', 'bloqueos', 'dias', 'excepciones'].includes(selectedConfigTab)
-          ? renderBarberChips({ firstNameOnly: selectedConfigTab === 'excepciones' })
+        {['horario', 'restricciones'].includes(selectedConfigTab)
+          ? renderBarberChips({ firstNameOnly: selectedConfigTab === 'restricciones' })
           : null}
 
         {selectedConfigTab === 'horario' && renderHorarioTab()}
-        {selectedConfigTab === 'bloqueos' && renderBloqueosTab()}
-        {selectedConfigTab === 'dias' && renderDaysTab()}
+        {selectedConfigTab === 'restricciones' && renderRestriccionesTab()}
         {selectedConfigTab === 'parametros' && renderParamsTab()}
-        {selectedConfigTab === 'excepciones' && renderExceptionsTab()}
         {selectedConfigTab === 'sucursal' && renderSucursalTab()}
       </>
     );

@@ -143,7 +143,9 @@ export default function AdminAgendamientoHistorialPage() {
     try {
       const response = await listAdminCitasHistorial(buildFilterParams(filters, search));
       const payload = response?.data ?? response;
-      setCitas(Array.isArray(payload?.citas) ? payload.citas : []);
+      const rows = Array.isArray(payload?.citas) ? payload.citas : [];
+      rows.sort((left, right) => new Date(right?.inicio_at || '').getTime() - new Date(left?.inicio_at || '').getTime());
+      setCitas(rows);
     } catch (err) {
       if (handleAuthError(err)) return;
       setListError(extractMessage(err));

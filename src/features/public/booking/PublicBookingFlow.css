@@ -149,6 +149,13 @@
   min-width: 0;
 }
 
+.public-booking-contact-card {
+  border: 1px solid var(--mf-nav-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--mf-btn-bg) 72%, var(--mf-card) 28%);
+  padding: 10px 12px;
+}
+
 .public-booking-services-count {
   min-width: 30px;
   height: 30px;

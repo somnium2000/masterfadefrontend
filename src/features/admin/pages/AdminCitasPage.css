@@ -126,7 +126,13 @@
 
 .citas-service-card.is-selected {
   border-color: var(--mf-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mf-accent) 20%, transparent);
+  background: color-mix(in srgb, var(--mf-accent) 28%, var(--mf-card) 72%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mf-accent) 22%, transparent);
+}
+
+.citas-service-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .citas-service-name {

@@ -41,6 +41,7 @@ const EMPTY_CONTEXT = {
   sucursales: [],
   parametros: {},
 };
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const PublicBookingContext = createContext(null);
 
@@ -76,6 +77,11 @@ function normalizeHourMinute(value) {
   return match ? match[1] : null;
 }
 
+function isValidEmail(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return EMAIL_PATTERN.test(normalized);
+}
+
 function buildDynamicSlots({ availableTimes, horaInicio, horaFin }) {
   const start = normalizeHourMinute(horaInicio);
   const end = normalizeHourMinute(horaFin);
@@ -108,14 +114,19 @@ function normalizeBookingBlock(block, index) {
   const nextServiceIds = Array.isArray(block?.serviceIds)
     ? Array.from(new Set(block.serviceIds.map((id) => String(id || '').trim()).filter(Boolean)))
     : [];
+  const contactName = String(block?.contactName || '').trim();
+  const resolvedAlias = contactName || String(block?.alias || '').trim() || fallbackAlias;
 
   return {
     id: String(block?.id || '').trim() || createBlockId(),
-    alias: String(block?.alias || '').trim() || fallbackAlias,
+    alias: resolvedAlias,
     idBarbero: String(block?.idBarbero || '').trim(),
     serviceIds: nextServiceIds,
     selectedDate: String(block?.selectedDate || '').trim(),
     selectedTime: String(block?.selectedTime || '').trim(),
+    contactName,
+    contactEmail: String(block?.contactEmail || '').trim(),
+    contactPhone: String(block?.contactPhone || '').trim(),
   };
 }
 
@@ -126,6 +137,9 @@ function areBlocksEqual(left, right) {
     && left.idBarbero === right.idBarbero
     && left.selectedDate === right.selectedDate
     && left.selectedTime === right.selectedTime
+    && left.contactName === right.contactName
+    && left.contactEmail === right.contactEmail
+    && left.contactPhone === right.contactPhone
     && areServiceIdsEqual(left.serviceIds, right.serviceIds);
 }
 
@@ -138,6 +152,9 @@ function createBookingBlock({ alias = '', idBarbero = '' } = {}) {
       serviceIds: [],
       selectedDate: '',
       selectedTime: '',
+      contactName: '',
+      contactEmail: '',
+      contactPhone: '',
     },
     alias === 'Titular' ? 0 : 1
   );
@@ -303,7 +320,9 @@ export default function PublicBookingFlow() {
           selectedServices: blockServices,
           total_hnl: blockTotal,
           isComplete: Boolean(
-            block.idBarbero
+            String(block.contactName || '').trim()
+              && (index > 0 || isValidEmail(block.contactEmail))
+              && block.idBarbero
               && blockServices.length > 0
               && block.selectedDate
               && block.selectedTime
@@ -933,12 +952,10 @@ export default function PublicBookingFlow() {
       const source = prev.length > 0 ? prev : [createBookingBlock({ alias: 'Titular' })];
       const companionNumber = source.length;
       const inheritedBarberId = source[effectiveActiveBlockIndex]?.idBarbero || source[0]?.idBarbero || '';
-      const inheritedDate = source[0]?.selectedDate || '';
       const nextBlock = createBookingBlock({
         alias: `Acompañante ${companionNumber}`,
         idBarbero: inheritedBarberId,
       });
-      nextBlock.selectedDate = inheritedDate;
       const nextBlocks = [...source, nextBlock];
       setActiveBlockIndex(nextBlocks.length - 1);
       return nextBlocks;
@@ -969,6 +986,17 @@ export default function PublicBookingFlow() {
 
   const toggleService = useCallback((serviceId) => {
     if (!serviceId) return;
+    const currentBlock = bookingBlocks[effectiveActiveBlockIndex];
+    const contactName = String(currentBlock?.contactName || '').trim();
+    if (!contactName) {
+      notifications.warning(
+        effectiveActiveBlockIndex === 0
+          ? 'Completa el nombre del titular antes de elegir servicios.'
+          : 'Completa el nombre del acompañante antes de elegir servicios.',
+        { dedupeKey: 'public-booking-contact-name-required' }
+      );
+      return;
+    }
 
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => {
       const exists = currentBlock.serviceIds.includes(serviceId);
@@ -985,21 +1013,30 @@ export default function PublicBookingFlow() {
     });
 
     resetAvailabilityViewState();
-  }, [effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
+  }, [bookingBlocks, effectiveActiveBlockIndex, notifications, resetAvailabilityViewState, updateBlockAtIndex]);
 
   const updateActiveBlockBarber = useCallback((barberId) => {
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
       ...currentBlock,
       idBarbero: String(barberId || '').trim(),
-      selectedDate:
-        effectiveActiveBlockIndex > 0
-          ? (currentBlock.selectedDate || bookingBlocks[0]?.selectedDate || '')
-          : '',
+      selectedDate: currentBlock.selectedDate || '',
       selectedTime: '',
     }));
 
     resetAvailabilityViewState();
-  }, [bookingBlocks, effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
+  }, [effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
+
+  const updateActiveBlockContact = useCallback((patch) => {
+    updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => {
+      const next = {
+        ...currentBlock,
+        ...patch,
+      };
+      const normalizedName = String(next.contactName || '').trim();
+      next.alias = normalizedName || (effectiveActiveBlockIndex === 0 ? 'Titular' : `Acompañante ${effectiveActiveBlockIndex}`);
+      return next;
+    });
+  }, [effectiveActiveBlockIndex, updateBlockAtIndex]);
 
   const selectSuggestedBarber = useCallback((barberId) => {
     const nextBarberId = String(barberId || '').trim();
@@ -1034,28 +1071,15 @@ export default function PublicBookingFlow() {
   const onSelectDay = useCallback((dateKey, enabled) => {
     if (!enabled || dateKey < minBookingDateKey) return;
 
-    if (effectiveActiveBlockIndex > 0) {
-      return;
-    }
-
     setBookingBlocks((prev) => {
       const currentBlock = prev[effectiveActiveBlockIndex];
       if (!currentBlock) return prev;
-      
+
       const nextBlocks = [...prev];
       nextBlocks[effectiveActiveBlockIndex] = normalizeBookingBlock(
         { ...currentBlock, selectedDate: dateKey, selectedTime: '' },
         effectiveActiveBlockIndex
       );
-
-      if (effectiveActiveBlockIndex === 0) {
-        for (let i = 1; i < nextBlocks.length; i++) {
-          nextBlocks[i] = normalizeBookingBlock(
-            { ...nextBlocks[i], selectedDate: dateKey, selectedTime: '' },
-            i
-          );
-        }
-      }
 
       return nextBlocks;
     });
@@ -1138,6 +1162,47 @@ export default function PublicBookingFlow() {
       navigate('/agendar/agenda');
       return false;
     }
+    const titularBlock = bookingBlocks[0] || null;
+    const titularNombre = String(titularBlock?.contactName || '').trim();
+    const titularEmail = String(titularBlock?.contactEmail || '').trim().toLowerCase();
+    const titularTelefono = String(titularBlock?.contactPhone || '').trim();
+    if (!titularNombre) {
+      notifications.warning('Debes ingresar el nombre del titular antes de confirmar.', {
+        dedupeKey: 'public-booking-holder-name-required',
+      });
+      setActiveBlockIndex(0);
+      navigate('/agendar/agenda');
+      return false;
+    }
+    if (!isValidEmail(titularEmail)) {
+      notifications.warning('Debes ingresar un correo válido del titular antes de confirmar.', {
+        dedupeKey: 'public-booking-holder-email-required',
+      });
+      setActiveBlockIndex(0);
+      navigate('/agendar/agenda');
+      return false;
+    }
+    for (let index = 1; index < bookingBlocks.length; index += 1) {
+      const companion = bookingBlocks[index];
+      const companionName = String(companion?.contactName || '').trim();
+      const companionEmail = String(companion?.contactEmail || '').trim().toLowerCase();
+      if (!companionName) {
+        notifications.warning('Cada acompañante debe tener nombre antes de confirmar.', {
+          dedupeKey: 'public-booking-companion-name-required-submit',
+        });
+        setActiveBlockIndex(index);
+        navigate('/agendar/agenda');
+        return false;
+      }
+      if (companionEmail && !isValidEmail(companionEmail)) {
+        notifications.warning('Uno de los acompañantes tiene un correo inválido.', {
+          dedupeKey: 'public-booking-companion-email-invalid-submit',
+        });
+        setActiveBlockIndex(index);
+        navigate('/agendar/agenda');
+        return false;
+      }
+    }
     const selectedSlotMap = new Map();
     const resolvedBarberByBlockId = new Map();
     let autoAssignedCompanion = false;
@@ -1201,10 +1266,15 @@ export default function PublicBookingFlow() {
       }
       integrantes.push({
         orden_integrante: block.index + 1,
-        alias: block.alias,
+        alias: block.contactName || block.alias,
         id_barbero: resolvedBarberByBlockId.has(block.id)
           ? resolvedBarberByBlockId.get(block.id)
           : (block.idBarbero || null),
+        contacto: {
+          nombre: String(block.contactName || block.alias || '').trim(),
+          email: String(block.contactEmail || '').trim().toLowerCase() || null,
+          telefono: String(block.contactPhone || '').trim() || null,
+        },
         fecha_inicio: fechaInicio,
         servicios: block.selectedServices.map((service) => ({
           id_servicio: service.id_servicio,
@@ -1215,6 +1285,11 @@ export default function PublicBookingFlow() {
     try {
       const response = await createPublicCitaHold({
         id_sucursal: selectedBranchId,
+        titular: {
+          nombre: titularNombre,
+          email: titularEmail,
+          telefono: titularTelefono || null,
+        },
         integrantes,
       });
       const payload = response?.data ?? response;
@@ -1243,6 +1318,7 @@ export default function PublicBookingFlow() {
     }
   }, [
     allBlocksComplete,
+    bookingBlocks,
     bookingBlocksSummary,
     effectiveActiveBlockIndex,
     fetchAvailability,
@@ -1321,6 +1397,7 @@ export default function PublicBookingFlow() {
       toggleService,
       totalToPay,
       updateActiveBlockBarber,
+      updateActiveBlockContact,
       selectBarber,
       selectBranch,
       fetchAvailability,
@@ -1385,6 +1462,7 @@ export default function PublicBookingFlow() {
       toggleService,
       totalToPay,
       updateActiveBlockBarber,
+      updateActiveBlockContact,
       selectBarber,
       selectBranch,
       fetchAvailability,
