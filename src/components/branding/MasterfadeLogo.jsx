@@ -11,6 +11,10 @@ const VARIANTS = {
     gap: 'gap-0',
     script: 'w-[220px] sm:w-[250px] md:w-[320px] max-w-[82vw]',
   },
+  topbar: {
+    gap: 'gap-0',
+    script: 'w-[116px] min-[360px]:w-[132px] sm:w-[150px] md:w-[180px] max-w-[46vw]',
+  },
   public: {
     gap: 'gap-0',
     script: 'w-[300px] sm:w-[360px] md:w-[500px] max-w-[94vw]',

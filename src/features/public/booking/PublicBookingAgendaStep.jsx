@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+﻿import { useEffect, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, ChevronDown, Clock3, Plus, Scissors, UserRound } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
@@ -11,6 +11,7 @@ import {
   WEEK_DAYS,
   buildCalendarCells,
   formatCurrencyHnl,
+  formatDurationHuman,
   formatFriendlyDate,
   formatMonth,
   formatTime12Hour,
@@ -78,7 +79,10 @@ export default function PublicBookingAgendaStep() {
     onSelectDay,
     onSelectTime,
     selectSuggestedBarber,
+    barberPrepTime,
     selectedDate,
+    selectedBlockTotalMinutes,
+    selectedServicesDurationSum,
     selectedServices,
     selectedTime,
     serviceIds,
@@ -106,6 +110,7 @@ export default function PublicBookingAgendaStep() {
   const canGoToConfirm = Boolean(allBlocksComplete);
   const selectedServicesCount = selectedServices.length;
   const hasSelectedDate = Boolean(selectedDate);
+  const slotsSectionRef = useRef(null);
   const activeContactName = String(activeBlock?.contactName || '');
   const activeContactEmail = String(activeBlock?.contactEmail || '');
   const activeContactPhone = String(activeBlock?.contactPhone || '');
@@ -126,6 +131,11 @@ export default function PublicBookingAgendaStep() {
       window.removeEventListener('resize', syncServicesScrollState);
     };
   }, [bookingBlocks.length, services.length, servicesScrollRef, syncServicesScrollState]);
+
+  useEffect(() => {
+    if (!selectedDate || !slotsSectionRef.current) return;
+    slotsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [selectedDate]);
 
   if (servicesLoading) {
     return (
@@ -358,6 +368,7 @@ export default function PublicBookingAgendaStep() {
         <AnimatePresence initial={false}>
           {hasSelectedDate ? (
             <motion.div
+              ref={slotsSectionRef}
               key={`${activeBlock?.id || 'block'}-${selectedDate}`}
               className="citas-surface public-booking-slots-surface"
               initial={{ opacity: 0, y: 20, scale: 0.985 }}
@@ -370,6 +381,11 @@ export default function PublicBookingAgendaStep() {
                 <p className="citas-selected-date">
                   Fecha seleccionada: {formatFriendlyDate(selectedDate)}
                 </p>
+                <div className="public-booking-slot-summary">
+                  <span>Duración estimada de la cita: {formatDurationHuman(selectedServicesDurationSum)}</span>
+                  <span>Tiempo interno de preparación: + {formatDurationHuman(barberPrepTime)}</span>
+                  <strong>Bloque operativo total: {formatDurationHuman(selectedBlockTotalMinutes)}</strong>
+                </div>
 
                 {slotConflict ? (
                   <div className="public-booking-slot-conflict">
@@ -404,12 +420,11 @@ export default function PublicBookingAgendaStep() {
                 {slotsLoading ? (
                   <LoadingSpinner />
                 ) : (
-                  <div className="citas-timeslots">
+                  <div className="public-booking-time-block-list">
                     {slots.map((slot) => (
                       <SlotButton
                         key={slot.hora}
                         slot={slot}
-                        displayTime={formatTime12Hour(slot.hora)}
                         isDisabled={isPastSlotForToday(selectedDate, slot.hora)}
                         selectedTime={selectedTime}
                         onSelect={onSelectTime}
@@ -480,3 +495,4 @@ export default function PublicBookingAgendaStep() {
     </>
   );
 }
+

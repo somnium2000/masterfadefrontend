@@ -1649,82 +1649,148 @@ export default function AdminCitasPage() {
     }
     return (
       <div className="citas-surface">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+        <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <h3 className="mf-font-display text-[22px] md:text-[24px] text-[var(--mf-accent)]">
             Horario Semanal · {selectedBarber.nombre_completo}
           </h3>
-          <Button onClick={saveSchedule} disabled={scheduleSaving || scheduleLoading} className="gap-2">
+          <Button onClick={saveSchedule} disabled={scheduleSaving || scheduleLoading} className="w-full gap-2 sm:w-auto">
             <Save size={14} />
-            {scheduleSaving ? 'Guardando...' : 'Guardar cambios'}
+            {scheduleSaving ? 'Guardando...' : (
+              <>
+                <span className="sm:hidden">Guardar cambios y descansos</span>
+                <span className="hidden sm:inline">Guardar cambios</span>
+              </>
+            )}
           </Button>
         </div>
         {scheduleLoading ? (
           <div className="px-5 pb-5"><LoadingSpinner /></div>
         ) : (
-          <div className="citas-schedule-wrap">
-            <table className="citas-schedule-table">
-              <thead>
-                <tr>
-                  <th>Día</th>
-                  <th>Hora inicio</th>
-                  <th>Hora fin</th>
-                  <th>Almuerzo ini.</th>
-                  <th>Almuerzo fin</th>
-                  <th>Activo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scheduleRows.map((row) => (
-                  <tr key={row.dia_semana}>
-                    <td>{row.dia_label}</td>
-                    <td>
-                      <Input
-                        type="time"
-                        className="citas-inline-input"
-                        value={row.hora_inicio}
-                        onChange={(event) => updateScheduleRow(row.dia_semana, { hora_inicio: event.target.value })}
+          <>
+            <div className="citas-schedule-mobile">
+              {scheduleRows.map((row) => (
+                <article key={`mobile-${row.dia_semana}`} className={`citas-schedule-mobile-card ${row.activo ? '' : 'is-inactive'}`}>
+                  <div className="citas-schedule-mobile-head">
+                    <span className="citas-schedule-mobile-day">{row.dia_label}</span>
+                    <div className="citas-switch-inline">
+                      <button
+                        type="button"
+                        className={`citas-switch-track ${row.activo ? 'is-on' : ''}`}
+                        onClick={() => updateScheduleRow(row.dia_semana, { activo: !row.activo })}
+                        aria-label={`Cambiar estado ${row.dia_label}`}
                       />
-                    </td>
-                    <td>
-                      <Input
-                        type="time"
-                        className="citas-inline-input"
-                        value={row.hora_fin}
-                        onChange={(event) => updateScheduleRow(row.dia_semana, { hora_fin: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <Input
-                        type="time"
-                        className="citas-inline-input"
-                        value={row.almuerzo_inicio}
-                        onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_inicio: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <Input
-                        type="time"
-                        className="citas-inline-input"
-                        value={row.almuerzo_fin}
-                        onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_fin: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <div className="citas-switch-inline">
-                        <button
-                          type="button"
-                          className={`citas-switch-track ${row.activo ? 'is-on' : ''}`}
-                          onClick={() => updateScheduleRow(row.dia_semana, { activo: !row.activo })}
-                          aria-label={`Cambiar estado ${row.dia_label}`}
+                      <span>{row.activo ? 'Activo' : 'Inactivo'}</span>
+                    </div>
+                  </div>
+
+                  <div className="citas-schedule-mobile-grid">
+                    <div className="citas-schedule-mobile-group">
+                      <p className="citas-schedule-mobile-label">Turno regular (ini - fin)</p>
+                      <div className="citas-schedule-mobile-timepair">
+                        <Input
+                          type="time"
+                          className="citas-inline-input"
+                          value={row.hora_inicio}
+                          onChange={(event) => updateScheduleRow(row.dia_semana, { hora_inicio: event.target.value })}
                         />
-                        <span>{row.activo ? 'Activo' : 'Inactivo'}</span>
+                        <span className="citas-schedule-mobile-sep">a</span>
+                        <Input
+                          type="time"
+                          className="citas-inline-input"
+                          value={row.hora_fin}
+                          onChange={(event) => updateScheduleRow(row.dia_semana, { hora_fin: event.target.value })}
+                        />
                       </div>
-                    </td>
+                    </div>
+
+                    <div className="citas-schedule-mobile-group">
+                      <p className="citas-schedule-mobile-label">Almuerzo (ini - fin)</p>
+                      <div className="citas-schedule-mobile-timepair">
+                        <Input
+                          type="time"
+                          className="citas-inline-input"
+                          value={row.almuerzo_inicio}
+                          onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_inicio: event.target.value })}
+                        />
+                        <span className="citas-schedule-mobile-sep">a</span>
+                        <Input
+                          type="time"
+                          className="citas-inline-input"
+                          value={row.almuerzo_fin}
+                          onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_fin: event.target.value })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="citas-schedule-wrap">
+              <table className="citas-schedule-table">
+                <thead>
+                  <tr>
+                    <th>Día</th>
+                    <th>Turno (ini - fin)</th>
+                    <th>Almuerzo (ini - fin)</th>
+                    <th>Activo</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {scheduleRows.map((row) => (
+                    <tr key={row.dia_semana}>
+                      <td>{row.dia_label}</td>
+                      <td>
+                        <div className="citas-schedule-table-pair">
+                          <Input
+                            type="time"
+                            className="citas-inline-input"
+                            value={row.hora_inicio}
+                            onChange={(event) => updateScheduleRow(row.dia_semana, { hora_inicio: event.target.value })}
+                          />
+                          <span className="citas-schedule-mobile-sep">a</span>
+                          <Input
+                            type="time"
+                            className="citas-inline-input"
+                            value={row.hora_fin}
+                            onChange={(event) => updateScheduleRow(row.dia_semana, { hora_fin: event.target.value })}
+                          />
+                        </div>
+                      </td>
+                      <td>
+                        <div className="citas-schedule-table-pair">
+                          <Input
+                            type="time"
+                            className="citas-inline-input"
+                            value={row.almuerzo_inicio}
+                            onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_inicio: event.target.value })}
+                          />
+                          <span className="citas-schedule-mobile-sep">a</span>
+                          <Input
+                            type="time"
+                            className="citas-inline-input"
+                            value={row.almuerzo_fin}
+                            onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_fin: event.target.value })}
+                          />
+                        </div>
+                      </td>
+                      <td>
+                        <div className="citas-switch-inline">
+                          <button
+                            type="button"
+                            className={`citas-switch-track ${row.activo ? 'is-on' : ''}`}
+                            onClick={() => updateScheduleRow(row.dia_semana, { activo: !row.activo })}
+                            aria-label={`Cambiar estado ${row.dia_label}`}
+                          />
+                          <span>{row.activo ? 'Activo' : 'Inactivo'}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
     );

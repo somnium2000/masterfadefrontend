@@ -457,10 +457,14 @@ export default function DashboardLayout({ pageRole }) {
             {/* ── MOBILE LAYOUT ──────────────────────────────────────────────────────────── */}
             <div className="mf-page-gradient min-h-screen pb-[100px] lg:hidden">
                 <div className="mf-mobile-frame mf-screen-pad mf-safe-top">
-                    <header className="flex items-center justify-between pt-3">
-                        <MasterfadeLogo variant="compact" />
-                        <div className="flex items-center gap-3">
-                            <ThemeSwitcher />
+                    <header className="flex min-w-0 items-start justify-between gap-2 pt-3">
+                        <MasterfadeLogo variant="topbar" className="shrink min-w-0" />
+                        <div className="flex shrink-0 items-center gap-2">
+                            <ThemeSwitcher
+                                showLabel
+                                labelClassName="w-[70px] whitespace-normal text-right leading-[1.05]"
+                                buttonClassName="h-10 w-10 rounded-lg"
+                            />
                             <button
                                 type="button"
                                 onClick={() => setMobileMenuOpen(true)}

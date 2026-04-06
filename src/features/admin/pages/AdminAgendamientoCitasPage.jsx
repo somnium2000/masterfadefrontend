@@ -1,6 +1,18 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, CalendarCheck2, CalendarClock, CalendarDays, Search, SlidersHorizontal, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Armchair,
+  CalendarCheck2,
+  CalendarClock,
+  CalendarDays,
+  CheckCircle2,
+  MapPin,
+  Phone,
+  Search,
+  SlidersHorizontal,
+  X,
+} from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
@@ -32,6 +44,9 @@ const FILTER_DEFAULTS = {
   fechaDesde: '',
   fechaHasta: '',
 };
+
+const LIVE_REFRESH_DEBOUNCE_MS = 180;
+const LIVE_REFRESH_POLL_MS = 8000;
 
 const STATE_LABELS = {
   en_espera: 'En espera',
@@ -206,6 +221,10 @@ export default function AdminAgendamientoCitasPage() {
   const [batchItems, setBatchItems] = useState([]);
   const [batchPickerLoadingId, setBatchPickerLoadingId] = useState('');
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [activeMobileContainer, setActiveMobileContainer] = useState('confirmada');
+  const fetchInFlightRef = useRef(false);
+  const liveRefreshTimeoutRef = useRef(null);
+  const realtimeStatusRef = useRef('idle');
 
   const sucursales = Array.isArray(context?.sucursales) ? context.sucursales : [];
   const barberos = Array.isArray(context?.barberos) ? context.barberos : [];
@@ -239,6 +258,32 @@ export default function AdminAgendamientoCitasPage() {
       .sort(compareCompletedByRecent),
     [citas, todayHn]
   );
+  const containerItemsByKey = useMemo(
+    () => ({
+      confirmada: citasConfirmadas,
+      en_salon: citasEnSalon,
+      completada_hoy: citasCompletadasHoy,
+    }),
+    [citasCompletadasHoy, citasConfirmadas, citasEnSalon]
+  );
+  const mobileTabs = useMemo(
+    () => ([
+      { key: 'confirmada', label: 'Confirmadas', accent: 'text-sky-300', count: citasConfirmadas.length },
+      { key: 'en_salon', label: 'En sal\u00f3n', accent: 'text-amber-300', count: citasEnSalon.length },
+      { key: 'completada_hoy', label: 'Completadas', accent: 'text-emerald-300', count: citasCompletadasHoy.length },
+    ]),
+    [citasCompletadasHoy.length, citasConfirmadas.length, citasEnSalon.length]
+  );
+  const activeMobileItems = containerItemsByKey[activeMobileContainer] || [];
+
+  useEffect(() => {
+    const hasActive = (containerItemsByKey[activeMobileContainer] || []).length > 0;
+    if (hasActive) return;
+    const firstNonEmpty = mobileTabs.find((tab) => tab.count > 0);
+    if (firstNonEmpty && firstNonEmpty.key !== activeMobileContainer) {
+      setActiveMobileContainer(firstNonEmpty.key);
+    }
+  }, [activeMobileContainer, containerItemsByKey, mobileTabs]);
 
   const hiddenOperationalCount = useMemo(
     () => citas.filter((item) => ['en_espera', 'pendiente_pago'].includes(String(item?.estado_cita_codigo || '').toLowerCase())).length,
@@ -284,8 +329,10 @@ export default function AdminAgendamientoCitasPage() {
     }
   }, [handleAuthError]);
 
-  const fetchCitas = useCallback(async () => {
-    setLoading(true);
+  const fetchCitas = useCallback(async ({ silent = false } = {}) => {
+    if (fetchInFlightRef.current) return;
+    fetchInFlightRef.current = true;
+    if (!silent) setLoading(true);
     setListError('');
     try {
       const params = buildFilterParams(filters, search);
@@ -293,53 +340,92 @@ export default function AdminAgendamientoCitasPage() {
         listAdminCitasOperativas(params),
         listAdminCitasHistorial({ ...params, estado: 'completada', fecha_desde: todayHn, fecha_hasta: todayHn, limit: 300 }),
       ]);
-
       const operativas = Array.isArray((operativasResponse?.data ?? operativasResponse)?.citas) ? (operativasResponse?.data ?? operativasResponse).citas : [];
       const completadas = Array.isArray((completadasResponse?.data ?? completadasResponse)?.citas) ? (completadasResponse?.data ?? completadasResponse).citas : [];
-
       const byId = new Map();
       [...operativas, ...completadas].forEach((item) => {
         if (item?.id_cita) byId.set(item.id_cita, item);
       });
-
       setCitas(Array.from(byId.values()).sort((a, b) => new Date(a?.inicio_at || '').getTime() - new Date(b?.inicio_at || '').getTime()));
     } catch (err) {
       if (handleAuthError(err)) return;
       setListError(extractMessage(err));
     } finally {
-      setLoading(false);
+      fetchInFlightRef.current = false;
+      if (!silent) setLoading(false);
     }
   }, [filters, handleAuthError, search, todayHn]);
-
+  const scheduleLiveRefresh = useCallback((options = {}) => {
+    const { immediate = false } = options;
+    if (liveRefreshTimeoutRef.current) {
+      window.clearTimeout(liveRefreshTimeoutRef.current);
+      liveRefreshTimeoutRef.current = null;
+    }
+    const runRefresh = () => {
+      if (typeof document !== 'undefined' && document.hidden && !immediate) return;
+      void fetchCitas({ silent: true });
+    };
+    if (immediate) {
+      runRefresh();
+      return;
+    }
+    liveRefreshTimeoutRef.current = window.setTimeout(runRefresh, LIVE_REFRESH_DEBOUNCE_MS);
+  }, [fetchCitas]);
   useEffect(() => {
     void fetchContext();
   }, [fetchContext]);
-
   useEffect(() => {
     const timer = setTimeout(() => {
       void fetchCitas();
     }, 260);
     return () => clearTimeout(timer);
   }, [fetchCitas]);
-
   useEffect(() => {
     if (!supabase) return undefined;
     const channel = supabase
       .channel('admin-agendamiento-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, () => { void fetchCitas(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_holds' }, () => { void fetchCitas(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bloqueos_agenda' }, () => { void fetchCitas(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_reagendaciones' }, () => { void fetchCitas(); })
-      .subscribe();
-
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, () => { scheduleLiveRefresh(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_holds' }, () => { scheduleLiveRefresh(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bloqueos_agenda' }, () => { scheduleLiveRefresh(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_reagendaciones' }, () => { scheduleLiveRefresh(); })
+      .subscribe((status) => {
+        realtimeStatusRef.current = status;
+        if (status === 'SUBSCRIBED') scheduleLiveRefresh({ immediate: true });
+      });
     return () => {
+      if (liveRefreshTimeoutRef.current) {
+        window.clearTimeout(liveRefreshTimeoutRef.current);
+        liveRefreshTimeoutRef.current = null;
+      }
       try {
         supabase.removeChannel(channel);
       } catch {
         // ignore teardown errors
       }
     };
-  }, [fetchCitas]);
+  }, [scheduleLiveRefresh]);
+  useEffect(() => {
+    const handleFocus = () => {
+      scheduleLiveRefresh({ immediate: true });
+    };
+    const handleVisibility = () => {
+      if (!document.hidden) scheduleLiveRefresh({ immediate: true });
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [scheduleLiveRefresh]);
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      const channelHealthy = realtimeStatusRef.current === 'SUBSCRIBED';
+      scheduleLiveRefresh({ immediate: !channelHealthy });
+    }, LIVE_REFRESH_POLL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [scheduleLiveRefresh]);
 
   function clearAllFilters() {
     setSearch('');
@@ -559,29 +645,67 @@ export default function AdminAgendamientoCitasPage() {
     }
   }
 
-  function renderItemActions(cita) {
+  function renderItemActions(cita, options = {}) {
+    const { compact = false } = options;
     const state = String(cita?.estado_cita_codigo || '').toLowerCase();
     if (!['confirmada', 'en_salon'].includes(state)) return null;
+    const fitClass = compact ? 'flex-1 justify-center' : '';
 
     return (
       <div className="flex w-full flex-wrap items-center gap-2">
         {state === 'confirmada' ? (
-          <Button type="button" size="sm" className="gap-2" disabled={stateActionLoadingId === cita.id_cita} onClick={() => openStatusDialog(cita, 'en_salon')}>
+          <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita} onClick={() => openStatusDialog(cita, 'en_salon')}>
             <CalendarCheck2 size={14} />
-            Marcar como En Salón
+            Marcar como En Sal\u00f3n
           </Button>
         ) : (
-          <Button type="button" size="sm" className="gap-2" disabled={stateActionLoadingId === cita.id_cita} onClick={() => openStatusDialog(cita, 'completada')}>
+          <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita} onClick={() => openStatusDialog(cita, 'completada')}>
             <CalendarCheck2 size={14} />
             Marcar como completada
           </Button>
         )}
         {canManageEmergency ? (
-          <Button type="button" size="sm" variant="outline" className="gap-2" onClick={() => openSingleReschedule(cita)}>
+          <Button type="button" size="sm" variant="outline" className={`gap-2 ${fitClass}`} onClick={() => openSingleReschedule(cita)}>
             <CalendarClock size={14} />
-            Reagendar emergencia
+            {compact ? 'Reagendar' : 'Reagendar emergencia'}
           </Button>
         ) : null}
+      </div>
+    );
+  }
+
+  function renderMobileCardsList(items, emptyText) {
+    if (!items.length) return <p className="px-1 py-6 text-center text-sm text-[var(--mf-text-2)]">{emptyText}</p>;
+    return (
+      <div className="space-y-3">
+        {items.map((cita) => (
+          <article key={`mobile-${cita.id_cita}`} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_92%,transparent)] p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Cliente: <span className="font-semibold text-[var(--mf-text)]">{cita.nombre_cliente || 'Cliente'}</span></p>
+                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Barbero: <span className="text-[var(--mf-text)]">{cita.nombre_barbero || '-'}</span></p>
+                <p className="text-[13px] text-[var(--mf-text-2)]">Cita: <span className="text-[var(--mf-text)]">{formatDateTime(cita.inicio_at)}</span></p>
+              </div>
+              <div className="text-right">
+                <span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>
+                <p className="mt-2 text-[1.75rem] font-semibold leading-none text-[var(--mf-text)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--mf-nav-border)] pt-2 text-xs text-[var(--mf-text-2)]">
+              <span className="inline-flex items-center gap-1">
+                <MapPin size={12} />
+                {cita.nombre_sucursal || '-'}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Phone size={12} />
+                {cita.telefono_cliente || 'Sin teléfono'}
+              </span>
+            </div>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              {renderItemActions(cita, { compact: true })}
+            </div>
+          </article>
+        ))}
       </div>
     );
   }
@@ -664,8 +788,75 @@ function renderCardsList(items, emptyText) {
   }
 
   return (
-    <div className="space-y-4 px-2 pb-4 sm:px-4 sm:pb-6">
-      <header className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5">
+    <div className="space-y-4 px-0 pb-4 sm:px-4 sm:pb-6">
+      <section className="space-y-4 px-2 pt-1 md:hidden">
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operaci\u00f3n</p>
+            <h1 className="mf-font-display text-3xl text-[var(--mf-text)]">Citas</h1>
+          </div>
+
+          <div className="relative w-full">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
+            <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por cliente, barbero o ID" className="h-11 rounded-2xl pl-9 pr-[6.25rem] text-[0.98rem] min-[390px]:pr-28 min-[390px]:text-[1.03rem]" />
+            <div className="absolute right-1 top-1/2 -translate-y-1/2">
+              <div className="relative">
+                <div className="origin-right scale-[0.92]">
+                  <ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" />
+                </div>
+                {activeFilterCount > 0 ? (
+                  <span className="absolute -right-2 -top-2 inline-flex h-6 min-w-6 items-center justify-center rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-card)] px-1.5 text-xs font-semibold text-[var(--mf-text)]">
+                    {activeFilterCount}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className={`grid gap-2 ${canManageEmergency ? 'grid-cols-1 min-[380px]:grid-cols-[0.95fr_1.35fr]' : 'grid-cols-1'}`}>
+            <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-base font-semibold" onClick={() => setFiltersOpen(true)}>
+              <SlidersHorizontal size={15} />
+              Filtros
+            </Button>
+            {canManageEmergency ? (
+              <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-base font-semibold" onClick={() => setBatchDialogOpen(true)}>
+                <AlertTriangle size={14} />
+                Reagendaci\u00f3n masiva
+              </Button>
+            ) : null}
+          </div>
+
+          {hiddenOperationalCount > 0 ? (
+            <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-xs text-[var(--mf-text-2)]">
+              {hiddenOperationalCount} cita(s) en espera o pendiente de pago no se muestran.
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="border-b border-[var(--mf-nav-border)] px-2 pb-1 md:hidden">
+        <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
+          {mobileTabs.map((tab) => {
+            const active = activeMobileContainer === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveMobileContainer(tab.key)}
+                className={`relative inline-flex shrink-0 items-center justify-center gap-1 whitespace-nowrap px-1 pb-2 text-[0.96rem] font-semibold transition-colors min-[375px]:text-[1.02rem] ${
+                  active ? `${tab.accent}` : 'text-[var(--mf-text-2)]'
+                }`}
+              >
+                <span>{tab.label}</span>
+                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-1.5 text-xs text-[var(--mf-text)]">{tab.count}</span>
+                {active ? <span className="absolute bottom-0 left-0 right-0 h-[2.5px] rounded-full bg-current" /> : null}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <header className="hidden rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5 md:block">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div className="space-y-1">
             <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
@@ -707,7 +898,7 @@ function renderCardsList(items, emptyText) {
       </header>
 
       {hiddenOperationalCount > 0 ? (
-        <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-2 text-sm text-[var(--mf-text-2)]">
+        <div className="hidden rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-2 text-sm text-[var(--mf-text-2)] md:block">
           {hiddenOperationalCount} cita(s) en espera o pendiente de pago no se muestran en estos contenedores.
         </div>
       ) : null}
@@ -722,9 +913,43 @@ function renderCardsList(items, emptyText) {
       ) : null}
 
       {!loading && !listError ? (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="md:hidden space-y-4">
+          {renderMobileCardsList(
+            activeMobileItems,
+            activeMobileContainer === 'confirmada'
+              ? 'No hay citas confirmadas pendientes.'
+              : activeMobileContainer === 'en_salon'
+                ? 'No hay citas en sal\u00f3n en este momento.'
+                : 'No hay citas completadas hoy.'
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-amber-400/30 bg-[color:color-mix(in_srgb,var(--mf-card)_90%,rgba(245,158,11,0.08))] p-3">
+              <p className="inline-flex items-center gap-2 text-sm font-semibold text-amber-300">
+                <Armchair size={16} />
+                En sal\u00f3n
+              </p>
+              <p className="mt-2 text-xs text-[var(--mf-text-2)]">
+                {citasEnSalon.length > 0 ? `${citasEnSalon.length} cita(s) en atenci\u00f3n.` : 'No hay citas en sal\u00f3n hoy.'}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-emerald-400/30 bg-[color:color-mix(in_srgb,var(--mf-card)_90%,rgba(16,185,129,0.08))] p-3">
+              <p className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-300">
+                <CheckCircle2 size={16} />
+                Completadas
+              </p>
+              <p className="mt-2 text-xs text-[var(--mf-text-2)]">
+                {citasCompletadasHoy.length > 0 ? `${citasCompletadasHoy.length} cita(s) completadas hoy.` : 'No hay citas completadas hoy.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && !listError ? (
+        <div className="hidden grid-cols-1 gap-4 xl:grid-cols-3 md:grid">
           {renderContainer('confirmada', citasConfirmadas, 'No hay citas confirmadas pendientes.')}
-          {renderContainer('en_salon', citasEnSalon, 'No hay citas en salón en este momento.')}
+          {renderContainer('en_salon', citasEnSalon, 'No hay citas en sal\u00f3n en este momento.')}
           {renderContainer('completada_hoy', citasCompletadasHoy, 'No hay citas completadas hoy.')}
         </div>
       ) : null}
@@ -999,4 +1224,9 @@ function renderCardsList(items, emptyText) {
     </div>
   );
 }
+
+
+
+
+
 

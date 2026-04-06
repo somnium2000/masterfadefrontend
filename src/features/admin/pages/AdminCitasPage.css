@@ -612,9 +612,13 @@
   overflow-x: auto;
 }
 
+.citas-schedule-mobile {
+  display: none;
+}
+
 .citas-schedule-table {
   width: 100%;
-  min-width: 780px;
+  min-width: 620px;
   border-collapse: collapse;
 }
 
@@ -648,10 +652,77 @@
   padding: 0 10px;
 }
 
+.citas-schedule-table-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
 .citas-switch-inline {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+}
+
+.citas-schedule-mobile-card {
+  border: 1px solid var(--mf-nav-border);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--mf-card) 94%, transparent);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.citas-schedule-mobile-card.is-inactive {
+  opacity: 0.7;
+}
+
+.citas-schedule-mobile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.citas-schedule-mobile-day {
+  font-weight: 700;
+  color: var(--mf-text);
+  font-size: 15px;
+}
+
+.citas-schedule-mobile-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.citas-schedule-mobile-group {
+  border: 1px solid color-mix(in srgb, var(--mf-nav-border) 84%, transparent);
+  border-radius: 12px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--mf-btn-bg) 72%, var(--mf-card) 28%);
+}
+
+.citas-schedule-mobile-label {
+  margin: 0 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-size: 10px;
+  color: var(--mf-text-2);
+}
+
+.citas-schedule-mobile-timepair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.citas-schedule-mobile-sep {
+  color: var(--mf-text-2);
+  font-size: 12px;
 }
 
 .citas-switch-track {
@@ -841,6 +912,17 @@
 }
 
 @media (max-width: 768px) {
+  .citas-schedule-wrap {
+    display: none;
+  }
+
+  .citas-schedule-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 12px 14px;
+  }
+
   .citas-barber-card {
     flex: 1 1 100%;
     width: 100%;

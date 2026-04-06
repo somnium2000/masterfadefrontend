@@ -139,6 +139,30 @@ export function buildTimeSlots(start = '08:00', end = '18:30', stepMin = 30) {
 
 export const ALL_TIME_SLOTS = buildTimeSlots();
 
+export function timeKeyToMinutes(timeKey) {
+  const normalized = String(timeKey || '').trim();
+  const match = normalized.match(/^(\d{2}):(\d{2})(?::\d{2})?$/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  return (hours * 60) + minutes;
+}
+
+export function minutesToTimeKey(totalMinutes) {
+  if (!Number.isFinite(totalMinutes)) return null;
+  const normalized = ((Math.trunc(totalMinutes) % 1440) + 1440) % 1440;
+  const hours = String(Math.floor(normalized / 60)).padStart(2, '0');
+  const minutes = String(normalized % 60).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+export function addMinutesToTimeKey(timeKey, minutesToAdd) {
+  const baseMinutes = timeKeyToMinutes(timeKey);
+  if (baseMinutes == null || !Number.isFinite(Number(minutesToAdd))) return null;
+  return minutesToTimeKey(baseMinutes + Number(minutesToAdd));
+}
+
 function hashString(value) {
   let hash = 0;
   const source = String(value || '');
@@ -188,9 +212,18 @@ export function formatTime12Hour(rawTime) {
   return `${hour12}:${minute} ${period}`;
 }
 
+export function formatDurationHuman(totalMinutes) {
+  const safeMinutes = Math.max(Number(totalMinutes || 0), 0);
+  if (!Number.isFinite(safeMinutes)) return '0 min';
+  if (safeMinutes < 60) return `${safeMinutes} min`;
+  const hours = Math.floor(safeMinutes / 60);
+  const minutes = safeMinutes % 60;
+  if (minutes === 0) return `${hours} h`;
+  return `${hours} h ${minutes} min`;
+}
+
 export function getServiceDurationLabel(service) {
-  const duration = Number(service?.duracion_min || 0) + Number(service?.buffer_min || 0);
-  return `${duration} min`;
+  return `${Number(service?.duracion_min || 0)} min`;
 }
 
 export function toLocalDateTimeWithOffset(dateValue, timeValue) {

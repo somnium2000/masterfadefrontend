@@ -24,18 +24,20 @@ import {
   listPublicCatalogServicios,
 } from './publicBookingApi.js';
 import {
-  ALL_TIME_SLOTS,
   MAX_COMPANIONS,
+  addMinutesToTimeKey,
   buildTimeSlots,
   extractMessage,
   getCurrentTimeKeyInTimeZone,
   getTodayDateKeyInTimeZone,
+  timeKeyToMinutes,
   toDateKey,
   toLocalDateTimeWithOffset,
   toMonthStartFromDateKey,
 } from './bookingUtils.js';
 import '../../admin/pages/AdminCitasPage.css';
 import './PublicBookingFlow.css';
+import usePublicAgendaRealtime from './usePublicAgendaRealtime.js';
 
 const EMPTY_CONTEXT = {
   sucursales: [],
@@ -68,7 +70,7 @@ function readNumberParam(parametros, key, fallback) {
 }
 
 function buildDefaultSlots() {
-  return ALL_TIME_SLOTS.map((hora) => ({ hora, disponible: false }));
+  return [];
 }
 
 function normalizeHourMinute(value) {
@@ -82,13 +84,41 @@ function isValidEmail(value) {
   return EMAIL_PATTERN.test(normalized);
 }
 
-function buildDynamicSlots({ availableTimes, horaInicio, horaFin }) {
+function buildDynamicSlots({
+  horarios,
+  horaInicio,
+  horaFin,
+  duracionTotalMin,
+  bufferTotalMin,
+}) {
   const start = normalizeHourMinute(horaInicio);
   const end = normalizeHourMinute(horaFin);
-  const rangeSlots = start && end ? buildTimeSlots(start, end) : ALL_TIME_SLOTS;
-  return rangeSlots.map((hora) => ({
+  const list = Array.isArray(horarios) ? horarios : [];
+  const totalBlockMinutes = Math.max(Number(duracionTotalMin || 0) + Number(bufferTotalMin || 0), 0);
+  const firstAvailableStart = normalizeHourMinute(list[0]?.hora);
+  const lastAvailableEnd = list.length > 0
+    ? addMinutesToTimeKey(normalizeHourMinute(list[list.length - 1]?.hora), totalBlockMinutes)
+    : null;
+  const resolvedStart = start || firstAvailableStart;
+  const resolvedEnd = end || lastAvailableEnd;
+  const startMinutes = timeKeyToMinutes(resolvedStart);
+  const endMinutes = timeKeyToMinutes(resolvedEnd);
+  const lastCandidateMinutes = endMinutes != null && totalBlockMinutes > 0
+    ? endMinutes - totalBlockMinutes
+    : endMinutes;
+
+  if (startMinutes == null || endMinutes == null || lastCandidateMinutes == null || lastCandidateMinutes < startMinutes) {
+    return [];
+  }
+
+  const candidateTimes = buildTimeSlots(resolvedStart, addMinutesToTimeKey(resolvedStart, lastCandidateMinutes - startMinutes), 30);
+  const availableTimes = new Set(list.map((slot) => normalizeHourMinute(slot?.hora)).filter(Boolean));
+
+  return candidateTimes.map((hora) => ({
     hora,
+    horaFin: addMinutesToTimeKey(hora, totalBlockMinutes) || hora,
     disponible: availableTimes.has(hora),
+    duracionBloqueMin: totalBlockMinutes,
   }));
 }
 
@@ -141,6 +171,19 @@ function areBlocksEqual(left, right) {
     && left.contactEmail === right.contactEmail
     && left.contactPhone === right.contactPhone
     && areServiceIdsEqual(left.serviceIds, right.serviceIds);
+}
+
+function rangesOverlap(leftStart, leftDurationMin, rightStart, rightDurationMin) {
+  const leftMinutes = timeKeyToMinutes(leftStart);
+  const rightMinutes = timeKeyToMinutes(rightStart);
+  const safeLeftDuration = Number(leftDurationMin || 0);
+  const safeRightDuration = Number(rightDurationMin || 0);
+  if (leftMinutes == null || rightMinutes == null || safeLeftDuration <= 0 || safeRightDuration <= 0) {
+    return false;
+  }
+  const leftEnd = leftMinutes + safeLeftDuration;
+  const rightEnd = rightMinutes + safeRightDuration;
+  return leftMinutes < rightEnd && rightMinutes < leftEnd;
 }
 
 function createBookingBlock({ alias = '', idBarbero = '' } = {}) {
@@ -206,6 +249,7 @@ export default function PublicBookingFlow() {
   const [availabilityMap, setAvailabilityMap] = useState({});
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slots, setSlots] = useState(() => buildDefaultSlots());
+  const [slotMetrics, setSlotMetrics] = useState({ duracionTotalMin: 0, bufferTotalMin: 0 });
   const [slotConflict, setSlotConflict] = useState(null);
   const [slotSuggestions, setSlotSuggestions] = useState([]);
   const [slotSuggestionsLoading, setSlotSuggestionsLoading] = useState(false);
@@ -264,6 +308,10 @@ export default function PublicBookingFlow() {
     () => readNumberParam(contextData?.parametros, 'hold_duracion_min', 5),
     [contextData?.parametros]
   );
+  const configuredPrepTime = useMemo(
+    () => readNumberParam(contextData?.parametros, 'agenda_buffer_global_min', 0),
+    [contextData?.parametros]
+  );
 
   const branchList = useMemo(
     () => (Array.isArray(contextData?.sucursales) ? contextData.sucursales : []),
@@ -302,6 +350,22 @@ export default function PublicBookingFlow() {
     () => serviceIds.map((id) => servicesById.get(id)).filter(Boolean),
     [serviceIds, servicesById]
   );
+  const rawSelectedServicesDurationSum = useMemo(
+    () => selectedServices.reduce((total, service) => total + Number(service?.duracion_min || 0), 0),
+    [selectedServices]
+  );
+  const selectedServicesDurationSum = useMemo(
+    () => (slotMetrics.duracionTotalMin > 0 ? slotMetrics.duracionTotalMin : rawSelectedServicesDurationSum),
+    [rawSelectedServicesDurationSum, slotMetrics.duracionTotalMin]
+  );
+  const barberPrepTime = useMemo(
+    () => (slotMetrics.bufferTotalMin > 0 ? slotMetrics.bufferTotalMin : (selectedServices.length > 0 ? configuredPrepTime : 0)),
+    [configuredPrepTime, selectedServices.length, slotMetrics.bufferTotalMin]
+  );
+  const selectedBlockTotalMinutes = useMemo(
+    () => selectedServices.length > 0 ? selectedServicesDurationSum + barberPrepTime : 0,
+    [barberPrepTime, selectedServices, selectedServicesDurationSum]
+  );
 
   const servicesCsv = useMemo(() => serviceIds.join(','), [serviceIds]);
 
@@ -312,6 +376,8 @@ export default function PublicBookingFlow() {
           .map((serviceId) => servicesById.get(serviceId))
           .filter(Boolean);
         const blockTotal = blockServices.reduce((total, service) => total + Number(service?.precio_hnl || 0), 0);
+        const serviceDurationMin = blockServices.reduce((total, service) => total + Number(service?.duracion_min || 0), 0);
+        const blockBufferMin = blockServices.length > 0 ? barberPrepTime : 0;
         return {
           ...block,
           index,
@@ -319,6 +385,9 @@ export default function PublicBookingFlow() {
           barbero: barbersById.get(block.idBarbero) || null,
           selectedServices: blockServices,
           total_hnl: blockTotal,
+          duracion_servicios_min: serviceDurationMin,
+          buffer_total_min: blockBufferMin,
+          duracion_bloque_min: serviceDurationMin + blockBufferMin,
           isComplete: Boolean(
             String(block.contactName || '').trim()
               && (index > 0 || isValidEmail(block.contactEmail))
@@ -329,7 +398,7 @@ export default function PublicBookingFlow() {
           ),
         };
       }),
-    [bookingBlocks, servicesById, barbersById]
+    [barberPrepTime, bookingBlocks, servicesById, barbersById]
   );
 
   const totalToPay = useMemo(
@@ -629,6 +698,7 @@ export default function PublicBookingFlow() {
   const fetchSlots = useCallback(async () => {
     if (!selectedBranchId || !servicesCsv || !selectedDate) {
       setSlots(buildDefaultSlots());
+      setSlotMetrics({ duracionTotalMin: 0, bufferTotalMin: 0 });
       setSlotsLoading(false);
       return;
     }
@@ -636,7 +706,8 @@ export default function PublicBookingFlow() {
     const cacheKey = [selectedBranchId, activeBlockBarberId || 'auto', servicesCsv, selectedDate].join('|');
     const cached = slotsCacheRef.current.get(cacheKey);
     if (cached) {
-      setSlots(cached);
+      setSlots(cached.slots);
+      setSlotMetrics(cached.metrics);
       return;
     }
 
@@ -664,18 +735,23 @@ export default function PublicBookingFlow() {
       if (requestSeq !== slotsRequestSeqRef.current) return;
 
       const payload = response?.data ?? response;
-      const list = Array.isArray(payload?.horarios) ? payload.horarios : [];
-      const availableTimes = new Set(list.map((slot) => slot?.hora).filter(Boolean));
       const mapped = buildDynamicSlots({
-        availableTimes,
+        horarios: payload?.horarios,
         horaInicio: payload?.hora_inicio,
         horaFin: payload?.hora_fin,
+        duracionTotalMin: payload?.duracion_total_min,
+        bufferTotalMin: payload?.buffer_total_min,
       });
+      const metrics = {
+        duracionTotalMin: Number(payload?.duracion_total_min || 0),
+        bufferTotalMin: Number(payload?.buffer_total_min || 0),
+      };
 
-      slotsCacheRef.current.set(cacheKey, mapped);
+      slotsCacheRef.current.set(cacheKey, { slots: mapped, metrics });
       setSlots(mapped);
+      setSlotMetrics(metrics);
 
-      if (selectedTime && !availableTimes.has(selectedTime)) {
+      if (selectedTime && !mapped.some((slot) => slot.hora === selectedTime && slot.disponible)) {
         updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
           ...currentBlock,
           selectedTime: '',
@@ -708,7 +784,7 @@ export default function PublicBookingFlow() {
 
     const cacheKey = [selectedBranchId, barberId, servicesCsvValue, dateKey].join('|');
     const cached = slotsCacheRef.current.get(cacheKey);
-    if (cached) return cached;
+    if (cached) return cached.slots;
 
     const response = await listPublicAgendaHorarios({
       id_sucursal: selectedBranchId,
@@ -718,24 +794,30 @@ export default function PublicBookingFlow() {
     });
 
     const payload = response?.data ?? response;
-    const list = Array.isArray(payload?.horarios) ? payload.horarios : [];
-    const availableTimes = new Set(list.map((slot) => slot?.hora).filter(Boolean));
     const mapped = buildDynamicSlots({
-      availableTimes,
+      horarios: payload?.horarios,
       horaInicio: payload?.hora_inicio,
       horaFin: payload?.hora_fin,
+      duracionTotalMin: payload?.duracion_total_min,
+      bufferTotalMin: payload?.buffer_total_min,
     });
-    slotsCacheRef.current.set(cacheKey, mapped);
+    slotsCacheRef.current.set(cacheKey, {
+      slots: mapped,
+      metrics: {
+        duracionTotalMin: Number(payload?.duracion_total_min || 0),
+        bufferTotalMin: Number(payload?.buffer_total_min || 0),
+      },
+    });
     return mapped;
   }, [selectedBranchId]);
 
-  const findBlockCollision = useCallback((barberId, dateKey, timeKey, ignoreIndex) => {
-    if (!barberId || !dateKey || !timeKey) return null;
+  const findBlockCollision = useCallback((barberId, dateKey, timeKey, durationMinutes, ignoreIndex) => {
+    if (!barberId || !dateKey || !timeKey || Number(durationMinutes || 0) <= 0) return null;
     return bookingBlocksSummary.find((block) =>
       block.index !== ignoreIndex
       && block.idBarbero === barberId
       && block.selectedDate === dateKey
-      && block.selectedTime === timeKey) || null;
+      && rangesOverlap(timeKey, durationMinutes, block.selectedTime, block.duracion_bloque_min)) || null;
   }, [bookingBlocksSummary]);
 
   const loadSlotSuggestions = useCallback(async ({
@@ -792,6 +874,26 @@ export default function PublicBookingFlow() {
       }
     }
   }, [barbers, fetchSlotsForBarber]);
+
+  const invalidateAgendaCaches = useCallback(() => {
+    availabilityCacheRef.current.clear();
+    slotsCacheRef.current.clear();
+  }, []);
+
+  const refreshRealtimeAgenda = useCallback(() => {
+    invalidateAgendaCaches();
+    void fetchAvailability();
+    if (selectedDate) {
+      void fetchSlots();
+    }
+  }, [fetchAvailability, fetchSlots, invalidateAgendaCaches, selectedDate]);
+
+  usePublicAgendaRealtime({
+    barberId: activeBlockBarberId,
+    dateKey: selectedDate,
+    enabled: Boolean(selectedBranchId && activeBlockBarberId && servicesCsv),
+    onInvalidate: refreshRealtimeAgenda,
+  });
 
   useEffect(() => {
     void fetchContext();
@@ -1103,6 +1205,7 @@ export default function PublicBookingFlow() {
       activeBlockBarberId,
       selectedDate,
       nextTime,
+      selectedBlockTotalMinutes,
       effectiveActiveBlockIndex
     );
 
@@ -1113,7 +1216,7 @@ export default function PublicBookingFlow() {
         barberId: activeBlockBarberId,
         conflictingAlias: conflictingBlock.alias || `Integrante ${conflictingBlock.index + 1}`,
       });
-      notifications.warning('Ese barbero ya está ocupado en la misma fecha y hora por otro integrante.', {
+      notifications.warning('Ese bloque se solapa con otra reserva del grupo para el mismo barbero.', {
         dedupeKey: 'public-booking-duplicate-barber-slot',
       });
       await loadSlotSuggestions({
@@ -1139,6 +1242,7 @@ export default function PublicBookingFlow() {
     loadSlotSuggestions,
     notifications,
     selectedDate,
+    selectedBlockTotalMinutes,
     servicesCsv,
     updateBlockAtIndex,
   ]);
@@ -1216,8 +1320,15 @@ export default function PublicBookingFlow() {
         return false;
       }
       if (block.idBarbero) {
-        const collisionKey = `${block.idBarbero}|${block.selectedDate}|${block.selectedTime}`;
-        const previous = selectedSlotMap.get(collisionKey);
+        const collisionKey = `${block.idBarbero}|${block.selectedDate}`;
+        const previous = (selectedSlotMap.get(collisionKey) || []).find((candidate) =>
+          rangesOverlap(
+            block.selectedTime,
+            block.duracion_bloque_min,
+            candidate.selectedTime,
+            candidate.duracion_bloque_min
+          )
+        );
         if (previous) {
           if (block.index > 0) {
             resolvedBarberByBlockId.set(block.id, null);
@@ -1230,7 +1341,7 @@ export default function PublicBookingFlow() {
             barberId: block.idBarbero,
             conflictingAlias: previous.alias || 'Integrante',
           });
-          notifications.warning('Hay integrantes con el mismo barbero, fecha y hora. Debes cambiar uno de ellos.', {
+          notifications.warning('Hay integrantes con bloques que se solapan para el mismo barbero. Debes cambiar uno de ellos.', {
             dedupeKey: 'public-booking-submit-duplicate-slot',
           });
           setActiveBlockIndex(block.index);
@@ -1240,10 +1351,12 @@ export default function PublicBookingFlow() {
             dateKey: block.selectedDate,
             timeKey: block.selectedTime,
             servicesCsvValue: block.serviceIds.join(','),
-          });
+            });
           return false;
         }
-        selectedSlotMap.set(collisionKey, block);
+        const currentEntries = selectedSlotMap.get(collisionKey) || [];
+        currentEntries.push(block);
+        selectedSlotMap.set(collisionKey, currentEntries);
         resolvedBarberByBlockId.set(block.id, block.idBarbero);
       } else {
         resolvedBarberByBlockId.set(block.id, null);
@@ -1346,6 +1459,7 @@ export default function PublicBookingFlow() {
       availabilityMap,
       barbers,
       barbersLoading,
+      barberPrepTime,
       bookingBlocks,
       bookingBlocksSummary,
       branchList,
@@ -1373,9 +1487,11 @@ export default function PublicBookingFlow() {
       simulationNoPayment,
       selectedBarber,
       selectedBarberId,
+      selectedBlockTotalMinutes,
       selectedBranch,
       selectedBranchId,
       selectedDate,
+      selectedServicesDurationSum,
       selectedServices,
       selectedTime,
       serviceIds,
@@ -1413,6 +1529,7 @@ export default function PublicBookingFlow() {
       availabilityMap,
       barbers,
       barbersLoading,
+      barberPrepTime,
       bookingBlocks,
       bookingBlocksSummary,
       branchList,
@@ -1439,9 +1556,11 @@ export default function PublicBookingFlow() {
       simulationNoPayment,
       selectedBarber,
       selectedBarberId,
+      selectedBlockTotalMinutes,
       selectedBranch,
       selectedBranchId,
       selectedDate,
+      selectedServicesDurationSum,
       selectedServices,
       selectedTime,
       serviceIds,
