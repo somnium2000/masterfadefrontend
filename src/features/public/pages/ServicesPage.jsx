@@ -19,7 +19,11 @@ import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
-import { getPublicCatalog, listPublicCatalogBranches } from '../lib/catalogApi.js';
+import {
+  listPublicCatalogBranches,
+  listPublicCatalogPackages,
+  listPublicCatalogServices,
+} from '../lib/catalogApi.js';
 import { subscribeCatalogSync } from '../../../lib/catalogSync.js';
 
 function formatPriceHnl(value) {
@@ -228,10 +232,22 @@ export default function ServicesPage() {
     setErrorMessage('');
 
     try {
-      const result = await getPublicCatalog({ id_sucursal: branchId || undefined });
+      const [servicesResult, packagesResult] = await Promise.allSettled([
+        listPublicCatalogServices({ id_sucursal: branchId || undefined }),
+        listPublicCatalogPackages({ id_sucursal: branchId || undefined }),
+      ]);
+
+      if (servicesResult.status !== 'fulfilled') {
+        throw servicesResult.reason;
+      }
+
       if (!isMountedRef.current) return;
-      setServices(result.services);
-      setPackages(result.packages);
+      setServices(Array.isArray(servicesResult.value?.services) ? servicesResult.value.services : []);
+      setPackages(
+        packagesResult.status === 'fulfilled' && Array.isArray(packagesResult.value?.packages)
+          ? packagesResult.value.packages
+          : []
+      );
       setStatus('success');
     } catch (error) {
       if (!isMountedRef.current) return;

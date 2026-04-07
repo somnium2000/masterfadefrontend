@@ -41,7 +41,7 @@ function SideNavItem({ item, activeId }) {
           isActive
             ? 'font-semibold text-[var(--mf-accent)]'
             : 'font-normal text-[var(--mf-nav-inactive)]'
-        }`}
+        } max-w-full truncate text-center leading-tight`}
       >
         {item.label}
       </span>
@@ -50,40 +50,54 @@ function SideNavItem({ item, activeId }) {
 }
 
 export default function PremiumBottomNav({ activeId, sideItems, fabItem, className = '', isDesktop = false }) {
-  const FabIcon = fabItem.icon;
+  const hasFab = Boolean(fabItem?.icon && typeof fabItem?.onClick === 'function');
+  const FabIcon = fabItem?.icon;
+  const items = Array.isArray(sideItems) ? sideItems : [];
   const frameClass = isDesktop ? 'mf-mobile-frame px-0 md:mx-auto md:w-full md:max-w-[600px] md:px-0' : 'mf-mobile-frame px-0';
+
+  if (!items.length) return null;
 
   return (
     <div className={`fixed inset-x-0 bottom-0 z-50 ${className}`.trim()}>
       <div className={frameClass}>
-        <nav className="mf-glass-nav mf-safe-bottom flex items-end justify-between px-5 pb-[calc(env(safe-area-inset-bottom,8px)+8px)] pt-1 shadow-[0_-8px_28px_rgba(0,0,0,0.12)]">
-          <div className="flex flex-1 items-end justify-between">
-            {sideItems.slice(0, 2).map((item) => (
-              <SideNavItem key={item.id} item={item} activeId={activeId} />
-            ))}
-          </div>
+        <nav className="mf-glass-nav mf-safe-bottom flex items-end justify-between px-4 pb-[calc(env(safe-area-inset-bottom,8px)+8px)] pt-1 shadow-[0_-8px_28px_rgba(0,0,0,0.12)]">
+          {hasFab ? (
+            <>
+              <div className="flex flex-1 items-end justify-between">
+                {items.slice(0, 2).map((item) => (
+                  <SideNavItem key={item.id} item={item} activeId={activeId} />
+                ))}
+              </div>
 
-          <div className="mx-2 flex shrink-0 flex-col items-center">
-            <motion.button
-              type="button"
-              whileHover={{ scale: 1.08, y: -2 }}
-              whileTap={{ scale: 0.92 }}
-              onClick={fabItem.onClick}
-              className="mf-focus-ring mf-accent-gradient mf-fab-shadow -mt-[26px] inline-flex h-14 w-14 items-center justify-center rounded-full border-[3px] border-[var(--mf-nav-bg)]"
-              aria-label={fabItem.label}
-            >
-              <FabIcon size={26} strokeWidth={2.5} />
-            </motion.button>
-            <span className="mt-1 text-[9px] font-semibold tracking-[0.04em] text-[var(--mf-accent)]">
-              {fabItem.label}
-            </span>
-          </div>
+              <div className="mx-2 flex shrink-0 flex-col items-center">
+                <motion.button
+                  type="button"
+                  whileHover={{ scale: 1.08, y: -2 }}
+                  whileTap={{ scale: 0.92 }}
+                  onClick={fabItem.onClick}
+                  className="mf-focus-ring mf-accent-gradient mf-fab-shadow -mt-[26px] inline-flex h-14 w-14 items-center justify-center rounded-full border-[3px] border-[var(--mf-nav-bg)]"
+                  aria-label={fabItem.label}
+                >
+                  <FabIcon size={26} strokeWidth={2.5} />
+                </motion.button>
+                <span className="mt-1 text-[9px] font-semibold tracking-[0.04em] text-[var(--mf-accent)]">
+                  {fabItem.label}
+                </span>
+              </div>
 
-          <div className="flex flex-1 items-end justify-between">
-            {sideItems.slice(2).map((item) => (
-              <SideNavItem key={item.id} item={item} activeId={activeId} />
-            ))}
-          </div>
+              <div className="flex flex-1 items-end justify-between">
+                {items.slice(2).map((item) => (
+                  <SideNavItem key={item.id} item={item} activeId={activeId} />
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="flex w-full items-end justify-between gap-1">
+              {items.map((item) => (
+                <SideNavItem key={item.id} item={item} activeId={activeId} />
+              ))}
+            </div>
+          )}
         </nav>
       </div>
     </div>

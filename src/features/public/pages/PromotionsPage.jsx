@@ -64,7 +64,10 @@ function resolveExternalHref(value) {
 function PromotionCard({ promotion, onAction }) {
   const paragraphs = Array.isArray(promotion?.parrafos) ? promotion.parrafos.filter(Boolean) : [];
   const hasImage = Boolean(promotion?.imagen_principal_url || promotion?.imagen_mobile_url);
-  const hasAction = promotion?.cta_tipo === 'interno' || promotion?.cta_tipo === 'externo';
+  const internalHref = promotion?.cta_tipo === 'interno' ? resolveInternalHref(promotion?.cta_url) : '';
+  const externalHref = promotion?.cta_tipo === 'externo' ? resolveExternalHref(promotion?.cta_url) : '';
+  // AM: Evita CTA visibles sin destino valido en datos legacy o inconsistentes.
+  const hasAction = Boolean(internalHref || externalHref);
   const ctaLabel = String(promotion?.cta_texto || '').trim() || 'Ver mas';
   const dateRangeLabel = formatRangeLabel(promotion?.vigencia_desde, promotion?.vigencia_hasta);
 

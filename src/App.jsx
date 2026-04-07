@@ -32,7 +32,10 @@ import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx'
 import AdminClientesPage from './features/admin/pages/AdminClientesPage.jsx';
 import AdminUsuariosPage from './features/admin/pages/AdminUsuariosPage.jsx';
 import AdminConfiguracionComunicacionPage from './features/admin/pages/AdminConfiguracionComunicacionPage.jsx';
+import AdminConfiguracionNotificacionesPage from './features/admin/pages/AdminConfiguracionNotificacionesPage.jsx';
+import AdminConfiguracionPerfilPage from './features/admin/pages/AdminConfiguracionPerfilPage.jsx';
 import AdminConfiguracionPromocionesPage from './features/admin/pages/AdminConfiguracionPromocionesPage.jsx';
+import AdminConfiguracionSpamPage from './features/admin/pages/AdminConfiguracionSpamPage.jsx';
 import AdminCitasPage from './features/admin/pages/AdminCitasPage.jsx';
 import AdminCitasPreviewPage from './features/admin/pages/AdminCitasPreviewPage.jsx';
 import AdminAgendamientoCitasPage from './features/admin/pages/AdminAgendamientoCitasPage.jsx';
@@ -114,9 +117,9 @@ function App() {
         {/* Masterpuntos */}
         <Route path="superpuntos" element={<RouteErrorBoundary><AdminMasterPuntosPage /></RouteErrorBoundary>} />
         {/* Configuración */}
-        <Route path="configuracion/notificaciones" element={<Navigate to="configuracion/comunicacion" replace />} />
-        <Route path="configuracion/perfil" element={<Navigate to="configuracion/comunicacion" replace />} />
-        <Route path="configuracion/spam" element={<Navigate to="configuracion/comunicacion" replace />} />
+        <Route path="configuracion/notificaciones" element={<RouteErrorBoundary><AdminConfiguracionNotificacionesPage /></RouteErrorBoundary>} />
+        <Route path="configuracion/perfil" element={<RouteErrorBoundary><AdminConfiguracionPerfilPage /></RouteErrorBoundary>} />
+        <Route path="configuracion/spam" element={<RouteErrorBoundary><AdminConfiguracionSpamPage /></RouteErrorBoundary>} />
         <Route path="configuracion/comunicacion" element={<RouteErrorBoundary><AdminConfiguracionComunicacionPage /></RouteErrorBoundary>} />
         <Route path="configuracion/promociones" element={<RouteErrorBoundary><AdminConfiguracionPromocionesPage /></RouteErrorBoundary>} />
       </Route>
@@ -133,9 +136,9 @@ function App() {
         <Route index element={<UnderConstructionPage title="Inicio" />} />
         <Route path="kpis" element={<UnderConstructionPage title="KPIs" />} />
         {/* Personas */}
-        <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
-        <Route path="clientes" element={<RouteErrorBoundary><AdminClientesPage /></RouteErrorBoundary>} />
-        <Route path="usuarios" element={<RouteErrorBoundary><AdminUsuariosPage /></RouteErrorBoundary>} />
+        <Route path="empleados" element={<UnderConstructionPage title="Personas · Empleados" subtitle="Acceso temporalmente en definición para rol admin." />} />
+        <Route path="clientes" element={<UnderConstructionPage title="Personas · Clientes" subtitle="Acceso temporalmente en definición para rol admin." />} />
+        <Route path="usuarios" element={<UnderConstructionPage title="Personas · Usuarios" subtitle="Acceso temporalmente en definición para rol admin." />} />
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
         <Route path="catalog/servicios/publico" element={<RouteErrorBoundary><AdminServiciosCatalogoPublicoPage /></RouteErrorBoundary>} />

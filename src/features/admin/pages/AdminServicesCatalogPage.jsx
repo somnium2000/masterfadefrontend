@@ -176,6 +176,18 @@ function ServicioForm({ values, onChange }) {
                         placeholder="30"
                     />
                 </div>
+                <div className="flex flex-col gap-1">
+                    <Label htmlFor="f-grupo">Grupo *</Label>
+                    <select
+                        id="f-grupo"
+                        className="mf-select"
+                        value={values.grupo_catalogo}
+                        onChange={(e) => onChange('grupo_catalogo', e.target.value)}
+                    >
+                        <option value="barberia">Barberia</option>
+                        <option value="otros">Otros</option>
+                    </select>
+                </div>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1">
@@ -202,6 +214,17 @@ function ServicioForm({ values, onChange }) {
                     />
                 </div>
             </div>
+            <label className="mf-checkbox flex items-start gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_48%,transparent)] px-3 py-2.5">
+                <input
+                    type="checkbox"
+                    checked={Boolean(values.visible_publico)}
+                    onChange={(event) => onChange('visible_publico', event.target.checked)}
+                />
+                <span className="space-y-0.5 text-xs text-[var(--mf-text-2)]">
+                    <span className="block font-semibold uppercase tracking-[0.08em] text-[var(--mf-text)]">Visible en catálogo público</span>
+                    <span className="block">Controla si el servicio se publica para consulta externa.</span>
+                </span>
+            </label>
             <label className="mf-checkbox flex items-start gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_48%,transparent)] px-3 py-2.5">
                 <input
                     type="checkbox"
@@ -299,7 +322,6 @@ export default function AdminServicesCatalogPage() {
     const [search, setSearch] = useState('');
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [filters, setFilters] = useState(() => ({ ...SERVICES_FILTER_DEFAULTS }));
-    const [showInformativos, setShowInformativos] = useState(false);
 
     // Dialogo crear/editar
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -560,7 +582,9 @@ export default function AdminServicesCatalogPage() {
             descripcion: formValues.descripcion.trim() || null,
             duracion_min: parseInt(formValues.duracion_min, 10),
             precio_hnl: parseFloat(formValues.precio_hnl),
+            grupo_catalogo: String(formValues.grupo_catalogo || 'barberia').trim().toLowerCase() === 'otros' ? 'otros' : 'barberia',
             orden_visual: parseInt(formValues.orden_visual, 10),
+            visible_publico: Boolean(formValues.visible_publico),
             servicio_informativo: Boolean(formValues.servicio_informativo),
             id_sucursal: mutationBranchId,
         };
@@ -569,7 +593,9 @@ export default function AdminServicesCatalogPage() {
             descripcion: formValues.descripcion.trim() || null,
             duracion_min: parseInt(formValues.duracion_min, 10),
             precio_hnl: parseFloat(formValues.precio_hnl),
+            grupo_catalogo: String(formValues.grupo_catalogo || 'barberia').trim().toLowerCase() === 'otros' ? 'otros' : 'barberia',
             orden_visual: parseInt(formValues.orden_visual, 10),
+            visible_publico: Boolean(formValues.visible_publico),
             servicio_informativo: Boolean(formValues.servicio_informativo),
             id_sucursal: mutationBranchId,
         };
@@ -667,11 +693,9 @@ export default function AdminServicesCatalogPage() {
     const titleSubtitle = !sucursal && availableBranches.length > 1
         ? 'Selecciona una sucursal para crear, editar o cambiar estado de servicios.'
         : 'Gestiona servicios por sucursal con configuración operativa.';
-    const visibleServicios = useMemo(
-        () => filteredServicios.filter((servicio) => Boolean(servicio?.servicio_informativo) === showInformativos),
-        [filteredServicios, showInformativos]
-    );
-    const modeLabel = showInformativos ? 'informativos' : 'agendables';
+    // AM: Requisito de operacion: mostrar siempre servicios agendables e informativos en la misma vista por sucursal.
+    const visibleServicios = useMemo(() => filteredServicios, [filteredServicios]);
+    const modeLabel = 'servicios';
 
     // â”€â”€ Vista Cards de servicios â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function ServicioCards() {
@@ -753,31 +777,10 @@ export default function AdminServicesCatalogPage() {
 
                     <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[560px]">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-sm text-[var(--mf-text-2)]">
-                                {loading ? 'Cargando...' : `${visibleServicios.length} de ${filteredServicios.length} ${modeLabel}`}
-                            </p>
-                            <div className="flex items-center gap-3">
-                                <label className="inline-flex items-center gap-2 text-xs text-[var(--mf-text-2)]">
-                                    <button
-                                        type="button"
-                                        role="switch"
-                                        aria-checked={showInformativos}
-                                        aria-label="Mostrar servicios informativos"
-                                        onClick={() => setShowInformativos((prev) => !prev)}
-                                        className={`relative inline-flex h-6 w-11 items-center rounded-full border transition-colors ${
-                                            showInformativos
-                                                ? 'border-[var(--mf-accent)] bg-[var(--mf-accent)]/35'
-                                                : 'border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)]'
-                                        }`}
-                                    >
-                                        <span
-                                            className={`inline-block h-4 w-4 transform rounded-full bg-[var(--mf-text)] transition-transform ${
-                                                showInformativos ? 'translate-x-6' : 'translate-x-1'
-                                            }`}
-                                        />
-                                    </button>
-                                    <span>{showInformativos ? 'Informativos' : 'Agendables'}</span>
-                                </label>
+                                <p className="text-sm text-[var(--mf-text-2)]">
+                                    {loading ? 'Cargando...' : `${visibleServicios.length} ${modeLabel}`}
+                                </p>
+                                <div className="flex items-center gap-3">
                                 <ViewToggle defaultView={view} onViewChange={setView} storageKey="servicios" />
                             </div>
                         </div>

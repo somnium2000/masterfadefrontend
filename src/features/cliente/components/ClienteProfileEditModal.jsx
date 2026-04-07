@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, Loader2, Trash2 } from 'lucide-react';
+import { Camera, Loader2, Phone, Trash2, UserRound } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -11,6 +11,8 @@ import {
 import { Button } from '../../../components/ui/button.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
+  ALLOWED_PROFILE_IMAGE_TYPES,
+  MAX_PROFILE_IMAGE_BYTES,
   getClienteProfileImageReadUrl,
   prepareClienteProfileImageUpload,
   updateClienteMe,
@@ -30,7 +32,6 @@ function extractSafeText(value) {
     const normalized = value.normalize('NFC').trim();
     if (!normalized) return '';
 
-    // Soporta payloads serializados desde backend (json string / json object string).
     if (
       (normalized.startsWith('{') && normalized.endsWith('}'))
       || (normalized.startsWith('[') && normalized.endsWith(']'))
@@ -98,6 +99,10 @@ function normalizeInitialForm(profile) {
     preferencias_corte: extractSafeText(profile?.preferencias_corte),
     observaciones: extractSafeText(profile?.observaciones),
   };
+}
+
+function formatAllowedMimeTypes() {
+  return ALLOWED_PROFILE_IMAGE_TYPES.map((type) => type.replace('image/', '').toUpperCase()).join(', ');
 }
 
 export default function ClienteProfileEditModal({
@@ -195,26 +200,24 @@ export default function ClienteProfileEditModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-1rem)] max-h-[92vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Editar perfil cliente</DialogTitle>
+      <DialogContent className="!left-1/2 !top-1/2 !bottom-auto !right-auto !w-[calc(100vw-1rem)] !max-w-[680px] !-translate-x-1/2 !-translate-y-1/2 !rounded-[22px] max-h-[88vh] overflow-y-auto p-0">
+        <DialogHeader className="border-b border-[var(--mf-nav-border)] px-5 pb-4 pt-5 sm:px-6">
+          <DialogTitle>Perfil privado del cliente</DialogTitle>
           <DialogDescription id="cliente-profile-edit-description">
-            Actualiza tu informacion personal para mejorar recomendaciones y experiencia de reserva.
+            Actualiza solo lo necesario. Tus datos sensibles se muestran con enfoque de privacidad.
           </DialogDescription>
         </DialogHeader>
 
-        <form className="space-y-4" onSubmit={handleSubmit}>
+        <form className="space-y-4 px-5 pb-5 pt-4 sm:px-6" onSubmit={handleSubmit}>
           <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-text-2)]">
-              Foto privada
-            </p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Foto de perfil</p>
             <div className="mt-3 flex flex-wrap items-center gap-3">
-              <div className="h-20 w-20 overflow-hidden rounded-2xl border border-[var(--mf-btn-border)] bg-[var(--mf-card)]">
+              <div className="h-24 w-24 overflow-hidden rounded-2xl border border-[var(--mf-btn-border)] bg-[var(--mf-card)]">
                 {previewUrl ? (
-                  <img src={previewUrl} alt="Foto de perfil" className="h-full w-full object-cover" loading="lazy" />
+                  <img src={previewUrl} alt="Foto de perfil" className="h-full w-full object-cover object-center" loading="lazy" />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-[var(--mf-text-2)]">
-                    <Camera size={18} />
+                    <Camera size={20} />
                   </div>
                 )}
               </div>
@@ -228,7 +231,7 @@ export default function ClienteProfileEditModal({
                   onClick={() => fileInputRef.current?.click()}
                 >
                   {uploading ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
-                  {uploadedAssetId ? 'Reemplazar foto' : 'Subir foto'}
+                  {uploadedAssetId ? 'Reemplazar' : 'Subir foto'}
                 </Button>
                 <Button
                   type="button"
@@ -246,81 +249,103 @@ export default function ClienteProfileEditModal({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept={ALLOWED_PROFILE_IMAGE_TYPES.join(',')}
               className="hidden"
               onChange={(event) => void handleUploadPhoto(event)}
             />
-            <p className="mt-2 text-xs text-[var(--mf-text-2)]">
-              Esta imagen es privada. Solo tu, administradores autorizados y barberos con acceso interno pueden verla.
+            <p className="mt-2 text-xs leading-5 text-[var(--mf-text-2)]">
+              Formatos permitidos: {formatAllowedMimeTypes()}. Peso máximo: {(MAX_PROFILE_IMAGE_BYTES / (1024 * 1024)).toFixed(0)}MB.
+            </p>
+            <p className="mt-1 text-xs leading-5 text-[var(--mf-text-2)]">
+              Esta imagen es privada y se usa para facilitar tu identificación en recepción y por el barbero.
             </p>
           </section>
 
-          <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <label className="mf-label">Telefono principal</label>
-              <input
-                className="mf-input"
-                value={form.telefono_principal}
-                onChange={(event) => setField('telefono_principal', event.target.value)}
-                maxLength={40}
-                placeholder="Ej. +504 9999-9999"
-              />
-            </div>
-            <div>
-              <label className="mf-label">Fecha de nacimiento</label>
-              <input
-                type="date"
-                className="mf-input"
-                value={form.fecha_nacimiento}
-                onChange={(event) => setField('fecha_nacimiento', event.target.value)}
-              />
-            </div>
-            <div>
-              <label className="mf-label">Genero</label>
-              <select
-                className="mf-select"
-                value={form.genero_codigo}
-                onChange={(event) => setField('genero_codigo', event.target.value)}
-              >
-                <option value="">Selecciona genero</option>
-                {GENERO_OPTIONS.map((option) => (
-                  <option key={option.code} value={option.code}>{option.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="mf-label">Direccion</label>
-              <input
-                className="mf-input"
-                value={form.direccion_texto}
-                onChange={(event) => setField('direccion_texto', event.target.value)}
-                maxLength={300}
-                placeholder="Ciudad, colonia o punto de referencia"
-              />
+          <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Identidad y contacto</p>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mf-label">Teléfono principal</label>
+                <div className="relative">
+                  <Phone size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
+                  <input
+                    className="mf-input pl-9"
+                    value={form.telefono_principal}
+                    onChange={(event) => setField('telefono_principal', event.target.value)}
+                    maxLength={40}
+                    placeholder="Ej. +504 9999-9999"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="mf-label">Fecha de nacimiento</label>
+                <input
+                  type="date"
+                  className="mf-input"
+                  value={form.fecha_nacimiento}
+                  onChange={(event) => setField('fecha_nacimiento', event.target.value)}
+                />
+              </div>
+              <div>
+                <label className="mf-label">Género (opcional)</label>
+                <select
+                  className="mf-select"
+                  value={form.genero_codigo}
+                  onChange={(event) => setField('genero_codigo', event.target.value)}
+                >
+                  <option value="">Selecciona género</option>
+                  {GENERO_OPTIONS.map((option) => (
+                    <option key={option.code} value={option.code}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mf-label">Dirección (opcional)</label>
+                <input
+                  className="mf-input"
+                  value={form.direccion_texto}
+                  onChange={(event) => setField('direccion_texto', event.target.value)}
+                  maxLength={300}
+                  placeholder="Ciudad, colonia o referencia"
+                />
+              </div>
             </div>
           </section>
 
-          <section className="space-y-3">
-            <div>
-              <label className="mf-label">Preferencias para tu barbero</label>
-              <textarea
-                className="mf-input min-h-[96px] resize-y px-3 py-2"
-                value={form.preferencias_corte}
-                onChange={(event) => setField('preferencias_corte', event.target.value)}
-                maxLength={1000}
-                placeholder="Describe estilo, cuidados o detalles importantes para tu corte."
-              />
+          <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Preferencias y notas</p>
+            <div className="mt-3 space-y-3">
+              <div>
+                <label className="mf-label">Preferencias para tu barbero</label>
+                <textarea
+                  className="mf-input min-h-[96px] resize-y px-3 py-2"
+                  value={form.preferencias_corte}
+                  onChange={(event) => setField('preferencias_corte', event.target.value)}
+                  maxLength={1000}
+                  placeholder="Describe estilo, cuidados o detalles importantes para tu corte."
+                />
+              </div>
+              <div>
+                <label className="mf-label">Notas adicionales (opcional)</label>
+                <textarea
+                  className="mf-input min-h-[88px] resize-y px-3 py-2"
+                  value={form.observaciones}
+                  onChange={(event) => setField('observaciones', event.target.value)}
+                  maxLength={1000}
+                  placeholder="Información adicional que quieras registrar."
+                />
+              </div>
             </div>
-            <div>
-              <label className="mf-label">Notas adicionales</label>
-              <textarea
-                className="mf-input min-h-[88px] resize-y px-3 py-2"
-                value={form.observaciones}
-                onChange={(event) => setField('observaciones', event.target.value)}
-                maxLength={1000}
-                placeholder="Informacion adicional que quieras registrar en tu perfil."
-              />
-            </div>
+          </section>
+
+          <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_90%,transparent)] p-4">
+            <p className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">
+              <UserRound size={13} />
+              Privacidad
+            </p>
+            <p className="mt-2 text-xs leading-5 text-[var(--mf-text-2)]">
+              Solo se enviarán al sistema los campos que este formulario soporta actualmente. Los datos no incluidos aquí permanecen sin cambios.
+            </p>
           </section>
 
           <DialogFooter>

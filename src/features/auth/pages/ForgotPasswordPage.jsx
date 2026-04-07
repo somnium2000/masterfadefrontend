@@ -1,7 +1,9 @@
+import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import { http } from '../../../services/httpClient.js';
+import AuthLandingBrandBlock from '../components/AuthLandingBrandBlock.jsx';
 import './LoginPage.css';
 import './PasswordRecovery.css';
 
@@ -60,30 +62,10 @@ export default function ForgotPasswordPage() {
       return;
     }
 
-    const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3002';
-
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/v1/auth/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: value }),
-      });
-
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        const rl = data?.error?.details?.rateLimit;
-        const ra = data?.error?.details?.retryAfterSeconds;
-
-        if (rl) setRateInfo(rl);
-        if (typeof ra === 'number') setRetryAfter(ra);
-
-        const message = data?.error?.message || 'No se pudo enviar el enlace.';
-        setError(message);
-        notifications.error(message, { dedupeKey: 'auth-forgot-send-error' });
-        return;
-      }
+      const response = await http.post('/v1/auth/forgot-password', { email: value });
+      const data = response?.data || response;
 
       const successMessage =
         data?.data?.message ||
@@ -94,10 +76,16 @@ export default function ForgotPasswordPage() {
 
       if (data?.data?.rateLimit) setRateInfo(data.data.rateLimit);
       setRetryAfter(0);
-    } catch {
-      const message = 'No se pudo conectar con el backend. Verifica que este corriendo en 3002.';
+    } catch (requestError) {
+      const rl = requestError?.data?.error?.details?.rateLimit;
+      const ra = requestError?.data?.error?.details?.retryAfterSeconds;
+
+      if (rl) setRateInfo(rl);
+      if (typeof ra === 'number') setRetryAfter(ra);
+
+      const message = requestError?.data?.error?.message || requestError?.message || 'No se pudo enviar el enlace.';
       setError(message);
-      notifications.error(message, { dedupeKey: 'auth-forgot-connect-error' });
+      notifications.error(message, { dedupeKey: 'auth-forgot-send-error' });
     } finally {
       setLoading(false);
     }
@@ -106,16 +94,22 @@ export default function ForgotPasswordPage() {
   return (
     <div className="mf-login-page">
       <div className="mf-login-container">
-        <div className="mf-login-brand" aria-hidden="true">
-          <MasterfadeLogo variant="publicPromotions" className="-my-6 sm:-my-8 md:-my-10" />
-        </div>
+        <motion.div
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.55, delay: 0.15, ease: 'easeOut' }}
+          className="mf-login-brand"
+          aria-hidden="true"
+        >
+          <AuthLandingBrandBlock />
+        </motion.div>
 
         <div className="mf-login-card">
           <div className="mf-login-card-header">
             <h1 className="mf-login-title">Recuperar Contraseña</h1>
           </div>
 
-          <form className="mf-login-form" onSubmit={onSubmit}>
+          <form className="mf-login-form" onSubmit={onSubmit} aria-busy={loading}>
             <div className="mf-form-group">
               <label className="mf-label" htmlFor="email">
                 Correo
@@ -133,12 +127,12 @@ export default function ForgotPasswordPage() {
             </div>
 
             {/* Mensajes */}
-            {error ? <div className="mf-error">{error}</div> : null}
-            {msg ? <div className="mf-success">{msg}</div> : null}
+            {error ? <div className="mf-error" role="alert" aria-live="assertive">{error}</div> : null}
+            {msg ? <div className="mf-success" role="status" aria-live="polite">{msg}</div> : null}
 
             {/* Visualización del rate limit */}
             {rateInfo ? (
-              <div className="mf-help">
+              <div className="mf-help" role="status" aria-live="polite">
                 {retryAfter > 0 ? (
                   <>
                     <b>Bloqueado para este correo.</b> Intenta de nuevo en{' '}

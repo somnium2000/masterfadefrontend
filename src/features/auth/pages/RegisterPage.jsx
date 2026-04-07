@@ -12,11 +12,11 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { http } from '../../../services/httpClient.js';
+import AuthLandingBrandBlock from '../components/AuthLandingBrandBlock.jsx';
 import './LoginPage.css';
 import './RegisterPage.css';
 
@@ -190,7 +190,7 @@ export default function RegisterPage() {
             transition={{ duration: 0.55, delay: 0.15, ease: 'easeOut' }}
             className="mf-login-brand"
           >
-            <MasterfadeLogo variant="publicPromotions" className="-my-6 sm:-my-8 md:-my-10" />
+            <AuthLandingBrandBlock />
           </motion.div>
 
           <motion.div

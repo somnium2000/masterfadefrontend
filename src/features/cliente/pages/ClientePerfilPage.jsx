@@ -1,5 +1,5 @@
-﻿import { useCallback, useEffect, useState } from 'react';
-import { Camera, Coins, MapPin, Phone, UserRound } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Calendar, Camera, Coins, LockKeyhole, MapPin, Phone, Scissors, ShieldCheck, UserRound } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
@@ -38,6 +38,20 @@ function toSafeText(value, fallback = '-') {
     return list.length ? list.join(', ') : fallback;
   }
   return fallback;
+}
+
+function InfoRow({ icon: Icon, label, value, highlight = false }) {
+  return (
+    <div className="flex items-start gap-2.5">
+      <Icon size={14} className="mt-0.5 shrink-0 text-[var(--mf-accent)]" />
+      <div className="min-w-0">
+        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">{label}</p>
+        <p className={highlight ? 'mt-1 text-sm font-semibold text-[var(--mf-text)]' : 'mt-1 text-sm text-[var(--mf-text)]'}>
+          {value}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 export default function ClientePerfilPage() {
@@ -82,6 +96,12 @@ export default function ClientePerfilPage() {
   const profile = data?.cliente || null;
   const completion = data?.profile_completion || null;
 
+  const profileCompletionPercent = useMemo(
+    () => Math.max(0, Number(completion?.completion_percent || 0)),
+    [completion?.completion_percent]
+  );
+  const profileIsComplete = Boolean(completion?.is_complete || profileCompletionPercent >= 100);
+
   function handleProfileSaved(payload) {
     setData(payload);
     if (refreshClienteProfile) {
@@ -90,22 +110,17 @@ export default function ClientePerfilPage() {
   }
 
   if ((!canLoadProfile && isHydrating) || loading) {
-    return <div className="mf-skeleton h-56 rounded-3xl" />;
+    return <div className="mf-skeleton h-72 rounded-3xl" />;
   }
 
   return (
     <div className="space-y-5">
-      <ClienteProfileCompletionBanner
-        profileCompletion={completion}
-        onEditProfile={() => setModalOpen(true)}
-      />
-
-      <section className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-5 sm:p-6">
+      <section className="mf-glass-surface rounded-[26px] border border-[var(--mf-nav-border)] p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="h-20 w-20 overflow-hidden rounded-2xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)]">
+            <div className="h-24 w-24 overflow-hidden rounded-2xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)]">
               {profile?.foto_perfil_signed_url ? (
-                <img src={profile.foto_perfil_signed_url} alt="Foto de perfil" className="h-full w-full object-cover" loading="lazy" />
+                <img src={profile.foto_perfil_signed_url} alt="Foto de perfil" className="h-full w-full object-cover object-center" loading="lazy" />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-[var(--mf-text-2)]">
                   <Camera size={20} />
@@ -113,53 +128,88 @@ export default function ClientePerfilPage() {
               )}
             </div>
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Perfil cliente</p>
-              <h1 className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">{toSafeText(profile?.nombre_completo, 'Cliente')}</h1>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Perfil privado</p>
+              <h1 className="mf-font-display mt-2 text-3xl leading-none text-[var(--mf-text)]">{toSafeText(profile?.nombre_completo, 'Cliente')}</h1>
               <p className="mt-1 text-sm text-[var(--mf-text-2)]">{toSafeText(profile?.correo_principal)}</p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            className="mf-accent-gradient inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold"
-          >
-            Editar perfil
-          </button>
-        </div>
-
-        <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--mf-text-2)]">Masterpuntos</p>
-            <p className="mt-2 inline-flex items-center gap-2 text-2xl font-semibold text-[var(--mf-text)]">
-              <Coins size={18} className="text-[var(--mf-accent)]" />
-              {Number(profile?.masterpuntos || 0)}
-            </p>
-          </article>
-
-          <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--mf-text-2)]">Completitud de perfil</p>
-            <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">{Number(completion?.completion_percent || 0)}%</p>
-          </article>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
+              <Coins size={13} className="text-[var(--mf-accent)]" />
+              Masterpuntos: {Number(profile?.masterpuntos || 0)}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--mf-nav-border)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
+              <ShieldCheck size={13} className={profileIsComplete ? 'text-emerald-300' : 'text-[var(--mf-accent)]'} />
+              {profileIsComplete ? 'Perfil completo' : `Perfil ${profileCompletionPercent}%`}
+            </span>
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className="mf-accent-gradient inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold"
+            >
+              Editar perfil
+            </button>
+          </div>
         </div>
       </section>
 
-      <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
-          <h2 className="text-sm font-semibold text-[var(--mf-text)]">Datos personales</h2>
-          <dl className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)]">
-            <div className="flex items-center gap-2"><Phone size={14} /><span>{toSafeText(profile?.telefono_principal)}</span></div>
-            <div className="flex items-center gap-2"><UserRound size={14} /><span>{toSafeText(profile?.genero_descripcion || profile?.genero_codigo)}</span></div>
-            <div className="flex items-center gap-2"><MapPin size={14} /><span>{toSafeText(profile?.direccion_texto)}</span></div>
-            <div className="flex items-center gap-2"><span className="text-[var(--mf-text)]">Nacimiento:</span><span>{formatDate(profile?.fecha_nacimiento)}</span></div>
-          </dl>
+      <ClienteProfileCompletionBanner
+        profileCompletion={completion}
+        onEditProfile={() => setModalOpen(true)}
+      />
+
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-[var(--mf-accent)]">Identidad</h2>
+          <div className="mt-4 space-y-3">
+            <InfoRow icon={UserRound} label="Nombre" value={toSafeText(profile?.nombre_completo)} highlight />
+            <InfoRow icon={Calendar} label="Fecha de nacimiento" value={formatDate(profile?.fecha_nacimiento)} highlight />
+            <InfoRow icon={Phone} label="Celular principal" value={toSafeText(profile?.telefono_principal)} highlight />
+            <InfoRow icon={UserRound} label="Género" value={toSafeText(profile?.genero_descripcion || profile?.genero_codigo)} />
+          </div>
         </article>
 
-        <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
-          <h2 className="text-sm font-semibold text-[var(--mf-text)]">Preferencias para barbero</h2>
-          <p className="mt-3 text-sm leading-6 text-[var(--mf-text-2)]">
-            {toSafeText(profile?.preferencias_corte, 'Aun no has registrado preferencias de corte.')}
-          </p>
+        <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-[var(--mf-accent)]">Contacto</h2>
+          <div className="mt-4 space-y-3">
+            <InfoRow icon={MapPin} label="Dirección" value={toSafeText(profile?.direccion_texto)} />
+            <InfoRow icon={UserRound} label="Correo de acceso" value={toSafeText(profile?.correo_principal)} />
+          </div>
+        </article>
+      </section>
+
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-[var(--mf-accent)]">Preferencias</h2>
+          <div className="mt-4 space-y-3">
+            <InfoRow
+              icon={Scissors}
+              label="Preferencias para barbero"
+              value={toSafeText(profile?.preferencias_corte, 'Aún no has registrado preferencias de corte.')}
+            />
+            <p className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] px-3 py-2 text-xs leading-5 text-[var(--mf-text-2)]">
+              Puedes actualizar este bloque desde editar perfil para mejorar recomendaciones en tus próximas citas.
+            </p>
+          </div>
+        </article>
+
+        <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-[var(--mf-accent)]">Privacidad y seguridad</h2>
+          <div className="mt-4 space-y-3">
+            <InfoRow icon={ShieldCheck} label="Estado de sesión" value="Protegida y activa" />
+            <InfoRow icon={LockKeyhole} label="Contraseña" value="Gestionada mediante flujo seguro existente" />
+            <button
+              type="button"
+              onClick={() => navigate('/forgot-password')}
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--mf-btn-border)] bg-[var(--mf-card)] px-4 text-sm font-semibold text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)]"
+            >
+              Cambiar o crear contraseña
+            </button>
+            <p className="text-xs leading-5 text-[var(--mf-text-2)]">
+              Si iniciaste con Google, este acceso te lleva al flujo seguro de recuperación para definir una contraseña propia.
+            </p>
+          </div>
         </article>
       </section>
 
@@ -172,5 +222,3 @@ export default function ClientePerfilPage() {
     </div>
   );
 }
-
-

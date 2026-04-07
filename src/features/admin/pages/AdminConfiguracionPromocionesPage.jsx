@@ -26,7 +26,11 @@ const FORM_DEFAULTS = {
   imagen_mobile_url: '',
   imagen_principal_asset_id: null,
   imagen_mobile_asset_id: null,
+  cta_tipo: 'none',
+  cta_texto: '',
+  cta_url: '',
   visible_publico: false, destacada: false,
+  orden_visual: '100',
   vigencia_desde: '', vigencia_hasta: '', estado: 'borrador',
 };
 
@@ -112,6 +116,18 @@ function validate(values) {
   if (!parrafos.length) return 'La descripcion es requerida.';
   if (parrafos.length > 8) return 'Solo se permiten hasta 8 parrafos.';
   if (parrafos.some((line) => line.length > 420)) return 'Cada parrafo admite maximo 420 caracteres.';
+  const ordenVisual = Number(values.orden_visual);
+  if (!Number.isInteger(ordenVisual) || ordenVisual < 0) return 'orden_visual debe ser un entero mayor o igual a 0.';
+  const ctaTipo = String(values.cta_tipo || 'none').trim().toLowerCase();
+  const ctaTexto = String(values.cta_texto || '').trim();
+  const ctaUrl = String(values.cta_url || '').trim();
+  if (!['none', 'interno', 'externo'].includes(ctaTipo)) return 'cta_tipo invalido.';
+  if (ctaTipo === 'none') {
+    if (ctaTexto || ctaUrl) return 'Si cta_tipo es none, cta_texto y cta_url deben ir vacios.';
+  } else {
+    if (!ctaTexto) return 'cta_texto es requerido cuando cta_tipo es interno o externo.';
+    if (!ctaUrl) return 'cta_url es requerido cuando cta_tipo es interno o externo.';
+  }
   if (vigenciaDesde && vigenciaHasta && vigenciaHasta < vigenciaDesde) return 'vigencia_hasta no puede ser menor que vigencia_desde.';
   if (estado === 'archivada' && visiblePublico) return 'Una promocion archivada no puede estar visible_publico=true.';
   if (estado === 'publicada') {
@@ -140,12 +156,12 @@ function toPayload(values) {
     imagen_principal_url: String(values.imagen_principal_url || '').trim() || null,
     imagen_mobile_url: String(values.imagen_mobile_url || '').trim() || null,
     imagen_alt: titulo || null,
-    cta_tipo: 'none',
-    cta_texto: null,
-    cta_url: null,
+    cta_tipo: String(values.cta_tipo || 'none').trim().toLowerCase(),
+    cta_texto: String(values.cta_texto || '').trim() || null,
+    cta_url: String(values.cta_url || '').trim() || null,
     visible_publico: normalizeBoolean(values.visible_publico),
     destacada: normalizeBoolean(values.destacada),
-    orden_visual: 100,
+    orden_visual: Number(values.orden_visual),
     vigencia_desde: vigenciaDesde || null,
     vigencia_hasta: vigenciaHasta || null,
     estado: values.estado,
@@ -161,7 +177,11 @@ function mapToForm(promo, branch = '') {
     imagen_mobile_url: promo?.imagen_mobile_url || '',
     imagen_principal_asset_id: promo?.imagen_principal_asset_id || null,
     imagen_mobile_asset_id: promo?.imagen_mobile_asset_id || null,
+    cta_tipo: promo?.cta_tipo || 'none',
+    cta_texto: promo?.cta_texto || '',
+    cta_url: promo?.cta_url || '',
     visible_publico: normalizeBoolean(promo?.visible_publico), destacada: normalizeBoolean(promo?.destacada),
+    orden_visual: String(Number(promo?.orden_visual ?? 100)),
     vigencia_desde: toDateInputValue(promo?.vigencia_desde), vigencia_hasta: toDateInputValue(promo?.vigencia_hasta),
     estado: promo?.estado || 'borrador',
   };
@@ -267,7 +287,16 @@ function PromotionForm({ values, onChange, branchLabel, promotionId }) {
         <div className="space-y-1.5"><Label className="mf-label">Estado</Label><select className="mf-select" value={values.estado} onChange={(e) => onChange('estado', e.target.value)}><option value="borrador">Borrador</option><option value="publicada">Publicada</option><option value="archivada">Archivada</option></select></div>
         <div className="space-y-1.5"><Label>Vigencia desde</Label><Input type="date" value={values.vigencia_desde} onChange={(e) => onChange('vigencia_desde', e.target.value)} /></div>
         <div className="space-y-1.5"><Label>Vigencia hasta</Label><Input type="date" value={values.vigencia_hasta} onChange={(e) => onChange('vigencia_hasta', e.target.value)} /></div>
+        <div className="space-y-1.5"><Label>Orden visual *</Label><Input type="number" min="0" step="1" value={values.orden_visual} onChange={(e) => onChange('orden_visual', e.target.value)} /></div>
+        <div className="space-y-1.5"><Label>CTA</Label><select className="mf-select" value={values.cta_tipo} onChange={(e) => onChange('cta_tipo', e.target.value)}><option value="none">Sin CTA</option><option value="interno">Interno</option><option value="externo">Externo</option></select></div>
       </div>
+
+      {values.cta_tipo !== 'none' ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5"><Label>Texto CTA *</Label><Input value={values.cta_texto} onChange={(e) => onChange('cta_texto', e.target.value)} placeholder="Ej. Ver detalle" /></div>
+          <div className="space-y-1.5"><Label>URL CTA *</Label><Input value={values.cta_url} onChange={(e) => onChange('cta_url', e.target.value)} placeholder={values.cta_tipo === 'interno' ? '/promociones/oferta' : 'https://example.com'} /></div>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex items-center justify-between rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2.5 text-sm"><span className="text-[var(--mf-text)]">Visible en landing publica</span><input type="checkbox" checked={Boolean(values.visible_publico)} onChange={(e) => onChange('visible_publico', e.target.checked)} className="h-4 w-4 accent-[var(--mf-accent)]" /></label>
@@ -386,6 +415,11 @@ export default function AdminConfiguracionPromocionesPage() {
       const next = { ...prev, [field]: value };
       if (field === 'estado' && value === 'archivada') { next.visible_publico = false; next.destacada = false; }
       if (field === 'visible_publico' && !value) next.destacada = false;
+      if (field === 'cta_tipo' && value === 'none') {
+        // AM: Evita enviar CTA parcial cuando el tipo es none.
+        next.cta_texto = '';
+        next.cta_url = '';
+      }
       return next;
     });
     setFormError('');
@@ -576,6 +610,8 @@ export default function AdminConfiguracionPromocionesPage() {
                   { label: 'Visible publico', value: <PromotionVisibilityBadge visible={Boolean(detailTarget.visible_publico)} /> },
                   { label: 'Estado', value: <PromotionStateBadge estado={detailTarget.estado} /> },
                   { label: 'Destacada', value: <PromotionFeaturedBadge destacada={Boolean(detailTarget.destacada)} /> },
+                  { label: 'CTA', value: ctaLabel(detailTarget.cta_tipo) },
+                  { label: 'Orden visual', value: Number(detailTarget.orden_visual ?? 100) },
                   { label: 'Vigencia', value: <PromotionVigenciaBadge vigenciaHasta={detailTarget.vigencia_hasta} /> },
                   { label: 'Vigencia desde', value: detailTarget.vigencia_desde || '-' },
                   { label: 'Vigencia hasta', value: detailTarget.vigencia_hasta || '-' },
@@ -585,6 +621,8 @@ export default function AdminConfiguracionPromocionesPage() {
                   { label: 'Subtitulo', value: detailTarget.subtitulo || '-' },
                   { label: 'Descripcion', value: Array.isArray(detailTarget.parrafos) && detailTarget.parrafos.length ? <div className="space-y-1 text-left">{detailTarget.parrafos.map((line, index) => (<p key={`${index}-${line}`} className="text-sm">{line}</p>))}</div> : 'Sin descripcion', span: 'full' },
                   { label: 'Imagen principal', value: detailTarget.imagen_principal_url || '-', span: 'full' },
+                  { label: 'CTA texto', value: detailTarget.cta_texto || '-', span: 'full' },
+                  { label: 'CTA URL', value: detailTarget.cta_url || '-', span: 'full' },
                 ]},
               ]}
             />

@@ -33,10 +33,10 @@ function assertProfileImageFile(file) {
     throw new Error('Debes seleccionar una imagen.');
   }
   if (!ALLOWED_PROFILE_IMAGE_TYPES.includes(file.type)) {
-    throw new Error('Formato no valido. Usa JPG, PNG o WEBP.');
+    throw new Error('Formato no válido. Usa JPG, PNG o WEBP.');
   }
   if (Number(file.size || 0) > MAX_PROFILE_IMAGE_BYTES) {
-    throw new Error('La imagen supera el maximo permitido de 5MB.');
+    throw new Error('La imagen supera el máximo permitido de 5MB.');
   }
 }
 
@@ -101,7 +101,7 @@ function buildClienteProfilePatchPayload(rawPayload = {}) {
 
 async function uploadPreparedFile(prepared, file) {
   if (!supabase) {
-    throw new Error('Supabase no esta configurado en frontend.');
+    throw new Error('Supabase no está configurado en frontend.');
   }
 
   const { error } = await supabase.storage
@@ -136,6 +136,21 @@ export async function listClienteCitas(filters = {}) {
   };
 }
 
+export async function getClientePlanEstado() {
+  const response = await http.get(`${BASE}/planes/estado`);
+  return normalizeResponsePayload(response);
+}
+
+export async function acquireClientePlan(payload) {
+  const response = await http.post(`${BASE}/planes/adquirir`, payload);
+  return normalizeResponsePayload(response);
+}
+
+export async function createClienteCitaHold(payload) {
+  const response = await http.post(`${CITA_BASE}/hold`, payload);
+  return normalizeResponsePayload(response);
+}
+
 export async function getClienteCitaDetalle(idCita) {
   const response = await http.get(`${CITA_BASE}/${idCita}`);
   return normalizeResponsePayload(response);
@@ -152,7 +167,7 @@ export async function prepareClienteProfileImageUpload(file, { label = 'perfil-c
   const prepared = normalizeResponsePayload(response);
 
   if (!prepared?.asset_id || !prepared?.bucket || !prepared?.path || !prepared?.token) {
-    throw new Error('El backend no devolvio datos validos para upload firmado.');
+    throw new Error('El backend no devolvió datos válidos para upload firmado.');
   }
 
   await uploadPreparedFile(prepared, file);
