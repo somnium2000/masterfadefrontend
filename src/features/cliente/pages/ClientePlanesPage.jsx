@@ -91,7 +91,7 @@ function PlanCard({
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: categoryTheme.accentColor }}>
             Nivel {categoryLevel} · {categoryTheme.label}
           </p>
-          <h2 className="mt-2 text-2xl font-semibold leading-tight text-[var(--mf-text)]">
+          <h2 className="mf-font-display mt-2 text-2xl leading-tight text-[var(--mf-text)]">
             {plan.nombre_plan}
           </h2>
           <p className="mt-1 text-xs uppercase tracking-[0.15em] text-[var(--mf-text-2)]">
@@ -291,7 +291,7 @@ export default function ClientePlanesPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Estado de membresía</p>
-            <h2 className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
+            <h2 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)]">
               {membershipLoading
                 ? "Consultando plan..."
                 : activePlan?.nombre_plan || "Sin plan activo"}
@@ -397,7 +397,7 @@ export default function ClientePlanesPage() {
 
       <section className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-5">
         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Colección de membresías</p>
-        <h1 className="mt-2 text-2xl font-semibold text-[var(--mf-text)] sm:text-3xl">Planes con jerarquía premium</h1>
+        <h1 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)] sm:text-3xl">Planes con jerarquía premium</h1>
         <p className="mt-1 text-sm text-[var(--mf-text-2)]">
           Compara por categoría, beneficios y valor mensual para elegir el plan que mejor se adapta a tu estilo.
         </p>

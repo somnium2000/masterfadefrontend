@@ -161,7 +161,7 @@ export default function ClientePerfilPage() {
 
       <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-[var(--mf-accent)]">Identidad</h2>
+          <h2 className="mf-font-display text-sm uppercase tracking-[0.1em] text-[var(--mf-accent)]">Identidad</h2>
           <div className="mt-4 space-y-3">
             <InfoRow icon={UserRound} label="Nombre" value={toSafeText(profile?.nombre_completo)} highlight />
             <InfoRow icon={Calendar} label="Fecha de nacimiento" value={formatDate(profile?.fecha_nacimiento)} highlight />
@@ -171,7 +171,7 @@ export default function ClientePerfilPage() {
         </article>
 
         <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-[var(--mf-accent)]">Contacto</h2>
+          <h2 className="mf-font-display text-sm uppercase tracking-[0.1em] text-[var(--mf-accent)]">Contacto</h2>
           <div className="mt-4 space-y-3">
             <InfoRow icon={MapPin} label="Dirección" value={toSafeText(profile?.direccion_texto)} />
             <InfoRow icon={UserRound} label="Correo de acceso" value={toSafeText(profile?.correo_principal)} />
@@ -181,7 +181,7 @@ export default function ClientePerfilPage() {
 
       <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-[var(--mf-accent)]">Preferencias</h2>
+          <h2 className="mf-font-display text-sm uppercase tracking-[0.1em] text-[var(--mf-accent)]">Preferencias</h2>
           <div className="mt-4 space-y-3">
             <InfoRow
               icon={Scissors}
@@ -195,7 +195,7 @@ export default function ClientePerfilPage() {
         </article>
 
         <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-[var(--mf-accent)]">Privacidad y seguridad</h2>
+          <h2 className="mf-font-display text-sm uppercase tracking-[0.1em] text-[var(--mf-accent)]">Privacidad y seguridad</h2>
           <div className="mt-4 space-y-3">
             <InfoRow icon={ShieldCheck} label="Estado de sesión" value="Protegida y activa" />
             <InfoRow icon={LockKeyhole} label="Contraseña" value="Gestionada mediante flujo seguro existente" />

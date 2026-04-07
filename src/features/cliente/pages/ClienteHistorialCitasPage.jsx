@@ -97,7 +97,7 @@ export default function ClienteHistorialCitasPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Historial de citas</p>
-            <h1 className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">Tus reservas</h1>
+            <h1 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)]">Tus reservas</h1>
             <p className="mt-1 text-sm text-[var(--mf-text-2)]">Visualiza próximas citas y tu actividad pasada en un solo lugar.</p>
           </div>
           <button
@@ -130,7 +130,7 @@ export default function ClienteHistorialCitasPage() {
       ) : (
         <>
           <section className="space-y-3">
-            <h2 className="text-lg font-semibold text-[var(--mf-text)]">Próximas ({upcoming.length})</h2>
+            <h2 className="mf-font-display text-lg text-[var(--mf-text)]">Próximas ({upcoming.length})</h2>
             {upcoming.length ? upcoming.map((cita) => <CitaCard key={cita.id_cita} cita={cita} />) : (
               <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
                 No tienes citas próximas.
@@ -139,7 +139,7 @@ export default function ClienteHistorialCitasPage() {
           </section>
 
           <section className="space-y-3">
-            <h2 className="text-lg font-semibold text-[var(--mf-text)]">Historial ({past.length})</h2>
+            <h2 className="mf-font-display text-lg text-[var(--mf-text)]">Historial ({past.length})</h2>
             {past.length ? past.map((cita) => <CitaCard key={cita.id_cita} cita={cita} />) : (
               <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
                 Aún no hay citas pasadas en tu historial.

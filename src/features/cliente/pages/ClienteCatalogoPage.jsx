@@ -495,7 +495,7 @@ export default function ClienteCatalogoPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Catálogo premium</p>
-            <h1 className="mt-2 text-2xl font-semibold text-[var(--mf-text)] sm:text-3xl">Servicios, paquetes y promociones</h1>
+            <h1 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)] sm:text-3xl">Servicios, paquetes y promociones</h1>
             <p className="mt-1 text-sm text-[var(--mf-text-2)]">Explora tu oferta disponible de forma informativa y clara.</p>
           </div>
           <button

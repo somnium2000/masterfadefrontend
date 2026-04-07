@@ -177,7 +177,7 @@ export default function ClienteDashboardPage() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Servicios favoritos</p>
-            <h2 className="mt-1 text-xl font-semibold text-[var(--mf-text)]">Reserva más rápido</h2>
+            <h2 className="mf-font-display mt-1 text-xl text-[var(--mf-text)]">Reserva más rápido</h2>
           </div>
           <button
             type="button"

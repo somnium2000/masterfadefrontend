@@ -33,7 +33,7 @@ export default function ClienteProfileCompletionBanner({
             <AlertCircle size={13} />
             Perfil en progreso
           </div>
-          <h2 className="mt-2 text-base font-semibold text-[var(--mf-text)] sm:text-lg">
+          <h2 className="mf-font-display mt-2 text-base text-[var(--mf-text)] sm:text-lg">
             Completa tu perfil para recibir una experiencia más personalizada
           </h2>
           {!compact && missing.length ? (
