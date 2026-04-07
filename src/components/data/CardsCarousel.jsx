@@ -50,6 +50,7 @@ export default function CardsCarousel({
   renderItem,
   getItemKey,
   className = '',
+  showViewBadge = true,
 }) {
   const reducedMotion = useReducedMotion();
   const [pageSize, setPageSize] = useState(() => resolvePageSize());
@@ -97,26 +98,35 @@ export default function CardsCarousel({
         <div className="absolute bottom-[-54px] left-1/3 h-36 w-36 rounded-full bg-white/8 blur-3xl" />
       </div>
 
-      <div className="relative z-10 mb-3 flex items-center justify-between gap-2">
-        <div className="inline-flex items-center gap-2 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">
-          <Waves size={13} className="text-[var(--mf-accent)]" />
-          <span>Vista Carrusel</span>
+      {(showViewBadge || canMove) ? (
+        <div
+          className={cn(
+            'relative z-10 mb-3 flex items-center gap-2',
+            showViewBadge ? 'justify-between' : 'justify-end'
+          )}
+        >
+          {showViewBadge ? (
+            <div className="inline-flex items-center gap-2 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">
+              <Waves size={13} className="text-[var(--mf-accent)]" />
+              <span>Vista Carrusel</span>
+            </div>
+          ) : null}
+          {canMove && (
+            <div className="flex items-center gap-2">
+              <CarouselActionButton
+                label="Anterior"
+                onClick={() => movePage(-1)}
+                icon={<ChevronLeft size={15} strokeWidth={2.1} />}
+              />
+              <CarouselActionButton
+                label="Siguiente"
+                onClick={() => movePage(1)}
+                icon={<ChevronRight size={15} strokeWidth={2.1} />}
+              />
+            </div>
+          )}
         </div>
-        {canMove && (
-          <div className="flex items-center gap-2">
-            <CarouselActionButton
-              label="Anterior"
-              onClick={() => movePage(-1)}
-              icon={<ChevronLeft size={15} strokeWidth={2.1} />}
-            />
-            <CarouselActionButton
-              label="Siguiente"
-              onClick={() => movePage(1)}
-              icon={<ChevronRight size={15} strokeWidth={2.1} />}
-            />
-          </div>
-        )}
-      </div>
+      ) : null}
 
       <div className="relative z-10 min-h-[220px]">
         <AnimatePresence custom={direction} mode="wait">

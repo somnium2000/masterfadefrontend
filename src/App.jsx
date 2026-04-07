@@ -26,6 +26,10 @@ import AdminClientesPage from './features/admin/pages/AdminClientesPage.jsx';
 import AdminUsuariosPage from './features/admin/pages/AdminUsuariosPage.jsx';
 import AdminCitasPage from './features/admin/pages/AdminCitasPage.jsx';
 import AdminCitasPreviewPage from './features/admin/pages/AdminCitasPreviewPage.jsx';
+import AdminReportesIngresosPage from './features/admin/pages/AdminReportesIngresosPage.jsx';
+import AdminReportesMembresiasPage from './features/admin/pages/AdminReportesMembresiasPage.jsx';
+import AdminReportesBarberosPage from './features/admin/pages/AdminReportesBarberosPage.jsx';
+import AdminReportesConcurrenciaPage from './features/admin/pages/AdminReportesConcurrenciaPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
@@ -89,10 +93,16 @@ function App() {
         <Route path="seguridad/sesiones" element={<UnderConstructionPage title="Sesiones Activas" />} />
         <Route path="seguridad/bitacoras" element={<UnderConstructionPage title="Bitácoras de Auditoría" />} />
         {/* Reportes */}
-        <Route path="reportes/ventas" element={<UnderConstructionPage title="Ventas" />} />
-        <Route path="reportes/ingresos" element={<UnderConstructionPage title="Reporte de Ingresos" />} />
-        <Route path="reportes/barberos" element={<UnderConstructionPage title="Productividad Barberos" />} />
-        <Route path="reportes/concurrencia" element={<UnderConstructionPage title="Concurrencia de Clientes" />} />
+        {/* JK: Reportes usa tabs como navegacion principal y redirecciona por defecto a Ingresos. */}
+        <Route path="reportes" element={<Navigate to="ingresos" replace />} />
+        <Route path="reportes/ingresos" element={<RouteErrorBoundary><AdminReportesIngresosPage /></RouteErrorBoundary>} />
+        <Route path="reportes/membresias" element={<RouteErrorBoundary><AdminReportesMembresiasPage /></RouteErrorBoundary>} />
+        <Route path="reportes/barberos" element={<RouteErrorBoundary><AdminReportesBarberosPage /></RouteErrorBoundary>} />
+        <Route path="reportes/concurrencia" element={<RouteErrorBoundary><AdminReportesConcurrenciaPage /></RouteErrorBoundary>} />
+        {/* JK: Sucursales oculto temporalmente en reportes; redirige a Ingresos. */}
+        <Route path="reportes/sucursales" element={<Navigate to="../ingresos" replace />} />
+        {/* JK: Compatibilidad temporal para ruta legacy del modulo anterior. */}
+        <Route path="reportes/ventas" element={<RouteErrorBoundary><AdminReportesIngresosPage /></RouteErrorBoundary>} />
         {/* Masterpuntos */}
         <Route path="superpuntos" element={<UnderConstructionPage title="Masterpuntos" />} />
         {/* Configuración */}
@@ -130,10 +140,16 @@ function App() {
         <Route path="seguridad/sesiones" element={<UnderConstructionPage title="Sesiones Activas" />} />
         <Route path="seguridad/bitacoras" element={<UnderConstructionPage title="Bitácoras de Auditoría" />} />
         {/* Reportes */}
-        <Route path="reportes/ventas" element={<UnderConstructionPage title="Ventas" />} />
-        <Route path="reportes/ingresos" element={<UnderConstructionPage title="Reporte de Ingresos" />} />
-        <Route path="reportes/barberos" element={<UnderConstructionPage title="Productividad Barberos" />} />
-        <Route path="reportes/concurrencia" element={<UnderConstructionPage title="Concurrencia de Clientes" />} />
+        {/* JK: Reportes usa tabs como navegacion principal y redirecciona por defecto a Ingresos. */}
+        <Route path="reportes" element={<Navigate to="ingresos" replace />} />
+        <Route path="reportes/ingresos" element={<RouteErrorBoundary><AdminReportesIngresosPage /></RouteErrorBoundary>} />
+        <Route path="reportes/membresias" element={<RouteErrorBoundary><AdminReportesMembresiasPage /></RouteErrorBoundary>} />
+        <Route path="reportes/barberos" element={<RouteErrorBoundary><AdminReportesBarberosPage /></RouteErrorBoundary>} />
+        <Route path="reportes/concurrencia" element={<RouteErrorBoundary><AdminReportesConcurrenciaPage /></RouteErrorBoundary>} />
+        {/* JK: Sucursales oculto temporalmente en reportes; redirige a Ingresos. */}
+        <Route path="reportes/sucursales" element={<Navigate to="../ingresos" replace />} />
+        {/* JK: Compatibilidad temporal para ruta legacy del modulo anterior. */}
+        <Route path="reportes/ventas" element={<RouteErrorBoundary><AdminReportesIngresosPage /></RouteErrorBoundary>} />
         {/* Masterpuntos */}
         <Route path="superpuntos" element={<UnderConstructionPage title="Masterpuntos" />} />
         {/* Configuración */}

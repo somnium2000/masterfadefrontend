@@ -186,6 +186,7 @@ function SucursalCards({ sucursales, renderActions, isSuperAdmin }) {
     <CardsCarousel
       items={sucursales}
       getItemKey={(sucursal) => sucursal?.id_sucursal}
+      showViewBadge={false}
       renderItem={(sucursal, index, pageIndex) => (
         <DataCard
           key={sucursal.id_sucursal}
