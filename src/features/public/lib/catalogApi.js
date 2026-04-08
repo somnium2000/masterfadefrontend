@@ -24,6 +24,36 @@ export async function listPublicCatalogPlans({ id_sucursal } = {}) {
   };
 }
 
+export async function listPublicCatalogPromotions({ id_sucursal } = {}) {
+  // AM: Reutiliza el mismo scope de sucursal para promociones en catalogo publico.
+  const branchId = normalizeBranchId(id_sucursal);
+  const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
+  const response = await http.get(`/v1/public/catalog/promociones${query}`);
+  return {
+    promotions: response?.data?.promociones || [],
+  };
+}
+
+export async function listPublicCatalogServices({ id_sucursal } = {}) {
+  // AM: Scope explicito para servicios publicos por sucursal.
+  const branchId = normalizeBranchId(id_sucursal);
+  const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
+  const response = await http.get(`/v1/public/catalog/servicios${query}`);
+  return {
+    services: response?.data?.servicios || [],
+  };
+}
+
+export async function listPublicCatalogPackages({ id_sucursal } = {}) {
+  // AM: Scope explicito para paquetes publicos por sucursal.
+  const branchId = normalizeBranchId(id_sucursal);
+  const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
+  const response = await http.get(`/v1/public/catalog/paquetes${query}`);
+  return {
+    packages: response?.data?.paquetes || [],
+  };
+}
+
 export async function getPublicCatalog({ id_sucursal } = {}) {
   // AM: Mantiene servicios y paquetes sincronizados bajo el mismo scope de sucursal.
   const branchId = normalizeBranchId(id_sucursal);

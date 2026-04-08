@@ -13,7 +13,7 @@ export default function ThemeSwitcher({ className = '', showLabel = true, labelC
   const Icon = variant === 'dark' ? Sun : Moon;
 
   return (
-    <div className={`flex items-center justify-end gap-3 ${className}`.trim()}>
+    <div className={`flex items-center justify-end ${showLabel ? 'gap-3' : 'gap-0'} ${className}`.trim()}>
       {showLabel ? (
         <span className={`text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--mf-text)] ${labelClassName}`.trim()}>
           {LABELS[variant]}

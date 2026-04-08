@@ -363,6 +363,7 @@ export default function AdminCitasPage() {
     horas_minimas: '2',
     permitir_acompanantes: false,
     pago_total_obligatorio: true,
+    simulacion_sin_pago: true,
     confirmacion_automatica: true,
   });
 
@@ -527,6 +528,7 @@ export default function AdminCitasPage() {
         no_show_min: String(nextContext.parametros?.no_show_min ?? prev.no_show_min),
         permitir_acompanantes: Boolean(nextContext.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(nextContext.parametros?.pago_total_obligatorio ?? true),
+        simulacion_sin_pago: Boolean(nextContext.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
       }));
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -768,6 +770,7 @@ export default function AdminCitasPage() {
         no_show_min: String(payload?.parametros?.no_show_min ?? prev.no_show_min),
         permitir_acompanantes: Boolean(payload?.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(payload?.parametros?.pago_total_obligatorio ?? true),
+        simulacion_sin_pago: Boolean(payload?.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
       }));
       return true;
     } catch (err) {
@@ -1229,6 +1232,7 @@ export default function AdminCitasPage() {
         no_show_min: noShow,
         permitir_acompanantes: Boolean(paramsForm.permitir_acompanantes),
         pago_total_obligatorio: true,
+        simulacion_sin_pago: Boolean(paramsForm.simulacion_sin_pago),
       });
       const payload = response?.data ?? response;
       setParamsForm((prev) => ({
@@ -1237,6 +1241,7 @@ export default function AdminCitasPage() {
         no_show_min: String(payload?.parametros?.no_show_min ?? noShow),
         permitir_acompanantes: Boolean(payload?.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(payload?.parametros?.pago_total_obligatorio ?? true),
+        simulacion_sin_pago: Boolean(payload?.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
       }));
       notifications.success('Parámetros guardados.', { dedupeKey: 'citas-params-save-ok' });
     } catch (err) {
@@ -1904,6 +1909,18 @@ export default function AdminCitasPage() {
 
             <div className="citas-param-row">
               <div className="citas-param-copy">
+                <h4>Simulación sin pago (temporal)</h4>
+                <p>Permite reservas sin cobro en /agendar mientras se integra la pasarela de pago.</p>
+              </div>
+              <button
+                type="button"
+                className={`citas-switch-track ${paramsForm.simulacion_sin_pago ? 'is-on' : ''}`}
+                onClick={() => setParamsForm((prev) => ({ ...prev, simulacion_sin_pago: !prev.simulacion_sin_pago }))}
+              />
+            </div>
+
+            <div className="citas-param-row">
+              <div className="citas-param-copy">
                 <h4>Confirmacion automatica</h4>
                 <p>Toggle informativo para comportamiento esperado.</p>
               </div>
@@ -1949,7 +1966,7 @@ export default function AdminCitasPage() {
             Excepciones de horario para <span className="font-semibold text-[var(--mf-text)]">{selectedBarber.nombre_completo}</span>
           </p>
           <Button className="gap-2" onClick={() => setBlockDialogOpen(true)}>
-            <Plus size={15} /> Nueva excepciï¿½n
+            <Plus size={15} /> Nueva excepción
           </Button>
         </div>
 
@@ -1976,8 +1993,8 @@ export default function AdminCitasPage() {
                     type="button"
                     className="citas-icon-action"
                     onClick={handleEditException}
-                    aria-label="Editar excepciï¿½n"
-                    title="Editar excepciï¿½n"
+                    aria-label="Editar excepción"
+                    title="Editar excepción"
                   >
                     <Pencil size={18} />
                   </button>
@@ -1986,8 +2003,8 @@ export default function AdminCitasPage() {
                     className="citas-icon-action is-danger disabled:opacity-45"
                     onClick={() => handleDeleteBlock(item.id_bloqueo)}
                     disabled={blockDeleteId === item.id_bloqueo}
-                    aria-label="Eliminar excepciï¿½n"
-                    title="Eliminar excepciï¿½n"
+                    aria-label="Eliminar excepción"
+                    title="Eliminar excepción"
                   >
                     <Trash2 size={18} />
                   </button>
@@ -2005,10 +2022,10 @@ export default function AdminCitasPage() {
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[var(--mf-text-2)] text-lg">
-            Inhabilitar un dï¿½a completo por sucursal
+            Inhabilitar un día completo por sucursal
           </p>
           <Button className="gap-2" onClick={() => setBranchDayOffDialogOpen(true)}>
-            <Plus size={15} /> Bloquear dï¿½a
+            <Plus size={15} /> Bloquear día
           </Button>
         </div>
 
@@ -2018,7 +2035,7 @@ export default function AdminCitasPage() {
           <EmptyState
             icon={Ban}
             title="Sin bloqueos por sucursal"
-            description="No hay dï¿½as completos bloqueados en la sucursal seleccionada."
+            description="No hay días completos bloqueados en la sucursal seleccionada."
           />
         ) : (
           <div className="citas-block-list">

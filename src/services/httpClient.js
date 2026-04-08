@@ -3,7 +3,7 @@
 // - Usa VITE_API_URL como base.
 // - Inyecta token Bearer automáticamente si hay un tokenGetter registrado.
 
-// ── Token interceptor ──
+// Token interceptor
 // AuthContext debe llamar setTokenGetter(() => token) al montar.
 let _tokenGetter = null;
 
@@ -11,7 +11,7 @@ export function setTokenGetter(fn) {
   _tokenGetter = typeof fn === "function" ? fn : null;
 }
 
-// ── URL helper ──
+// URL helper
 function joinUrl(baseUrl, path) {
   const base = String(baseUrl || "").trim();
   const p = String(path || "").trim();
@@ -25,7 +25,7 @@ function joinUrl(baseUrl, path) {
   return `${baseClean}${pathClean}`;
 }
 
-// ── Response parser ──
+// Response parser
 async function parseResponse(response) {
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -34,7 +34,7 @@ async function parseResponse(response) {
   return response.text();
 }
 
-// ── Core request ──
+// Core request
 export async function request(path, options = {}) {
   const { method = "GET", body, token, headers = {}, signal } = options;
 
@@ -79,7 +79,7 @@ export async function request(path, options = {}) {
   return data;
 }
 
-// ── Convenience methods ──
+// Convenience methods
 export const http = {
   get: (path, opts = {}) => request(path, { ...opts, method: "GET" }),
   post: (path, body, opts = {}) =>

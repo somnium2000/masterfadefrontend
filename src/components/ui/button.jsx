@@ -24,19 +24,19 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // Gradiente dorado / vino según tema — acción principal
+        // Gradiente dorado / vino según tema â€” acción principal
         default:
           "mf-accent-gradient text-[var(--mf-accent-text)] shadow-[var(--mf-shadow-accent)] hover:shadow-[var(--mf-shadow-accent-strong)] hover:-translate-y-px active:translate-y-0 active:shadow-[var(--mf-shadow-accent)]",
-        // Borde translúcido — acción secundaria
+        // Borde translúcido â€” acción secundaria
         outline:
           "border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text)] hover:border-[var(--mf-accent)]/50 hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_80%,var(--mf-accent)_8%)] hover:text-[var(--mf-text)]",
-        // Fantasma — acciones de baja jerarquía
+        // Fantasma â€” acciones de baja jerarquía
         ghost:
           "bg-transparent text-[var(--mf-text-2)] hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-text)] rounded-xl",
-        // Peligro — eliminar
+        // Peligro â€” eliminar
         destructive:
           "bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25 hover:border-red-500/50",
-        // Link — navegación inline
+        // Link â€” navegación inline
         link:
           "text-[var(--mf-accent)] underline-offset-4 hover:underline min-h-0 px-0 h-auto",
       },

@@ -64,6 +64,7 @@ export default function PublicBookingAgendaStep() {
     allBlocksComplete,
     allowCompanions,
     availabilityError,
+    availabilityLoading,
     availabilityMap,
     barbers,
     bookingBlocks,
@@ -91,7 +92,6 @@ export default function PublicBookingAgendaStep() {
     slotConflict,
     slotSuggestions,
     slotSuggestionsLoading,
-    showBlockingAvailabilityLoader,
     slots,
     slotsLoading,
     syncServicesScrollState,
@@ -139,12 +139,6 @@ export default function PublicBookingAgendaStep() {
 
   return (
     <>
-      {showBlockingAvailabilityLoader ? (
-        <div className="citas-surface p-6">
-          <LoadingSpinner />
-        </div>
-      ) : null}
-
       {availabilityError ? <ErrorBanner message={availabilityError} onRetry={fetchAvailability} /> : null}
 
       <div className="citas-agenda-layout public-booking-agenda-stack">
@@ -188,6 +182,9 @@ export default function PublicBookingAgendaStep() {
               value={activeBlock?.idBarbero || ''}
               onChange={(event) => updateActiveBlockBarber(event.target.value)}
             >
+              {activeBlockIndex > 0 ? (
+                <option value="">Sin preferencia (asignación automática)</option>
+              ) : null}
               {barbers.map((barber) => (
                 <option key={barber.id_empleado} value={barber.id_empleado}>
                   {barber.nombre_completo}
@@ -235,8 +232,13 @@ export default function PublicBookingAgendaStep() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45, delay: 0.06, ease: LANDING_EASE }}
         >
-          <div className="citas-calendar-head">
+          <div className="citas-calendar-head public-booking-calendar-head">
             <h3 className="citas-side-title">Fechas Disponibles</h3>
+            {availabilityLoading ? (
+              <span className="public-booking-calendar-refresh" aria-live="polite">
+                Actualizando disponibilidad...
+              </span>
+            ) : null}
           </div>
 
           {activeBlockIndex > 0 ? (

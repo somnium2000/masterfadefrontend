@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Loader2,
@@ -56,12 +56,19 @@ import LoadingSpinner from "../../../components/data/LoadingSpinner.jsx";
 import ActionConfirmDialog from "../../../components/feedback/ActionConfirmDialog.jsx";
 import { useNotifications } from "../../../context/NotificationsContext.jsx";
 import { emitCatalogSync } from "../../../lib/catalogSync.js";
+import {
+  DEFAULT_PLAN_CATEGORY,
+  getPlanCategoryTheme,
+  PLAN_CATEGORY_OPTIONS,
+  normalizePlanCategory,
+} from "../../plans/lib/planCategoryTheme.js";
 
 const FORM_DEFAULTS = {
   nombre_plan: "",
   descripcion: "",
   precio_hnl: "",
   periodo_membresia_codigo: "mensual",
+  categoria_nivel: DEFAULT_PLAN_CATEGORY,
   visible_publico: true,
   orden_visual: "100",
   beneficios: [],
@@ -80,16 +87,38 @@ function extractMessage(error) {
 }
 
 function normalizeTipo(value) {
-  return String(value || "").trim().toLowerCase() === "servicio" ? "servicio" : "cortesia";
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "cortesia") return "cortesia";
+  return "servicio";
 }
 
 function normalizeBenefits(items = []) {
-  return (Array.isArray(items) ? items : []).map((item) => ({
-    tipo: normalizeTipo(item?.tipo),
-    id_servicio: item?.id_servicio ? String(item.id_servicio) : "",
-    nombre: item?.nombre ? String(item.nombre) : "",
-    cantidad: Number(item?.cantidad ?? 1),
-  }));
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const normalizedServiceId = String(item?.id_servicio || "").trim();
+      const normalizedTipo = normalizeTipo(item?.tipo);
+      // AM: Compatibilidad con beneficios legacy sin tipo cuando existe id_servicio.
+      const tipo = normalizedTipo === "cortesia" && normalizedServiceId ? "servicio" : normalizedTipo;
+      const codigo = item?.codigo ? String(item.codigo) : "";
+      const nombre = item?.nombre ? String(item.nombre) : (tipo === "cortesia" ? codigo : "");
+      return {
+        tipo,
+        id_servicio: normalizedServiceId,
+        codigo,
+        nombre,
+        cantidad: Number(item?.cantidad ?? 1),
+      };
+    });
+}
+
+function sanitizeBenefitsByServices(items = [], services = []) {
+  const validServiceIds = new Set((Array.isArray(services) ? services : []).map((service) => String(service?.id_servicio || "")));
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => {
+      const tipo = normalizeTipo(item?.tipo);
+      if (tipo !== "servicio") return true;
+      return validServiceIds.has(String(item?.id_servicio || ""));
+    });
 }
 
 function formatPeriod(value) {
@@ -132,13 +161,13 @@ function validateForm(values) {
   if (!Number.isFinite(precio) || precio < 0) return "El precio debe ser mayor o igual a 0.";
   const ordenVisual = Number(values?.orden_visual);
   if (!Number.isFinite(ordenVisual) || ordenVisual < 0) return "El orden visual debe ser mayor o igual a 0.";
+  const categoriaNivel = normalizePlanCategory(values?.categoria_nivel, NaN);
+  if (!Number.isInteger(categoriaNivel)) return "La categoría debe estar entre 1 y 5.";
 
   const benefits = Array.isArray(values?.beneficios) ? values.beneficios : [];
   if (!benefits.length) return "Debes agregar al menos un beneficio.";
 
   const seenServices = new Set();
-  const seenCourtesies = new Set();
-
   for (const benefit of benefits) {
     const tipo = normalizeTipo(benefit?.tipo);
     const cantidad = Number(benefit?.cantidad);
@@ -149,14 +178,10 @@ function validateForm(values) {
       if (!idServicio) return "Cada beneficio tipo servicio debe seleccionar servicio.";
       if (seenServices.has(idServicio)) return "No repitas servicios en beneficios.";
       seenServices.add(idServicio);
-      continue;
+    } else {
+      const nombreCortesia = String(benefit?.nombre || "").trim();
+      if (!nombreCortesia) return "Cada cortesia debe tener nombre.";
     }
-
-    const nombre = String(benefit?.nombre || "").trim();
-    if (!nombre) return "Cada cortesia debe incluir nombre.";
-    const key = String(nombre).trim().toLowerCase();
-    if (seenCourtesies.has(key)) return "No repitas la misma cortesia.";
-    seenCourtesies.add(key);
   }
 
   return null;
@@ -176,12 +201,30 @@ function PlanStatusBadge({ activo }) {
   return <span className={`mf-badge ${activo ? "mf-badge-green" : "mf-badge-red"}`}>{activo ? "Activo" : "Inactivo"}</span>;
 }
 
-function PlanVisibilityBadge({ visible }) {
+function PlanVisibilityBadge({ visible, activo = true }) {
+  if (!activo) return <span className="mf-badge mf-badge-red">Inactivo</span>;
   return <span className={`mf-badge ${visible ? "mf-badge-green" : "mf-badge-muted"}`}>{visible ? "Visible" : "Oculto"}</span>;
 }
 
 function PlanPeriodBadge({ period }) {
   return <span className="mf-badge mf-badge-gold">{formatPeriod(period)}</span>;
+}
+
+function PlanCategoryBadge({ level }) {
+  const normalizedLevel = normalizePlanCategory(level, DEFAULT_PLAN_CATEGORY);
+  const categoryTheme = getPlanCategoryTheme(normalizedLevel);
+  return (
+    <span
+      className="inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]"
+      style={{
+        background: categoryTheme.badgeTone,
+        borderColor: categoryTheme.badgeBorder,
+        color: categoryTheme.badgeColor,
+      }}
+    >
+      Nivel {normalizedLevel} - {categoryTheme.label}
+    </span>
+  );
 }
 
 function SucursalSelector({ branchIds, allBranches, selected, onChange, loading }) {
@@ -249,8 +292,11 @@ function PlanBenefitsEditor({ items, onChange, services }) {
     onChange(benefits.map((item, currentIndex) => {
       if (currentIndex !== index) return item;
       if (field === "tipo") {
-        const nextType = normalizeTipo(value);
-        return { tipo: nextType, id_servicio: "", nombre: "", cantidad: 1 };
+        const nextTipo = normalizeTipo(value);
+        if (nextTipo === "servicio") {
+          return { ...item, tipo: "servicio", id_servicio: "", codigo: "", nombre: "" };
+        }
+        return { ...item, tipo: "cortesia", id_servicio: "", codigo: "", nombre: item?.nombre || "" };
       }
       return { ...item, [field]: value };
     }));
@@ -270,9 +316,10 @@ function PlanBenefitsEditor({ items, onChange, services }) {
       {benefits.map((item, index) => {
         const tipo = normalizeTipo(item?.tipo);
         const currentServiceId = String(item?.id_servicio || "").trim();
+        const currentCourtesyName = String(item?.nombre || "").trim();
 
         return (
-          <div key={`${index}-${currentServiceId || item?.codigo || "new"}`} className="grid grid-cols-1 gap-2 rounded-xl border border-[var(--mf-nav-border)] p-2 sm:grid-cols-[130px_1fr_90px_auto] sm:items-center">
+          <div key={`${index}-${currentServiceId || currentCourtesyName || "new"}`} className="grid grid-cols-1 gap-2 rounded-xl border border-[var(--mf-nav-border)] p-2 sm:grid-cols-[130px_1fr_90px_auto] sm:items-center">
             <select value={tipo} onChange={(event) => updateItem(index, "tipo", event.target.value)} className="mf-select">
               <option value="servicio">Servicio</option>
               <option value="cortesia">Cortesia</option>
@@ -293,9 +340,10 @@ function PlanBenefitsEditor({ items, onChange, services }) {
               </select>
             ) : (
               <Input
-                value={item?.nombre || ""}
+                type="text"
+                value={currentCourtesyName}
                 onChange={(event) => updateItem(index, "nombre", event.target.value)}
-                placeholder="Nombre cortesia"
+                placeholder="Nombre de la cortesia"
               />
             )}
 
@@ -361,8 +409,30 @@ function PlanForm({ values, onChange, services, branchLabel }) {
           <Input id="plan-period" value="Mensual" readOnly />
         </div>
 
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="plan-category">Categoría visual</Label>
+          <select
+            id="plan-category"
+            className="mf-select"
+            value={String(normalizePlanCategory(values.categoria_nivel, DEFAULT_PLAN_CATEGORY))}
+            onChange={(event) => onChange("categoria_nivel", Number(event.target.value))}
+          >
+            {PLAN_CATEGORY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                Nivel {option.value} - {option.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-[var(--mf-text-2)]">
+            {PLAN_CATEGORY_OPTIONS.find((option) => option.value === normalizePlanCategory(values.categoria_nivel, DEFAULT_PLAN_CATEGORY))?.helper}
+          </p>
+        </div>
+
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex items-center justify-between rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2.5 text-sm">
-          <span className="text-[var(--mf-text)]">Visible en catalogo publico</span>
+          <span className="text-[var(--mf-text)]">Visible en catálogo público</span>
           <input type="checkbox" checked={Boolean(values.visible_publico)} onChange={(event) => onChange("visible_publico", event.target.checked)} className="h-4 w-4 accent-[var(--mf-accent)]" />
         </label>
       </div>
@@ -415,6 +485,15 @@ export default function AdminPlansCatalogPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [stateTarget, setStateTarget] = useState(null);
   const [stateLoading, setStateLoading] = useState(false);
+  const lastErrorToastRef = useRef({ planes: "", sucursales: "" });
+
+  const notifyErrorOnce = useCallback((scope, message) => {
+    const normalized = String(message || "").trim();
+    if (!normalized) return;
+    if (lastErrorToastRef.current[scope] === normalized) return;
+    lastErrorToastRef.current[scope] = normalized;
+    notifications.error(normalized);
+  }, [notifications]);
 
   const branchNameById = useMemo(() => allBranches.reduce((acc, branch) => ({ ...acc, [branch.id_sucursal]: branch.nombre_sucursal }), {}), [allBranches]);
 
@@ -465,7 +544,7 @@ export default function AdminPlansCatalogPage() {
     const trimmedSearch = search.trim();
     if (trimmedSearch) chips.push({ key: "search", label: `Busqueda: ${trimmedSearch}` });
     if (filters.estado !== "all") chips.push({ key: "estado", label: `Estado: ${filters.estado === "activo" ? "Activo" : "Inactivo"}` });
-    if (filters.visibilidad !== "all") chips.push({ key: "visibilidad", label: `Publico: ${filters.visibilidad === "visible" ? "Visible" : "Oculto"}` });
+    if (filters.visibilidad !== "all") chips.push({ key: "visibilidad", label: `Público: ${filters.visibilidad === "visible" ? "Visible" : "Oculto"}` });
     if (filters.tipo !== "all") chips.push({ key: "tipo", label: `Beneficios: ${filters.tipo}` });
     if (filters.periodo !== "all") chips.push({ key: "periodo", label: `Periodo: ${formatPeriod(filters.periodo)}` });
     if (!sucursal && filters.idSucursal !== "all") chips.push({ key: "idSucursal", label: `Sucursal: ${branchNameById[filters.idSucursal] || "Seleccionada"}` });
@@ -491,9 +570,12 @@ export default function AdminPlansCatalogPage() {
     setBranchLoadError("");
 
     try {
-      const response = await listAdminSucursales();
-      const nextBranches = Array.isArray(response?.data?.sucursales) ? response.data.sucursales.filter((branch) => branch?.id_sucursal) : [];
+      const response = await listAdminSucursales({ soloActivas: true });
+      const nextBranches = Array.isArray(response?.data?.sucursales)
+        ? response.data.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
+        : [];
       setAllBranches(nextBranches);
+      lastErrorToastRef.current.sucursales = "";
 
       if (nextBranches.length === 1) {
         setSucursal(nextBranches[0].id_sucursal);
@@ -503,11 +585,11 @@ export default function AdminPlansCatalogPage() {
     } catch (error) {
       const message = extractMessage(error);
       setBranchLoadError(message);
-      notifications.error(message);
+      notifyErrorOnce("sucursales", message);
     } finally {
       setLoadingBranches(false);
     }
-  }, [isSuperAdmin, notifications, sucursal]);
+  }, [isSuperAdmin, notifyErrorOnce, sucursal]);
 
   const fetchPlanes = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -517,14 +599,15 @@ export default function AdminPlansCatalogPage() {
       const response = await listAdminPlanes({ id_sucursal: sucursal || undefined });
       const list = Array.isArray(response?.data?.planes) ? response.data.planes : [];
       setPlanes(sortPlanes(list));
+      lastErrorToastRef.current.planes = "";
     } catch (error) {
       const message = extractMessage(error);
       setListError(message);
-      if (!silent) notifications.error(message);
+      if (!silent) notifyErrorOnce("planes", message);
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [notifications, sucursal]);
+  }, [notifyErrorOnce, sucursal]);
 
   const fetchServicesForBranch = useCallback(async (branchId) => {
     if (!branchId) {
@@ -537,7 +620,13 @@ export default function AdminPlansCatalogPage() {
       const response = await listAdminServicios({ id_sucursal: branchId });
       const list = Array.isArray(response?.data?.servicios) ? response.data.servicios : [];
       const scoped = list
-        .filter((service) => Boolean(service?.activo) && Boolean(service?.tarifa_activa))
+        // AM: Solo servicios operativos por sucursal para beneficios de planes.
+        .filter((service) =>
+          Boolean(service?.activo)
+          && Boolean(service?.tarifa_activa)
+          && service?.servicio_informativo !== true
+          && String(service?.id_sucursal || "") === String(branchId)
+        )
         .map((service) => ({ id_servicio: service.id_servicio, nombre_servicio: service.nombre_servicio }))
         .sort((a, b) => String(a.nombre_servicio || "").localeCompare(String(b.nombre_servicio || ""), "es"));
 
@@ -577,6 +666,18 @@ export default function AdminPlansCatalogPage() {
     void fetchServicesForBranch(sucursal);
   }, [fetchPlanes, fetchServicesForBranch, isSuperAdmin, sucursal]);
 
+  useEffect(() => {
+    if (!dialogOpen) return;
+    setFormValues((previous) => {
+      const nextBenefits = sanitizeBenefitsByServices(previous?.beneficios, services);
+      if (nextBenefits.length === (Array.isArray(previous?.beneficios) ? previous.beneficios.length : 0)) {
+        return previous;
+      }
+      // AM: Limpia beneficios inválidos si cambia la sucursal o el set de servicios operativos.
+      return { ...previous, beneficios: nextBenefits };
+    });
+  }, [dialogOpen, services]);
+
   function handleFormChange(field, value) {
     setFormValues((previous) => ({ ...previous, [field]: value }));
   }
@@ -603,17 +704,19 @@ export default function AdminPlansCatalogPage() {
       return;
     }
 
-    await fetchServicesForBranch(branchId);
+    const scopedServices = await fetchServicesForBranch(branchId);
     setFormBranchId(branchId);
     setEditTarget(plan);
+    const nextBenefits = sanitizeBenefitsByServices(normalizeBenefits(plan?.beneficios), scopedServices);
     setFormValues({
       nombre_plan: plan?.nombre_plan || "",
       descripcion: plan?.descripcion || "",
       precio_hnl: Number(plan?.precio_hnl ?? 0).toString(),
       periodo_membresia_codigo: String(plan?.periodo_membresia_codigo || "mensual").toLowerCase(),
+      categoria_nivel: normalizePlanCategory(plan?.categoria_nivel, DEFAULT_PLAN_CATEGORY),
       visible_publico: Boolean(plan?.visible_publico),
       orden_visual: String(Number(plan?.orden_visual ?? 100)),
-      beneficios: normalizeBenefits(plan?.beneficios),
+      beneficios: nextBenefits,
     });
     setFormError("");
     setDialogOpen(true);
@@ -648,6 +751,17 @@ export default function AdminPlansCatalogPage() {
       return;
     }
 
+    const validServiceIds = new Set((Array.isArray(services) ? services : []).map((service) => String(service?.id_servicio || "")));
+    const invalidServiceBenefit = normalizeBenefits(formValues?.beneficios).find((item) => {
+      if (normalizeTipo(item?.tipo) !== "servicio") return false;
+      return !validServiceIds.has(String(item?.id_servicio || ""));
+    });
+    if (invalidServiceBenefit) {
+      // AM: Defensa en UI ante manipulación de payload o cambios de sucursal durante edición.
+      setFormError("Uno o más servicios seleccionados no son operativos en la sucursal actual.");
+      return;
+    }
+
     setFormLoading(true);
     setFormError("");
 
@@ -656,6 +770,7 @@ export default function AdminPlansCatalogPage() {
       descripcion: String(formValues.descripcion || "").trim() || null,
       precio_hnl: Number(formValues.precio_hnl),
       periodo_membresia_codigo: "mensual",
+      categoria_nivel: normalizePlanCategory(formValues.categoria_nivel, DEFAULT_PLAN_CATEGORY),
       beneficios: normalizeBenefits(formValues.beneficios).map((item) => {
         const tipo = normalizeTipo(item?.tipo);
         const payloadItem = { tipo, cantidad: Number(item?.cantidad) };
@@ -663,6 +778,8 @@ export default function AdminPlansCatalogPage() {
           payloadItem.id_servicio = String(item?.id_servicio || "").trim();
         } else {
           payloadItem.nombre = String(item?.nombre || "").trim();
+          const codigo = String(item?.codigo || "").trim();
+          if (codigo) payloadItem.codigo = codigo;
         }
         return payloadItem;
       }),
@@ -807,9 +924,11 @@ export default function AdminPlansCatalogPage() {
               badge={<PlanStatusBadge activo={Boolean(plan.activo)} />}
               fields={[
                 ...(!sucursal ? [{ label: "Sucursal", value: branchNameById[plan.id_sucursal] || "Sin sucursal" }] : []),
+                { label: "Categoría", value: <PlanCategoryBadge level={plan.categoria_nivel} /> },
                 { label: "Periodo", value: <PlanPeriodBadge period={plan.periodo_membresia_codigo} /> },
                 { label: "Precio", value: <span className="font-mono font-bold text-[var(--mf-accent)]">L {Number(plan.precio_hnl ?? 0).toFixed(2)}</span> },
-                { label: "Publico", value: <PlanVisibilityBadge visible={Boolean(plan.visible_publico)} /> },
+                { label: "Orden visual", value: Number(plan.orden_visual ?? 100) },
+                { label: "Público", value: <PlanVisibilityBadge visible={Boolean(plan.visible_publico)} activo={Boolean(plan.activo)} /> },
                 { label: "Beneficios", value: Array.isArray(plan?.beneficios) ? plan.beneficios.length : 0 },
               ]}
               actions={renderActions(plan)}
@@ -825,10 +944,12 @@ export default function AdminPlansCatalogPage() {
               <TableRow className="border-[var(--mf-nav-border)]">
                 {!sucursal ? <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursal</TableHead> : null}
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
+                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Categoría</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Periodo</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Precio HNL</TableHead>
+                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Beneficios</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Publico</TableHead>
+                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Público</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Estado</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead>
               </TableRow>
@@ -841,10 +962,12 @@ export default function AdminPlansCatalogPage() {
                     <div>{plan.nombre_plan}</div>
                     {plan.descripcion ? <div className="text-xs text-[var(--mf-text-2)] mt-0.5">{plan.descripcion}</div> : null}
                   </TableCell>
+                  <TableCell className="text-center"><PlanCategoryBadge level={plan.categoria_nivel} /></TableCell>
                   <TableCell className="text-center"><PlanPeriodBadge period={plan.periodo_membresia_codigo} /></TableCell>
                   <TableCell className="text-right font-mono font-semibold text-[var(--mf-accent)]">L {Number(plan.precio_hnl ?? 0).toFixed(2)}</TableCell>
+                  <TableCell className="text-center text-[var(--mf-text-2)]">{Number(plan.orden_visual ?? 100)}</TableCell>
                   <TableCell className="text-center hidden md:table-cell text-[var(--mf-text-2)]">{Array.isArray(plan?.beneficios) ? plan.beneficios.length : 0}</TableCell>
-                  <TableCell className="text-center hidden md:table-cell"><PlanVisibilityBadge visible={Boolean(plan.visible_publico)} /></TableCell>
+                  <TableCell className="text-center hidden md:table-cell"><PlanVisibilityBadge visible={Boolean(plan.visible_publico)} activo={Boolean(plan.activo)} /></TableCell>
                   <TableCell className="text-center"><PlanStatusBadge activo={Boolean(plan.activo)} /></TableCell>
                   <TableCell className="text-right"><div className="flex items-center justify-end gap-1.5">{renderActions(plan)}</div></TableCell>
                 </TableRow>
@@ -886,8 +1009,9 @@ export default function AdminPlansCatalogPage() {
                   icon: <Gift size={14} />,
                   fields: [
                     { label: "Precio HNL", value: `L ${Number(detailTarget.precio_hnl ?? 0).toFixed(2)}` },
+                    { label: "Categoría", value: <PlanCategoryBadge level={detailTarget.categoria_nivel} /> },
                     { label: "Periodo", value: <PlanPeriodBadge period={detailTarget.periodo_membresia_codigo} /> },
-                    { label: "Visibilidad publica", value: <PlanVisibilityBadge visible={Boolean(detailTarget.visible_publico)} /> },
+                    { label: "Visibilidad pública", value: <PlanVisibilityBadge visible={Boolean(detailTarget.visible_publico)} activo={Boolean(detailTarget.activo)} /> },
                     { label: "Sucursal", value: detailTarget.id_sucursal ? (branchNameById[detailTarget.id_sucursal] || detailTarget.id_sucursal) : "Sin sucursal" },
                     { label: "Orden visual", value: Number(detailTarget.orden_visual ?? 100) },
                   ],
@@ -906,7 +1030,9 @@ export default function AdminPlansCatalogPage() {
                             <div key={`${index}-${benefit?.id_servicio || benefit?.codigo || benefit?.nombre || "benefit"}`} className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2 text-sm">
                               <span className="font-semibold text-[var(--mf-text)]">{Number(benefit?.cantidad || 0)}x</span>{" "}
                               <span className="text-[var(--mf-text)]">{benefit?.nombre || benefit?.codigo || "Beneficio"}</span>
-                              <span className="ml-2 text-xs text-[var(--mf-text-2)]">({normalizeTipo(benefit?.tipo) === "servicio" ? "Servicio" : "Cortesia"})</span>
+                              <span className="ml-2 text-xs text-[var(--mf-text-2)]">
+                                ({normalizeTipo(benefit?.tipo) === "servicio" ? "Servicio" : "Cortesia"})
+                              </span>
                             </div>
                           ))}
                         </div>
@@ -937,8 +1063,8 @@ export default function AdminPlansCatalogPage() {
           {/* AM: Atajos de filtro para acelerar trabajo operativo del super admin. */}
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" onClick={() => setFilters((prev) => ({ ...prev, estado: prev.estado === "activo" ? "all" : "activo" }))} className={quickFilterButtonClass(filters.estado === "activo")}>Solo activos</Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => setFilters((prev) => ({ ...prev, visibilidad: prev.visibilidad === "visible" ? "all" : "visible" }))} className={quickFilterButtonClass(filters.visibilidad === "visible")}>Publicos</Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => setFilters((prev) => ({ ...prev, tipo: prev.tipo === "servicio" ? "all" : "servicio" }))} className={quickFilterButtonClass(filters.tipo === "servicio")}>Con servicio</Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setFilters((prev) => ({ ...prev, visibilidad: prev.visibilidad === "visible" ? "all" : "visible" }))} className={quickFilterButtonClass(filters.visibilidad === "visible")}>Públicos</Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setFilters((prev) => ({ ...prev, tipo: prev.tipo === "servicio" ? "all" : "servicio" }))} className={quickFilterButtonClass(filters.tipo === "servicio")}>Con servicios</Button>
           </div>
 
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -951,7 +1077,7 @@ export default function AdminPlansCatalogPage() {
               </select>
             </div>
             <div>
-              <Label className="mf-label">Visibilidad publica</Label>
+              <Label className="mf-label">Visibilidad pública</Label>
               <select className="mf-select mt-1" value={filters.visibilidad} onChange={(event) => setFilters((prev) => ({ ...prev, visibilidad: event.target.value }))}>
                 <option value="all">Todos</option>
                 <option value="visible">Visible al publico</option>
@@ -1014,4 +1140,6 @@ export default function AdminPlansCatalogPage() {
     </div>
   );
 }
+
+
 

@@ -67,6 +67,7 @@ const FORM_DEFAULTS = {
     nombre_paquete: '',
     descripcion: '',
     precio_hnl: '',
+    orden_visual: '100',
     items: [],
 };
 
@@ -192,6 +193,9 @@ function getItemsSearchText(paquete) {
 
 function sortPaquetes(list = []) {
     return [...(Array.isArray(list) ? list : [])].sort((a, b) => {
+        const orderA = Number(a?.orden_visual ?? 100);
+        const orderB = Number(b?.orden_visual ?? 100);
+        if (orderA !== orderB) return orderA - orderB;
         const nameCompare = String(a?.nombre_paquete || '').localeCompare(String(b?.nombre_paquete || ''), 'es');
         if (nameCompare !== 0) return nameCompare;
         const branchCompare = String(a?.id_sucursal || '').localeCompare(String(b?.id_sucursal || ''), 'es');
@@ -234,6 +238,8 @@ function validateForm(values) {
 
     const precio = Number(values.precio_hnl);
     if (!Number.isFinite(precio) || precio < 0) return 'El precio debe ser mayor o igual a 0.';
+    const orden = Number(values.orden_visual);
+    if (!Number.isFinite(orden) || orden < 0) return 'El orden visual debe ser mayor o igual a 0.';
 
     if (!Array.isArray(values.items) || values.items.length === 0) {
         return 'Agrega al menos un servicio al paquete.';
@@ -369,6 +375,18 @@ function PaqueteForm({ values, onChange, serviciosList }) {
                     value={values.precio_hnl}
                     onChange={(event) => onChange('precio_hnl', event.target.value)}
                     placeholder="650.00"
+                />
+            </div>
+
+            <div className="flex flex-col gap-1">
+                <Label htmlFor="fp-orden">Orden visual *</Label>
+                <Input
+                    id="fp-orden"
+                    type="number"
+                    min="0"
+                    value={values.orden_visual}
+                    onChange={(event) => onChange('orden_visual', event.target.value)}
+                    placeholder="100"
                 />
             </div>
 
@@ -518,9 +536,12 @@ export default function AdminPackagesCatalogPage() {
     const fetchBranches = useCallback(async () => {
         setLoadingBranches(true);
         try {
-            const data = await listAdminSucursales();
+            const data = await listAdminSucursales({ soloActivas: true });
             const payloadData = data?.data ?? data;
-            setAllBranches(Array.isArray(payloadData?.sucursales) ? payloadData.sucursales : []);
+            const nextBranches = Array.isArray(payloadData?.sucursales)
+                ? payloadData.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
+                : [];
+            setAllBranches(nextBranches);
         } catch {
             setAllBranches([]);
             notifications.error('No se pudieron cargar las sucursales para operar paquetes.', {
@@ -661,6 +682,7 @@ export default function AdminPackagesCatalogPage() {
             nombre_paquete: paquete?.nombre_paquete ?? '',
             descripcion: paquete?.descripcion ?? '',
             precio_hnl: String(paquete?.precio_hnl ?? ''),
+            orden_visual: String(Number(paquete?.orden_visual ?? 100)),
             items: Array.isArray(paquete?.items)
                 ? paquete.items.map((item) => ({
                     id_servicio: String(item?.id_servicio || ''),
@@ -693,6 +715,7 @@ export default function AdminPackagesCatalogPage() {
             nombre_paquete: formValues.nombre_paquete.trim(),
             descripcion: formValues.descripcion.trim() || undefined,
             precio_hnl: Number(formValues.precio_hnl),
+            orden_visual: Number(formValues.orden_visual),
             items: normalizeItemsForPayload(formValues.items),
             id_sucursal: mutationBranchId,
         };
@@ -961,6 +984,7 @@ export default function AdminPackagesCatalogPage() {
                                     label: 'Precio',
                                     value: <span className="font-mono font-bold text-[var(--mf-accent)]">L {Number(paquete.precio_hnl ?? 0).toFixed(2)}</span>,
                                 },
+                                { label: 'Orden visual', value: Number(paquete.orden_visual ?? 100) },
                                 { label: 'Servicios', value: getItemsCount(paquete) },
                                 { label: 'Composicion', value: <PackageCompositionBadge itemsCount={getItemsCount(paquete)} /> },
                                 { label: 'Publico', value: <PackageVisibilityBadge visiblePublico={Boolean(paquete.visible_publico)} /> },
@@ -981,6 +1005,7 @@ export default function AdminPackagesCatalogPage() {
                                 ) : null}
                                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
                                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Precio HNL</TableHead>
+                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead>
                                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Servicios</TableHead>
                                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Composicion</TableHead>
                                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Publico</TableHead>
@@ -1004,6 +1029,9 @@ export default function AdminPackagesCatalogPage() {
                                     </TableCell>
                                     <TableCell className="text-right font-mono font-semibold text-[var(--mf-accent)]">
                                         L {Number(paquete.precio_hnl ?? 0).toFixed(2)}
+                                    </TableCell>
+                                    <TableCell className="text-center text-[var(--mf-text-2)]">
+                                        {Number(paquete.orden_visual ?? 100)}
                                     </TableCell>
                                     <TableCell className="text-center text-[var(--mf-text-2)]">
                                         {getItemsCount(paquete)}
@@ -1077,6 +1105,7 @@ export default function AdminPackagesCatalogPage() {
                                             label: 'Precio HNL',
                                             value: `L ${Number(detailTarget.precio_hnl ?? 0).toFixed(2)}`,
                                         },
+                                        { label: 'Orden visual', value: Number(detailTarget.orden_visual ?? 100) },
                                         {
                                             label: 'Sucursal',
                                             value: detailTarget.id_sucursal

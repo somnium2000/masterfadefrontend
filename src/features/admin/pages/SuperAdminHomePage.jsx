@@ -1,6 +1,6 @@
 // src/features/admin/pages/SuperAdminHomePage.jsx
 // Pantalla Home dedicada para rol Super Admin.
-// Sin Figma disponible → Placeholder premium con acciones previstas.
+// Sin Figma disponible - Placeholder premium con acciones previstas.
 
 import { motion } from 'framer-motion';
 import { ShieldAlert, BarChart3, Settings, Users, Building2, House, LogOut } from 'lucide-react';

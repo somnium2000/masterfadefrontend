@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { http, setTokenGetter } from '../services/httpClient.js';
+import { supabase } from '../config/supabaseClient.js';
 
 const AuthContext = createContext(null);
 
@@ -51,6 +52,15 @@ export function getUserDisplayName(user) {
 
 function isLikelyEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
+function resolveLoginErrorMessage(rawMessage) {
+  const fallback = 'Correo o contraseña incorrecta, inténtalo de nuevo.';
+  const normalized = String(rawMessage || '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized.includes('invalid login credentials')) return fallback;
+  if (normalized.includes('credenciales invalidas') || normalized.includes('credenciales inválidas')) return fallback;
+  return String(rawMessage).trim();
 }
 
 export function AuthProvider({ children }) {
@@ -152,10 +162,10 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (identifier, contrasena, remember) => {
     const normalizedIdentifier = String(identifier || '').trim().toLowerCase();
-    const password = String(contrasena || '').trim();
+    const password = String(contrasena || '');
 
     if (!normalizedIdentifier || !password) {
-      return { ok: false, message: 'Correo y contrasena son requeridos.' };
+      return { ok: false, message: 'Correo y contraseña son requeridos.' };
     }
 
     // AM: Fase 1 exige correo como identificador formal de autenticacion.
@@ -173,23 +183,28 @@ export function AuthProvider({ children }) {
       const payload = response?.data || response;
 
       if (!response?.ok || !payload?.token) {
-        return { ok: false, message: response?.error?.message || response?.message || 'Credenciales invalidas.' };
+        return {
+          ok: false,
+          code: response?.error?.code || response?.data?.error?.code || null,
+          message: resolveLoginErrorMessage(response?.error?.message || response?.message),
+        };
       }
 
+      const resolvedToken = String(payload.token || '').trim();
       shouldPersistRef.current = Boolean(remember);
-      tokenRef.current = payload.token;
-      setToken(payload.token);
+      tokenRef.current = resolvedToken;
+      setToken(resolvedToken);
       setIsHydrating(true);
       setIsHydrated(false);
 
       if (shouldPersistRef.current) {
-        localStorage.setItem(LS_TOKEN_KEY, payload.token);
+        localStorage.setItem(LS_TOKEN_KEY, resolvedToken);
       } else {
         localStorage.removeItem(LS_TOKEN_KEY);
         localStorage.removeItem(LS_USER_KEY);
       }
 
-      const hydrated = await hydrateSession({ tokenOverride: payload.token });
+      const hydrated = await hydrateSession({ tokenOverride: resolvedToken });
 
       if (!hydrated.ok) {
         return { ok: false, message: hydrated.message || 'La sesion no se pudo completar.' };
@@ -200,13 +215,45 @@ export function AuthProvider({ children }) {
       clearSessionState();
       return {
         ok: false,
-        message: err?.data?.error?.message || err?.message || 'Error al intentar iniciar sesion.',
+        code: err?.data?.error?.code || null,
+        message: resolveLoginErrorMessage(err?.data?.error?.message || err?.message),
       };
     }
   }, [clearSessionState, hydrateSession]);
 
+  const completeExchangeLogin = useCallback(async (appToken, options = {}) => {
+    const resolvedToken = String(appToken || '').trim();
+    if (!resolvedToken) {
+      return { ok: false, message: 'Token de aplicacion invalido para completar sesion.' };
+    }
+
+    shouldPersistRef.current = options.remember !== false;
+    tokenRef.current = resolvedToken;
+    setToken(resolvedToken);
+    setIsHydrating(true);
+    setIsHydrated(false);
+
+    if (shouldPersistRef.current) {
+      localStorage.setItem(LS_TOKEN_KEY, resolvedToken);
+    } else {
+      localStorage.removeItem(LS_TOKEN_KEY);
+      localStorage.removeItem(LS_USER_KEY);
+    }
+
+    const hydrated = await hydrateSession({ tokenOverride: resolvedToken });
+    if (!hydrated.ok) {
+      return { ok: false, message: hydrated.message || 'No se pudo completar la sesion social.' };
+    }
+
+    return { ok: true };
+  }, [hydrateSession]);
+
   const logout = useCallback(() => {
     clearSessionState();
+    if (supabase) {
+      // AM: Limpieza defensiva de sesion social para evitar efectos residuales en callbacks futuros.
+      void supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+    }
   }, [clearSessionState]);
 
   useEffect(() => {
@@ -229,10 +276,25 @@ export function AuthProvider({ children }) {
       isHydrating,
       isHydrated,
       login,
+      completeExchangeLogin,
       hydrateSession,
       logout,
     }),
-    [token, user, roles, branchIds, empresaId, empleadoId, clienteId, isHydrating, isHydrated, login, hydrateSession, logout]
+    [
+      token,
+      user,
+      roles,
+      branchIds,
+      empresaId,
+      empleadoId,
+      clienteId,
+      isHydrating,
+      isHydrated,
+      login,
+      completeExchangeLogin,
+      hydrateSession,
+      logout,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

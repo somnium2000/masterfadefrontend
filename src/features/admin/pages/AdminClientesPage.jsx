@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Building2, CheckCircle2, Eye, KeyRound, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Users, X } from 'lucide-react';
 import {
@@ -28,6 +28,7 @@ import DetailInfoModalContent from '../../../components/data/DetailInfoModalCont
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
+import ImageUploaderField from '../../../components/data/ImageUploaderField.jsx';
 import {
   Table,
   TableBody,
@@ -41,7 +42,7 @@ import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialo
 import { replaceItemById } from '../../../lib/collectionState.js';
 
 const ACCESS_LABELS = {
-  pendiente_password: 'Contrasena pendiente',
+  pendiente_password: 'ContraseÃ±a pendiente',
   activo: 'Activo',
   bloqueado: 'Bloqueado',
   inactivo: 'Inactivo',
@@ -64,13 +65,14 @@ const FORM_DEFAULTS = {
   estado: true,
   consentimiento_marketing: false,
   acepta_terminos: false,
+  foto_perfil_asset_id: null,
+  foto_perfil_signed_url: '',
 };
 
 const CLIENTE_FILTER_DEFAULTS = {
   estadoCliente: 'all',
   tipoAcceso: 'all',
   estadoAcceso: 'all',
-  idSucursal: 'all',
 };
 
 const CLIENTE_ESTADO_LABELS = {
@@ -100,7 +102,13 @@ function normalizeDigits(value) {
 
 function toDateTimeIso(dateValue) {
   if (!dateValue) return null;
-  return new Date(`${dateValue}T00:00:00`).toISOString();
+  const normalized = String(dateValue).slice(0, 10);
+  // AM: date-time estable en UTC al mediodia para preservar el dia logico seleccionado.
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? `${normalized}T12:00:00.000Z` : null;
+}
+
+function normalizeUnicodeText(value) {
+  return String(value || '').normalize('NFC').trim();
 }
 
 function mapClienteToForm(cliente) {
@@ -121,12 +129,14 @@ function mapClienteToForm(cliente) {
     estado: Boolean(cliente?.estado_cliente),
     consentimiento_marketing: Boolean(cliente?.consentimiento_marketing),
     acepta_terminos: Boolean(cliente?.acepta_terminos),
+    foto_perfil_asset_id: cliente?.foto_perfil_asset_id || null,
+    foto_perfil_signed_url: cliente?.foto_perfil_signed_url || '',
   };
 }
 
 function validateForm(values, { isEditing, selectedCliente }) {
-  if (!values.nombres.trim()) return 'Nombres es obligatorio.';
-  if (!values.apellidos.trim()) return 'Apellidos es obligatorio.';
+  if (!normalizeUnicodeText(values.nombres)) return 'Nombres es obligatorio.';
+  if (!normalizeUnicodeText(values.apellidos)) return 'Apellidos es obligatorio.';
   if (!values.correo_principal.trim() || !values.correo_principal.includes('@')) {
     return 'Correo principal es obligatorio y debe ser valido.';
   }
@@ -161,15 +171,15 @@ function validateForm(values, { isEditing, selectedCliente }) {
 function buildPayload(values) {
   return {
     persona: {
-      nombres: values.nombres.trim(),
-      apellidos: values.apellidos.trim(),
+      nombres: normalizeUnicodeText(values.nombres),
+      apellidos: normalizeUnicodeText(values.apellidos),
       fecha_nacimiento: values.fecha_nacimiento || null,
-      genero_codigo: values.genero_codigo.trim() || null,
+      genero_codigo: normalizeUnicodeText(values.genero_codigo) || null,
       dni: normalizeDigits(values.dni) || null,
       rtn: normalizeDigits(values.rtn) || null,
-      telefono_principal: values.telefono_principal.trim() || null,
-      direccion_texto: values.direccion_texto.trim() || null,
-      observaciones: values.observaciones.trim() || null,
+      telefono_principal: normalizeUnicodeText(values.telefono_principal) || null,
+      direccion_texto: normalizeUnicodeText(values.direccion_texto) || null,
+      observaciones: normalizeUnicodeText(values.observaciones) || null,
     },
     acceso: {
       habilitar_acceso: Boolean(values.habilitar_acceso),
@@ -181,6 +191,7 @@ function buildPayload(values) {
       estado: Boolean(values.estado),
       consentimiento_marketing: Boolean(values.consentimiento_marketing),
       acepta_terminos: Boolean(values.acepta_terminos),
+      foto_perfil_asset_id: values.foto_perfil_asset_id || null,
     },
   };
 }
@@ -235,7 +246,6 @@ export default function AdminClientesPage() {
           cliente?.correo_principal,
           cliente?.dni,
           cliente?.telefono_principal,
-          cliente?.nombre_sucursal,
         ]
           .filter(Boolean)
           .join(' ')
@@ -254,10 +264,6 @@ export default function AdminClientesPage() {
       }
 
       if (filters.estadoAcceso !== 'all' && String(cliente?.estado_acceso || '') !== filters.estadoAcceso) {
-        return false;
-      }
-
-      if (filters.idSucursal !== 'all' && String(cliente?.id_sucursal_origen || '') !== filters.idSucursal) {
         return false;
       }
 
@@ -285,12 +291,8 @@ export default function AdminClientesPage() {
     if (filters.estadoAcceso !== 'all') {
       chips.push({ key: 'estadoAcceso', label: `Acceso: ${ACCESS_LABELS[filters.estadoAcceso] || filters.estadoAcceso}` });
     }
-    if (filters.idSucursal !== 'all') {
-      const sucursalNombre = sucursales.find((item) => String(item.id_sucursal) === String(filters.idSucursal))?.nombre_sucursal;
-      chips.push({ key: 'idSucursal', label: `Sucursal: ${sucursalNombre || 'Seleccionada'}` });
-    }
     return chips;
-  }, [filters, search, sucursales]);
+  }, [filters, search]);
 
   function clearAllFilters() {
     setSearch('');
@@ -400,7 +402,7 @@ export default function AdminClientesPage() {
       const baseMessage = editingId ? 'Cliente actualizado.' : 'Cliente creado.';
       notifications.success(baseMessage, { dedupeKey: 'personas-clientes-save-ok' });
       if (data?.setup_password?.mensaje) {
-        // AM: Retroalimentación reutilizable del envío setup password en alta/edición de cliente con acceso.
+        // AM: RetroalimentaciÃ³n reutilizable del envÃ­o setup password en alta/ediciÃ³n de cliente con acceso.
         const tone = data?.setup_password?.enviado ? 'info' : 'warning';
         notifications[tone](data.setup_password.mensaje, { dedupeKey: 'personas-clientes-setup-message' });
       }
@@ -594,7 +596,6 @@ export default function AdminClientesPage() {
               subtitle={cliente.correo_principal || 'Sin correo'}
               badge={<AccessBadge cliente={cliente} />}
               fields={[
-                { label: 'Sucursal', value: cliente.nombre_sucursal || 'Sin sucursal' },
                 { label: 'Estado cliente', value: cliente.estado_cliente ? 'Activo' : 'Inactivo' },
                 { label: 'Fecha de cliente', value: cliente.fecha_ingreso ? String(cliente.fecha_ingreso).slice(0, 10) : 'Sin fecha' },
                 { label: 'Marketing', value: cliente.consentimiento_marketing ? 'Si' : 'No' },
@@ -609,20 +610,18 @@ export default function AdminClientesPage() {
         <div className="mf-table-wrap">
           <Table>
             <TableHeader>
-              <TableRow className="border-[var(--mf-nav-border)]">
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Correo</TableHead>
-                <TableHead className="hidden md:table-cell text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursal</TableHead>
-                <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acceso</TableHead>
-                <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acciones</TableHead>
-              </TableRow>
+                <TableRow className="border-[var(--mf-nav-border)]">
+                  <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
+                  <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Correo</TableHead>
+                  <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acceso</TableHead>
+                  <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acciones</TableHead>
+                </TableRow>
             </TableHeader>
             <TableBody>
               {filteredClientes.map((cliente) => (
                 <TableRow key={cliente.id_cliente} className="border-[var(--mf-nav-border)]">
                   <TableCell className="font-medium">{cliente.nombre_completo || 'Cliente'}</TableCell>
                   <TableCell>{cliente.correo_principal || 'Sin correo'}</TableCell>
-                  <TableCell className="hidden md:table-cell">{cliente.nombre_sucursal || 'Sin sucursal'}</TableCell>
                   <TableCell className="text-center"><AccessBadge cliente={cliente} /></TableCell>
                   <TableCell className="text-center">{renderActions(cliente)}</TableCell>
                 </TableRow>
@@ -685,6 +684,33 @@ export default function AdminClientesPage() {
               <Label className="mf-label">Observaciones</Label>
               <Input className="mf-input mt-1" value={formValues.observaciones} onChange={(e) => setFormValues((p) => ({ ...p, observaciones: e.target.value }))} />
             </div>
+
+            <div className="sm:col-span-2">
+              {editingId ? (
+                <ImageUploaderField
+                  label="Foto de perfil privada"
+                  helperText="Imagen interna del cliente (bucket privado). La vista usa URL firmada temporal."
+                  scopeKey="private_client_profile"
+                  entityType="cliente"
+                  entityId={editingId}
+                  idSucursal={formValues.id_sucursal_origen || selectedCliente?.id_sucursal_origen || null}
+                  allowedMimeTypes={['image/jpeg', 'image/png', 'image/webp']}
+                  valueAssetId={formValues.foto_perfil_asset_id}
+                  initialPreviewUrl={formValues.foto_perfil_signed_url}
+                  onChange={(payload) => {
+                    setFormValues((prev) => ({
+                      ...prev,
+                      foto_perfil_asset_id: payload?.asset_id || null,
+                      foto_perfil_signed_url: payload?.signed_read_url || payload?.public_url || '',
+                    }));
+                  }}
+                />
+              ) : (
+                <p className="rounded-lg border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_54%,transparent)] px-3 py-2 text-xs text-[var(--mf-text-2)]">
+                  Guarda primero el cliente para habilitar carga de foto de perfil privada.
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="mt-3 rounded-[12px] border border-[var(--mf-nav-border)] p-3 text-sm">
@@ -713,7 +739,7 @@ export default function AdminClientesPage() {
                     {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
                   </select>
                 </div>
-                <p className="text-xs text-[var(--mf-text-2)]">El cliente creara su propia contrasena con flujo seguro.</p>
+                <p className="text-xs text-[var(--mf-text-2)]">El cliente crearÃ¡ su propia contraseÃ±a con flujo seguro.</p>
 
                 <label className="mt-1 flex items-center gap-2">
                   <input type="checkbox" checked={formValues.consentimiento_marketing} onChange={(e) => setFormValues((p) => ({ ...p, consentimiento_marketing: e.target.checked }))} />
@@ -754,6 +780,19 @@ export default function AdminClientesPage() {
                   title: 'Identidad',
                   icon: <Users size={14} />,
                   fields: [
+                    {
+                      label: 'Foto perfil',
+                      value: selectedCliente.foto_perfil_signed_url
+                        ? (
+                          <img
+                            src={selectedCliente.foto_perfil_signed_url}
+                            alt={`Foto de ${selectedCliente.nombre_completo || 'cliente'}`}
+                            className="h-24 w-24 rounded-lg border border-[var(--mf-nav-border)] object-cover"
+                            loading="lazy"
+                          />
+                        )
+                        : 'Sin foto',
+                    },
                     { label: 'Nombre', value: selectedCliente.nombre_completo || '-' },
                     { label: 'Correo', value: selectedCliente.correo_principal || 'Sin correo' },
                     { label: 'DNI', value: selectedCliente.dni || '-' },
@@ -769,7 +808,6 @@ export default function AdminClientesPage() {
                   title: 'Cliente',
                   icon: <Building2 size={14} />,
                   fields: [
-                    { label: 'Sucursal', value: selectedCliente.nombre_sucursal || 'Sin sucursal' },
                     { label: 'Estado cliente', value: selectedCliente.estado_cliente ? 'Activo' : 'Inactivo' },
                     { label: 'Fecha de cliente', value: selectedCliente.fecha_ingreso ? String(selectedCliente.fecha_ingreso).slice(0, 10) : '-' },
                     { label: 'Consentimiento marketing', value: selectedCliente.consentimiento_marketing ? 'Si' : 'No' },
@@ -878,25 +916,10 @@ export default function AdminClientesPage() {
                 onChange={(event) => setFilters((prev) => ({ ...prev, estadoAcceso: event.target.value }))}
               >
                 <option value="all">Todos</option>
-                <option value="pendiente_password">Contrasena pendiente</option>
+                <option value="pendiente_password">ContraseÃ±a pendiente</option>
                 <option value="activo">Activo</option>
                 <option value="bloqueado">Bloqueado</option>
                 <option value="inactivo">Inactivo</option>
-              </select>
-            </div>
-            <div>
-              <Label className="mf-label">Sucursal</Label>
-              <select
-                className="mf-select mt-1"
-                value={filters.idSucursal}
-                onChange={(event) => setFilters((prev) => ({ ...prev, idSucursal: event.target.value }))}
-              >
-                <option value="all">Todas</option>
-                {sucursales.map((sucursal) => (
-                  <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>
-                    {sucursal.nombre_sucursal}
-                  </option>
-                ))}
               </select>
             </div>
           </div>
@@ -911,3 +934,5 @@ export default function AdminClientesPage() {
     </div>
   );
 }
+
+

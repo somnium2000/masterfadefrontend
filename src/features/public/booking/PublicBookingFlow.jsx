@@ -1,4 +1,4 @@
-import {
+﻿import {
   createContext,
   useCallback,
   useContext,
@@ -13,9 +13,12 @@ import { Button } from '../../../components/ui/button.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
+import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
+  createClienteCitaHold,
   createPublicCitaHold,
+  getClienteMembershipEstado,
   getPublicBookingContext,
   listPublicAgendaBarberos,
   listPublicAgendaDisponibilidad,
@@ -154,6 +157,8 @@ export default function PublicBookingFlow() {
   const location = useLocation();
   const navigate = useNavigate();
   const notifications = useNotifications();
+  const { isAuthenticated, roles } = useAuth();
+  const canUseClienteHold = Boolean(isAuthenticated && Array.isArray(roles) && roles.includes('cliente'));
 
   const [contextLoading, setContextLoading] = useState(false);
   const [contextError, setContextError] = useState('');
@@ -193,6 +198,8 @@ export default function PublicBookingFlow() {
 
   const [holdSubmitting, setHoldSubmitting] = useState(false);
   const [holdResult, setHoldResult] = useState(null);
+  const [holdCountdownStartedAt, setHoldCountdownStartedAt] = useState(null);
+  const [countdownNow, setCountdownNow] = useState(() => Date.now());
 
   const availabilityAbortRef = useRef(null);
   const slotsAbortRef = useRef(null);
@@ -203,6 +210,8 @@ export default function PublicBookingFlow() {
   const availabilityCacheRef = useRef(new Map());
   const slotsCacheRef = useRef(new Map());
   const servicesScrollRef = useRef(null);
+  // AM: Evita reaplicar propuesta automática del plan varias veces sobre la misma combinación de sucursal/servicios.
+  const membershipPrefillKeysRef = useRef(new Set());
   const [servicesCanScroll, setServicesCanScroll] = useState(false);
   const [servicesAtEnd, setServicesAtEnd] = useState(true);
 
@@ -233,6 +242,10 @@ export default function PublicBookingFlow() {
   );
   const paymentRequired = useMemo(
     () => readBooleanParam(contextData?.parametros, 'pago_total_obligatorio', true),
+    [contextData?.parametros]
+  );
+  const simulationNoPayment = useMemo(
+    () => readBooleanParam(contextData?.parametros, 'simulacion_sin_pago', true),
     [contextData?.parametros]
   );
   const holdDurationMin = useMemo(
@@ -314,6 +327,18 @@ export default function PublicBookingFlow() {
     () => bookingBlocksSummary.length > 0 && bookingBlocksSummary.every((block) => block.isComplete),
     [bookingBlocksSummary]
   );
+  const holdExpiresAtIso = useMemo(() => {
+    if (holdResult?.expires_at) return holdResult.expires_at;
+    if (!holdCountdownStartedAt) return null;
+    return new Date(holdCountdownStartedAt + holdDurationMin * 60 * 1000).toISOString();
+  }, [holdCountdownStartedAt, holdDurationMin, holdResult?.expires_at]);
+  const holdRemainingMs = useMemo(() => {
+    if (!holdExpiresAtIso) return null;
+    const expiresAt = new Date(holdExpiresAtIso);
+    if (Number.isNaN(expiresAt.getTime())) return null;
+    return Math.max(expiresAt.getTime() - countdownNow, 0);
+  }, [holdExpiresAtIso, countdownNow]);
+  const holdExpired = holdRemainingMs != null && holdRemainingMs <= 0;
 
   const canAddCompanionBlock = useMemo(
     () => bookingBlocks.length < (MAX_COMPANIONS + 1),
@@ -328,8 +353,6 @@ export default function PublicBookingFlow() {
     return { from, to };
   }, [currentMonth]);
 
-  const showBlockingAvailabilityLoader = availabilityLoading && Object.keys(availabilityMap).length === 0;
-
   const isPastSlotForToday = useCallback((dateKey, timeKey) => {
     if (!dateKey || !timeKey) return false;
     if (dateKey !== minBookingDateKey) return false;
@@ -342,21 +365,29 @@ export default function PublicBookingFlow() {
     setSlotSuggestionsLoading(false);
   }, []);
 
+  const resetAvailabilityViewState = useCallback((options = {}) => {
+    const { clearError = true } = options;
+    setSlots(buildDefaultSlots());
+    if (clearError) {
+      setAvailabilityError('');
+    }
+    clearSlotConflict();
+  }, [clearSlotConflict]);
+
   const clearRequestState = useCallback(() => {
     if (availabilityAbortRef.current) availabilityAbortRef.current.abort();
     if (slotsAbortRef.current) slotsAbortRef.current.abort();
     availabilityCacheRef.current.clear();
     slotsCacheRef.current.clear();
     setAvailabilityMap({});
-    setSlots(buildDefaultSlots());
-    setAvailabilityError('');
-    clearSlotConflict();
-  }, [clearSlotConflict]);
+    resetAvailabilityViewState();
+  }, [resetAvailabilityViewState]);
 
   const resetFlowForBranchChange = useCallback(() => {
     setBookingBlocks([createBookingBlock({ alias: 'Titular' })]);
     setActiveBlockIndex(0);
     setHoldResult(null);
+    setHoldCountdownStartedAt(null);
     setCurrentMonth(new Date(minBookingMonth.getFullYear(), minBookingMonth.getMonth(), 1));
     clearRequestState();
   }, [clearRequestState, minBookingMonth]);
@@ -435,8 +466,13 @@ export default function PublicBookingFlow() {
       const barbersPayload = barbersResponse?.data ?? barbersResponse;
       const servicesPayload = servicesResponse?.data ?? servicesResponse;
       const nextBarbers = Array.isArray(barbersPayload?.barberos) ? barbersPayload.barberos : [];
-      const nextServices = Array.isArray(servicesPayload?.servicios) ? servicesPayload.servicios : [];
+      const nextServices = Array.isArray(servicesPayload?.servicios)
+        ? servicesPayload.servicios.filter(
+          (service) => service?.activo !== false && service?.agendable && !service?.servicio_informativo
+        )
+        : [];
       const validBarberIds = new Set(nextBarbers.map((barber) => barber.id_empleado));
+      const validServiceIds = new Set(nextServices.map((service) => service.id_servicio));
       const fallbackBarberId = nextBarbers[0]?.id_empleado || '';
 
       setBarbers(nextBarbers);
@@ -454,8 +490,9 @@ export default function PublicBookingFlow() {
           const nextBarberId = validBarberIds.has(block.idBarbero)
             ? block.idBarbero
             : fallbackBarberId;
+          const nextServiceIds = block.serviceIds.filter((serviceId) => validServiceIds.has(serviceId));
 
-          if (block.idBarbero === nextBarberId) {
+          if (block.idBarbero === nextBarberId && areServiceIdsEqual(block.serviceIds, nextServiceIds)) {
             return block;
           }
 
@@ -463,6 +500,7 @@ export default function PublicBookingFlow() {
           return {
             ...block,
             idBarbero: nextBarberId,
+            serviceIds: nextServiceIds,
             selectedDate: '',
             selectedTime: '',
           };
@@ -484,13 +522,13 @@ export default function PublicBookingFlow() {
   }, [notifications, selectedBranchId]);
 
   const fetchAvailability = useCallback(async () => {
-    if (!selectedBranchId || !activeBlockBarberId || !servicesCsv) {
+    if (!selectedBranchId || !servicesCsv) {
       setAvailabilityMap({});
       setAvailabilityLoading(false);
       return;
     }
 
-    const cacheKey = [selectedBranchId, activeBlockBarberId, servicesCsv, monthRange.from, monthRange.to].join('|');
+    const cacheKey = [selectedBranchId, activeBlockBarberId || 'auto', servicesCsv, monthRange.from, monthRange.to].join('|');
     const cached = availabilityCacheRef.current.get(cacheKey);
     if (cached) {
       setAvailabilityMap(cached);
@@ -523,7 +561,7 @@ export default function PublicBookingFlow() {
       const response = await listPublicAgendaDisponibilidad(
         {
           id_sucursal: selectedBranchId,
-          id_barbero: activeBlockBarberId,
+          id_barbero: activeBlockBarberId || undefined,
           servicios: servicesCsv,
           fecha_desde: monthRange.from,
           fecha_hasta: monthRange.to,
@@ -575,13 +613,13 @@ export default function PublicBookingFlow() {
   ]);
 
   const fetchSlots = useCallback(async () => {
-    if (!selectedBranchId || !activeBlockBarberId || !servicesCsv || !selectedDate) {
+    if (!selectedBranchId || !servicesCsv || !selectedDate) {
       setSlots(buildDefaultSlots());
       setSlotsLoading(false);
       return;
     }
 
-    const cacheKey = [selectedBranchId, activeBlockBarberId, servicesCsv, selectedDate].join('|');
+    const cacheKey = [selectedBranchId, activeBlockBarberId || 'auto', servicesCsv, selectedDate].join('|');
     const cached = slotsCacheRef.current.get(cacheKey);
     if (cached) {
       setSlots(cached);
@@ -602,7 +640,7 @@ export default function PublicBookingFlow() {
       const response = await listPublicAgendaHorarios(
         {
           id_sucursal: selectedBranchId,
-          id_barbero: activeBlockBarberId,
+          id_barbero: activeBlockBarberId || undefined,
           servicios: servicesCsv,
           fecha: selectedDate,
         },
@@ -761,6 +799,74 @@ export default function PublicBookingFlow() {
   }, [fetchBranchData]);
 
   useEffect(() => {
+    if (!canUseClienteHold) return;
+    if (!selectedBranchId) return;
+    const titular = bookingBlocks[0];
+    if (!titular || Array.isArray(titular.serviceIds) && titular.serviceIds.length > 0) return;
+    const availableServices = Array.isArray(services) ? services : [];
+    if (availableServices.length === 0) return;
+
+    const prefillKey = `${selectedBranchId}:${availableServices.map((service) => service?.id_servicio).filter(Boolean).join(",")}`;
+    if (membershipPrefillKeysRef.current.has(prefillKey)) return;
+
+    let cancelled = false;
+    // AM: Propone automáticamente el primer servicio cubierto por plan para el titular sin forzar selección múltiple.
+    (async () => {
+      try {
+        const response = await getClienteMembershipEstado();
+        if (cancelled) return;
+        const payload = response?.data ?? response;
+        const remanentes = Array.isArray(payload?.plan_activo?.remanentes?.servicios)
+          ? payload.plan_activo.remanentes.servicios
+          : [];
+        const coveredServiceIds = remanentes
+          .filter((item) => Number(item?.restante || 0) > 0)
+          .map((item) => String(item?.id_servicio || "").trim())
+          .filter(Boolean);
+        if (coveredServiceIds.length === 0) {
+          membershipPrefillKeysRef.current.add(prefillKey);
+          return;
+        }
+
+        const availableServiceIds = new Set(availableServices.map((item) => String(item?.id_servicio || "").trim()).filter(Boolean));
+        const suggestedId = coveredServiceIds.find((serviceId) => availableServiceIds.has(serviceId));
+        if (!suggestedId) {
+          membershipPrefillKeysRef.current.add(prefillKey);
+          return;
+        }
+
+        setBookingBlocks((prev) => {
+          const base = Array.isArray(prev) && prev.length > 0 ? prev : [createBookingBlock({ alias: "Titular" })];
+          const currentTitular = normalizeBookingBlock(base[0], 0);
+          if (Array.isArray(currentTitular.serviceIds) && currentTitular.serviceIds.length > 0) return prev;
+          const nextTitular = normalizeBookingBlock(
+            {
+              ...currentTitular,
+              serviceIds: [suggestedId],
+              selectedTime: "",
+            },
+            0
+          );
+          const next = [...base];
+          next[0] = nextTitular;
+          return next;
+        });
+
+        membershipPrefillKeysRef.current.add(prefillKey);
+        notifications.info("Seleccionamos automáticamente un servicio cubierto por tu plan para agilizar tu reserva.", {
+          dedupeKey: "public-booking-membership-prefill",
+        });
+      } catch {
+        // AM: Fallback silencioso; el flujo de booking debe continuar sin depender de membresía.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingBlocks, canUseClienteHold, notifications, selectedBranchId, services]);
+
+  useEffect(() => {
     if (!selectedBranchId) return;
     const timer = setTimeout(() => {
       void fetchAvailability();
@@ -848,7 +954,21 @@ export default function PublicBookingFlow() {
 
   useEffect(() => {
     setHoldResult(null);
-  }, [selectedBranchId, bookingBlocks]);
+    if (!allBlocksComplete) {
+      setHoldCountdownStartedAt(null);
+      return;
+    }
+    setHoldCountdownStartedAt(Date.now());
+  }, [selectedBranchId, bookingBlocks, allBlocksComplete]);
+
+  useEffect(() => {
+    if (!holdExpiresAtIso) return undefined;
+    setCountdownNow(Date.now());
+    const intervalId = setInterval(() => {
+      setCountdownNow(Date.now());
+    }, 1000);
+    return () => clearInterval(intervalId);
+  }, [holdExpiresAtIso]);
 
   const selectBranch = useCallback(
     (nextBranchId) => {
@@ -877,11 +997,8 @@ export default function PublicBookingFlow() {
     if (!Number.isFinite(parsed)) return;
     const clamped = Math.max(0, Math.min(bookingBlocks.length - 1, Math.trunc(parsed)));
     setActiveBlockIndex(clamped);
-    setAvailabilityMap({});
-    setSlots(buildDefaultSlots());
-    setAvailabilityError('');
-    clearSlotConflict();
-  }, [bookingBlocks.length, clearSlotConflict]);
+    resetAvailabilityViewState();
+  }, [bookingBlocks.length, resetAvailabilityViewState]);
 
   const addCompanionBlock = useCallback(() => {
     setBookingBlocks((prev) => {
@@ -899,11 +1016,8 @@ export default function PublicBookingFlow() {
       setActiveBlockIndex(nextBlocks.length - 1);
       return nextBlocks;
     });
-    setAvailabilityMap({});
-    setSlots(buildDefaultSlots());
-    setAvailabilityError('');
-    clearSlotConflict();
-  }, [clearSlotConflict, effectiveActiveBlockIndex]);
+    resetAvailabilityViewState();
+  }, [effectiveActiveBlockIndex, resetAvailabilityViewState]);
 
   const goToAgenda = useCallback(() => {
     if (!selectedBranchId || !selectedBarberId) return;
@@ -918,6 +1032,13 @@ export default function PublicBookingFlow() {
     if (!allBlocksComplete) return;
     navigate('/agendar/confirmar');
   }, [allBlocksComplete, navigate]);
+
+  const completeBookingFlow = useCallback(() => {
+    setHoldResult(null);
+    setHoldCountdownStartedAt(null);
+    resetFlowForBranchChange();
+    navigate('/');
+  }, [navigate, resetFlowForBranchChange]);
 
   const toggleService = useCallback((serviceId) => {
     if (!serviceId) return;
@@ -936,25 +1057,22 @@ export default function PublicBookingFlow() {
       };
     });
 
-    setAvailabilityMap({});
-    setSlots(buildDefaultSlots());
-    setAvailabilityError('');
-    clearSlotConflict();
-  }, [clearSlotConflict, effectiveActiveBlockIndex, updateBlockAtIndex]);
+    resetAvailabilityViewState();
+  }, [effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
 
   const updateActiveBlockBarber = useCallback((barberId) => {
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
       ...currentBlock,
       idBarbero: String(barberId || '').trim(),
-      selectedDate: '',
+      selectedDate:
+        effectiveActiveBlockIndex > 0
+          ? (currentBlock.selectedDate || bookingBlocks[0]?.selectedDate || '')
+          : '',
       selectedTime: '',
     }));
 
-    setAvailabilityMap({});
-    setSlots(buildDefaultSlots());
-    setAvailabilityError('');
-    clearSlotConflict();
-  }, [clearSlotConflict, effectiveActiveBlockIndex, updateBlockAtIndex]);
+    resetAvailabilityViewState();
+  }, [bookingBlocks, effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
 
   const selectSuggestedBarber = useCallback((barberId) => {
     const nextBarberId = String(barberId || '').trim();
@@ -970,13 +1088,10 @@ export default function PublicBookingFlow() {
       selectedTime: preservedTime,
     }));
 
-    setAvailabilityMap({});
-    setSlots(buildDefaultSlots());
-    setAvailabilityError('');
-    clearSlotConflict();
+    resetAvailabilityViewState();
   }, [
-    clearSlotConflict,
     effectiveActiveBlockIndex,
+    resetAvailabilityViewState,
     selectedDate,
     slotConflict,
     updateBlockAtIndex,
@@ -1047,7 +1162,7 @@ export default function PublicBookingFlow() {
         barberId: activeBlockBarberId,
         conflictingAlias: conflictingBlock.alias || `Integrante ${conflictingBlock.index + 1}`,
       });
-      notifications.warning('Ese barbero ya esta ocupado en la misma fecha y hora por otro integrante.', {
+      notifications.warning('Ese barbero ya está ocupado en la misma fecha y hora por otro integrante.', {
         dedupeKey: 'public-booking-duplicate-barber-slot',
       });
       await loadSlotSuggestions({
@@ -1083,7 +1198,11 @@ export default function PublicBookingFlow() {
       navigate('/agendar/barberos');
       return false;
     }
-
+    if (holdExpired) {
+      notifications.warning('El tiempo de confirmación expiró. Reintentaremos con la misma hora si sigue disponible.', {
+        dedupeKey: 'public-booking-hold-expired-before-submit',
+      });
+    }
     const blocksToSubmit = bookingBlocksSummary.filter((block) => block.selectedServices.length > 0);
     if (blocksToSubmit.length === 0 || !allBlocksComplete) {
       notifications.warning('Completa servicios, fecha y hora en todos los bloques antes de confirmar.', {
@@ -1092,8 +1211,9 @@ export default function PublicBookingFlow() {
       navigate('/agendar/agenda');
       return false;
     }
-
     const selectedSlotMap = new Map();
+    const resolvedBarberByBlockId = new Map();
+    let autoAssignedCompanion = false;
     for (const block of blocksToSubmit) {
       if (isPastSlotForToday(block.selectedDate, block.selectedTime)) {
         notifications.warning('No puedes confirmar una cita en hora pasada para hoy.', {
@@ -1103,33 +1223,46 @@ export default function PublicBookingFlow() {
         navigate('/agendar/agenda');
         return false;
       }
-
-      const collisionKey = `${block.idBarbero}|${block.selectedDate}|${block.selectedTime}`;
-      const previous = selectedSlotMap.get(collisionKey);
-      if (previous) {
-        setSlotConflict({
-          dateKey: block.selectedDate,
-          timeKey: block.selectedTime,
-          barberId: block.idBarbero,
-          conflictingAlias: previous.alias || 'Integrante',
-        });
-        notifications.warning('Hay integrantes con el mismo barbero, fecha y hora. Debes cambiar uno de ellos.', {
-          dedupeKey: 'public-booking-submit-duplicate-slot',
-        });
-        setActiveBlockIndex(block.index);
-        navigate('/agendar/agenda');
-        await loadSlotSuggestions({
-          barberId: block.idBarbero,
-          dateKey: block.selectedDate,
-          timeKey: block.selectedTime,
-          servicesCsvValue: block.serviceIds.join(','),
-        });
-        return false;
+      if (block.idBarbero) {
+        const collisionKey = `${block.idBarbero}|${block.selectedDate}|${block.selectedTime}`;
+        const previous = selectedSlotMap.get(collisionKey);
+        if (previous) {
+          if (block.index > 0) {
+            resolvedBarberByBlockId.set(block.id, null);
+            autoAssignedCompanion = true;
+            continue;
+          }
+          setSlotConflict({
+            dateKey: block.selectedDate,
+            timeKey: block.selectedTime,
+            barberId: block.idBarbero,
+            conflictingAlias: previous.alias || 'Integrante',
+          });
+          notifications.warning('Hay integrantes con el mismo barbero, fecha y hora. Debes cambiar uno de ellos.', {
+            dedupeKey: 'public-booking-submit-duplicate-slot',
+          });
+          setActiveBlockIndex(block.index);
+          navigate('/agendar/agenda');
+          await loadSlotSuggestions({
+            barberId: block.idBarbero,
+            dateKey: block.selectedDate,
+            timeKey: block.selectedTime,
+            servicesCsvValue: block.serviceIds.join(','),
+          });
+          return false;
+        }
+        selectedSlotMap.set(collisionKey, block);
+        resolvedBarberByBlockId.set(block.id, block.idBarbero);
+      } else {
+        resolvedBarberByBlockId.set(block.id, null);
+        if (block.index > 0) autoAssignedCompanion = true;
       }
-
-      selectedSlotMap.set(collisionKey, block);
     }
-
+    if (autoAssignedCompanion) {
+      notifications.info('Uno o más acompañantes serán asignados automáticamente con barbero disponible en ese horario.', {
+        dedupeKey: 'public-booking-autoassign-companion-info',
+      });
+    }
     const integrantes = [];
     for (const block of blocksToSubmit) {
       const fechaInicio = toLocalDateTimeWithOffset(block.selectedDate, block.selectedTime);
@@ -1139,38 +1272,46 @@ export default function PublicBookingFlow() {
         });
         return false;
       }
-
       integrantes.push({
         orden_integrante: block.index + 1,
         alias: block.alias,
-        id_barbero: block.idBarbero || null,
+        id_barbero: resolvedBarberByBlockId.has(block.id)
+          ? resolvedBarberByBlockId.get(block.id)
+          : (block.idBarbero || null),
         fecha_inicio: fechaInicio,
         servicios: block.selectedServices.map((service) => ({
           id_servicio: service.id_servicio,
         })),
       });
     }
-
     setHoldSubmitting(true);
     try {
-      const response = await createPublicCitaHold({
+      const holdPayload = {
         id_sucursal: selectedBranchId,
         integrantes,
-      });
-
+      };
+      const response = canUseClienteHold
+        ? await createClienteCitaHold(holdPayload)
+        : await createPublicCitaHold(holdPayload);
       const payload = response?.data ?? response;
       setHoldResult(payload);
-      notifications.success('Reserva grupal creada correctamente.', { dedupeKey: 'public-booking-hold-success' });
+      notifications.success('Reserva creada correctamente.', { dedupeKey: 'public-booking-hold-success' });
       return true;
     } catch (err) {
-      notifications.error(extractMessage(err), { dedupeKey: 'public-booking-hold-error' });
       if (err?.status === 409) {
+        notifications.warning(
+          'La hora seleccionada ya no está disponible. Selecciona una hora distinta para continuar.',
+          { dedupeKey: 'public-booking-hold-conflict' }
+        );
         updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
           ...currentBlock,
           selectedTime: '',
         }));
+        navigate('/agendar/agenda');
         void fetchSlots();
         void fetchAvailability();
+      } else {
+        notifications.error(extractMessage(err), { dedupeKey: 'public-booking-hold-error' });
       }
       return false;
     } finally {
@@ -1182,7 +1323,9 @@ export default function PublicBookingFlow() {
     effectiveActiveBlockIndex,
     fetchAvailability,
     fetchSlots,
+    holdExpired,
     isPastSlotForToday,
+    canUseClienteHold,
     loadSlotSuggestions,
     navigate,
     notifications,
@@ -1214,7 +1357,11 @@ export default function PublicBookingFlow() {
       goToAgenda,
       goToBarberos,
       goToConfirm,
+      completeBookingFlow,
       holdDurationMin,
+      holdExpiresAtIso,
+      holdRemainingMs,
+      holdExpired,
       holdResult,
       holdSubmitting,
       isPastSlotForToday,
@@ -1224,6 +1371,7 @@ export default function PublicBookingFlow() {
       onSelectDay,
       onSelectTime,
       paymentRequired,
+      simulationNoPayment,
       selectedBarber,
       selectedBarberId,
       selectedBranch,
@@ -1243,7 +1391,6 @@ export default function PublicBookingFlow() {
       slotConflict,
       slotSuggestions,
       slotSuggestionsLoading,
-      showBlockingAvailabilityLoader,
       slots,
       slotsLoading,
       submitHold,
@@ -1276,7 +1423,11 @@ export default function PublicBookingFlow() {
       goToAgenda,
       goToBarberos,
       goToConfirm,
+      completeBookingFlow,
       holdDurationMin,
+      holdExpiresAtIso,
+      holdRemainingMs,
+      holdExpired,
       holdResult,
       holdSubmitting,
       isPastSlotForToday,
@@ -1285,6 +1436,7 @@ export default function PublicBookingFlow() {
       onSelectDay,
       onSelectTime,
       paymentRequired,
+      simulationNoPayment,
       selectedBarber,
       selectedBarberId,
       selectedBranch,
@@ -1303,7 +1455,6 @@ export default function PublicBookingFlow() {
       slotConflict,
       slotSuggestions,
       slotSuggestionsLoading,
-      showBlockingAvailabilityLoader,
       slots,
       slotsLoading,
       submitHold,
@@ -1322,15 +1473,18 @@ export default function PublicBookingFlow() {
   }
 
   const showTopbarBackToBarberos = location.pathname.startsWith('/agendar/agenda');
+  const isClienteSession = isAuthenticated && Array.isArray(roles) && roles.includes('cliente');
+  const homePath = isClienteSession ? '/home/cliente' : '/';
+  const homeLabel = 'Inicio MasterFade';
 
   return (
     <div className="public-booking-page mf-page-gradient min-h-screen">
       <div className="public-booking-shell">
         <header className="public-booking-topbar">
           <div className="public-booking-topbar-left">
-            <Link to="/" className="public-booking-home">
+            <Link to={homePath} className="public-booking-home">
               <House size={16} />
-              <span>Inicio</span>
+              <span>{homeLabel}</span>
             </Link>
             {showTopbarBackToBarberos ? (
               <Button
@@ -1344,7 +1498,7 @@ export default function PublicBookingFlow() {
               </Button>
             ) : null}
           </div>
-          <ThemeSwitcher />
+          <ThemeSwitcher showLabel={false} />
         </header>
 
         {contextLoading ? (
@@ -1370,3 +1524,5 @@ export default function PublicBookingFlow() {
     </div>
   );
 }
+
+

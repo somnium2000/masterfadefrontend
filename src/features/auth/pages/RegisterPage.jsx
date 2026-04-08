@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeft,
   CheckCircle2,
+  Eye,
   KeyRound,
   Mail,
   Megaphone,
@@ -11,11 +12,11 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { http } from '../../../services/httpClient.js';
+import AuthLandingBrandBlock from '../components/AuthLandingBrandBlock.jsx';
 import './LoginPage.css';
 import './RegisterPage.css';
 
@@ -54,6 +55,8 @@ export default function RegisterPage() {
   const [confirmarContrasena, setConfirmarContrasena] = useState('');
   const [aceptaTerminos, setAceptaTerminos] = useState(false);
   const [consentimientoMarketing, setConsentimientoMarketing] = useState(false);
+  const [showPasswordWhilePress, setShowPasswordWhilePress] = useState(false);
+  const [showConfirmPasswordWhilePress, setShowConfirmPasswordWhilePress] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -68,12 +71,29 @@ export default function RegisterPage() {
     return query ? `/login?${query}` : '/login';
   }, [nextPath, intent, branchId, planId]);
 
+  function handlePasswordRevealStart(field, event) {
+    event.preventDefault();
+    if (field === 'password') {
+      setShowPasswordWhilePress(true);
+      return;
+    }
+    setShowConfirmPasswordWhilePress(true);
+  }
+
+  function handlePasswordRevealEnd(field) {
+    if (field === 'password') {
+      setShowPasswordWhilePress(false);
+      return;
+    }
+    setShowConfirmPasswordWhilePress(false);
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
     setError('');
 
-    const normalizedNombres = String(nombres || '').trim();
-    const normalizedApellidos = String(apellidos || '').trim();
+    const normalizedNombres = String(nombres || '').normalize('NFC').trim();
+    const normalizedApellidos = String(apellidos || '').normalize('NFC').trim();
     const normalizedCorreo = String(correo || '').trim().toLowerCase();
     const password = String(contrasena || '');
     const passwordConfirm = String(confirmarContrasena || '');
@@ -93,21 +113,21 @@ export default function RegisterPage() {
     }
 
     if (!PASSWORD_REGEX.test(password)) {
-      const message = 'La contrasena debe tener al menos 8 caracteres, mayuscula, minuscula y numero.';
+      const message = 'La contraseña debe tener al menos 8 caracteres, mayúscula, minúscula y número.';
       setError(message);
       notifications.warning(message, { dedupeKey: 'auth-register-weak-password' });
       return;
     }
 
     if (password !== passwordConfirm) {
-      const message = 'La confirmacion de contrasena no coincide.';
+      const message = 'La confirmación de contraseña no coincide.';
       setError(message);
       notifications.warning(message, { dedupeKey: 'auth-register-password-mismatch' });
       return;
     }
 
-    if (!aceptaTerminos) {
-      const message = 'Debes aceptar terminos y condiciones para crear tu cuenta.';
+    if (!aceptaTerminos || !consentimientoMarketing) {
+      const message = 'para crear un usuario debes seleccionar los consentimientos de cuenta para una MASTER experiencia.';
       setError(message);
       notifications.warning(message, { dedupeKey: 'auth-register-terms-required' });
       return;
@@ -170,7 +190,7 @@ export default function RegisterPage() {
             transition={{ duration: 0.55, delay: 0.15, ease: 'easeOut' }}
             className="mf-login-brand"
           >
-            <MasterfadeLogo variant="compact" />
+            <AuthLandingBrandBlock />
           </motion.div>
 
           <motion.div
@@ -223,7 +243,7 @@ export default function RegisterPage() {
                       autoComplete="given-name"
                       value={nombres}
                       onChange={(event) => setNombres(event.target.value)}
-                      placeholder="Fernando"
+                      placeholder="Samir"
                       disabled={loading}
                     />
                   </div>
@@ -243,7 +263,7 @@ export default function RegisterPage() {
                       autoComplete="family-name"
                       value={apellidos}
                       onChange={(event) => setApellidos(event.target.value)}
-                      placeholder="Miranda"
+                      placeholder="Lobo"
                       disabled={loading}
                     />
                   </div>
@@ -264,7 +284,7 @@ export default function RegisterPage() {
                     autoComplete="email"
                     value={correo}
                     onChange={(event) => setCorreo(event.target.value)}
-                    placeholder="cliente@masterfade.hn"
+                    placeholder="cliente@masterfadeapp.com"
                     disabled={loading}
                   />
                 </div>
@@ -274,46 +294,74 @@ export default function RegisterPage() {
                 <div className="mf-form-group">
                   <label className="mf-label mf-register-label" htmlFor="register_contrasena">
                     <KeyRound size={12} strokeWidth={2} />
-                    Contrasena
+                    Contraseña
                   </label>
                   <div className="mf-register-input-wrap">
                     <KeyRound className="mf-register-input-icon" size={15} strokeWidth={1.9} />
                     <input
                       id="register_contrasena"
-                      className="mf-input mf-register-input"
-                      type="password"
+                      className="mf-input mf-register-input mf-register-input-password"
+                      type={showPasswordWhilePress ? 'text' : 'password'}
                       autoComplete="new-password"
                       value={contrasena}
                       onChange={(event) => setContrasena(event.target.value)}
                       placeholder="********"
                       disabled={loading}
                     />
+                    <button
+                      type="button"
+                      className="mf-register-password-peek"
+                      aria-label="Mantén presionado para ver la contraseña"
+                      title="Mantén presionado para ver la contraseña"
+                      disabled={loading}
+                      onPointerDown={(event) => handlePasswordRevealStart('password', event)}
+                      onPointerUp={() => handlePasswordRevealEnd('password')}
+                      onPointerLeave={() => handlePasswordRevealEnd('password')}
+                      onPointerCancel={() => handlePasswordRevealEnd('password')}
+                      onBlur={() => handlePasswordRevealEnd('password')}
+                    >
+                      <Eye size={16} />
+                    </button>
                   </div>
                 </div>
 
                 <div className="mf-form-group">
                   <label className="mf-label mf-register-label" htmlFor="register_confirmar">
                     <KeyRound size={12} strokeWidth={2} />
-                    Confirmar contrasena
+                    Confirmar contraseña
                   </label>
                   <div className="mf-register-input-wrap">
                     <KeyRound className="mf-register-input-icon" size={15} strokeWidth={1.9} />
                     <input
                       id="register_confirmar"
-                      className="mf-input mf-register-input"
-                      type="password"
+                      className="mf-input mf-register-input mf-register-input-password"
+                      type={showConfirmPasswordWhilePress ? 'text' : 'password'}
                       autoComplete="new-password"
                       value={confirmarContrasena}
                       onChange={(event) => setConfirmarContrasena(event.target.value)}
                       placeholder="********"
                       disabled={loading}
                     />
+                    <button
+                      type="button"
+                      className="mf-register-password-peek"
+                      aria-label="Mantén presionado para ver la contraseña"
+                      title="Mantén presionado para ver la contraseña"
+                      disabled={loading}
+                      onPointerDown={(event) => handlePasswordRevealStart('confirm', event)}
+                      onPointerUp={() => handlePasswordRevealEnd('confirm')}
+                      onPointerLeave={() => handlePasswordRevealEnd('confirm')}
+                      onPointerCancel={() => handlePasswordRevealEnd('confirm')}
+                      onBlur={() => handlePasswordRevealEnd('confirm')}
+                    >
+                      <Eye size={16} />
+                    </button>
                   </div>
                 </div>
               </div>
 
               <p className="mf-register-help">
-                Minimo 8 caracteres con mayuscula, minuscula y numero.
+                Mínimo 8 caracteres con mayúscula, minúscula y número.
               </p>
 
               {/* AM: Panel de consentimientos para separar legal/marketing y mejorar legibilidad. */}

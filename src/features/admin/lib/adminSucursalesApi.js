@@ -4,8 +4,9 @@ import { http } from '../../../services/httpClient.js';
 const BASE = '/v1/admin/sucursales';
 
 /** GET /v1/admin/sucursales */
-export async function listAdminSucursales() {
-  return http.get(BASE);
+export async function listAdminSucursales({ soloActivas = false } = {}) {
+  const query = soloActivas ? '?solo_activas=true' : '';
+  return http.get(`${BASE}${query}`);
 }
 
 /** GET /v1/admin/sucursales/empresas */

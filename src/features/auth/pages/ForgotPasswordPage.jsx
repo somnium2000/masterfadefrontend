@@ -1,6 +1,9 @@
+import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import { http } from '../../../services/httpClient.js';
+import AuthLandingBrandBlock from '../components/AuthLandingBrandBlock.jsx';
 import './LoginPage.css';
 import './PasswordRecovery.css';
 
@@ -12,14 +15,14 @@ export default function ForgotPasswordPage() {
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
 
-  // ✅ Meta de rate limit (por correo)
+  // Meta de rate limit (por correo)
   // { max, remaining, windowSeconds, resetInSeconds, blockSeconds }
   const [rateInfo, setRateInfo] = useState(null);
 
-  // ✅ Contador de bloqueo (segundos)
+  // Contador de bloqueo (segundos)
   const [retryAfter, setRetryAfter] = useState(0);
 
-  // ✅ countdown automático cuando está bloqueado
+  // Countdown automático cuando está bloqueado
   useEffect(() => {
     if (retryAfter <= 0) return;
 
@@ -59,44 +62,30 @@ export default function ForgotPasswordPage() {
       return;
     }
 
-    const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:3002';
-
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/v1/auth/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: value }),
-      });
-
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        const rl = data?.error?.details?.rateLimit;
-        const ra = data?.error?.details?.retryAfterSeconds;
-
-        if (rl) setRateInfo(rl);
-        if (typeof ra === 'number') setRetryAfter(ra);
-
-        const message = data?.error?.message || 'No se pudo enviar el enlace.';
-        setError(message);
-        notifications.error(message, { dedupeKey: 'auth-forgot-send-error' });
-        return;
-      }
+      const response = await http.post('/v1/auth/forgot-password', { email: value });
+      const data = response?.data || response;
 
       const successMessage =
         data?.data?.message ||
-        'Si el correo existe, recibiras un enlace para restablecer tu contrasena.';
+        'Si el correo existe, recibirás un enlace para restablecer tu contraseña.';
 
       setMsg(successMessage);
       notifications.success(successMessage, { dedupeKey: 'auth-forgot-send-ok' });
 
       if (data?.data?.rateLimit) setRateInfo(data.data.rateLimit);
       setRetryAfter(0);
-    } catch {
-      const message = 'No se pudo conectar con el backend. Verifica que este corriendo en 3002.';
+    } catch (requestError) {
+      const rl = requestError?.data?.error?.details?.rateLimit;
+      const ra = requestError?.data?.error?.details?.retryAfterSeconds;
+
+      if (rl) setRateInfo(rl);
+      if (typeof ra === 'number') setRetryAfter(ra);
+
+      const message = requestError?.data?.error?.message || requestError?.message || 'No se pudo enviar el enlace.';
       setError(message);
-      notifications.error(message, { dedupeKey: 'auth-forgot-connect-error' });
+      notifications.error(message, { dedupeKey: 'auth-forgot-send-error' });
     } finally {
       setLoading(false);
     }
@@ -105,16 +94,22 @@ export default function ForgotPasswordPage() {
   return (
     <div className="mf-login-page">
       <div className="mf-login-container">
-        <div className="mf-login-logo" aria-hidden="true">
-          <span className="mf-login-logo-badge">B</span>
-        </div>
+        <motion.div
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.55, delay: 0.15, ease: 'easeOut' }}
+          className="mf-login-brand"
+          aria-hidden="true"
+        >
+          <AuthLandingBrandBlock />
+        </motion.div>
 
         <div className="mf-login-card">
           <div className="mf-login-card-header">
-            <h1 className="mf-login-title">Recuperar contraseña</h1>
+            <h1 className="mf-login-title">Recuperar Contraseña</h1>
           </div>
 
-          <form className="mf-login-form" onSubmit={onSubmit}>
+          <form className="mf-login-form" onSubmit={onSubmit} aria-busy={loading}>
             <div className="mf-form-group">
               <label className="mf-label" htmlFor="email">
                 Correo
@@ -132,12 +127,12 @@ export default function ForgotPasswordPage() {
             </div>
 
             {/* Mensajes */}
-            {error ? <div className="mf-error">{error}</div> : null}
-            {msg ? <div className="mf-success">{msg}</div> : null}
+            {error ? <div className="mf-error" role="alert" aria-live="assertive">{error}</div> : null}
+            {msg ? <div className="mf-success" role="status" aria-live="polite">{msg}</div> : null}
 
-            {/* ✅ Visualización del rate limit */}
+            {/* Visualización del rate limit */}
             {rateInfo ? (
-              <div className="mf-help">
+              <div className="mf-help" role="status" aria-live="polite">
                 {retryAfter > 0 ? (
                   <>
                     <b>Bloqueado para este correo.</b> Intenta de nuevo en{' '}
@@ -163,13 +158,10 @@ export default function ForgotPasswordPage() {
                 disabled={loading || retryAfter > 0}
                 title={retryAfter > 0 ? 'Bloqueado temporalmente por demasiados intentos' : 'Enviar enlace'}
               >
-                {loading ? 'Enviando…' : retryAfter > 0 ? 'Bloqueado' : 'Enviar enlace'}
+                {loading ? 'Enviando...' : retryAfter > 0 ? 'Bloqueado' : 'Enviar enlace'}
               </button>
             </div>
 
-            <div className="mf-help">
-              Mantén tu front corriendo mientras abres el enlace del correo.
-            </div>
           </form>
         </div>
       </div>
