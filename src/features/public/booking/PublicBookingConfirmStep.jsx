@@ -1,5 +1,6 @@
 import { ArrowLeft, CheckCircle2, Clock3, Loader2 } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
 import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
 import {
   formatCurrencyHnl,
@@ -35,11 +36,13 @@ function HoldResultSummary({ holdResult, holdDurationMin, bookingBlocksSummary, 
   const bloques = Array.isArray(holdResult.bloques) ? holdResult.bloques : [];
 
   return (
-    <div className="citas-surface p-5 public-booking-success">
+    <div className="public-booking-success">
       <div className="public-booking-success-head">
         <CheckCircle2 size={18} />
-        <span>{mode === 'preview' ? 'Simulación completada' : 'Reserva confirmada con éxito'}</span>
+        <span>{mode === 'preview' ? 'Simulacion completada' : 'Reserva confirmada con exito'}</span>
       </div>
+
+      <p className="citas-selected-date mt-2">Puedes tomar una captura de esta pantalla como comprobante de tu cita.</p>
 
       <div className="citas-confirm-row">
         <span>ID grupo</span>
@@ -66,7 +69,7 @@ function HoldResultSummary({ holdResult, holdDurationMin, bookingBlocksSummary, 
         <span>{expiresAt ? expiresAt.toLocaleString('es-HN', { timeZone: HONDURAS_TIME_ZONE }) : 'N/D'}</span>
       </div>
       <div className="citas-confirm-row">
-        <span>Duración de hold</span>
+        <span>Duracion de hold</span>
         <span>{holdDurationMin} min</span>
       </div>
 
@@ -139,7 +142,7 @@ export default function PublicBookingConfirmStep() {
               </span>
             </div>
             <div className="citas-confirm-row">
-              <span>Duración hold</span>
+              <span>Duracion hold</span>
               <span>{holdDurationMin} min</span>
             </div>
       <div className="citas-confirm-row">
@@ -172,16 +175,16 @@ export default function PublicBookingConfirmStep() {
             <Clock3 size={14} />
             <span>
               {simulationNoPayment
-                ? 'Simulación activa: por pruebas, no se realizará cobro ni pasarela en esta fase.'
+                ? 'Simulacion activa: por pruebas, no se realizara cobro ni pasarela en esta fase.'
                 : paymentRequired
-                  ? 'Pago total obligatorio activo. La pasarela se integra en la siguiente iteración.'
-                  : 'La pasarela de pago aún no está integrada en este flujo.'}
+                  ? 'Pago total obligatorio activo. La pasarela se integra en la siguiente iteracion.'
+                  : 'La pasarela de pago aun no esta integrada en este flujo.'}
             </span>
           </div>
 
           {holdExpired ? (
             <p className="mt-3 rounded-[12px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-              El tiempo de confirmación expiró. Si la hora sigue libre, puedes crear la reserva de nuevo.
+              El tiempo de confirmacion expiro. Si la hora sigue libre, puedes crear la reserva de nuevo.
             </p>
           ) : null}
 
@@ -199,13 +202,27 @@ export default function PublicBookingConfirmStep() {
           </div>
         </div>
 
-        <HoldResultSummary
-          holdResult={holdResult}
-          holdDurationMin={holdDurationMin}
-          bookingBlocksSummary={bookingBlocksSummary}
-          mode={mode}
-          onBackHome={completeBookingFlow}
-        />
+        <Dialog
+          open={Boolean(holdResult)}
+          onOpenChange={(open) => {
+            if (!open && holdResult) {
+              completeBookingFlow();
+            }
+          }}
+        >
+          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Detalle de cita confirmada</DialogTitle>
+            </DialogHeader>
+            <HoldResultSummary
+              holdResult={holdResult}
+              holdDurationMin={holdDurationMin}
+              bookingBlocksSummary={bookingBlocksSummary}
+              mode={mode}
+              onBackHome={completeBookingFlow}
+            />
+          </DialogContent>
+        </Dialog>
       </div>
     </>
   );

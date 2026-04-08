@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+﻿import { useEffect, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, ChevronDown, Clock3, Plus, Scissors, UserRound } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
@@ -11,6 +11,7 @@ import {
   WEEK_DAYS,
   buildCalendarCells,
   formatCurrencyHnl,
+  formatDurationHuman,
   formatFriendlyDate,
   formatMonth,
   formatTime12Hour,
@@ -78,7 +79,10 @@ export default function PublicBookingAgendaStep() {
     onSelectDay,
     onSelectTime,
     selectSuggestedBarber,
+    barberPrepTime,
     selectedDate,
+    selectedBlockTotalMinutes,
+    selectedServicesDurationSum,
     selectedServices,
     selectedTime,
     serviceIds,
@@ -98,13 +102,23 @@ export default function PublicBookingAgendaStep() {
     toggleService,
     totalToPay,
     updateActiveBlockBarber,
+    updateActiveBlockContact,
     currentMonth,
+    selectedBarber,
   } = usePublicBookingFlow();
 
   const calendarCells = useMemo(() => buildCalendarCells(currentMonth), [currentMonth]);
   const canGoToConfirm = Boolean(allBlocksComplete);
   const selectedServicesCount = selectedServices.length;
   const hasSelectedDate = Boolean(selectedDate);
+  const slotsSectionRef = useRef(null);
+  const activeContactName = String(activeBlock?.contactName || '');
+  const activeContactEmail = String(activeBlock?.contactEmail || '');
+  const activeContactPhone = String(activeBlock?.contactPhone || '');
+  const contactNameRequiredMessage = activeBlockIndex === 0
+    ? 'Ingresa el nombre del titular para continuar con la selección de servicios.'
+    : 'Ingresa el nombre del acompañante antes de elegir servicios.';
+  const canSelectServices = Boolean(activeContactName.trim());
 
   useEffect(() => {
     syncServicesScrollState();
@@ -119,6 +133,11 @@ export default function PublicBookingAgendaStep() {
     };
   }, [bookingBlocks.length, services.length, servicesScrollRef, syncServicesScrollState]);
 
+  useEffect(() => {
+    if (!selectedDate || !slotsSectionRef.current) return;
+    slotsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [selectedDate]);
+
   if (servicesLoading) {
     return (
       <div className="citas-surface p-6">
@@ -132,7 +151,9 @@ export default function PublicBookingAgendaStep() {
       <EmptyState
         icon={Scissors}
         title="Sin servicios disponibles"
-        description="No hay servicios activos para esta sucursal."
+        description={selectedBarber
+          ? `No hay servicios ofrecidos configurados para ${selectedBarber.nombre_completo}.`
+          : 'No hay servicios activos para esta sucursal.'}
       />
     );
   }
@@ -193,6 +214,69 @@ export default function PublicBookingAgendaStep() {
             </select>
           </div>
 
+          <div className="public-booking-contact-card">
+            <div className="public-booking-form-grid">
+              <div className="public-booking-form-row">
+                <label className="mf-label" htmlFor="booking-contact-name">
+                  {activeBlockIndex === 0 ? 'Nombre del titular *' : 'Nombre del acompañante *'}
+                </label>
+                <input
+                  id="booking-contact-name"
+                  type="text"
+                  className="mf-input"
+                  value={activeContactName}
+                  onChange={(event) => updateActiveBlockContact({ contactName: event.target.value })}
+                  placeholder={activeBlockIndex === 0 ? 'Ej. Carlos Ramírez' : 'Ej. José López'}
+                />
+                {activeBlockIndex > 0 ? (
+                  <p className="citas-selected-date">
+                    Este nombre se usa para llamarle correctamente en la barbería y evitar confusiones.
+                  </p>
+                ) : null}
+              </div>
+              <div className="public-booking-form-row">
+                <label className="mf-label" htmlFor="booking-contact-email">
+                  {activeBlockIndex === 0 ? 'Correo del titular *' : 'Correo del acompañante (opcional)'}
+                </label>
+                <input
+                  id="booking-contact-email"
+                  type="email"
+                  className="mf-input"
+                  value={activeContactEmail}
+                  onChange={(event) => updateActiveBlockContact({ contactEmail: event.target.value })}
+                  placeholder={activeBlockIndex === 0 ? 'titular@correo.com' : 'acompanante@correo.com'}
+                />
+                {activeBlockIndex > 0 ? (
+                  <p className="citas-selected-date">
+                    Si lo indicas, enviaremos la información de la cita a este correo.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+            {activeBlockIndex === 0 ? (
+              <div className="public-booking-form-row mt-2">
+                <label className="mf-label" htmlFor="booking-contact-phone">
+                  Teléfono del titular (opcional)
+                </label>
+                <input
+                  id="booking-contact-phone"
+                  type="tel"
+                  className="mf-input"
+                  value={activeContactPhone}
+                  onChange={(event) => updateActiveBlockContact({ contactPhone: event.target.value })}
+                  placeholder="Ej. +504 9999-9999"
+                />
+                <p className="citas-selected-date">
+                  Lo usaremos para avisarte si hay cambios extraordinarios en fecha u hora.
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          {!canSelectServices ? (
+            <p className="citas-selected-date">{contactNameRequiredMessage}</p>
+          ) : null}
+
           <div className="citas-services-scroll scrollbar-hide" ref={servicesScrollRef}>
             <div className="citas-services-grid">
               {services.map((service) => (
@@ -200,6 +284,7 @@ export default function PublicBookingAgendaStep() {
                   key={service.id_servicio}
                   service={service}
                   isSelected={serviceIds.includes(service.id_servicio)}
+                  disabled={!canSelectServices}
                   onToggle={() => toggleService(service.id_servicio)}
                 />
               ))}
@@ -241,65 +326,52 @@ export default function PublicBookingAgendaStep() {
             ) : null}
           </div>
 
-          {activeBlockIndex > 0 ? (
-            <div className="p-5 text-center my-4">
-              <p className="citas-selected-date block mb-2">
-                La fecha para los integrantes esta bloqueada para coincidir con la del titular:
-              </p>
-              <strong className="citas-calendar-profile-name" style={{ display: 'block', fontSize: '16px' }}>
-                {bookingBlocks[0]?.selectedDate ? formatFriendlyDate(bookingBlocks[0].selectedDate) : 'Ninguna'}
-              </strong>
-              <p className="citas-selected-date block mt-4" style={{ fontSize: '13px' }}>
-                Para cambiar la fecha, vuelve a seleccionar al Titular.
-              </p>
+          <>
+            <div className="citas-calendar-head" style={{ paddingTop: '0' }}>
+              <button
+                type="button"
+                className="citas-nav-round"
+                onClick={() => setMonth(-1)}
+                aria-label="Mes anterior"
+                disabled={!canGoPrevMonth}
+              >
+                <ArrowLeft size={16} />
+              </button>
+              <div className="citas-calendar-month">{formatMonth(currentMonth)}</div>
+              <button type="button" className="citas-nav-round" onClick={() => setMonth(1)} aria-label="Mes siguiente">
+                <ArrowRight size={16} />
+              </button>
             </div>
-          ) : (
-            <>
-              <div className="citas-calendar-head" style={{ paddingTop: '0' }}>
-                <button
-                  type="button"
-                  className="citas-nav-round"
-                  onClick={() => setMonth(-1)}
-                  aria-label="Mes anterior"
-                  disabled={!canGoPrevMonth}
-                >
-                  <ArrowLeft size={16} />
-                </button>
-                <div className="citas-calendar-month">{formatMonth(currentMonth)}</div>
-                <button type="button" className="citas-nav-round" onClick={() => setMonth(1)} aria-label="Mes siguiente">
-                  <ArrowRight size={16} />
-                </button>
+
+            <div className="citas-calendar-grid">
+              <div className="citas-weekdays">
+                {WEEK_DAYS.map((day) => (
+                  <div key={day} className="citas-weekday">
+                    {day}
+                  </div>
+                ))}
               </div>
 
-              <div className="citas-calendar-grid">
-                <div className="citas-weekdays">
-                  {WEEK_DAYS.map((day) => (
-                    <div key={day} className="citas-weekday">
-                      {day}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="citas-days">
-                  {calendarCells.map((cell) => (
-                    <DayButton
-                      key={cell.key}
-                      cell={cell}
-                      dayInfo={availabilityMap[cell.key]}
-                      minDateKey={minBookingDateKey}
-                      selectedDate={selectedDate}
-                      onSelect={onSelectDay}
-                    />
-                  ))}
-                </div>
+              <div className="citas-days">
+                {calendarCells.map((cell) => (
+                  <DayButton
+                    key={cell.key}
+                    cell={cell}
+                    dayInfo={availabilityMap[cell.key]}
+                    minDateKey={minBookingDateKey}
+                    selectedDate={selectedDate}
+                    onSelect={onSelectDay}
+                  />
+                ))}
               </div>
-            </>
-          )}
+            </div>
+          </>
         </motion.div>
 
         <AnimatePresence initial={false}>
           {hasSelectedDate ? (
             <motion.div
+              ref={slotsSectionRef}
               key={`${activeBlock?.id || 'block'}-${selectedDate}`}
               className="citas-surface public-booking-slots-surface"
               initial={{ opacity: 0, y: 20, scale: 0.985 }}
@@ -312,6 +384,11 @@ export default function PublicBookingAgendaStep() {
                 <p className="citas-selected-date">
                   Fecha seleccionada: {formatFriendlyDate(selectedDate)}
                 </p>
+                <div className="public-booking-slot-summary">
+                  <span>Duración estimada de la cita: {formatDurationHuman(selectedServicesDurationSum)}</span>
+                  <span>Tiempo interno de preparación: + {formatDurationHuman(barberPrepTime)}</span>
+                  <strong>Bloque operativo total: {formatDurationHuman(selectedBlockTotalMinutes)}</strong>
+                </div>
 
                 {slotConflict ? (
                   <div className="public-booking-slot-conflict">
@@ -346,12 +423,11 @@ export default function PublicBookingAgendaStep() {
                 {slotsLoading ? (
                   <LoadingSpinner />
                 ) : (
-                  <div className="citas-timeslots">
+                  <div className="public-booking-time-block-list">
                     {slots.map((slot) => (
                       <SlotButton
                         key={slot.hora}
                         slot={slot}
-                        displayTime={formatTime12Hour(slot.hora)}
                         isDisabled={isPastSlotForToday(selectedDate, slot.hora)}
                         selectedTime={selectedTime}
                         onSelect={onSelectTime}
@@ -422,3 +498,4 @@ export default function PublicBookingAgendaStep() {
     </>
   );
 }
+

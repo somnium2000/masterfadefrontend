@@ -225,6 +225,13 @@ select {
   padding-right: 24px;
 }
 
+@media (max-width: 420px) {
+  .mf-screen-pad {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
+
 .mf-safe-top {
   padding-top: env(safe-area-inset-top, 0px);
 }

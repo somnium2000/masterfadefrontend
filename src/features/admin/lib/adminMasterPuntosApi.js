@@ -25,3 +25,7 @@ export async function updateAdminMasterPuntosRegla(payload) {
 export async function createAdminMasterPuntosCanje(payload) {
   return http.post(`${BASE}/canjes`, payload);
 }
+
+export async function createAdminMasterPuntosLegacyMigracion(payload) {
+  return http.post(`${BASE}/legacy-migracion`, payload);
+}

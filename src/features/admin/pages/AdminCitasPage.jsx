@@ -50,10 +50,8 @@ const PREVIEW_STEPS = [
 
 const CONFIG_TABS = [
   { id: 'horario', label: 'Horario Habitual', icon: Clock3 },
-  { id: 'bloqueos', label: 'Bloqueos', icon: SlidersHorizontal },
-  { id: 'dias', label: 'Días Inhabilitados', icon: CalendarDays },
+  { id: 'restricciones', label: 'Bloqueos y Excepciones', icon: AlertTriangle },
   { id: 'parametros', label: 'Parámetros Globales', icon: SlidersHorizontal },
-  { id: 'excepciones', label: 'Excepciones', icon: AlertTriangle },
   { id: 'sucursal', label: 'Por Sucursal', icon: Ban },
 ];
 
@@ -243,7 +241,6 @@ function buildDefaultScheduleRows() {
       hora_fin: isWeekend ? '17:00' : '19:00',
       almuerzo_inicio: '12:00',
       almuerzo_fin: '13:00',
-      duracion_min: 30,
       activo: item.code !== 0,
     };
   });
@@ -323,24 +320,19 @@ export default function AdminCitasPage() {
 
   const [blocksLoading, setBlocksLoading] = useState(false);
   const [blocks, setBlocks] = useState([]);
-  const [blockDialogOpen, setBlockDialogOpen] = useState(false);
-  const [blockSaving, setBlockSaving] = useState(false);
   const [blockDeleteId, setBlockDeleteId] = useState('');
-  const [blockForm, setBlockForm] = useState({
+
+  const [daysOffLoading, setDaysOffLoading] = useState(false);
+  const [daysOff, setDaysOff] = useState([]);
+  const [dayOffDeleteId, setDayOffDeleteId] = useState('');
+  const [restrictionDialogOpen, setRestrictionDialogOpen] = useState(false);
+  const [restrictionSaving, setRestrictionSaving] = useState(false);
+  const [restrictionForm, setRestrictionForm] = useState({
+    tipo_registro: 'bloqueo',
     fecha: '',
     hora_inicio: '10:00',
     hora_fin: '11:00',
     tipo_bloqueo_codigo: '',
-    motivo: '',
-  });
-
-  const [daysOffLoading, setDaysOffLoading] = useState(false);
-  const [daysOff, setDaysOff] = useState([]);
-  const [dayOffDialogOpen, setDayOffDialogOpen] = useState(false);
-  const [dayOffSaving, setDayOffSaving] = useState(false);
-  const [dayOffDeleteId, setDayOffDeleteId] = useState('');
-  const [dayOffForm, setDayOffForm] = useState({
-    fecha: '',
     motivo: '',
   });
 
@@ -359,11 +351,13 @@ export default function AdminCitasPage() {
   const [paramsForm, setParamsForm] = useState({
     hold_duracion_min: '5',
     no_show_min: '10',
+    agenda_buffer_global_min: '0',
     dias_anticipacion: '30',
     horas_minimas: '2',
     permitir_acompanantes: false,
     pago_total_obligatorio: true,
     simulacion_sin_pago: true,
+    masterpuntos_migracion_manual_habilitada: false,
     confirmacion_automatica: true,
   });
 
@@ -497,16 +491,27 @@ export default function AdminCitasPage() {
     if (tabId === 'parametros') return 'params:global';
     if (tabId === 'sucursal') return selectedBranchId ? `branchDays:${selectedBranchId}` : '';
     if (tabId === 'horario') return selectedBarberId ? `schedule:${selectedBarberId}` : '';
-    if (tabId === 'bloqueos' || tabId === 'excepciones') return selectedBarberId ? `blocks:${selectedBarberId}` : '';
-    if (tabId === 'dias') {
-      const barberKey = selectedBarberId ? `days:${selectedBarberId}` : '';
-      const branchKey = selectedBranchId ? `branchDays:${selectedBranchId}` : '';
-      return [barberKey, branchKey].filter(Boolean).join('|');
-    }
+    if (tabId === 'restricciones') return selectedBarberId ? `restricciones:${selectedBarberId}` : '';
     return '';
   }, [selectedBarberId, selectedBranchId]);
 
-  const exceptionsList = useMemo(() => blocks.filter((item) => !item.es_dia_completo), [blocks]);
+  const restrictionItems = useMemo(() => {
+    const hourlyItems = (Array.isArray(blocks) ? blocks : []).map((item) => ({
+      ...item,
+      registro_tipo: 'bloqueo_horario',
+      registro_titulo: 'Bloqueo / excepción',
+      registro_descripcion: item.tipo_bloqueo_codigo || 'Bloqueo horario',
+      sortKey: item?.inicio_at || item?.fecha || '',
+    }));
+    const fullDayItems = (Array.isArray(daysOff) ? daysOff : []).map((item) => ({
+      ...item,
+      registro_tipo: 'dia_inhabilitado',
+      registro_titulo: 'Día inhabilitado',
+      registro_descripcion: 'Día completo',
+      sortKey: item?.inicio_at || item?.fecha || '',
+    }));
+    return [...hourlyItems, ...fullDayItems].sort((left, right) => String(right.sortKey).localeCompare(String(left.sortKey)));
+  }, [blocks, daysOff]);
 
   const fetchContext = useCallback(async () => {
     setContextLoading(true);
@@ -526,9 +531,16 @@ export default function AdminCitasPage() {
         ...prev,
         hold_duracion_min: String(nextContext.parametros?.hold_duracion_min ?? prev.hold_duracion_min),
         no_show_min: String(nextContext.parametros?.no_show_min ?? prev.no_show_min),
+        agenda_buffer_global_min: String(
+          nextContext.parametros?.agenda_buffer_global_min ?? prev.agenda_buffer_global_min
+        ),
         permitir_acompanantes: Boolean(nextContext.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(nextContext.parametros?.pago_total_obligatorio ?? true),
         simulacion_sin_pago: Boolean(nextContext.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
+        masterpuntos_migracion_manual_habilitada: Boolean(
+          nextContext.parametros?.masterpuntos_migracion_manual_habilitada
+            ?? prev.masterpuntos_migracion_manual_habilitada
+        ),
       }));
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -768,9 +780,14 @@ export default function AdminCitasPage() {
         ...prev,
         hold_duracion_min: String(payload?.parametros?.hold_duracion_min ?? prev.hold_duracion_min),
         no_show_min: String(payload?.parametros?.no_show_min ?? prev.no_show_min),
+        agenda_buffer_global_min: String(payload?.parametros?.agenda_buffer_global_min ?? prev.agenda_buffer_global_min),
         permitir_acompanantes: Boolean(payload?.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(payload?.parametros?.pago_total_obligatorio ?? true),
         simulacion_sin_pago: Boolean(payload?.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
+        masterpuntos_migracion_manual_habilitada: Boolean(
+          payload?.parametros?.masterpuntos_migracion_manual_habilitada
+            ?? prev.masterpuntos_migracion_manual_habilitada
+        ),
       }));
       return true;
     } catch (err) {
@@ -849,11 +866,11 @@ export default function AdminCitasPage() {
   }, []);
 
   useEffect(() => {
-    if (blockForm.tipo_bloqueo_codigo) return;
+    if (restrictionForm.tipo_bloqueo_codigo) return;
     const firstType = contextData?.tipos_bloqueo?.[0]?.tipo_bloqueo_codigo || '';
     if (!firstType) return;
-    setBlockForm((prev) => ({ ...prev, tipo_bloqueo_codigo: firstType }));
-  }, [blockForm.tipo_bloqueo_codigo, contextData?.tipos_bloqueo]);
+    setRestrictionForm((prev) => ({ ...prev, tipo_bloqueo_codigo: firstType }));
+  }, [contextData?.tipos_bloqueo, restrictionForm.tipo_bloqueo_codigo]);
 
   useEffect(() => {
     if (paramsForm.permitir_acompanantes) return;
@@ -898,27 +915,15 @@ export default function AdminCitasPage() {
     };
 
     async function loadConfigData() {
-      if (selectedConfigTab === 'dias') {
-        const dayKey = selectedBarberId ? `days:${selectedBarberId}` : '';
-        const branchKey = selectedBranchId ? `branchDays:${selectedBranchId}` : '';
-
-        if (dayKey && !configLoadCacheRef.current.has(dayKey)) {
-          const ok = await fetchDaysOff();
-          if (ok) markLoaded(dayKey);
-        }
-        if (branchKey && !configLoadCacheRef.current.has(branchKey)) {
-          const ok = await fetchBranchDaysOff();
-          if (ok) markLoaded(branchKey);
-        }
-        return;
-      }
-
       const cacheKey = getConfigDataCacheKey(selectedConfigTab);
       if (cacheKey && configLoadCacheRef.current.has(cacheKey)) return;
 
       let loaded = false;
       if (selectedConfigTab === 'horario') loaded = await fetchSchedule();
-      else if (selectedConfigTab === 'bloqueos' || selectedConfigTab === 'excepciones') loaded = await fetchBlocks();
+      else if (selectedConfigTab === 'restricciones') {
+        const [okBlocks, okDays] = await Promise.all([fetchBlocks(), fetchDaysOff()]);
+        loaded = Boolean(okBlocks || okDays);
+      }
       else if (selectedConfigTab === 'parametros') loaded = await fetchParams();
       else if (selectedConfigTab === 'sucursal') loaded = await fetchBranchDaysOff();
 
@@ -1062,48 +1067,71 @@ export default function AdminCitasPage() {
     )));
   }
 
-  async function handleCreateBlock() {
+  function handleOpenRestrictionDialog(tipoRegistro = 'bloqueo') {
+    setRestrictionForm({
+      tipo_registro: tipoRegistro,
+      fecha: '',
+      hora_inicio: '10:00',
+      hora_fin: '11:00',
+      tipo_bloqueo_codigo: contextData.tipos_bloqueo?.[0]?.tipo_bloqueo_codigo || '',
+      motivo: '',
+    });
+    setRestrictionDialogOpen(true);
+  }
+
+  async function handleSaveRestriction() {
     if (!selectedBarber) return;
-    const inicioAt = toDateTimeIso(blockForm.fecha, blockForm.hora_inicio);
-    const finAt = toDateTimeIso(blockForm.fecha, blockForm.hora_fin);
-    if (!inicioAt || !finAt) {
+    if (!restrictionForm.fecha) {
+      notifications.warning('Selecciona una fecha para registrar la restricción.', {
+        dedupeKey: 'citas-restriction-date',
+      });
+      return;
+    }
+
+    const isDayOff = restrictionForm.tipo_registro === 'dia_inhabilitado';
+    const inicioAt = toDateTimeIso(restrictionForm.fecha, restrictionForm.hora_inicio);
+    const finAt = toDateTimeIso(restrictionForm.fecha, restrictionForm.hora_fin);
+
+    if (!isDayOff && (!inicioAt || !finAt)) {
       notifications.warning('Completa fecha y rango horario válido.', { dedupeKey: 'citas-block-create-invalid' });
       return;
     }
-    if (new Date(finAt).getTime() <= new Date(inicioAt).getTime()) {
+    if (!isDayOff && new Date(finAt).getTime() <= new Date(inicioAt).getTime()) {
       notifications.warning('La hora de fin debe ser mayor a la hora de inicio.', { dedupeKey: 'citas-block-create-range' });
       return;
     }
-    if (!blockForm.tipo_bloqueo_codigo) {
+    if (!isDayOff && !restrictionForm.tipo_bloqueo_codigo) {
       notifications.warning('Selecciona un tipo de bloqueo.', { dedupeKey: 'citas-block-create-type' });
       return;
     }
 
-    setBlockSaving(true);
+    setRestrictionSaving(true);
     try {
-      await createAdminCitasBloqueo({
-        id_empleado: selectedBarber.id_empleado,
-        id_sucursal: selectedBarber.id_sucursal,
-        tipo_bloqueo_codigo: blockForm.tipo_bloqueo_codigo,
-        inicio_at: inicioAt,
-        fin_at: finAt,
-        motivo: blockForm.motivo || null,
-      });
-      setBlockDialogOpen(false);
-      setBlockForm((prev) => ({
-        ...prev,
-        fecha: '',
-        hora_inicio: '10:00',
-        hora_fin: '11:00',
-        motivo: '',
-      }));
-      notifications.success('Bloqueo creado.', { dedupeKey: 'citas-block-create-ok' });
-      void fetchBlocks();
+      if (isDayOff) {
+        await createAdminCitasDiaInhabilitado({
+          id_empleado: selectedBarber.id_empleado,
+          id_sucursal: selectedBarber.id_sucursal,
+          fecha: restrictionForm.fecha,
+          motivo: restrictionForm.motivo || null,
+        });
+      } else {
+        await createAdminCitasBloqueo({
+          id_empleado: selectedBarber.id_empleado,
+          id_sucursal: selectedBarber.id_sucursal,
+          tipo_bloqueo_codigo: restrictionForm.tipo_bloqueo_codigo,
+          inicio_at: inicioAt,
+          fin_at: finAt,
+          motivo: restrictionForm.motivo || null,
+        });
+      }
+      setRestrictionDialogOpen(false);
+      notifications.success('Restricción guardada.', { dedupeKey: 'citas-restriction-save-ok' });
+      await Promise.all([fetchBlocks(), fetchDaysOff()]);
     } catch (err) {
       if (handleAuthError(err)) return;
-      notifications.error(extractMessage(err), { dedupeKey: 'citas-block-create-error' });
+      notifications.error(extractMessage(err), { dedupeKey: 'citas-restriction-save-error' });
     } finally {
-      setBlockSaving(false);
+      setRestrictionSaving(false);
     }
   }
 
@@ -1119,32 +1147,6 @@ export default function AdminCitasPage() {
       notifications.error(extractMessage(err), { dedupeKey: 'citas-block-delete-error' });
     } finally {
       setBlockDeleteId('');
-    }
-  }
-
-  async function handleCreateDayOff() {
-    if (!selectedBarber) return;
-    if (!dayOffForm.fecha) {
-      notifications.warning('Selecciona una fecha para inhabilitar.', { dedupeKey: 'citas-dayoff-create-date' });
-      return;
-    }
-    setDayOffSaving(true);
-    try {
-      await createAdminCitasDiaInhabilitado({
-        id_empleado: selectedBarber.id_empleado,
-        id_sucursal: selectedBarber.id_sucursal,
-        fecha: dayOffForm.fecha,
-        motivo: dayOffForm.motivo || null,
-      });
-      setDayOffDialogOpen(false);
-      setDayOffForm({ fecha: '', motivo: '' });
-      notifications.success('Día inhabilitado creado.', { dedupeKey: 'citas-dayoff-create-ok' });
-      void fetchDaysOff();
-    } catch (err) {
-      if (handleAuthError(err)) return;
-      notifications.error(extractMessage(err), { dedupeKey: 'citas-dayoff-create-error' });
-    } finally {
-      setDayOffSaving(false);
     }
   }
 
@@ -1206,12 +1208,6 @@ export default function AdminCitasPage() {
     }
   }
 
-  function handleEditException() {
-    notifications.info('La edicion de excepciones se habilitara en una siguiente iteracion.', {
-      dedupeKey: 'citas-excepciones-edit-info',
-    });
-  }
-
   function handleEditBranchDayOff() {
     notifications.info('La edicion de bloqueos por sucursal se habilitara en una siguiente iteracion.', {
       dedupeKey: 'citas-sucursal-edit-info',
@@ -1221,8 +1217,15 @@ export default function AdminCitasPage() {
   async function handleSaveParams() {
     const hold = Number(paramsForm.hold_duracion_min);
     const noShow = Number(paramsForm.no_show_min);
-    if (!Number.isFinite(hold) || hold <= 0 || !Number.isFinite(noShow) || noShow <= 0) {
-      notifications.warning('Los Parámetros deben ser números positivos.', { dedupeKey: 'citas-params-invalid' });
+    const globalBuffer = Number(paramsForm.agenda_buffer_global_min);
+    if (
+      !Number.isFinite(hold) || hold <= 0
+      || !Number.isFinite(noShow) || noShow <= 0
+      || !Number.isFinite(globalBuffer) || globalBuffer < 0
+    ) {
+      notifications.warning('Hold y no-show deben ser positivos, y buffer global debe ser 0 o mayor.', {
+        dedupeKey: 'citas-params-invalid',
+      });
       return;
     }
     setParamsSaving(true);
@@ -1230,18 +1233,29 @@ export default function AdminCitasPage() {
       const response = await patchAdminCitasParametros({
         hold_duracion_min: hold,
         no_show_min: noShow,
+        agenda_buffer_global_min: globalBuffer,
         permitir_acompanantes: Boolean(paramsForm.permitir_acompanantes),
         pago_total_obligatorio: true,
         simulacion_sin_pago: Boolean(paramsForm.simulacion_sin_pago),
+        masterpuntos_migracion_manual_habilitada: Boolean(
+          paramsForm.masterpuntos_migracion_manual_habilitada
+        ),
       });
       const payload = response?.data ?? response;
       setParamsForm((prev) => ({
         ...prev,
         hold_duracion_min: String(payload?.parametros?.hold_duracion_min ?? hold),
         no_show_min: String(payload?.parametros?.no_show_min ?? noShow),
+        agenda_buffer_global_min: String(
+          payload?.parametros?.agenda_buffer_global_min ?? globalBuffer
+        ),
         permitir_acompanantes: Boolean(payload?.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(payload?.parametros?.pago_total_obligatorio ?? true),
         simulacion_sin_pago: Boolean(payload?.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
+        masterpuntos_migracion_manual_habilitada: Boolean(
+          payload?.parametros?.masterpuntos_migracion_manual_habilitada
+            ?? prev.masterpuntos_migracion_manual_habilitada
+        ),
       }));
       notifications.success('Parámetros guardados.', { dedupeKey: 'citas-params-save-ok' });
     } catch (err) {
@@ -1637,197 +1651,223 @@ export default function AdminCitasPage() {
     }
     return (
       <div className="citas-surface">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+        <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <h3 className="mf-font-display text-[22px] md:text-[24px] text-[var(--mf-accent)]">
             Horario Semanal · {selectedBarber.nombre_completo}
           </h3>
-          <Button onClick={saveSchedule} disabled={scheduleSaving || scheduleLoading} className="gap-2">
+          <Button onClick={saveSchedule} disabled={scheduleSaving || scheduleLoading} className="w-full gap-2 sm:w-auto">
             <Save size={14} />
-            {scheduleSaving ? 'Guardando...' : 'Guardar cambios'}
+            {scheduleSaving ? 'Guardando...' : (
+              <>
+                <span className="sm:hidden">Guardar cambios y descansos</span>
+                <span className="hidden sm:inline">Guardar cambios</span>
+              </>
+            )}
           </Button>
         </div>
         {scheduleLoading ? (
           <div className="px-5 pb-5"><LoadingSpinner /></div>
         ) : (
-          <div className="citas-schedule-wrap">
-            <table className="citas-schedule-table">
-              <thead>
-                <tr>
-                  <th>Día</th>
-                  <th>Hora inicio</th>
-                  <th>Hora fin</th>
-                  <th>Almuerzo ini.</th>
-                  <th>Almuerzo fin</th>
-                  <th>Duración</th>
-                  <th>Activo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scheduleRows.map((row) => (
-                  <tr key={row.dia_semana}>
-                    <td>{row.dia_label}</td>
-                    <td>
-                      <Input
-                        type="time"
-                        className="citas-inline-input"
-                        value={row.hora_inicio}
-                        onChange={(event) => updateScheduleRow(row.dia_semana, { hora_inicio: event.target.value })}
+          <>
+            <div className="citas-schedule-mobile">
+              {scheduleRows.map((row) => (
+                <article key={`mobile-${row.dia_semana}`} className={`citas-schedule-mobile-card ${row.activo ? '' : 'is-inactive'}`}>
+                  <div className="citas-schedule-mobile-head">
+                    <span className="citas-schedule-mobile-day">{row.dia_label}</span>
+                    <div className="citas-switch-inline">
+                      <button
+                        type="button"
+                        className={`citas-switch-track ${row.activo ? 'is-on' : ''}`}
+                        onClick={() => updateScheduleRow(row.dia_semana, { activo: !row.activo })}
+                        aria-label={`Cambiar estado ${row.dia_label}`}
                       />
-                    </td>
-                    <td>
-                      <Input
-                        type="time"
-                        className="citas-inline-input"
-                        value={row.hora_fin}
-                        onChange={(event) => updateScheduleRow(row.dia_semana, { hora_fin: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <Input
-                        type="time"
-                        className="citas-inline-input"
-                        value={row.almuerzo_inicio}
-                        onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_inicio: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <Input
-                        type="time"
-                        className="citas-inline-input"
-                        value={row.almuerzo_fin}
-                        onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_fin: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <select
-                        className="citas-inline-select"
-                        value={row.duracion_min}
-                        onChange={(event) => updateScheduleRow(row.dia_semana, { duracion_min: Number(event.target.value) })}
-                      >
-                        <option value={30}>30 min</option>
-                      </select>
-                    </td>
-                    <td>
-                      <div className="citas-switch-inline">
-                        <button
-                          type="button"
-                          className={`citas-switch-track ${row.activo ? 'is-on' : ''}`}
-                          onClick={() => updateScheduleRow(row.dia_semana, { activo: !row.activo })}
-                          aria-label={`Cambiar estado ${row.dia_label}`}
+                      <span>{row.activo ? 'Activo' : 'Inactivo'}</span>
+                    </div>
+                  </div>
+
+                  <div className="citas-schedule-mobile-grid">
+                    <div className="citas-schedule-mobile-group">
+                      <p className="citas-schedule-mobile-label">Turno regular (ini - fin)</p>
+                      <div className="citas-schedule-mobile-timepair">
+                        <Input
+                          type="time"
+                          className="citas-inline-input"
+                          value={row.hora_inicio}
+                          onChange={(event) => updateScheduleRow(row.dia_semana, { hora_inicio: event.target.value })}
                         />
-                        <span>{row.activo ? 'Activo' : 'Inactivo'}</span>
+                        <span className="citas-schedule-mobile-sep">a</span>
+                        <Input
+                          type="time"
+                          className="citas-inline-input"
+                          value={row.hora_fin}
+                          onChange={(event) => updateScheduleRow(row.dia_semana, { hora_fin: event.target.value })}
+                        />
                       </div>
-                    </td>
+                    </div>
+
+                    <div className="citas-schedule-mobile-group">
+                      <p className="citas-schedule-mobile-label">Almuerzo (ini - fin)</p>
+                      <div className="citas-schedule-mobile-timepair">
+                        <Input
+                          type="time"
+                          className="citas-inline-input"
+                          value={row.almuerzo_inicio}
+                          onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_inicio: event.target.value })}
+                        />
+                        <span className="citas-schedule-mobile-sep">a</span>
+                        <Input
+                          type="time"
+                          className="citas-inline-input"
+                          value={row.almuerzo_fin}
+                          onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_fin: event.target.value })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="citas-schedule-wrap">
+              <table className="citas-schedule-table">
+                <thead>
+                  <tr>
+                    <th>Día</th>
+                    <th>Turno (ini - fin)</th>
+                    <th>Almuerzo (ini - fin)</th>
+                    <th>Activo</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {scheduleRows.map((row) => (
+                    <tr key={row.dia_semana}>
+                      <td>{row.dia_label}</td>
+                      <td>
+                        <div className="citas-schedule-table-pair">
+                          <Input
+                            type="time"
+                            className="citas-inline-input"
+                            value={row.hora_inicio}
+                            onChange={(event) => updateScheduleRow(row.dia_semana, { hora_inicio: event.target.value })}
+                          />
+                          <span className="citas-schedule-mobile-sep">a</span>
+                          <Input
+                            type="time"
+                            className="citas-inline-input"
+                            value={row.hora_fin}
+                            onChange={(event) => updateScheduleRow(row.dia_semana, { hora_fin: event.target.value })}
+                          />
+                        </div>
+                      </td>
+                      <td>
+                        <div className="citas-schedule-table-pair">
+                          <Input
+                            type="time"
+                            className="citas-inline-input"
+                            value={row.almuerzo_inicio}
+                            onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_inicio: event.target.value })}
+                          />
+                          <span className="citas-schedule-mobile-sep">a</span>
+                          <Input
+                            type="time"
+                            className="citas-inline-input"
+                            value={row.almuerzo_fin}
+                            onChange={(event) => updateScheduleRow(row.dia_semana, { almuerzo_fin: event.target.value })}
+                          />
+                        </div>
+                      </td>
+                      <td>
+                        <div className="citas-switch-inline">
+                          <button
+                            type="button"
+                            className={`citas-switch-track ${row.activo ? 'is-on' : ''}`}
+                            onClick={() => updateScheduleRow(row.dia_semana, { activo: !row.activo })}
+                            aria-label={`Cambiar estado ${row.dia_label}`}
+                          />
+                          <span>{row.activo ? 'Activo' : 'Inactivo'}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
     );
   }
 
-  function renderBloqueosTab() {
+  function renderRestriccionesTab() {
     if (!selectedBarber) {
-      return <EmptyState icon={SlidersHorizontal} title="Selecciona un barbero" description="Primero elige un barbero para administrar bloqueos." />;
+      return (
+        <EmptyState
+          icon={AlertTriangle}
+          title="Selecciona un barbero"
+          description="Primero elige un barbero para administrar bloqueos, días inhabilitados y excepciones."
+        />
+      );
     }
     return (
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-[var(--mf-text-2)] text-lg">
-            Bloqueos de horas para <span className="font-semibold text-[var(--mf-text)]">{selectedBarber.nombre_completo}</span>
-          </p>
-          <Button className="gap-2" onClick={() => setBlockDialogOpen(true)}>
-            <Plus size={14} /> Nuevo bloqueo
+          <div>
+            <p className="text-[var(--mf-text-2)] text-lg">
+              Restricciones de agenda para <span className="font-semibold text-[var(--mf-text)]">{selectedBarber.nombre_completo}</span>
+            </p>
+            <p className="text-sm text-[var(--mf-text-2)]">
+              Unifica bloqueos, días inhabilitados y excepciones de horario en un solo flujo.
+            </p>
+          </div>
+          <Button className="gap-2" onClick={() => handleOpenRestrictionDialog('bloqueo')}>
+            <Plus size={14} /> Nuevo registro
           </Button>
         </div>
 
-        {blocksLoading ? (
+        {(blocksLoading || daysOffLoading) ? (
           <LoadingSpinner />
+        ) : restrictionItems.length === 0 ? (
+          <EmptyState
+            icon={AlertTriangle}
+            title="Sin restricciones"
+            description="No hay bloqueos, excepciones ni días inhabilitados registrados para este barbero."
+          />
         ) : (
           <div className="citas-block-list">
-            {blocks.length === 0 ? (
-              <EmptyState icon={SlidersHorizontal} title="Sin bloqueos" description="No hay bloqueos registrados para este barbero." />
-            ) : (
-              blocks.map((block) => (
-                <div key={block.id_bloqueo} className="citas-block-item">
-                  <span className="citas-block-color" style={{ background: getBlockTone(block.tipo_bloqueo_codigo) }} />
-                  <div>
-                    <p className="text-xl font-semibold text-[var(--mf-text)]">{block.fecha}</p>
+            {restrictionItems.map((item) => (
+              <div key={`${item.registro_tipo}-${item.id_bloqueo}`} className="citas-exception-card">
+                <span className="citas-block-color" style={{ background: item.registro_tipo === 'dia_inhabilitado' ? '#dc2626' : getBlockTone(item.tipo_bloqueo_codigo) }} />
+                <div className="citas-exception-main">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xl font-semibold text-[var(--mf-text)]">{item.fecha}</p>
+                    <span className="citas-tag">{item.registro_titulo}</span>
+                    {item.tipo_bloqueo_codigo ? <span className="citas-tag">{item.tipo_bloqueo_codigo}</span> : null}
                   </div>
                   <div className="text-[var(--mf-text-2)]">
-                    {new Intl.DateTimeFormat('es-HN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(block.inicio_at))}
-                    {' '}â€“{' '}
-                    {new Intl.DateTimeFormat('es-HN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(block.fin_at))}
+                    {item.registro_tipo === 'dia_inhabilitado'
+                      ? 'Día completo'
+                      : formatTimeRange(item.inicio_at, item.fin_at)}
                   </div>
-                  <div className="text-[var(--mf-text-2)]">{block.motivo || 'Sin motivo'}</div>
-                  <div className="flex items-center justify-end gap-2">
-                    <span className="citas-tag">{block.tipo_bloqueo_codigo}</span>
-                    <button
-                      type="button"
-                      className="text-red-500 disabled:opacity-45"
-                      onClick={() => handleDeleteBlock(block.id_bloqueo)}
-                      disabled={blockDeleteId === block.id_bloqueo}
-                      aria-label="Eliminar bloqueo"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  function renderDaysTab() {
-    if (!selectedBarber) {
-      return <EmptyState icon={CalendarDays} title="Selecciona un barbero" description="Primero elige un barbero para administrar Días inhabilitados." />;
-    }
-
-    return (
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-[var(--mf-text-2)] text-lg">
-            Días inhabilitados para <span className="font-semibold text-[var(--mf-text)]">{selectedBarber.nombre_completo}</span>
-          </p>
-          <Button className="gap-2" onClick={() => setDayOffDialogOpen(true)}>
-            <Plus size={14} /> Inhabilitar Día
-          </Button>
-        </div>
-
-        {daysOffLoading ? (
-          <LoadingSpinner />
-        ) : (
-          <div className="citas-block-list">
-            {daysOff.length === 0 ? (
-              <EmptyState icon={CalendarDays} title="Sin Días inhabilitados" description="No hay Días completos bloqueados para este barbero." />
-            ) : (
-              daysOff.map((item) => (
-                <div key={item.id_bloqueo} className="citas-block-item">
-                  <span className="citas-block-color" style={{ background: '#dc2626' }} />
-                  <div>
-                    <p className="text-xl font-semibold text-[var(--mf-text)]">{item.fecha}</p>
-                  </div>
-                  <div className="text-[var(--mf-text-2)]">Día completo</div>
                   <div className="text-[var(--mf-text-2)]">{item.motivo || 'Sin motivo'}</div>
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      className="text-red-500 disabled:opacity-45"
-                      onClick={() => handleDeleteDayOff(item.id_bloqueo)}
-                      disabled={dayOffDeleteId === item.id_bloqueo}
-                      aria-label="Eliminar Día inhabilitado"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
                 </div>
-              ))
-            )}
+                <div className="citas-card-actions">
+                  <button
+                    type="button"
+                    className="citas-icon-action is-danger disabled:opacity-45"
+                    onClick={() => (
+                      item.registro_tipo === 'dia_inhabilitado'
+                        ? handleDeleteDayOff(item.id_bloqueo)
+                        : handleDeleteBlock(item.id_bloqueo)
+                    )}
+                    disabled={item.registro_tipo === 'dia_inhabilitado' ? dayOffDeleteId === item.id_bloqueo : blockDeleteId === item.id_bloqueo}
+                    aria-label="Eliminar restricción"
+                    title="Eliminar restricción"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -1868,6 +1908,20 @@ export default function AdminCitasPage() {
                 className="citas-inline-input citas-param-value"
                 value={paramsForm.no_show_min}
                 onChange={(event) => setParamsForm((prev) => ({ ...prev, no_show_min: event.target.value }))}
+              />
+            </div>
+
+            <div className="citas-param-row">
+              <div className="citas-param-copy">
+                <h4>Buffer global entre citas (minutos)</h4>
+                <p>Tiempo de preparación aplicado a todas las citas de forma global.</p>
+              </div>
+              <Input
+                type="number"
+                min={0}
+                className="citas-inline-input citas-param-value"
+                value={paramsForm.agenda_buffer_global_min}
+                onChange={(event) => setParamsForm((prev) => ({ ...prev, agenda_buffer_global_min: event.target.value }))}
               />
             </div>
 
@@ -1942,6 +1996,21 @@ export default function AdminCitasPage() {
                 onClick={() => setParamsForm((prev) => ({ ...prev, permitir_acompanantes: !prev.permitir_acompanantes }))}
               />
             </div>
+
+            <div className="citas-param-row">
+              <div className="citas-param-copy">
+                <h4>Migración manual de puntos legacy</h4>
+                <p>Habilita en MasterPuntos la carga manual única para clientes pendientes de migración.</p>
+              </div>
+              <button
+                type="button"
+                className={`citas-switch-track ${paramsForm.masterpuntos_migracion_manual_habilitada ? 'is-on' : ''}`}
+                onClick={() => setParamsForm((prev) => ({
+                  ...prev,
+                  masterpuntos_migracion_manual_habilitada: !prev.masterpuntos_migracion_manual_habilitada,
+                }))}
+              />
+            </div>
           </>
         )}
 
@@ -1954,69 +2023,6 @@ export default function AdminCitasPage() {
       </div>
     );
   }
-  function renderExceptionsTab() {
-    if (!selectedBarber) {
-      return <EmptyState icon={AlertTriangle} title="Selecciona un barbero" description="Primero elige un barbero para administrar excepciones." />;
-    }
-
-    return (
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-[var(--mf-text-2)] text-lg">
-            Excepciones de horario para <span className="font-semibold text-[var(--mf-text)]">{selectedBarber.nombre_completo}</span>
-          </p>
-          <Button className="gap-2" onClick={() => setBlockDialogOpen(true)}>
-            <Plus size={15} /> Nueva excepción
-          </Button>
-        </div>
-
-        {blocksLoading ? (
-          <LoadingSpinner />
-        ) : exceptionsList.length === 0 ? (
-          <EmptyState
-            icon={AlertTriangle}
-            title="Sin excepciones para mostrar"
-            description="No se detectaron excepciones en los bloqueos del barbero seleccionado."
-          />
-        ) : (
-          <div className="citas-block-list">
-            {exceptionsList.map((item) => (
-              <div key={item.id_bloqueo} className="citas-exception-card">
-                <span className="citas-block-color" style={{ background: getBlockTone(item.tipo_bloqueo_codigo) }} />
-                <div className="citas-exception-main">
-                  <p className="text-[28px] font-semibold text-[var(--mf-text)]">{item.fecha}</p>
-                  <div className="text-[var(--mf-text-2)]">{formatTimeRange(item.inicio_at, item.fin_at)}</div>
-                  <div className="text-[var(--mf-text-2)]">{item.motivo || 'Sin motivo'}</div>
-                </div>
-                <div className="citas-card-actions">
-                  <button
-                    type="button"
-                    className="citas-icon-action"
-                    onClick={handleEditException}
-                    aria-label="Editar excepción"
-                    title="Editar excepción"
-                  >
-                    <Pencil size={18} />
-                  </button>
-                  <button
-                    type="button"
-                    className="citas-icon-action is-danger disabled:opacity-45"
-                    onClick={() => handleDeleteBlock(item.id_bloqueo)}
-                    disabled={blockDeleteId === item.id_bloqueo}
-                    aria-label="Eliminar excepción"
-                    title="Eliminar excepción"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
   function renderSucursalTab() {
     return (
       <div className="flex flex-col gap-3">
@@ -2125,15 +2131,13 @@ export default function AdminCitasPage() {
         </div>
 
         <div className="citas-config-rail" />
-        {['horario', 'bloqueos', 'dias', 'excepciones'].includes(selectedConfigTab)
-          ? renderBarberChips({ firstNameOnly: selectedConfigTab === 'excepciones' })
+        {['horario', 'restricciones'].includes(selectedConfigTab)
+          ? renderBarberChips({ firstNameOnly: selectedConfigTab === 'restricciones' })
           : null}
 
         {selectedConfigTab === 'horario' && renderHorarioTab()}
-        {selectedConfigTab === 'bloqueos' && renderBloqueosTab()}
-        {selectedConfigTab === 'dias' && renderDaysTab()}
+        {selectedConfigTab === 'restricciones' && renderRestriccionesTab()}
         {selectedConfigTab === 'parametros' && renderParamsTab()}
-        {selectedConfigTab === 'excepciones' && renderExceptionsTab()}
         {selectedConfigTab === 'sucursal' && renderSucursalTab()}
       </>
     );
@@ -2196,102 +2200,86 @@ export default function AdminCitasPage() {
         </div>
       )}
 
-      <Dialog open={blockDialogOpen} onOpenChange={setBlockDialogOpen}>
+      <Dialog open={restrictionDialogOpen} onOpenChange={setRestrictionDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Nuevo bloqueo</DialogTitle>
+            <DialogTitle>Nueva restricción</DialogTitle>
           </DialogHeader>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <Label className="mf-label">Fecha</Label>
-              <Input
-                type="date"
-                className="mf-input mt-1"
-                value={blockForm.fecha}
-                onChange={(event) => setBlockForm((prev) => ({ ...prev, fecha: event.target.value }))}
-              />
-            </div>
-            <div>
-              <Label className="mf-label">Hora inicio</Label>
-              <Input
-                type="time"
-                className="mf-input mt-1"
-                value={blockForm.hora_inicio}
-                onChange={(event) => setBlockForm((prev) => ({ ...prev, hora_inicio: event.target.value }))}
-              />
-            </div>
-            <div>
-              <Label className="mf-label">Hora fin</Label>
-              <Input
-                type="time"
-                className="mf-input mt-1"
-                value={blockForm.hora_fin}
-                onChange={(event) => setBlockForm((prev) => ({ ...prev, hora_fin: event.target.value }))}
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <Label className="mf-label">Tipo de bloqueo</Label>
+              <Label className="mf-label">Tipo de registro</Label>
               <select
                 className="mf-select mt-1"
-                value={blockForm.tipo_bloqueo_codigo}
-                onChange={(event) => setBlockForm((prev) => ({ ...prev, tipo_bloqueo_codigo: event.target.value }))}
+                value={restrictionForm.tipo_registro}
+                onChange={(event) => setRestrictionForm((prev) => ({ ...prev, tipo_registro: event.target.value }))}
               >
-                {contextData.tipos_bloqueo.map((type) => (
-                  <option key={type.tipo_bloqueo_codigo} value={type.tipo_bloqueo_codigo}>
-                    {type.descripcion || type.tipo_bloqueo_codigo}
-                  </option>
-                ))}
+                <option value="bloqueo">Bloqueo</option>
+                <option value="dia_inhabilitado">Inhabilitar día</option>
+                <option value="excepcion_horario">Excepción de horario</option>
               </select>
             </div>
             <div className="sm:col-span-2">
-              <Label className="mf-label">Motivo</Label>
-              <Input
-                className="mf-input mt-1"
-                value={blockForm.motivo}
-                onChange={(event) => setBlockForm((prev) => ({ ...prev, motivo: event.target.value }))}
-                placeholder="Ej. Cita medica"
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setBlockDialogOpen(false)} disabled={blockSaving}>Cancelar</Button>
-            <Button onClick={handleCreateBlock} disabled={blockSaving}>{blockSaving ? 'Guardando...' : 'Guardar bloqueo'}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={dayOffDialogOpen} onOpenChange={setDayOffDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Inhabilitar dia completo</DialogTitle>
-          </DialogHeader>
-
-          <div className="grid grid-cols-1 gap-3">
-            <div>
               <Label className="mf-label">Fecha</Label>
               <Input
                 type="date"
                 className="mf-input mt-1"
-                value={dayOffForm.fecha}
-                onChange={(event) => setDayOffForm((prev) => ({ ...prev, fecha: event.target.value }))}
+                value={restrictionForm.fecha}
+                onChange={(event) => setRestrictionForm((prev) => ({ ...prev, fecha: event.target.value }))}
               />
             </div>
-            <div>
+            {restrictionForm.tipo_registro !== 'dia_inhabilitado' ? (
+              <>
+                <div>
+                  <Label className="mf-label">Hora inicio</Label>
+                  <Input
+                    type="time"
+                    className="mf-input mt-1"
+                    value={restrictionForm.hora_inicio}
+                    onChange={(event) => setRestrictionForm((prev) => ({ ...prev, hora_inicio: event.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label className="mf-label">Hora fin</Label>
+                  <Input
+                    type="time"
+                    className="mf-input mt-1"
+                    value={restrictionForm.hora_fin}
+                    onChange={(event) => setRestrictionForm((prev) => ({ ...prev, hora_fin: event.target.value }))}
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <Label className="mf-label">Tipo de bloqueo</Label>
+                  <select
+                    className="mf-select mt-1"
+                    value={restrictionForm.tipo_bloqueo_codigo}
+                    onChange={(event) => setRestrictionForm((prev) => ({ ...prev, tipo_bloqueo_codigo: event.target.value }))}
+                  >
+                    {contextData.tipos_bloqueo.map((type) => (
+                      <option key={type.tipo_bloqueo_codigo} value={type.tipo_bloqueo_codigo}>
+                        {type.descripcion || type.tipo_bloqueo_codigo}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            ) : null}
+            <div className="sm:col-span-2">
               <Label className="mf-label">Motivo</Label>
               <Input
                 className="mf-input mt-1"
-                value={dayOffForm.motivo}
-                onChange={(event) => setDayOffForm((prev) => ({ ...prev, motivo: event.target.value }))}
-                placeholder="Ej. Feriado nacional"
+                value={restrictionForm.motivo}
+                onChange={(event) => setRestrictionForm((prev) => ({ ...prev, motivo: event.target.value }))}
+                placeholder={restrictionForm.tipo_registro === 'dia_inhabilitado' ? 'Ej. Feriado nacional' : 'Ej. Cita médica'}
               />
             </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDayOffDialogOpen(false)} disabled={dayOffSaving}>Cancelar</Button>
-            <Button onClick={handleCreateDayOff} disabled={dayOffSaving}>{dayOffSaving ? 'Guardando...' : 'Inhabilitar dia'}</Button>
+            <Button variant="outline" onClick={() => setRestrictionDialogOpen(false)} disabled={restrictionSaving}>Cancelar</Button>
+            <Button onClick={handleSaveRestriction} disabled={restrictionSaving}>
+              {restrictionSaving ? 'Guardando...' : 'Guardar restricción'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

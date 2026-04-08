@@ -27,6 +27,8 @@ import ClienteCatalogoPage from './features/cliente/pages/ClienteCatalogoPage.js
 import ClienteHistorialCitasPage from './features/cliente/pages/ClienteHistorialCitasPage.jsx';
 import ClientePerfilPage from './features/cliente/pages/ClientePerfilPage.jsx';
 import ClientePlanesPage from './features/cliente/pages/ClientePlanesPage.jsx';
+import BarberoHomePage from './features/barbero/pages/BarberoHomePage.jsx';
+import BarberoProfilePage from './features/barbero/pages/BarberoProfilePage.jsx';
 import AdminEmpleadosPage from './features/admin/pages/AdminEmpleadosPage.jsx';
 import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx';
 import AdminClientesPage from './features/admin/pages/AdminClientesPage.jsx';
@@ -195,9 +197,9 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<UnderConstructionPage title="Inicio" />} />
+        <Route index element={<RouteErrorBoundary><BarberoHomePage /></RouteErrorBoundary>} />
         <Route path="citas" element={<RouteErrorBoundary><AdminAgendamientoCitasPage /></RouteErrorBoundary>} />
-        <Route path="citas/historial" element={<RouteErrorBoundary><AdminAgendamientoHistorialPage /></RouteErrorBoundary>} />
+        <Route path="perfil" element={<RouteErrorBoundary><BarberoProfilePage /></RouteErrorBoundary>} />
       </Route>
 
       {/* Cliente */}

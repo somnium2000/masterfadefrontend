@@ -1,5 +1,6 @@
-import { Check, Clock3 } from 'lucide-react';
+import { Check, Clock3, Lock } from 'lucide-react';
 import {
+  formatTime12Hour,
   formatCurrencyHnl,
   getBarberMeta,
   getInitials,
@@ -36,6 +37,7 @@ export function ServiceCard({
   service,
   isSelected,
   onToggle,
+  disabled = false,
 }) {
   return (
     <button
@@ -43,6 +45,7 @@ export function ServiceCard({
       className={`citas-service-card ${isSelected ? 'is-selected' : ''}`}
       onClick={onToggle}
       aria-pressed={isSelected}
+      disabled={disabled}
     >
       <div className="citas-service-name">{service?.nombre_servicio || 'Servicio'}</div>
       <div className="citas-service-meta">
@@ -94,16 +97,18 @@ export function SlotButton({
   slot,
   selectedTime,
   onSelect,
-  displayTime,
   isDisabled = false,
 }) {
   const isSelected = selectedTime === slot.hora;
   const isUnavailable = !slot.disponible || isDisabled;
   const classes = [
-    'citas-slot-btn',
-    isUnavailable ? 'is-unavailable' : '',
+    'public-booking-time-block',
+    isUnavailable ? 'is-unavailable' : 'is-available',
     isSelected ? 'is-selected' : '',
   ].join(' ');
+  const startLabel = formatTime12Hour(slot.hora);
+  const endLabel = formatTime12Hour(slot.horaFin || slot.hora);
+  const statusLabel = isSelected ? 'SELECCIONADO' : isUnavailable ? 'NO DISPONIBLE' : 'DISPONIBLE';
 
   return (
     <button
@@ -113,7 +118,13 @@ export function SlotButton({
       onClick={() => onSelect(slot.hora, !isUnavailable)}
       aria-pressed={isSelected}
     >
-      {displayTime || slot.hora}
+      <span className="public-booking-time-block-copy">
+        <span className="public-booking-time-block-range">[ {startLabel} - {endLabel} ]</span>
+        <span className="public-booking-time-block-status">{statusLabel}</span>
+      </span>
+      <span className="public-booking-time-block-icon" aria-hidden="true">
+        {isUnavailable ? <Lock size={15} /> : isSelected ? <Check size={16} /> : <Clock3 size={15} />}
+      </span>
     </button>
   );
 }

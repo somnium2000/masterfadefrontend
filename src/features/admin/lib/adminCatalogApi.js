@@ -63,3 +63,37 @@ export async function deleteAdminServicio(id, id_sucursal) {
 export async function setAdminServicioEstado(id, payload) {
     return http.patch(`/v1/admin/catalog/servicios/${id}/estado`, payload);
 }
+
+/**
+ * Consulta la lista de barberos asignables a un servicio en una sucursal.
+ * Solo disponible para super admin.
+ * @param {string} id
+ * @param {{ id_sucursal: string }} params
+ */
+export async function getAdminServicioBarberos(id, { id_sucursal }) {
+    const branchId = normalizeBranchId(id_sucursal);
+    if (!branchId) {
+        throw new Error('Debes seleccionar una sucursal valida para consultar barberos del servicio.');
+    }
+    return http.get(`/v1/admin/catalog/servicios/${id}/barberos?id_sucursal=${encodeURIComponent(branchId)}`);
+}
+
+/**
+ * Guarda la lista de barberos que ofrecen un servicio en una sucursal.
+ * Solo disponible para super admin.
+ * @param {string} id
+ * @param {{ id_sucursal: string, id_empleados: string[] }} payload
+ */
+export async function saveAdminServicioBarberos(id, payload) {
+    const branchId = normalizeBranchId(payload?.id_sucursal);
+    if (!branchId) {
+        throw new Error('Debes seleccionar una sucursal valida para guardar barberos del servicio.');
+    }
+    const id_empleados = Array.isArray(payload?.id_empleados)
+        ? payload.id_empleados.filter((value) => UUID_REGEX.test(String(value ?? '').trim()))
+        : [];
+    return http.put(`/v1/admin/catalog/servicios/${id}/barberos`, {
+        id_sucursal: branchId,
+        id_empleados,
+    });
+}

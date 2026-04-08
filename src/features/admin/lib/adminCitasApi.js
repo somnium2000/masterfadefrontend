@@ -22,6 +22,10 @@ export async function listAdminCitasOperativas(params = {}) {
   return http.get(`/v1/admin/citas/operativas${toQueryString(params)}`);
 }
 
+export async function getAdminCitasOperativasCompletadasHoy(params = {}) {
+  return http.get(`/v1/admin/citas/operativas/completadas-hoy${toQueryString(params)}`);
+}
+
 export async function listAdminCitasHistorial(params = {}) {
   return http.get(`/v1/admin/citas/historial${toQueryString(params)}`);
 }

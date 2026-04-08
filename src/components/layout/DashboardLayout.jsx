@@ -5,7 +5,7 @@ import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     House, Users, Scissors, Building2, CalendarDays, Shield, BarChart3,
-    Settings, Star, LogOut, ChevronLeft, ChevronRight, Menu, X, ChevronDown
+    Settings, Star, LogOut, ChevronLeft, ChevronRight, Menu, X, ChevronDown, UserRound
 } from 'lucide-react';
 import { useLocation, useNavigate, Outlet } from 'react-router-dom';
 import MasterfadeLogo from '../branding/MasterfadeLogo.jsx';
@@ -18,7 +18,35 @@ import PremiumBottomNav from '../navigation/PremiumBottomNav.jsx';
 function buildNavModules(basePath, role) {
     const isBarbero = role === 'barbero';
     const isCliente = role === 'cliente';
-    
+
+    if (isBarbero) {
+        return [
+            {
+                id: 'inicio',
+                label: 'Inicio',
+                icon: House,
+                path: basePath,
+                subItems: null,
+            },
+            {
+                id: 'citas',
+                label: 'Agendamiento',
+                icon: CalendarDays,
+                path: `${basePath}/citas`,
+                subItems: [
+                    { id: 'agendamiento-citas', label: 'Citas', path: `${basePath}/citas` },
+                ],
+            },
+            {
+                id: 'perfil-barbero',
+                label: 'Perfil Barbero',
+                icon: UserRound,
+                path: `${basePath}/perfil`,
+                subItems: null,
+            },
+        ];
+    }
+
     // Sub-items de agendamiento basados en el rol (provenientes de dev)
     const agendamientoSubItems = isBarbero
         ? [
@@ -134,10 +162,6 @@ function buildNavModules(basePath, role) {
             subItems: configSubItems,
         },
     ];
-
-    if (isBarbero) {
-        return modules.filter((module) => ['inicio', 'citas'].includes(module.id));
-    }
 
     if (isCliente) {
         return modules.filter((module) => ['inicio'].includes(module.id));
@@ -308,8 +332,8 @@ export default function DashboardLayout({ pageRole }) {
     const mobileItems = currentRole === 'barbero'
         ? [
             { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate(basePath) },
-            { id: 'agendamiento', label: 'Agendamiento', icon: CalendarDays, onClick: () => navigate(`${basePath}/citas`) },
-            { id: 'historial', label: 'Historial', icon: CalendarDays, onClick: () => navigate(`${basePath}/citas/historial`) },
+            { id: 'agendamiento', label: 'Citas', icon: CalendarDays, onClick: () => navigate(`${basePath}/citas`) },
+            { id: 'perfil-barbero', label: 'Perfil', icon: UserRound, onClick: () => navigate(`${basePath}/perfil`) },
             { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
         ]
         : [
@@ -463,10 +487,14 @@ export default function DashboardLayout({ pageRole }) {
             {/* ── MOBILE LAYOUT ──────────────────────────────────────────────────────────── */}
             <div className="mf-page-gradient min-h-screen pb-[100px] lg:hidden">
                 <div className="mf-mobile-frame mf-screen-pad mf-safe-top">
-                    <header className="flex items-center justify-between pt-3">
-                        <MasterfadeLogo variant="compact" />
-                        <div className="flex items-center gap-3">
-                            <ThemeSwitcher />
+                    <header className="flex min-w-0 items-start justify-between gap-2 pt-3">
+                        <MasterfadeLogo variant="topbar" className="shrink min-w-0" />
+                        <div className="flex shrink-0 items-center gap-2">
+                            <ThemeSwitcher
+                                showLabel
+                                labelClassName="w-[70px] whitespace-normal text-right leading-[1.05]"
+                                buttonClassName="h-10 w-10 rounded-lg"
+                            />
                             <button
                                 type="button"
                                 onClick={() => setMobileMenuOpen(true)}
