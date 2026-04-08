@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Building2, CheckCircle2, Eye, KeyRound, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Users, X } from 'lucide-react';
 import {
@@ -42,7 +42,7 @@ import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialo
 import { replaceItemById } from '../../../lib/collectionState.js';
 
 const ACCESS_LABELS = {
-  pendiente_password: 'Contraseña pendiente',
+  pendiente_password: 'ContraseÃ±a pendiente',
   activo: 'Activo',
   bloqueado: 'Bloqueado',
   inactivo: 'Inactivo',
@@ -73,7 +73,6 @@ const CLIENTE_FILTER_DEFAULTS = {
   estadoCliente: 'all',
   tipoAcceso: 'all',
   estadoAcceso: 'all',
-  idSucursal: 'all',
 };
 
 const CLIENTE_ESTADO_LABELS = {
@@ -247,7 +246,6 @@ export default function AdminClientesPage() {
           cliente?.correo_principal,
           cliente?.dni,
           cliente?.telefono_principal,
-          cliente?.nombre_sucursal,
         ]
           .filter(Boolean)
           .join(' ')
@@ -266,10 +264,6 @@ export default function AdminClientesPage() {
       }
 
       if (filters.estadoAcceso !== 'all' && String(cliente?.estado_acceso || '') !== filters.estadoAcceso) {
-        return false;
-      }
-
-      if (filters.idSucursal !== 'all' && String(cliente?.id_sucursal_origen || '') !== filters.idSucursal) {
         return false;
       }
 
@@ -297,12 +291,8 @@ export default function AdminClientesPage() {
     if (filters.estadoAcceso !== 'all') {
       chips.push({ key: 'estadoAcceso', label: `Acceso: ${ACCESS_LABELS[filters.estadoAcceso] || filters.estadoAcceso}` });
     }
-    if (filters.idSucursal !== 'all') {
-      const sucursalNombre = sucursales.find((item) => String(item.id_sucursal) === String(filters.idSucursal))?.nombre_sucursal;
-      chips.push({ key: 'idSucursal', label: `Sucursal: ${sucursalNombre || 'Seleccionada'}` });
-    }
     return chips;
-  }, [filters, search, sucursales]);
+  }, [filters, search]);
 
   function clearAllFilters() {
     setSearch('');
@@ -412,7 +402,7 @@ export default function AdminClientesPage() {
       const baseMessage = editingId ? 'Cliente actualizado.' : 'Cliente creado.';
       notifications.success(baseMessage, { dedupeKey: 'personas-clientes-save-ok' });
       if (data?.setup_password?.mensaje) {
-        // AM: Retroalimentación reutilizable del envío setup password en alta/edición de cliente con acceso.
+        // AM: RetroalimentaciÃ³n reutilizable del envÃ­o setup password en alta/ediciÃ³n de cliente con acceso.
         const tone = data?.setup_password?.enviado ? 'info' : 'warning';
         notifications[tone](data.setup_password.mensaje, { dedupeKey: 'personas-clientes-setup-message' });
       }
@@ -606,7 +596,6 @@ export default function AdminClientesPage() {
               subtitle={cliente.correo_principal || 'Sin correo'}
               badge={<AccessBadge cliente={cliente} />}
               fields={[
-                { label: 'Sucursal', value: cliente.nombre_sucursal || 'Sin sucursal' },
                 { label: 'Estado cliente', value: cliente.estado_cliente ? 'Activo' : 'Inactivo' },
                 { label: 'Fecha de cliente', value: cliente.fecha_ingreso ? String(cliente.fecha_ingreso).slice(0, 10) : 'Sin fecha' },
                 { label: 'Marketing', value: cliente.consentimiento_marketing ? 'Si' : 'No' },
@@ -621,20 +610,18 @@ export default function AdminClientesPage() {
         <div className="mf-table-wrap">
           <Table>
             <TableHeader>
-              <TableRow className="border-[var(--mf-nav-border)]">
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Correo</TableHead>
-                <TableHead className="hidden md:table-cell text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursal</TableHead>
-                <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acceso</TableHead>
-                <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acciones</TableHead>
-              </TableRow>
+                <TableRow className="border-[var(--mf-nav-border)]">
+                  <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
+                  <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Correo</TableHead>
+                  <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acceso</TableHead>
+                  <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acciones</TableHead>
+                </TableRow>
             </TableHeader>
             <TableBody>
               {filteredClientes.map((cliente) => (
                 <TableRow key={cliente.id_cliente} className="border-[var(--mf-nav-border)]">
                   <TableCell className="font-medium">{cliente.nombre_completo || 'Cliente'}</TableCell>
                   <TableCell>{cliente.correo_principal || 'Sin correo'}</TableCell>
-                  <TableCell className="hidden md:table-cell">{cliente.nombre_sucursal || 'Sin sucursal'}</TableCell>
                   <TableCell className="text-center"><AccessBadge cliente={cliente} /></TableCell>
                   <TableCell className="text-center">{renderActions(cliente)}</TableCell>
                 </TableRow>
@@ -752,7 +739,7 @@ export default function AdminClientesPage() {
                     {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
                   </select>
                 </div>
-                <p className="text-xs text-[var(--mf-text-2)]">El cliente creará su propia contraseña con flujo seguro.</p>
+                <p className="text-xs text-[var(--mf-text-2)]">El cliente crearÃ¡ su propia contraseÃ±a con flujo seguro.</p>
 
                 <label className="mt-1 flex items-center gap-2">
                   <input type="checkbox" checked={formValues.consentimiento_marketing} onChange={(e) => setFormValues((p) => ({ ...p, consentimiento_marketing: e.target.checked }))} />
@@ -821,7 +808,6 @@ export default function AdminClientesPage() {
                   title: 'Cliente',
                   icon: <Building2 size={14} />,
                   fields: [
-                    { label: 'Sucursal', value: selectedCliente.nombre_sucursal || 'Sin sucursal' },
                     { label: 'Estado cliente', value: selectedCliente.estado_cliente ? 'Activo' : 'Inactivo' },
                     { label: 'Fecha de cliente', value: selectedCliente.fecha_ingreso ? String(selectedCliente.fecha_ingreso).slice(0, 10) : '-' },
                     { label: 'Consentimiento marketing', value: selectedCliente.consentimiento_marketing ? 'Si' : 'No' },
@@ -930,25 +916,10 @@ export default function AdminClientesPage() {
                 onChange={(event) => setFilters((prev) => ({ ...prev, estadoAcceso: event.target.value }))}
               >
                 <option value="all">Todos</option>
-                <option value="pendiente_password">Contraseña pendiente</option>
+                <option value="pendiente_password">ContraseÃ±a pendiente</option>
                 <option value="activo">Activo</option>
                 <option value="bloqueado">Bloqueado</option>
                 <option value="inactivo">Inactivo</option>
-              </select>
-            </div>
-            <div>
-              <Label className="mf-label">Sucursal</Label>
-              <select
-                className="mf-select mt-1"
-                value={filters.idSucursal}
-                onChange={(event) => setFilters((prev) => ({ ...prev, idSucursal: event.target.value }))}
-              >
-                <option value="all">Todas</option>
-                {sucursales.map((sucursal) => (
-                  <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>
-                    {sucursal.nombre_sucursal}
-                  </option>
-                ))}
               </select>
             </div>
           </div>
@@ -963,3 +934,5 @@ export default function AdminClientesPage() {
     </div>
   );
 }
+
+

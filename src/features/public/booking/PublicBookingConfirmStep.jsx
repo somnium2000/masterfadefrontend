@@ -54,6 +54,14 @@ function HoldResultSummary({ holdResult, holdDurationMin, bookingBlocksSummary, 
         <span>{formatCurrencyHnl(holdResult.monto_total_hnl || 0)}</span>
       </div>
       <div className="citas-confirm-row">
+        <span>Cubierto por plan</span>
+        <span>{formatCurrencyHnl(holdResult.descuento_total_hnl || 0)}</span>
+      </div>
+      <div className="citas-confirm-row">
+        <span>Extras pendientes</span>
+        <span>{formatCurrencyHnl(holdResult.total_pagar_hnl || holdResult.extras_pendientes_hnl || 0)}</span>
+      </div>
+      <div className="citas-confirm-row">
         <span>Expira hold</span>
         <span>{expiresAt ? expiresAt.toLocaleString('es-HN', { timeZone: HONDURAS_TIME_ZONE }) : 'N/D'}</span>
       </div>
@@ -134,11 +142,17 @@ export default function PublicBookingConfirmStep() {
               <span>Duración hold</span>
               <span>{holdDurationMin} min</span>
             </div>
-            <div className="citas-confirm-row">
-              <span>Total servicios</span>
-              <span>{formatCurrencyHnl(totalToPay)}</span>
-            </div>
-          </div>
+      <div className="citas-confirm-row">
+        <span>Total servicios</span>
+        <span>{formatCurrencyHnl(totalToPay)}</span>
+      </div>
+      {holdResult?.membresia?.cobertura_activa ? (
+        <div className="citas-confirm-row">
+          <span>Plan activo</span>
+          <span>{holdResult?.membresia?.nombre_plan || 'Membresía activa'}</span>
+        </div>
+      ) : null}
+    </div>
 
           <div className="citas-confirm-services mt-4">
             <h4 className="citas-confirm-subtitle">Resumen por integrante</h4>

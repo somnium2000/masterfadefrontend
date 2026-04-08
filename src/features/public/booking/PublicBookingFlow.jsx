@@ -16,7 +16,9 @@ import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
+  createClienteCitaHold,
   createPublicCitaHold,
+  getClienteMembershipEstado,
   getPublicBookingContext,
   listPublicAgendaBarberos,
   listPublicAgendaDisponibilidad,
@@ -156,6 +158,7 @@ export default function PublicBookingFlow() {
   const navigate = useNavigate();
   const notifications = useNotifications();
   const { isAuthenticated, roles } = useAuth();
+  const canUseClienteHold = Boolean(isAuthenticated && Array.isArray(roles) && roles.includes('cliente'));
 
   const [contextLoading, setContextLoading] = useState(false);
   const [contextError, setContextError] = useState('');
@@ -207,6 +210,8 @@ export default function PublicBookingFlow() {
   const availabilityCacheRef = useRef(new Map());
   const slotsCacheRef = useRef(new Map());
   const servicesScrollRef = useRef(null);
+  // AM: Evita reaplicar propuesta automática del plan varias veces sobre la misma combinación de sucursal/servicios.
+  const membershipPrefillKeysRef = useRef(new Set());
   const [servicesCanScroll, setServicesCanScroll] = useState(false);
   const [servicesAtEnd, setServicesAtEnd] = useState(true);
 
@@ -463,7 +468,7 @@ export default function PublicBookingFlow() {
       const nextBarbers = Array.isArray(barbersPayload?.barberos) ? barbersPayload.barberos : [];
       const nextServices = Array.isArray(servicesPayload?.servicios)
         ? servicesPayload.servicios.filter(
-          (service) => service?.agendable && !service?.servicio_informativo
+          (service) => service?.activo !== false && service?.agendable && !service?.servicio_informativo
         )
         : [];
       const validBarberIds = new Set(nextBarbers.map((barber) => barber.id_empleado));
@@ -792,6 +797,74 @@ export default function PublicBookingFlow() {
   useEffect(() => {
     void fetchBranchData();
   }, [fetchBranchData]);
+
+  useEffect(() => {
+    if (!canUseClienteHold) return;
+    if (!selectedBranchId) return;
+    const titular = bookingBlocks[0];
+    if (!titular || Array.isArray(titular.serviceIds) && titular.serviceIds.length > 0) return;
+    const availableServices = Array.isArray(services) ? services : [];
+    if (availableServices.length === 0) return;
+
+    const prefillKey = `${selectedBranchId}:${availableServices.map((service) => service?.id_servicio).filter(Boolean).join(",")}`;
+    if (membershipPrefillKeysRef.current.has(prefillKey)) return;
+
+    let cancelled = false;
+    // AM: Propone automáticamente el primer servicio cubierto por plan para el titular sin forzar selección múltiple.
+    (async () => {
+      try {
+        const response = await getClienteMembershipEstado();
+        if (cancelled) return;
+        const payload = response?.data ?? response;
+        const remanentes = Array.isArray(payload?.plan_activo?.remanentes?.servicios)
+          ? payload.plan_activo.remanentes.servicios
+          : [];
+        const coveredServiceIds = remanentes
+          .filter((item) => Number(item?.restante || 0) > 0)
+          .map((item) => String(item?.id_servicio || "").trim())
+          .filter(Boolean);
+        if (coveredServiceIds.length === 0) {
+          membershipPrefillKeysRef.current.add(prefillKey);
+          return;
+        }
+
+        const availableServiceIds = new Set(availableServices.map((item) => String(item?.id_servicio || "").trim()).filter(Boolean));
+        const suggestedId = coveredServiceIds.find((serviceId) => availableServiceIds.has(serviceId));
+        if (!suggestedId) {
+          membershipPrefillKeysRef.current.add(prefillKey);
+          return;
+        }
+
+        setBookingBlocks((prev) => {
+          const base = Array.isArray(prev) && prev.length > 0 ? prev : [createBookingBlock({ alias: "Titular" })];
+          const currentTitular = normalizeBookingBlock(base[0], 0);
+          if (Array.isArray(currentTitular.serviceIds) && currentTitular.serviceIds.length > 0) return prev;
+          const nextTitular = normalizeBookingBlock(
+            {
+              ...currentTitular,
+              serviceIds: [suggestedId],
+              selectedTime: "",
+            },
+            0
+          );
+          const next = [...base];
+          next[0] = nextTitular;
+          return next;
+        });
+
+        membershipPrefillKeysRef.current.add(prefillKey);
+        notifications.info("Seleccionamos automáticamente un servicio cubierto por tu plan para agilizar tu reserva.", {
+          dedupeKey: "public-booking-membership-prefill",
+        });
+      } catch {
+        // AM: Fallback silencioso; el flujo de booking debe continuar sin depender de membresía.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingBlocks, canUseClienteHold, notifications, selectedBranchId, services]);
 
   useEffect(() => {
     if (!selectedBranchId) return;
@@ -1213,10 +1286,13 @@ export default function PublicBookingFlow() {
     }
     setHoldSubmitting(true);
     try {
-      const response = await createPublicCitaHold({
+      const holdPayload = {
         id_sucursal: selectedBranchId,
         integrantes,
-      });
+      };
+      const response = canUseClienteHold
+        ? await createClienteCitaHold(holdPayload)
+        : await createPublicCitaHold(holdPayload);
       const payload = response?.data ?? response;
       setHoldResult(payload);
       notifications.success('Reserva creada correctamente.', { dedupeKey: 'public-booking-hold-success' });
@@ -1249,6 +1325,7 @@ export default function PublicBookingFlow() {
     fetchSlots,
     holdExpired,
     isPastSlotForToday,
+    canUseClienteHold,
     loadSlotSuggestions,
     navigate,
     notifications,
@@ -1398,7 +1475,7 @@ export default function PublicBookingFlow() {
   const showTopbarBackToBarberos = location.pathname.startsWith('/agendar/agenda');
   const isClienteSession = isAuthenticated && Array.isArray(roles) && roles.includes('cliente');
   const homePath = isClienteSession ? '/home/cliente' : '/';
-  const homeLabel = isClienteSession ? 'Inicio cliente' : 'Inicio';
+  const homeLabel = 'Inicio MasterFade';
 
   return (
     <div className="public-booking-page mf-page-gradient min-h-screen">
@@ -1409,17 +1486,6 @@ export default function PublicBookingFlow() {
               <House size={16} />
               <span>{homeLabel}</span>
             </Link>
-            {isClienteSession ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="public-booking-topbar-back gap-2"
-                onClick={() => navigate('/home/cliente')}
-              >
-                <ArrowLeft size={15} />
-                Volver al inicio
-              </Button>
-            ) : null}
             {showTopbarBackToBarberos ? (
               <Button
                 variant="outline"
@@ -1432,7 +1498,7 @@ export default function PublicBookingFlow() {
               </Button>
             ) : null}
           </div>
-          <ThemeSwitcher />
+          <ThemeSwitcher showLabel={false} />
         </header>
 
         {contextLoading ? (

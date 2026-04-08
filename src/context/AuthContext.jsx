@@ -162,7 +162,7 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (identifier, contrasena, remember) => {
     const normalizedIdentifier = String(identifier || '').trim().toLowerCase();
-    const password = String(contrasena || '').trim();
+    const password = String(contrasena || '');
 
     if (!normalizedIdentifier || !password) {
       return { ok: false, message: 'Correo y contraseña son requeridos.' };

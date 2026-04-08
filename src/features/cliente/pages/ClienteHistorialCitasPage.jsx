@@ -1,5 +1,5 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Clock3, MapPin, Scissors, Wallet } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { CalendarDays, Clock3, MapPin, MessageSquare, Scissors, Wallet } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
@@ -20,31 +20,33 @@ function isUpcoming(cita) {
 function CitaCard({ cita }) {
   return (
     <article className="mf-glass-surface rounded-[20px] border border-[var(--mf-nav-border)] p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-[var(--mf-text)]">{cita.nombre_sucursal || 'Sucursal'}</p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="space-y-1">
+          <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--mf-text)]">
+            <MapPin size={14} className="shrink-0 text-[var(--mf-accent)]" />
+            <span className="leading-none">{cita.nombre_sucursal || 'Sucursal'}</span>
+          </p>
+          <p className="mt-1 text-xs text-[var(--mf-text-2)]">{formatDateTime(cita.inicio_at)}</p>
+        </div>
         <span className="mf-badge mf-badge-gold">{cita.estado_cita_codigo}</span>
       </div>
 
       <dl className="mt-3 grid grid-cols-1 gap-2 text-xs text-[var(--mf-text-2)] sm:grid-cols-2">
         <div className="flex items-center gap-2">
-          <CalendarDays size={14} />
-          <span>{formatDateTime(cita.inicio_at)}</span>
+          <Clock3 size={14} className="shrink-0 text-[var(--mf-accent)]" />
+          <span>Duración: {Number(cita.duracion_total_min || 0)} min</span>
         </div>
         <div className="flex items-center gap-2">
-          <Clock3 size={14} />
-          <span>Duracion: {Number(cita.duracion_total_min || 0)} min</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Scissors size={14} />
+          <Scissors size={14} className="shrink-0 text-[var(--mf-accent)]" />
           <span>{cita.nombre_barbero || 'Barbero por definir'}</span>
         </div>
         <div className="flex items-center gap-2">
-          <Wallet size={14} />
+          <Wallet size={14} className="shrink-0 text-[var(--mf-accent)]" />
           <span>L {Number(cita.total_pagar_hnl || 0).toFixed(2)}</span>
         </div>
         {cita.notas ? (
           <div className="flex items-center gap-2 sm:col-span-2">
-            <MapPin size={14} />
+            <MessageSquare size={14} className="shrink-0 text-[var(--mf-accent)]" />
             <span>{cita.notas}</span>
           </div>
         ) : null}
@@ -95,16 +97,29 @@ export default function ClienteHistorialCitasPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Historial de citas</p>
-            <h1 className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">Tus reservas</h1>
-            <p className="mt-1 text-sm text-[var(--mf-text-2)]">Consulta tus citas proximas y el historial completo.</p>
+            <h1 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)]">Tus reservas</h1>
+            <p className="mt-1 text-sm text-[var(--mf-text-2)]">Visualiza próximas citas y tu actividad pasada en un solo lugar.</p>
           </div>
           <button
             type="button"
             onClick={() => navigate('/agendar')}
-            className="mf-accent-gradient inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold"
+            className="mf-accent-gradient inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold"
           >
+            <CalendarDays size={15} />
             Nueva cita
           </button>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <span className="inline-flex rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
+            Próximas: <strong className="ml-1 text-[var(--mf-text)]">{upcoming.length}</strong>
+          </span>
+          <span className="inline-flex rounded-full border border-[var(--mf-nav-border)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
+            Historial: <strong className="ml-1 text-[var(--mf-text)]">{past.length}</strong>
+          </span>
+          <span className="inline-flex rounded-full border border-[var(--mf-nav-border)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
+            Total: <strong className="ml-1 text-[var(--mf-text)]">{citas.length}</strong>
+          </span>
         </div>
       </section>
 
@@ -115,19 +130,19 @@ export default function ClienteHistorialCitasPage() {
       ) : (
         <>
           <section className="space-y-3">
-            <h2 className="text-lg font-semibold text-[var(--mf-text)]">Proximas ({upcoming.length})</h2>
+            <h2 className="mf-font-display text-lg text-[var(--mf-text)]">Próximas ({upcoming.length})</h2>
             {upcoming.length ? upcoming.map((cita) => <CitaCard key={cita.id_cita} cita={cita} />) : (
               <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
-                No tienes citas proximas.
+                No tienes citas próximas.
               </p>
             )}
           </section>
 
           <section className="space-y-3">
-            <h2 className="text-lg font-semibold text-[var(--mf-text)]">Historial ({past.length})</h2>
+            <h2 className="mf-font-display text-lg text-[var(--mf-text)]">Historial ({past.length})</h2>
             {past.length ? past.map((cita) => <CitaCard key={cita.id_cita} cita={cita} />) : (
               <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
-                Aun no hay citas pasadas en tu historial.
+                Aún no hay citas pasadas en tu historial.
               </p>
             )}
           </section>
@@ -136,5 +151,3 @@ export default function ClienteHistorialCitasPage() {
     </div>
   );
 }
-
-

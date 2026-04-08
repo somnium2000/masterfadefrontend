@@ -151,10 +151,14 @@ export default function ResetPasswordPage() {
             <h1 className="mf-login-title">Restablecer contraseña</h1>
           </div>
 
-          <form className="mf-login-form" onSubmit={onSubmit}>
+          <form className="mf-login-form" onSubmit={onSubmit} aria-busy={loading}>
             {!ready ? (
               <>
-                {error ? <div className="mf-error">{error}</div> : <div className="mf-help">Validando enlace...</div>}
+                {error ? (
+                  <div className="mf-error" role="alert" aria-live="assertive">{error}</div>
+                ) : (
+                  <div className="mf-help" role="status" aria-live="polite">Validando enlace...</div>
+                )}
                 <div className="mf-actions">
                   <Link className="mf-link" to="/forgot-password">Volver</Link>
                   <Link className="mf-link" to="/login">Login</Link>
@@ -172,6 +176,7 @@ export default function ResetPasswordPage() {
                       value={newPass}
                       onChange={(e) => setNewPass(e.target.value)}
                       placeholder="••••••••"
+                      disabled={loading}
                     />
                     <button
                       type="button"
@@ -183,6 +188,7 @@ export default function ResetPasswordPage() {
                       onPointerLeave={() => handlePasswordRevealEnd('new')}
                       onPointerCancel={() => handlePasswordRevealEnd('new')}
                       onBlur={() => handlePasswordRevealEnd('new')}
+                      disabled={loading}
                     >
                       <Eye size={16} />
                     </button>
@@ -199,6 +205,7 @@ export default function ResetPasswordPage() {
                       value={confirm}
                       onChange={(e) => setConfirm(e.target.value)}
                       placeholder="••••••••"
+                      disabled={loading}
                     />
                     <button
                       type="button"
@@ -210,14 +217,15 @@ export default function ResetPasswordPage() {
                       onPointerLeave={() => handlePasswordRevealEnd('confirm')}
                       onPointerCancel={() => handlePasswordRevealEnd('confirm')}
                       onBlur={() => handlePasswordRevealEnd('confirm')}
+                      disabled={loading}
                     >
                       <Eye size={16} />
                     </button>
                   </div>
                 </div>
 
-                {error ? <div className="mf-error">{error}</div> : null}
-                {msg ? <div className="mf-success">{msg}</div> : null}
+                {error ? <div className="mf-error" role="alert" aria-live="assertive">{error}</div> : null}
+                {msg ? <div className="mf-success" role="status" aria-live="polite">{msg}</div> : null}
 
                 <div className="mf-actions">
                   <Link className="mf-link" to="/login">Volver a login</Link>

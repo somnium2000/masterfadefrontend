@@ -33,3 +33,12 @@ export async function listPublicAgendaHorarios(params = {}, options = {}) {
 export async function createPublicCitaHold(payload) {
   return http.post('/v1/public/citas/hold', payload);
 }
+
+export async function createClienteCitaHold(payload) {
+  return http.post('/v1/citas/hold', payload);
+}
+
+// AM: Consulta de estado de membresía para propuesta automática de servicios cubiertos en booking autenticado.
+export async function getClienteMembershipEstado() {
+  return http.get('/v1/cliente/planes/estado');
+}
