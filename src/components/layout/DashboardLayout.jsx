@@ -109,11 +109,14 @@ function buildNavModules(basePath, role) {
             label: 'Reportes',
             icon: BarChart3,
             path: `${basePath}/reportes`,
+            // JK: Oculta el indicador de submenu en sidebar para que se vea como modulo directo.
+            showSidebarDropdown: false,
             subItems: [
-                { id: 'rep-ventas', label: 'Ventas', path: `${basePath}/reportes/ventas` },
-                { id: 'rep-ingresos', label: 'Reportes de Ingresos', path: `${basePath}/reportes/ingresos` },
-                { id: 'rep-barberos', label: 'Productividad Barberos', path: `${basePath}/reportes/barberos` },
-                { id: 'rep-concurrencia', label: 'Concurrencia de Clientes', path: `${basePath}/reportes/concurrencia` },
+                // JK: Tabs unificadas de reportes (sin vista intermedia por cards).
+                { id: 'rep-ingresos', label: 'Ingresos', path: `${basePath}/reportes/ingresos` },
+                { id: 'rep-membresias', label: 'Membresias', path: `${basePath}/reportes/membresias` },
+                { id: 'rep-barberos', label: 'Barberos', path: `${basePath}/reportes/barberos` },
+                { id: 'rep-concurrencia', label: 'Concurrencia', path: `${basePath}/reportes/concurrencia` },
             ],
         },
         {
@@ -222,7 +225,7 @@ function SidebarItem({ module, isActive, isCollapsed, onClick }) {
                     </motion.span>
                 )}
             </AnimatePresence>
-            {!isCollapsed && module.subItems && (
+            {!isCollapsed && module.subItems && module.showSidebarDropdown !== false && (
                 <ChevronDown size={13} className={`relative z-10 shrink-0 transition-transform duration-200 opacity-50 ${isActive ? 'rotate-180' : ''}`} />
             )}
         </motion.button>
