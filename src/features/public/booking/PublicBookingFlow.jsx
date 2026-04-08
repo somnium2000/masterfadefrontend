@@ -540,23 +540,30 @@ export default function PublicBookingFlow() {
     setAvailabilityError('');
 
     try {
-      const [barbersResponse, servicesResponse] = await Promise.all([
-        listPublicAgendaBarberos({ id_sucursal: selectedBranchId }),
-        listPublicCatalogServicios({ id_sucursal: selectedBranchId }),
-      ]);
+      const barbersResponse = await listPublicAgendaBarberos({ id_sucursal: selectedBranchId });
       if (requestSeq !== branchDataRequestSeqRef.current) return;
 
       const barbersPayload = barbersResponse?.data ?? barbersResponse;
-      const servicesPayload = servicesResponse?.data ?? servicesResponse;
       const nextBarbers = Array.isArray(barbersPayload?.barberos) ? barbersPayload.barberos : [];
+      const validBarberIds = new Set(nextBarbers.map((barber) => barber.id_empleado));
+      const fallbackBarberId = nextBarbers[0]?.id_empleado || '';
+      const scopedBarberId = activeBlockBarberId && validBarberIds.has(activeBlockBarberId)
+        ? activeBlockBarberId
+        : '';
+
+      const servicesResponse = await listPublicCatalogServicios({
+        id_sucursal: selectedBranchId,
+        id_barbero: scopedBarberId || undefined,
+      });
+      if (requestSeq !== branchDataRequestSeqRef.current) return;
+
+      const servicesPayload = servicesResponse?.data ?? servicesResponse;
       const nextServices = Array.isArray(servicesPayload?.servicios)
         ? servicesPayload.servicios.filter(
           (service) => service?.agendable && !service?.servicio_informativo
         )
         : [];
-      const validBarberIds = new Set(nextBarbers.map((barber) => barber.id_empleado));
       const validServiceIds = new Set(nextServices.map((service) => service.id_servicio));
-      const fallbackBarberId = nextBarbers[0]?.id_empleado || '';
 
       setBarbers(nextBarbers);
       setServices(nextServices);
@@ -573,7 +580,12 @@ export default function PublicBookingFlow() {
           const nextBarberId = validBarberIds.has(block.idBarbero)
             ? block.idBarbero
             : fallbackBarberId;
-          const nextServiceIds = block.serviceIds.filter((serviceId) => validServiceIds.has(serviceId));
+          const shouldFilterServices = block.id !== activeBlock?.id
+            ? block.idBarbero !== nextBarberId
+            : true;
+          const nextServiceIds = shouldFilterServices
+            ? block.serviceIds.filter((serviceId) => validServiceIds.has(serviceId))
+            : block.serviceIds;
 
           if (block.idBarbero === nextBarberId && areServiceIdsEqual(block.serviceIds, nextServiceIds)) {
             return block;
@@ -602,7 +614,7 @@ export default function PublicBookingFlow() {
         setServicesLoading(false);
       }
     }
-  }, [notifications, selectedBranchId]);
+  }, [activeBlock?.id, activeBlockBarberId, notifications, selectedBranchId]);
 
   const fetchAvailability = useCallback(async () => {
     if (!selectedBranchId || !servicesCsv) {

@@ -11,6 +11,8 @@ import {
     createAdminServicio,
     updateAdminServicio,
     setAdminServicioEstado,
+    getAdminServicioBarberos,
+    saveAdminServicioBarberos,
 } from '../lib/adminCatalogApi.js';
 import { listAdminSucursales } from '../lib/adminSucursalesApi.js';
 import { Button } from '../../../components/ui/button.jsx';
@@ -106,6 +108,13 @@ const FORM_DEFAULTS = {
     visible_publico: true,
     servicio_informativo: false,
     orden_visual: '100',
+};
+
+const SERVICE_BARBER_ASSIGNMENTS_DEFAULTS = {
+    loading: false,
+    error: '',
+    barberos: [],
+    selectedIds: [],
 };
 
 const SERVICES_FILTER_DEFAULTS = {
@@ -232,6 +241,17 @@ function resolveGrupoLabel(grupo) {
     return String(grupo || '').trim().toLowerCase() === 'otros' ? 'Otros servicios' : 'Barberia';
 }
 
+function summarizeAssignedBarbers(barberos = [], maxVisible = 2) {
+    const safeBarberos = Array.isArray(barberos) ? barberos.filter(Boolean) : [];
+    if (safeBarberos.length === 0) return 'Sin barberos asignados';
+    const names = safeBarberos
+        .map((barbero) => String(barbero?.nombre_completo || '').trim())
+        .filter(Boolean);
+    if (names.length === 0) return 'Sin barberos asignados';
+    if (names.length <= maxVisible) return names.join(', ');
+    return `${names.slice(0, maxVisible).join(', ')} +${names.length - maxVisible}`;
+}
+
 function ServiceStatusBadge({ activo }) {
     return (
         <span className={`mf-badge ${activo ? 'mf-badge-green' : 'mf-badge-red'}`}>
@@ -307,6 +327,7 @@ export default function AdminServicesCatalogPage() {
     const [formValues, setFormValues] = useState(FORM_DEFAULTS);
     const [formError, setFormError] = useState('');
     const [formLoading, setFormLoading] = useState(false);
+    const [serviceBarberAssignments, setServiceBarberAssignments] = useState(SERVICE_BARBER_ASSIGNMENTS_DEFAULTS);
 
     // Dialogo detalle
     const [detailOpen, setDetailOpen] = useState(false);
@@ -500,6 +521,16 @@ export default function AdminServicesCatalogPage() {
         setFormValues((prev) => ({ ...prev, [field]: value }));
     }
 
+    function handleBarberAssignmentToggle(idEmpleado) {
+        setServiceBarberAssignments((prev) => {
+            const currentIds = Array.isArray(prev.selectedIds) ? prev.selectedIds : [];
+            const nextIds = currentIds.includes(idEmpleado)
+                ? currentIds.filter((value) => value !== idEmpleado)
+                : [...currentIds, idEmpleado];
+            return { ...prev, selectedIds: nextIds };
+        });
+    }
+
     function resolveMutationBranchId(servicio = null) {
         // AM: Para super admin sin filtro global, permite operar tomando la sucursal del registro.
         return sucursal || servicio?.id_sucursal || '';
@@ -515,6 +546,7 @@ export default function AdminServicesCatalogPage() {
         setEditTarget(null);
         setFormValues(FORM_DEFAULTS);
         setFormError('');
+        setServiceBarberAssignments(SERVICE_BARBER_ASSIGNMENTS_DEFAULTS);
         setDialogOpen(true);
     }
 
@@ -542,9 +574,66 @@ export default function AdminServicesCatalogPage() {
         setDialogOpen(true);
     }
 
+    useEffect(() => {
+        if (!dialogOpen || !editTarget || !isSuperAdmin) {
+            setServiceBarberAssignments(SERVICE_BARBER_ASSIGNMENTS_DEFAULTS);
+            return undefined;
+        }
+
+        const mutationBranchId = editTarget?._mutation_branch_id || '';
+        const serviceId = editTarget?.id_servicio || editTarget?.id || '';
+        if (!mutationBranchId || !serviceId) {
+            setServiceBarberAssignments({
+                loading: false,
+                error: 'No se pudo determinar la sucursal o el servicio para cargar barberos.',
+                barberos: [],
+                selectedIds: [],
+            });
+            return undefined;
+        }
+
+        let cancelled = false;
+        setServiceBarberAssignments((prev) => ({ ...prev, loading: true, error: '' }));
+
+        getAdminServicioBarberos(serviceId, { id_sucursal: mutationBranchId })
+            .then((response) => {
+                if (cancelled) return;
+                const payload = response?.data ?? response;
+                const barberos = Array.isArray(payload?.barberos) ? payload.barberos : [];
+                setServiceBarberAssignments({
+                    loading: false,
+                    error: '',
+                    barberos,
+                    selectedIds: barberos.filter((barbero) => barbero?.ofrece_servicio).map((barbero) => barbero.id_empleado),
+                });
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                setServiceBarberAssignments({
+                    loading: false,
+                    error: extractMessage(err) || 'No se pudieron cargar los barberos del servicio.',
+                    barberos: [],
+                    selectedIds: [],
+                });
+            });
+
+        return () => { cancelled = true; };
+    }, [dialogOpen, editTarget, isSuperAdmin]);
+
     async function handleGuardar() {
         const validationError = validateForm(formValues);
         if (validationError) { setFormError(validationError); return; }
+
+        if (isSuperAdmin && editTarget) {
+            if (serviceBarberAssignments.loading) {
+                setFormError('Espera a que termine de cargar la asignacion de barberos.');
+                return;
+            }
+            if (serviceBarberAssignments.error) {
+                setFormError('No se pudo validar la asignacion de barberos. Recarga el modal antes de guardar.');
+                return;
+            }
+        }
 
         const mutationBranchId = editTarget?._mutation_branch_id || sucursal;
         if (!mutationBranchId) {
@@ -575,15 +664,31 @@ export default function AdminServicesCatalogPage() {
         };
 
         try {
+            let savedServiceData = null;
             if (editTarget) {
-                await updateAdminServicio(editTarget.id_servicio ?? editTarget.id, editPayload);
+                const response = await updateAdminServicio(editTarget.id_servicio ?? editTarget.id, editPayload);
+                savedServiceData = response?.data ?? response;
             } else {
-                await createAdminServicio(createPayload);
+                const response = await createAdminServicio(createPayload);
+                savedServiceData = response?.data ?? response;
+            }
+
+            if (isSuperAdmin && editTarget) {
+                const savedServiceId = savedServiceData?.id_servicio || editTarget.id_servicio || editTarget.id;
+                await saveAdminServicioBarberos(savedServiceId, {
+                    id_sucursal: mutationBranchId,
+                    id_empleados: serviceBarberAssignments.selectedIds,
+                });
             }
             if (editTarget) {
                 notifications.success('Servicio actualizado.', { dedupeKey: 'servicios-save-ok' });
             } else {
                 notifications.success('Servicio creado.', { dedupeKey: 'servicios-save-ok' });
+                if (isSuperAdmin) {
+                    notifications.warning('El servicio se creo. Editalo para asignar los barberos que lo ofreceran.', {
+                        dedupeKey: 'servicios-assign-after-create',
+                    });
+                }
             }
             // AM: Publica sincronizacion para que catalogo publico y otras vistas refresquen al instante.
             emitCatalogSync(editTarget ? 'servicio-updated' : 'servicio-created');
@@ -697,6 +802,7 @@ export default function AdminServicesCatalogPage() {
                             { label: 'Tipo', value: s.servicio_informativo ? 'Informativo' : 'Agendable' },
                             { label: 'Precio', value: <span className="font-mono font-bold text-[var(--mf-accent)]">L {Number(s.precio_hnl).toFixed(2)}</span> },
                             { label: 'Duracion', value: `${s.duracion_min} min` },
+                            ...(isSuperAdmin ? [{ label: 'Barberos', value: summarizeAssignedBarbers(s.barberos_ofrecen) }] : []),
                             { label: 'Orden visual', value: Number(s.orden_visual ?? 100) },
                         ]}
                         actions={
@@ -873,6 +979,9 @@ export default function AdminServicesCatalogPage() {
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Tipo</TableHead>
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Grupo</TableHead>
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden lg:table-cell">Agendable</TableHead>
+                                    {isSuperAdmin ? (
+                                        <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden xl:table-cell">Barberos</TableHead>
+                                    ) : null}
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Dur (min)</TableHead>
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead>
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Precio HNL</TableHead>
@@ -912,6 +1021,16 @@ export default function AdminServicesCatalogPage() {
                                         <TableCell className="text-center hidden lg:table-cell">
                                             <ServiceAgendableBadge agendable={Boolean(s.agendable)} />
                                         </TableCell>
+                                        {isSuperAdmin ? (
+                                            <TableCell className="hidden xl:table-cell text-sm text-[var(--mf-text-2)]">
+                                                <div className="space-y-1">
+                                                    <div className="font-medium text-[var(--mf-text)]">
+                                                        {Number(s.barberos_ofrecen_total ?? 0)} asignado(s)
+                                                    </div>
+                                                    <div>{summarizeAssignedBarbers(s.barberos_ofrecen, 1)}</div>
+                                                </div>
+                                            </TableCell>
+                                        ) : null}
                                         <TableCell className="text-center text-[var(--mf-text-2)]">{s.duracion_min}</TableCell>
                                         <TableCell className="text-center text-[var(--mf-text-2)]">{Number(s.orden_visual ?? 100)}</TableCell>
                                         <TableCell className="text-right font-mono font-semibold text-[var(--mf-accent)]">
@@ -963,14 +1082,101 @@ export default function AdminServicesCatalogPage() {
 
             {/* Dialog Crear / Editar */}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogContent className="sm:max-w-md">
+                <DialogContent className={isSuperAdmin && editTarget ? 'sm:max-w-2xl' : 'sm:max-w-md'}>
                     <DialogHeader>
                         <DialogTitle>{editTarget ? 'Editar servicio' : 'Nuevo servicio'}</DialogTitle>
                         <DialogDescription className="sr-only">
                             Configura nombre, duracion, precio y visibilidad del servicio por sucursal.
                         </DialogDescription>
                     </DialogHeader>
-                    <ServicioForm values={formValues} onChange={handleFormChange} />
+                    <div className={`grid gap-5 ${isSuperAdmin && editTarget ? 'lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]' : 'grid-cols-1'}`}>
+                        <ServicioForm values={formValues} onChange={handleFormChange} />
+
+                        {isSuperAdmin ? (
+                            <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_38%,transparent)] p-4">
+                                <div className="space-y-1">
+                                    <p className="text-xs uppercase tracking-[0.22em] text-[var(--mf-accent)]">Barberos que ofrecen este servicio</p>
+                                    <h3 className="text-base font-semibold text-[var(--mf-text)]">Asignación operativa</h3>
+                                    <p className="text-sm text-[var(--mf-text-2)]">
+                                        {editTarget
+                                            ? 'Selecciona los barberos activos de la sucursal que podrán ofrecer este servicio en el agendamiento.'
+                                            : 'Guarda primero el servicio para luego asignarle barberos desde esta misma pantalla.'}
+                                    </p>
+                                </div>
+
+                                {!editTarget ? (
+                                    <div className="mt-4 rounded-2xl border border-dashed border-[var(--mf-nav-border)] px-4 py-5 text-sm text-[var(--mf-text-2)]">
+                                        La asignación de barberos se habilita después de crear el servicio.
+                                    </div>
+                                ) : serviceBarberAssignments.loading ? (
+                                    <div className="mt-4 flex min-h-[180px] items-center justify-center rounded-2xl border border-[var(--mf-nav-border)]">
+                                        <div className="flex items-center gap-2 text-sm text-[var(--mf-text-2)]">
+                                            <Loader2 size={16} className="animate-spin" />
+                                            Cargando barberos...
+                                        </div>
+                                    </div>
+                                ) : serviceBarberAssignments.error ? (
+                                    <div className="mt-4">
+                                        <ErrorBanner message={serviceBarberAssignments.error} />
+                                    </div>
+                                ) : serviceBarberAssignments.barberos.length === 0 ? (
+                                    <div className="mt-4 rounded-2xl border border-dashed border-[var(--mf-nav-border)] px-4 py-5 text-sm text-[var(--mf-text-2)]">
+                                        No hay barberos activos en esta sucursal para asignar.
+                                    </div>
+                                ) : (
+                                    <div className="mt-4 space-y-3">
+                                        <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_76%,transparent)] px-3 py-2">
+                                            <div>
+                                                <p className="text-xs uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Seleccionados</p>
+                                                <p className="text-sm font-semibold text-[var(--mf-text)]">
+                                                    {serviceBarberAssignments.selectedIds.length} barbero(s)
+                                                </p>
+                                            </div>
+                                            <p className="max-w-[260px] text-right text-xs text-[var(--mf-text-2)]">
+                                                {summarizeAssignedBarbers(
+                                                    serviceBarberAssignments.barberos.filter((barbero) => serviceBarberAssignments.selectedIds.includes(barbero.id_empleado)),
+                                                    2
+                                                )}
+                                            </p>
+                                        </div>
+
+                                        <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
+                                            {serviceBarberAssignments.barberos.map((barbero) => {
+                                                const checked = serviceBarberAssignments.selectedIds.includes(barbero.id_empleado);
+                                                return (
+                                                    <label
+                                                        key={barbero.id_empleado}
+                                                        className={`mf-checkbox flex items-start gap-3 rounded-2xl border px-3 py-3 transition-colors ${
+                                                            checked
+                                                                ? 'border-[var(--mf-accent)] bg-[color:color-mix(in_srgb,var(--mf-accent)_14%,var(--mf-card))]'
+                                                                : 'border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_30%,transparent)]'
+                                                        }`}
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={checked}
+                                                            onChange={() => handleBarberAssignmentToggle(barbero.id_empleado)}
+                                                        />
+                                                        <span className="flex-1 space-y-1">
+                                                            <span className="flex items-center justify-between gap-3">
+                                                                <span className="font-medium text-[var(--mf-text)]">{barbero.nombre_completo}</span>
+                                                                <span className={`mf-badge ${checked ? 'mf-badge-green' : 'mf-badge-muted'}`}>
+                                                                    {checked ? 'Ofrece' : 'Sin asignar'}
+                                                                </span>
+                                                            </span>
+                                                            <span className="block text-xs text-[var(--mf-text-2)]">
+                                                                {barbero.telefono_principal || 'Telefono no registrado'}
+                                                            </span>
+                                                        </span>
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                            </section>
+                        ) : null}
+                    </div>
                     {formError && (
                         <ErrorBanner message={formError} />
                     )}
@@ -978,7 +1184,11 @@ export default function AdminServicesCatalogPage() {
                         <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>
                             Cancelar
                         </Button>
-                        <Button onClick={handleGuardar} disabled={formLoading} className="gap-2 min-w-[120px]">
+                        <Button
+                            onClick={handleGuardar}
+                            disabled={formLoading || (isSuperAdmin && editTarget && serviceBarberAssignments.loading)}
+                            className="gap-2 min-w-[120px]"
+                        >
                             {formLoading ? 'Guardando...' : editTarget ? 'Guardar cambios' : 'Crear servicio'}
                         </Button>
                     </DialogFooter>
@@ -1031,6 +1241,7 @@ export default function AdminServicesCatalogPage() {
                                     fields: [
                                         { label: 'Sucursal', value: detailTarget.id_sucursal ? (branchNameById[detailTarget.id_sucursal] || detailTarget.id_sucursal) : 'No definida' },
                                         { label: 'ID servicio', value: detailTarget.id_servicio || '-' },
+                                        ...(isSuperAdmin ? [{ label: 'Barberos asignados', value: summarizeAssignedBarbers(detailTarget.barberos_ofrecen, 3) }] : []),
                                     ],
                                 },
                             ]}

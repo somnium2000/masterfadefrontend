@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock3, Gift, Plus, Search, Settings2, SlidersHorizontal, Star, X } from "lucide-react";
+import { Clock3, Gift, Search, Settings2, SlidersHorizontal, Star, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.jsx";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog.jsx";
 import { Input } from "../../../components/ui/input.jsx";
@@ -17,7 +17,6 @@ import { useNotifications } from "../../../context/NotificationsContext.jsx";
 import { useAuth } from "../../../context/AuthContext.jsx";
 import { replaceItemById } from "../../../lib/collectionState.js";
 import {
-  createAdminPersonaCliente,
   listAdminPersonasClientes,
 } from "../lib/adminPersonasApi.js";
 import {
@@ -30,55 +29,12 @@ import {
 } from "../lib/adminMasterPuntosApi.js";
 
 const RULE_DEFAULTS = { scope: "global", id_sucursal: "", umbral_monto_hnl: 250, puntos_para_premio: 10, activo: true, servicios_redimibles: [] };
-const LEGACY_CLIENT_FORM_DEFAULTS = {
-  nombres: "",
-  apellidos: "",
-  correo_principal: "",
-  telefono_principal: "",
-  dni: "",
-  id_sucursal_origen: "",
-  fecha_ingreso: "",
-};
-
 function extractMessage(err) {
   return err?.data?.error?.message || err?.message || "Error desconocido.";
 }
 
-function normalizeDigits(value) {
-  return String(value || "").replace(/\D/g, "");
-}
-
 function normalizeText(value) {
   return String(value || "").trim();
-}
-
-function toDateTimeIso(dateValue) {
-  if (!dateValue) return null;
-  const normalized = String(dateValue).slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? `${normalized}T12:00:00.000Z` : null;
-}
-
-function buildLegacyClientCreatePayload(formValues) {
-  return {
-    persona: {
-      nombres: normalizeText(formValues.nombres),
-      apellidos: normalizeText(formValues.apellidos),
-      dni: normalizeDigits(formValues.dni) || null,
-      telefono_principal: normalizeText(formValues.telefono_principal) || null,
-    },
-    acceso: {
-      habilitar_acceso: false,
-      correo_principal: normalizeText(formValues.correo_principal).toLowerCase(),
-    },
-    cliente: {
-      id_sucursal_origen: normalizeText(formValues.id_sucursal_origen) || null,
-      fecha_ingreso: toDateTimeIso(formValues.fecha_ingreso),
-      estado: true,
-      consentimiento_marketing: false,
-      acepta_terminos: false,
-      foto_perfil_asset_id: null,
-    },
-  };
 }
 
 function formatDate(value) {
@@ -184,11 +140,6 @@ export default function AdminMasterPuntosPage() {
   const [legacyCandidatesLoading, setLegacyCandidatesLoading] = useState(false);
   const [legacyClientPickerOpen, setLegacyClientPickerOpen] = useState(false);
   const [legacyClientQuery, setLegacyClientQuery] = useState("");
-  const [legacyCreateOpen, setLegacyCreateOpen] = useState(false);
-  const [legacyCreateForm, setLegacyCreateForm] = useState(LEGACY_CLIENT_FORM_DEFAULTS);
-  const [legacyCreateError, setLegacyCreateError] = useState("");
-  const [legacyCreateSaving, setLegacyCreateSaving] = useState(false);
-
   const scopeBranch = selectedBranch === "all" ? undefined : selectedBranch;
   const canManageLegacyPoints = useMemo(() => {
     const roleList = Array.isArray(roles) ? roles.map((role) => String(role || "").toLowerCase()) : [];
@@ -330,7 +281,10 @@ export default function AdminMasterPuntosPage() {
     try {
       const response = await listAdminPersonasClientes();
       const payload = response?.data ?? response;
-      setLegacyCandidates(Array.isArray(payload?.clientes) ? payload.clientes : []);
+      const onlyRegisteredClients = Array.isArray(payload?.clientes)
+        ? payload.clientes.filter((cliente) => Boolean(cliente?.tiene_acceso))
+        : [];
+      setLegacyCandidates(onlyRegisteredClients);
     } catch (err) {
       notifications.error(extractMessage(err), { dedupeKey: "masterpuntos-legacy-candidates-error" });
       setLegacyCandidates([]);
@@ -348,46 +302,6 @@ export default function AdminMasterPuntosPage() {
     setLegacyError("");
     setLegacyOpen(true);
     void loadLegacyCandidates();
-  }
-
-  function openLegacyCreateClient() {
-    setLegacyCreateForm({
-      ...LEGACY_CLIENT_FORM_DEFAULTS,
-      id_sucursal_origen: selectedBranch !== "all" ? selectedBranch : "",
-    });
-    setLegacyCreateError("");
-    setLegacyCreateOpen(true);
-  }
-
-  async function saveLegacyCreateClient() {
-    const nombres = normalizeText(legacyCreateForm.nombres);
-    const apellidos = normalizeText(legacyCreateForm.apellidos);
-    const correo = normalizeText(legacyCreateForm.correo_principal).toLowerCase();
-    const sucursal = normalizeText(legacyCreateForm.id_sucursal_origen);
-
-    if (!nombres) return setLegacyCreateError("Nombres es obligatorio.");
-    if (!apellidos) return setLegacyCreateError("Apellidos es obligatorio.");
-    if (!correo || !correo.includes("@")) return setLegacyCreateError("Correo principal es obligatorio y debe ser válido.");
-    if (!sucursal) return setLegacyCreateError("Sucursal de origen es obligatoria.");
-
-    setLegacyCreateSaving(true);
-    setLegacyCreateError("");
-    try {
-      const response = await createAdminPersonaCliente(buildLegacyClientCreatePayload(legacyCreateForm));
-      const payload = response?.data ?? response;
-      const createdCliente = payload?.cliente || null;
-      notifications.success("Cliente creado.", { dedupeKey: "masterpuntos-legacy-create-client-ok" });
-      setLegacyCreateOpen(false);
-      await loadLegacyCandidates();
-      if (createdCliente?.id_cliente) {
-        setLegacyTarget(createdCliente);
-        setLegacyClientQuery(createdCliente.nombre_completo || "");
-      }
-    } catch (err) {
-      setLegacyCreateError(extractMessage(err));
-    } finally {
-      setLegacyCreateSaving(false);
-    }
   }
 
   async function saveCanje() {
@@ -624,19 +538,10 @@ export default function AdminMasterPuntosPage() {
                 }}
                 placeholder="Buscar por nombre o teléfono"
               />
-              <button
-                type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md border border-[var(--mf-nav-border)] px-2 py-1 text-xs"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={openLegacyCreateClient}
-              >
-                <span className="inline-flex items-center gap-1"><Plus size={12} /> Nuevo</span>
-              </button>
-
               {legacyClientPickerOpen ? (
                 <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-1 shadow-lg">
                   {legacyCandidatesLoading ? (
-                    <p className="px-3 py-2 text-sm text-[var(--mf-text-2)]">Buscando clientes...</p>
+                    <p className="px-3 py-2 text-sm text-[var(--mf-text-2)]">Buscando clientes registrados...</p>
                   ) : legacyCandidatesFiltered.length > 0 ? (
                     legacyCandidatesFiltered.map((cliente) => (
                       <button
@@ -659,21 +564,12 @@ export default function AdminMasterPuntosPage() {
                     ))
                   ) : (
                     <div className="space-y-2 px-3 py-2">
-                      <p className="text-sm text-[var(--mf-text-2)]">No se encontró cliente con ese criterio.</p>
-                      <Button type="button" variant="outline" className="gap-2" onMouseDown={(event) => event.preventDefault()} onClick={openLegacyCreateClient}>
-                        <Plus size={14} />
-                        Agregar cliente
-                      </Button>
+                      <p className="text-sm text-[var(--mf-text-2)]">No se encontró un cliente registrado con ese criterio.</p>
                     </div>
                   )}
                 </div>
               ) : null}
             </div>
-          </div>
-
-          <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-sm">
-            <p className="font-semibold">{legacyTarget?.nombre_completo || "Cliente no seleccionado"}</p>
-            <p className="text-xs text-[var(--mf-text-2)]">{legacyTarget?.telefono_principal || "Sin teléfono registrado"}</p>
           </div>
 
           <div>
@@ -702,54 +598,6 @@ export default function AdminMasterPuntosPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setLegacyOpen(false)} disabled={legacySaving}>Cancelar</Button>
             <Button onClick={saveLegacyMigration} disabled={legacySaving || !legacyTarget?.id_cliente}>{legacySaving ? "Guardando..." : "Aplicar migración"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={legacyCreateOpen} onOpenChange={setLegacyCreateOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Nuevo cliente</DialogTitle>
-          </DialogHeader>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <Label className="mf-label">Nombres *</Label>
-              <Input className="mf-input mt-1" value={legacyCreateForm.nombres} onChange={(e) => setLegacyCreateForm((prev) => ({ ...prev, nombres: e.target.value }))} />
-            </div>
-            <div>
-              <Label className="mf-label">Apellidos *</Label>
-              <Input className="mf-input mt-1" value={legacyCreateForm.apellidos} onChange={(e) => setLegacyCreateForm((prev) => ({ ...prev, apellidos: e.target.value }))} />
-            </div>
-            <div>
-              <Label className="mf-label">Correo principal *</Label>
-              <Input className="mf-input mt-1" type="email" value={legacyCreateForm.correo_principal} onChange={(e) => setLegacyCreateForm((prev) => ({ ...prev, correo_principal: e.target.value }))} />
-            </div>
-            <div>
-              <Label className="mf-label">Teléfono</Label>
-              <Input className="mf-input mt-1" value={legacyCreateForm.telefono_principal} onChange={(e) => setLegacyCreateForm((prev) => ({ ...prev, telefono_principal: e.target.value }))} />
-            </div>
-            <div>
-              <Label className="mf-label">DNI</Label>
-              <Input className="mf-input mt-1" value={legacyCreateForm.dni} onChange={(e) => setLegacyCreateForm((prev) => ({ ...prev, dni: e.target.value }))} />
-            </div>
-            <div>
-              <Label className="mf-label">Fecha de cliente</Label>
-              <Input type="date" className="mf-input mt-1" value={legacyCreateForm.fecha_ingreso} onChange={(e) => setLegacyCreateForm((prev) => ({ ...prev, fecha_ingreso: e.target.value }))} />
-            </div>
-            <div className="sm:col-span-2">
-              <Label className="mf-label">Sucursal de origen *</Label>
-              <select className="mf-select mt-1" value={legacyCreateForm.id_sucursal_origen} onChange={(e) => setLegacyCreateForm((prev) => ({ ...prev, id_sucursal_origen: e.target.value }))}>
-                <option value="">Selecciona sucursal</option>
-                {(contexto.sucursales || []).map((sucursal) => (
-                  <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          {legacyCreateError ? <p className="mt-2 rounded-[12px] bg-red-500/10 px-3 py-2 text-sm text-red-400">{legacyCreateError}</p> : null}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setLegacyCreateOpen(false)} disabled={legacyCreateSaving}>Cancelar</Button>
-            <Button onClick={saveLegacyCreateClient} disabled={legacyCreateSaving}>{legacyCreateSaving ? "Guardando..." : "Crear cliente"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

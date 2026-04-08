@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -19,13 +20,42 @@ function ProtectedRouteLoader() {
 }
 
 export default function ProtectedRoute({ children, allowedRoles }) {
-  const { isAuthenticated, isHydrating, roles } = useAuth();
+  const { isAuthenticated, isHydrating, roles, hydrateSession } = useAuth();
+  const [rehydrationChecked, setRehydrationChecked] = useState(false);
+  const rehydrationStartedRef = useRef(false);
+
+  const needsRouteRehydration =
+    isAuthenticated &&
+    !isHydrating &&
+    roles.length === 0 &&
+    !rehydrationChecked;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!needsRouteRehydration || rehydrationStartedRef.current) {
+      return undefined;
+    }
+
+    rehydrationStartedRef.current = true;
+
+    void hydrateSession()
+      .catch(() => {})
+      .finally(() => {
+        if (cancelled) return;
+        setRehydrationChecked(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateSession, needsRouteRehydration]);
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
-  if (isHydrating) {
+  if (isHydrating || needsRouteRehydration) {
     return <ProtectedRouteLoader />;
   }
 

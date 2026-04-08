@@ -27,8 +27,8 @@ import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import {
   getAdminCitasOperativasContexto,
+  getAdminCitasOperativasCompletadasHoy,
   listAdminCitasAfectadasReagendacion,
-  listAdminCitasHistorial,
   listAdminCitasOperativas,
   listPublicAgendaHorarios,
   patchAdminCitaEstado,
@@ -68,6 +68,20 @@ const CONTAINER_META = {
 
 function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
+}
+
+function extractSafeEstadoMessage(err) {
+  const code = String(err?.data?.error?.code || '').trim();
+  if (code === 'ADMIN_CITAS_STATUS_WINDOW_NOT_OPEN') {
+    return 'La cita aún no está disponible para marcarse en este estado.';
+  }
+  if (code === 'ADMIN_CITAS_STATUS_TRANSITION_INVALID') {
+    return 'El cambio de estado solicitado no está disponible para esta cita.';
+  }
+  if (code === 'ADMIN_CITAS_STATUS_START_INVALID') {
+    return 'La cita no se puede actualizar en este momento.';
+  }
+  return extractMessage(err);
 }
 
 function toInputDateTime(isoValue) {
@@ -228,7 +242,7 @@ export default function AdminAgendamientoCitasPage() {
 
   const sucursales = Array.isArray(context?.sucursales) ? context.sucursales : [];
   const barberos = Array.isArray(context?.barberos) ? context.barberos : [];
-  const todayHn = useMemo(() => getDateInHonduras(), []);
+  const todayHn = useMemo(() => getDateInHonduras(new Date(nowMs).toISOString()), [nowMs]);
 
   useEffect(() => {
     const timerId = window.setInterval(() => setNowMs(Date.now()), 30000);
@@ -269,7 +283,7 @@ export default function AdminAgendamientoCitasPage() {
   const mobileTabs = useMemo(
     () => ([
       { key: 'confirmada', label: 'Confirmadas', accent: 'text-sky-300', count: citasConfirmadas.length },
-      { key: 'en_salon', label: 'En sal\u00f3n', accent: 'text-amber-300', count: citasEnSalon.length },
+      { key: 'en_salon', label: 'En salón', accent: 'text-amber-300', count: citasEnSalon.length },
       { key: 'completada_hoy', label: 'Completadas', accent: 'text-emerald-300', count: citasCompletadasHoy.length },
     ]),
     [citasCompletadasHoy.length, citasConfirmadas.length, citasEnSalon.length]
@@ -338,7 +352,7 @@ export default function AdminAgendamientoCitasPage() {
       const params = buildFilterParams(filters, search);
       const [operativasResponse, completadasResponse] = await Promise.all([
         listAdminCitasOperativas(params),
-        listAdminCitasHistorial({ ...params, estado: 'completada', fecha_desde: todayHn, fecha_hasta: todayHn, limit: 300 }),
+        getAdminCitasOperativasCompletadasHoy({ ...params, limit: 300 }),
       ]);
       const operativas = Array.isArray((operativasResponse?.data ?? operativasResponse)?.citas) ? (operativasResponse?.data ?? operativasResponse).citas : [];
       const completadas = Array.isArray((completadasResponse?.data ?? completadasResponse)?.citas) ? (completadasResponse?.data ?? completadasResponse).citas : [];
@@ -354,7 +368,7 @@ export default function AdminAgendamientoCitasPage() {
       fetchInFlightRef.current = false;
       if (!silent) setLoading(false);
     }
-  }, [filters, handleAuthError, search, todayHn]);
+  }, [filters, handleAuthError, search]);
   const scheduleLiveRefresh = useCallback((options = {}) => {
     const { immediate = false } = options;
     if (liveRefreshTimeoutRef.current) {
@@ -451,7 +465,7 @@ export default function AdminAgendamientoCitasPage() {
       setStateDialog({ open: false, cita: null, estadoDestino: '' });
       void fetchCitas();
     } catch (err) {
-      notifications.error(extractMessage(err), { dedupeKey: 'agendamiento-citas-estado-error' });
+      notifications.error(extractSafeEstadoMessage(err), { dedupeKey: 'agendamiento-citas-estado-error' });
     } finally {
       setStateActionLoadingId('');
     }
@@ -656,7 +670,7 @@ export default function AdminAgendamientoCitasPage() {
         {state === 'confirmada' ? (
           <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita} onClick={() => openStatusDialog(cita, 'en_salon')}>
             <CalendarCheck2 size={14} />
-            Marcar como En Sal\u00f3n
+            Marcar como En salón
           </Button>
         ) : (
           <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita} onClick={() => openStatusDialog(cita, 'completada')}>
@@ -792,7 +806,7 @@ function renderCardsList(items, emptyText) {
       <section className="space-y-4 px-2 pt-1 md:hidden">
         <div className="space-y-3">
           <div className="space-y-1">
-            <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operaci\u00f3n</p>
+            <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
             <h1 className="mf-font-display text-3xl text-[var(--mf-text)]">Citas</h1>
           </div>
 
@@ -819,9 +833,9 @@ function renderCardsList(items, emptyText) {
               Filtros
             </Button>
             {canManageEmergency ? (
-              <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-base font-semibold" onClick={() => setBatchDialogOpen(true)}>
+              <Button type="button" variant="outline" className="h-auto min-h-11 min-w-0 gap-2 whitespace-normal rounded-2xl px-3 py-2 text-center text-sm font-semibold leading-tight min-[390px]:text-base" onClick={() => setBatchDialogOpen(true)}>
                 <AlertTriangle size={14} />
-                Reagendaci\u00f3n masiva
+                Reagendación masiva
               </Button>
             ) : null}
           </div>
@@ -908,10 +922,6 @@ function renderCardsList(items, emptyText) {
       {listError ? <ErrorBanner message={listError} onRetry={fetchCitas} /> : null}
       {loading && !listError ? <LoadingSpinner /> : null}
 
-      {!loading && !listError && citasConfirmadas.length === 0 && citasEnSalon.length === 0 && citasCompletadasHoy.length === 0 ? (
-        <EmptyState icon={CalendarDays} title="Sin citas para operar" description="No hay citas para los contenedores actuales con los filtros seleccionados." />
-      ) : null}
-
       {!loading && !listError ? (
         <div className="md:hidden space-y-4">
           {renderMobileCardsList(
@@ -919,7 +929,7 @@ function renderCardsList(items, emptyText) {
             activeMobileContainer === 'confirmada'
               ? 'No hay citas confirmadas pendientes.'
               : activeMobileContainer === 'en_salon'
-                ? 'No hay citas en sal\u00f3n en este momento.'
+                ? 'No hay citas en salón en este momento.'
                 : 'No hay citas completadas hoy.'
           )}
 
@@ -927,10 +937,10 @@ function renderCardsList(items, emptyText) {
             <div className="rounded-2xl border border-amber-400/30 bg-[color:color-mix(in_srgb,var(--mf-card)_90%,rgba(245,158,11,0.08))] p-3">
               <p className="inline-flex items-center gap-2 text-sm font-semibold text-amber-300">
                 <Armchair size={16} />
-                En sal\u00f3n
+                En salón
               </p>
               <p className="mt-2 text-xs text-[var(--mf-text-2)]">
-                {citasEnSalon.length > 0 ? `${citasEnSalon.length} cita(s) en atenci\u00f3n.` : 'No hay citas en sal\u00f3n hoy.'}
+                {citasEnSalon.length > 0 ? `${citasEnSalon.length} cita(s) en atención.` : 'No hay citas en salón hoy.'}
               </p>
             </div>
             <div className="rounded-2xl border border-emerald-400/30 bg-[color:color-mix(in_srgb,var(--mf-card)_90%,rgba(16,185,129,0.08))] p-3">
@@ -949,7 +959,7 @@ function renderCardsList(items, emptyText) {
       {!loading && !listError ? (
         <div className="hidden grid-cols-1 gap-4 xl:grid-cols-3 md:grid">
           {renderContainer('confirmada', citasConfirmadas, 'No hay citas confirmadas pendientes.')}
-          {renderContainer('en_salon', citasEnSalon, 'No hay citas en sal\u00f3n en este momento.')}
+          {renderContainer('en_salon', citasEnSalon, 'No hay citas en salón en este momento.')}
           {renderContainer('completada_hoy', citasCompletadasHoy, 'No hay citas completadas hoy.')}
         </div>
       ) : null}

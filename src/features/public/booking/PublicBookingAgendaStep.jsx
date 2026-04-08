@@ -104,6 +104,7 @@ export default function PublicBookingAgendaStep() {
     updateActiveBlockBarber,
     updateActiveBlockContact,
     currentMonth,
+    selectedBarber,
   } = usePublicBookingFlow();
 
   const calendarCells = useMemo(() => buildCalendarCells(currentMonth), [currentMonth]);
@@ -150,7 +151,9 @@ export default function PublicBookingAgendaStep() {
       <EmptyState
         icon={Scissors}
         title="Sin servicios disponibles"
-        description="No hay servicios activos para esta sucursal."
+        description={selectedBarber
+          ? `No hay servicios ofrecidos configurados para ${selectedBarber.nombre_completo}.`
+          : 'No hay servicios activos para esta sucursal.'}
       />
     );
   }
