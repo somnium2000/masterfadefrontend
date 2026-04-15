@@ -21,6 +21,9 @@ function getServicesLabel(block, bookingBlocksSummary) {
   const source = Array.isArray(bookingBlocksSummary)
     ? bookingBlocksSummary.find((item) => item?.id === block?.id || item?.alias === block?.alias)
     : null;
+  if (source?.selection_type === 'package') {
+    return `Paquete: ${source?.selectedPackage?.nombre_paquete || 'Sin paquete'}`;
+  }
 
   const services = Array.isArray(source?.selectedServices)
     ? source.selectedServices.map((service) => service?.nombre_servicio).filter(Boolean)
@@ -29,7 +32,7 @@ function getServicesLabel(block, bookingBlocksSummary) {
   return services.length ? services.join(', ') : 'Sin servicios';
 }
 
-function HoldResultSummary({ holdResult, holdDurationMin, bookingBlocksSummary, mode = 'public', onBackHome }) {
+function HoldResultSummary({ holdResult, holdDurationMin, bookingBlocksSummary, mode = 'public', onBackHome, simulationNoPayment = false }) {
   if (!holdResult) return null;
 
   const expiresAt = holdResult.expires_at ? new Date(holdResult.expires_at) : null;
@@ -64,14 +67,18 @@ function HoldResultSummary({ holdResult, holdDurationMin, bookingBlocksSummary, 
         <span>Extras pendientes</span>
         <span>{formatCurrencyHnl(holdResult.total_pagar_hnl || holdResult.extras_pendientes_hnl || 0)}</span>
       </div>
-      <div className="citas-confirm-row">
-        <span>Expira hold</span>
-        <span>{expiresAt ? expiresAt.toLocaleString('es-HN', { timeZone: HONDURAS_TIME_ZONE }) : 'N/D'}</span>
-      </div>
-      <div className="citas-confirm-row">
-        <span>Duracion de hold</span>
-        <span>{holdDurationMin} min</span>
-      </div>
+      {!simulationNoPayment ? (
+        <>
+          <div className="citas-confirm-row">
+            <span>Expira hold</span>
+            <span>{expiresAt ? expiresAt.toLocaleString('es-HN', { timeZone: HONDURAS_TIME_ZONE }) : 'N/D'}</span>
+          </div>
+          <div className="citas-confirm-row">
+            <span>Duracion de hold</span>
+            <span>{holdDurationMin} min</span>
+          </div>
+        </>
+      ) : null}
 
       {bloques.length > 0 ? (
         <div className="citas-confirm-services mt-3">
@@ -129,22 +136,26 @@ export default function PublicBookingConfirmStep() {
               <span>Integrantes</span>
               <span>{bookingBlocksSummary.length}</span>
             </div>
-            <div className="citas-confirm-row">
-              <span>Tiempo restante</span>
-              <span>{formatRemainingTime(holdRemainingMs)}</span>
-            </div>
-            <div className="citas-confirm-row">
-              <span>Expira a las</span>
-              <span>
-                {holdExpiresAtIso
-                  ? new Date(holdExpiresAtIso).toLocaleTimeString('es-HN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: HONDURAS_TIME_ZONE })
-                  : 'N/D'}
-              </span>
-            </div>
-            <div className="citas-confirm-row">
-              <span>Duracion hold</span>
-              <span>{holdDurationMin} min</span>
-            </div>
+            {!simulationNoPayment ? (
+              <>
+                <div className="citas-confirm-row">
+                  <span>Tiempo restante</span>
+                  <span>{formatRemainingTime(holdRemainingMs)}</span>
+                </div>
+                <div className="citas-confirm-row">
+                  <span>Expira a las</span>
+                  <span>
+                    {holdExpiresAtIso
+                      ? new Date(holdExpiresAtIso).toLocaleTimeString('es-HN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: HONDURAS_TIME_ZONE })
+                      : 'N/D'}
+                  </span>
+                </div>
+                <div className="citas-confirm-row">
+                  <span>Duracion hold</span>
+                  <span>{holdDurationMin} min</span>
+                </div>
+              </>
+            ) : null}
       <div className="citas-confirm-row">
         <span>Total servicios</span>
         <span>{formatCurrencyHnl(totalToPay)}</span>
@@ -162,7 +173,9 @@ export default function PublicBookingConfirmStep() {
             {bookingBlocksSummary.map((block) => (
               <div key={block.id} className="citas-confirm-service-item">
                 <span>
-                  {block.alias}: {block.selectedServices.map((service) => service.nombre_servicio).join(', ') || 'Sin servicios'}
+                  {block.alias}: {block.selection_type === 'package'
+                    ? `Paquete ${block.selectedPackage?.nombre_paquete || 'Sin paquete'}`
+                    : (block.selectedServices.map((service) => service.nombre_servicio).join(', ') || 'Sin servicios')}
                   {' '}
                   ({formatDateOnly(block.selectedDate)} {formatTime12Hour(block.selectedTime || '')})
                 </span>
@@ -182,7 +195,7 @@ export default function PublicBookingConfirmStep() {
             </span>
           </div>
 
-          {holdExpired ? (
+          {!simulationNoPayment && holdExpired ? (
             <p className="mt-3 rounded-[12px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
               El tiempo de confirmacion expiro. Si la hora sigue libre, puedes crear la reserva de nuevo.
             </p>
@@ -219,6 +232,7 @@ export default function PublicBookingConfirmStep() {
               holdDurationMin={holdDurationMin}
               bookingBlocksSummary={bookingBlocksSummary}
               mode={mode}
+              simulationNoPayment={simulationNoPayment}
               onBackHome={completeBookingFlow}
             />
           </DialogContent>

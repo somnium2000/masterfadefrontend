@@ -115,6 +115,21 @@ function formatRelativeStart(isoValue, nowMs) {
   return `Comienza en ${hours} h ${minutes} min`;
 }
 
+function addMinutes(isoValue, minutes) {
+  const base = new Date(isoValue || '');
+  if (Number.isNaN(base.getTime())) return null;
+  return new Date(base.getTime() + Math.max(0, Number(minutes || 0)) * 60000);
+}
+
+function formatRelativeFinish(isoValue, nowMs) {
+  const finish = toTimestamp(isoValue);
+  if (!finish) return 'Sin estimacion';
+  const diff = Math.round((finish - nowMs) / 60000);
+  if (diff <= 0) return 'Tiempo cumplido';
+  if (diff === 1) return 'Falta 1 minuto';
+  return `Faltan ${diff} minutos`;
+}
+
 function InlineEmptyState({ title, description }) {
   return (
     <div className="rounded-[18px] border border-dashed border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_42%,transparent)] px-4 py-6 text-center">
@@ -231,6 +246,20 @@ export default function BarberoHomePage() {
   const totalToday = todayAppointments.length + completedToday.length;
   const remainingCount = todayAppointments.length;
   const completedCount = completedToday.length;
+  const currentAppointment = useMemo(
+    () => todayAppointments.find((item) => String(item?.estado_cita_codigo || '').trim().toLowerCase() === 'en_salon') || null,
+    [todayAppointments]
+  );
+  const currentEstimatedEnd = useMemo(
+    () => (currentAppointment?.atencion_iniciada_at
+      ? addMinutes(currentAppointment.atencion_iniciada_at, currentAppointment.duracion_total_min)
+      : null),
+    [currentAppointment]
+  );
+  const nextAdjustedAppointment = useMemo(() => {
+    if (!currentAppointment) return upcomingAppointments[0] || null;
+    return todayAppointments.find((item) => toTimestamp(item?.inicio_at) > toTimestamp(currentAppointment?.inicio_at)) || null;
+  }, [currentAppointment, todayAppointments, upcomingAppointments]);
 
   const upcomingAppointments = useMemo(() => {
     const future = todayAppointments.filter((item) => toTimestamp(item?.inicio_at) >= nowMs);
@@ -274,6 +303,7 @@ export default function BarberoHomePage() {
       setContext({
         sucursales: Array.isArray(contextPayload?.sucursales) ? contextPayload.sucursales : [],
         barberos: Array.isArray(contextPayload?.barberos) ? contextPayload.barberos : [],
+        retraso_operativo: contextPayload?.retraso_operativo || null,
       });
       setDashboardData({
         operativas: Array.isArray(operativasPayload?.citas) ? operativasPayload.citas : [],
@@ -357,6 +387,30 @@ export default function BarberoHomePage() {
               <StatCard icon={CalendarClock} label="Citas Totales" value={totalToday} />
               <StatCard icon={CheckCircle2} label="Citas Completadas" value={completedCount} />
               <StatCard icon={TimerReset} label="Citas Restantes" value={remainingCount} />
+            </div>
+            <div className="mt-4 rounded-[16px] border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
+              <h3 className="text-sm font-semibold text-[var(--mf-text)]">Atencion Actual</h3>
+              {currentAppointment ? (
+                <div className="mt-2 space-y-1 text-sm text-[var(--mf-text-2)]">
+                  <p><strong className="text-[var(--mf-text)]">Cliente:</strong> {currentAppointment.nombre_cliente || 'Cliente'}</p>
+                  <p><strong className="text-[var(--mf-text)]">Hora programada:</strong> {formatHour(currentAppointment.inicio_at)}</p>
+                  <p><strong className="text-[var(--mf-text)]">Inicio real:</strong> {currentAppointment.atencion_iniciada_at ? formatHour(currentAppointment.atencion_iniciada_at) : 'No registrado'}</p>
+                  <p><strong className="text-[var(--mf-text)]">Fin estimado real:</strong> {currentEstimatedEnd ? formatHour(currentEstimatedEnd.toISOString()) : 'N/D'}</p>
+                  <p><strong className="text-[var(--mf-text)]">Retraso acumulado:</strong> {Number(currentAppointment.retraso_inicio_min || 0)} min</p>
+                  {currentEstimatedEnd ? (
+                    <p className="text-amber-300">{formatRelativeFinish(currentEstimatedEnd.toISOString(), nowMs)}</p>
+                  ) : null}
+                  {nextAdjustedAppointment ? (
+                    <p><strong className="text-[var(--mf-text)]">Proxima cita ajustada:</strong> {nextAdjustedAppointment.nombre_cliente || 'Cliente'} - {formatHour(nextAdjustedAppointment.inicio_at)}</p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-[var(--mf-text-2)]">No hay cita en salon en este momento.</p>
+              )}
+              <div className="mt-3 text-xs text-[var(--mf-text-2)]">
+                Retrasos propagados hoy: {Number(context?.retraso_operativo?.citas_reagendadas_hoy || 0)}.
+                Correos pendientes: {Number(context?.retraso_operativo?.notificaciones_pendientes_hoy || 0)}.
+              </div>
             </div>
           </section>
 

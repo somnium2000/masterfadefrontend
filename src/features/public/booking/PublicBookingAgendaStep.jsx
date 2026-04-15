@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ChevronDown, Clock3, Plus, Scissors, UserRound } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ChevronDown, Clock3, Plus, Scissors, UserRound, Package } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
@@ -40,7 +40,9 @@ function BookingBlocksSummary({ bookingBlocksSummary, totalToPay }) {
               </header>
               <div className="citas-selected-date">{block.barbero?.nombre_completo || 'Sin barbero'}</div>
               <div className="citas-selected-date">
-                {block.selectedServices.map((service) => service.nombre_servicio).join(', ')}
+                {block.selection_type === 'package'
+                  ? `Paquete: ${block.selectedPackage?.nombre_paquete || 'Sin paquete'}`
+                  : block.selectedServices.map((service) => service.nombre_servicio).join(', ')}
               </div>
               <div className="citas-selected-date">
                 {formatFriendlyDate(block.selectedDate)} - {formatTime12Hour(block.selectedTime)}
@@ -81,12 +83,19 @@ export default function PublicBookingAgendaStep() {
     selectSuggestedBarber,
     barberPrepTime,
     selectedDate,
+    selectionType,
+    selectSelectionType,
+    selectedPackage,
+    selectedPackageId,
+    selectPackage,
     selectedBlockTotalMinutes,
     selectedServicesDurationSum,
     selectedServices,
     selectedTime,
     serviceIds,
     services,
+    packages,
+    packagesLoading,
     servicesAtEnd,
     servicesCanScroll,
     servicesLoading,
@@ -109,7 +118,9 @@ export default function PublicBookingAgendaStep() {
 
   const calendarCells = useMemo(() => buildCalendarCells(currentMonth), [currentMonth]);
   const canGoToConfirm = Boolean(allBlocksComplete);
-  const selectedServicesCount = selectedServices.length;
+  const selectedServicesCount = selectionType === 'package'
+    ? (selectedPackage ? 1 : 0)
+    : selectedServices.length;
   const hasSelectedDate = Boolean(selectedDate);
   const slotsSectionRef = useRef(null);
   const activeContactName = String(activeBlock?.contactName || '');
@@ -138,7 +149,7 @@ export default function PublicBookingAgendaStep() {
     slotsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [selectedDate]);
 
-  if (servicesLoading) {
+  if (servicesLoading || packagesLoading) {
     return (
       <div className="citas-surface p-6">
         <LoadingSpinner />
@@ -146,7 +157,7 @@ export default function PublicBookingAgendaStep() {
     );
   }
 
-  if (services.length === 0) {
+  if (selectionType === 'services' && services.length === 0) {
     return (
       <EmptyState
         icon={Scissors}
@@ -154,6 +165,16 @@ export default function PublicBookingAgendaStep() {
         description={selectedBarber
           ? `No hay servicios ofrecidos configurados para ${selectedBarber.nombre_completo}.`
           : 'No hay servicios activos para esta sucursal.'}
+      />
+    );
+  }
+
+  if (selectionType === 'package' && packages.length === 0) {
+    return (
+      <EmptyState
+        icon={Package}
+        title="Sin paquetes disponibles"
+        description="No hay paquetes activos para esta sucursal."
       />
     );
   }
@@ -277,9 +298,28 @@ export default function PublicBookingAgendaStep() {
             <p className="citas-selected-date">{contactNameRequiredMessage}</p>
           ) : null}
 
+          <div className="public-booking-selection-tabs">
+            <Button
+              type="button"
+              variant={selectionType === 'services' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => selectSelectionType('services')}
+            >
+              Servicios
+            </Button>
+            <Button
+              type="button"
+              variant={selectionType === 'package' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => selectSelectionType('package')}
+            >
+              Paquetes
+            </Button>
+          </div>
+
           <div className="citas-services-scroll scrollbar-hide" ref={servicesScrollRef}>
             <div className="citas-services-grid">
-              {services.map((service) => (
+              {selectionType === 'services' ? services.map((service) => (
                 <ServiceCard
                   key={service.id_servicio}
                   service={service}
@@ -287,6 +327,23 @@ export default function PublicBookingAgendaStep() {
                   disabled={!canSelectServices}
                   onToggle={() => toggleService(service.id_servicio)}
                 />
+              )) : packages.map((pkg) => (
+                <button
+                  key={pkg.id_paquete}
+                  type="button"
+                  className={`citas-service-card ${selectedPackageId === pkg.id_paquete ? 'is-selected' : ''}`}
+                  disabled={!canSelectServices}
+                  onClick={() => selectPackage(pkg.id_paquete)}
+                >
+                  <div className="citas-service-name">{pkg.nombre_paquete || 'Paquete'}</div>
+                  <div className="citas-service-meta">
+                    <Package size={14} />
+                    <span>{Array.isArray(pkg.items) ? `${pkg.items.length} servicios` : 'Paquete'}</span>
+                  </div>
+                  <div className="citas-service-meta">
+                    <span>{formatCurrencyHnl(pkg?.precio_hnl || 0)}</span>
+                  </div>
+                </button>
               ))}
             </div>
           </div>
@@ -389,6 +446,11 @@ export default function PublicBookingAgendaStep() {
                   <span>Tiempo interno de preparación: + {formatDurationHuman(barberPrepTime)}</span>
                   <strong>Bloque operativo total: {formatDurationHuman(selectedBlockTotalMinutes)}</strong>
                 </div>
+                {selectionType === 'package' && selectedPackage ? (
+                  <p className="citas-selected-date">
+                    Paquete seleccionado: {selectedPackage.nombre_paquete}
+                  </p>
+                ) : null}
 
                 {slotConflict ? (
                   <div className="public-booking-slot-conflict">

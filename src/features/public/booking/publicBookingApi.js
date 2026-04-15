@@ -22,6 +22,10 @@ export async function listPublicCatalogServicios(params = {}) {
   return http.get(`/v1/public/catalog/servicios${toQueryString(params)}`);
 }
 
+export async function listPublicCatalogPaquetes(params = {}) {
+  return http.get(`/v1/public/catalog/paquetes${toQueryString(params)}`);
+}
+
 export async function listPublicAgendaDisponibilidad(params = {}, options = {}) {
   return http.get(`/v1/public/agenda/disponibilidad${toQueryString(params)}`, options);
 }
