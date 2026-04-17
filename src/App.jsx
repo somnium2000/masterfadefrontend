@@ -7,7 +7,7 @@ import ResetPasswordPage from './features/auth/pages/ResetPasswordPage.jsx';
 import AuthCallbackPage from './features/auth/pages/AuthCallbackPage.jsx';
 import HomePage from './features/home/pages/HomePage.jsx';
 import HomeRedirectPage from './features/home/pages/HomeRedirectPage.jsx';
-import { ROLE_ROUTE_ALLOWED_ROLES } from './features/home/lib/roleRouting.js';
+import { ROLE_ROUTE_ALLOWED_ROLES, resolveHomePath } from './features/home/lib/roleRouting.js';
 import LandingPage from './features/landing/pages/LandingPage.jsx';
 import MembershipPlansPage from './features/public/pages/MembershipPlansPage.jsx';
 import PromotionsPage from './features/public/pages/PromotionsPage.jsx';
@@ -19,6 +19,7 @@ import PublicBookingConfirmStep from './features/public/booking/PublicBookingCon
 import UnauthorizedPage from './features/unauthorized/pages/UnauthorizedPage.jsx';
 import ProtectedRoute from './routes/ProtectedRoute.jsx';
 import AdminServicesCatalogPage from './features/admin/pages/AdminServicesCatalogPage.jsx';
+import AdminCortesiasCatalogPage from './features/admin/pages/AdminCortesiasCatalogPage.jsx';
 import AdminPackagesCatalogPage from './features/admin/pages/AdminPackagesCatalogPage.jsx';
 import AdminPlansCatalogPage from './features/admin/pages/AdminPlansCatalogPage.jsx';
 import ClienteHomePage from './features/cliente/pages/ClienteHomePage.jsx';
@@ -46,6 +47,17 @@ import AdminServiciosCatalogoPublicoPage from './features/admin/pages/AdminServi
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
 
+function AdminCortesiasCanonicalRedirect() {
+  const { roles } = useAuth();
+  const homePath = resolveHomePath(roles);
+
+  if (!homePath) {
+    return <Navigate to="/unauthorized" replace />;
+  }
+
+  return <Navigate to={`${homePath}/catalog/cortesias`} replace />;
+}
+
 function App() {
   const { isAuthenticated } = useAuth();
 
@@ -67,6 +79,14 @@ function App() {
         <Route path="confirmar" element={<PublicBookingConfirmStep />} />
       </Route>
       <Route path="/membresias-vip" element={<MembershipPlansPage />} />
+      <Route
+        path="/admin/servicios/cortesias"
+        element={(
+          <ProtectedRoute allowedRoles={ROLE_ROUTE_ALLOWED_ROLES.admin}>
+            <AdminCortesiasCanonicalRedirect />
+          </ProtectedRoute>
+        )}
+      />
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
       <Route
@@ -95,6 +115,7 @@ function App() {
         <Route path="usuarios" element={<RouteErrorBoundary><AdminUsuariosPage /></RouteErrorBoundary>} />
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
+        <Route path="catalog/cortesias" element={<RouteErrorBoundary><AdminCortesiasCatalogPage /></RouteErrorBoundary>} />
         <Route path="catalog/servicios/publico" element={<RouteErrorBoundary><AdminServiciosCatalogoPublicoPage /></RouteErrorBoundary>} />
         <Route path="catalog/paquetes" element={<AdminPackagesCatalogPage />} />
         <Route path="catalog/planes" element={<AdminPlansCatalogPage />} />
@@ -141,6 +162,7 @@ function App() {
         <Route path="usuarios" element={<UnderConstructionPage title="Personas · Usuarios" subtitle="Acceso temporalmente en definición para rol admin." />} />
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
+        <Route path="catalog/cortesias" element={<RouteErrorBoundary><AdminCortesiasCatalogPage /></RouteErrorBoundary>} />
         <Route path="catalog/servicios/publico" element={<RouteErrorBoundary><AdminServiciosCatalogoPublicoPage /></RouteErrorBoundary>} />
         <Route path="catalog/paquetes" element={<AdminPackagesCatalogPage />} />
         <Route path="catalog/planes" element={<AdminPlansCatalogPage />} />

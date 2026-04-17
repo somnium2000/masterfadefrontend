@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Building2,
+  Ban,
   Crown,
   Sparkles,
   Shield,
@@ -22,7 +23,7 @@ import {
   setStoredClienteCatalogBranchId,
 } from "../lib/clienteCatalogBranch.js";
 import { getPlanCategoryTheme, normalizePlanCategory } from "../../plans/lib/planCategoryTheme.js";
-import { acquireClientePlan, getClientePlanEstado } from "../lib/clienteApi.js";
+import { acquireClientePlan, cancelClientePlan, getClientePlanEstado } from "../lib/clienteApi.js";
 
 const CATEGORY_ICONS = {
   1: Shield,
@@ -57,6 +58,23 @@ function formatConsumptionDate(value) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+const MEMBERSHIP_STATUS_LABELS = {
+  activa: "Activa",
+  pendiente_renovacion: "Pendiente de renovación",
+  agotada: "Agotada",
+  vencida: "Vencida",
+  cancelada: "Cancelada",
+  sin_plan_activo: "Sin plan activo",
+};
+
+function isOperationalMembershipConsumption(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  if (entry.invalidado) return false;
+  const sourceKind = String(entry.source_kind || "").trim().toLowerCase();
+  if (sourceKind && sourceKind !== "appointment_completed") return false;
+  return true;
 }
 
 function PlanCard({
@@ -181,6 +199,7 @@ export default function ClientePlanesPage() {
   const [membershipState, setMembershipState] = useState(null);
   const [membershipLoading, setMembershipLoading] = useState(true);
   const [acquiringPlanId, setAcquiringPlanId] = useState("");
+  const [cancelLoading, setCancelLoading] = useState(false);
 
   const fetchPlans = useCallback(async (selectedBranchId) => {
     const plansPayload = await listPublicCatalogPlans({ id_sucursal: selectedBranchId || undefined });
@@ -258,11 +277,18 @@ export default function ClientePlanesPage() {
 
     setAcquiringPlanId(idPlan);
     try {
-      await acquireClientePlan({
+      const acquisition = await acquireClientePlan({
         id_plan: idPlan,
         id_sucursal: idSucursal,
       });
-      notifySuccess("Plan adquirido correctamente. Ya puedes usar tus beneficios.");
+      const transitionType = String(acquisition?.adquisicion?.transicion?.tipo || "").toLowerCase();
+      if (transitionType === "renovacion") {
+        notifySuccess("Membresía renovada correctamente.");
+      } else if (transitionType === "cambio_plan") {
+        notifySuccess("Plan actualizado correctamente.");
+      } else {
+        notifySuccess("Plan adquirido correctamente. Ya puedes usar tus beneficios.");
+      }
       await fetchMembershipState();
     } catch (error) {
       if (Number(error?.status) === 409) {
@@ -275,6 +301,22 @@ export default function ClientePlanesPage() {
     }
   }
 
+  async function handleCancelMembership() {
+    if (!activePlan?.id_suscripcion) return;
+    if (!window.confirm("¿Deseas cancelar tu membresía actual? Perderás el saldo pendiente.")) return;
+
+    setCancelLoading(true);
+    try {
+      await cancelClientePlan({ motivo_fin_codigo: "cancelacion" });
+      notifySuccess("Membresía cancelada correctamente.");
+      await fetchMembershipState();
+    } catch (error) {
+      notifyError(error?.data?.error?.message || error?.message || "No se pudo cancelar la membresía.");
+    } finally {
+      setCancelLoading(false);
+    }
+  }
+
   const recommendedPlanKey = useMemo(() => {
     if (!plans.length) return "";
     const topLevel = plans.reduce((maxLevel, plan) => Math.max(maxLevel, normalizePlanCategory(plan?.categoria_nivel, 1)), 1);
@@ -284,6 +326,10 @@ export default function ClientePlanesPage() {
   }, [plans]);
   const ctaLabel = membershipState?.cta_recomendada === "actualizar" ? "Actualizar plan" : "Adquirir plan";
   const activePlan = membershipState?.plan_activo || null;
+  const operationalHistory = useMemo(
+    () => (Array.isArray(membershipState?.historial_consumos) ? membershipState.historial_consumos : []).filter(isOperationalMembershipConsumption),
+    [membershipState?.historial_consumos]
+  );
 
   return (
     <div className="space-y-5">
@@ -307,7 +353,7 @@ export default function ClientePlanesPage() {
           <div className="flex flex-wrap gap-2">
             <span className="inline-flex items-center gap-1 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs font-semibold text-[var(--mf-accent)]">
               <ShieldCheck size={13} />
-              {membershipState?.estado_plan === "activo" ? "Activo" : "Sin plan"}
+              {MEMBERSHIP_STATUS_LABELS[membershipState?.estado_plan] || "Sin plan"}
             </span>
             <span className="inline-flex items-center gap-1 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs font-semibold text-[var(--mf-text-2)]">
               <WalletCards size={13} />
@@ -322,72 +368,150 @@ export default function ClientePlanesPage() {
 
         {activePlan ? (
           <>
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-              <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Servicios restantes</p>
-              <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
-                {Number(activePlan?.remanentes?.totales?.servicios_restantes || 0)}
-              </p>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+              <span className="inline-flex rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100">
+                Estado actual: {MEMBERSHIP_STATUS_LABELS[activePlan?.estado_visible] || activePlan?.estado_visible || "Activa"}
+              </span>
+              <Button type="button" variant="outline" className="gap-2" disabled={cancelLoading} onClick={() => void handleCancelMembership()}>
+                <Ban size={14} /> {cancelLoading ? "Cancelando..." : "Cancelar membresía"}
+              </Button>
             </div>
-            <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-              <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Servicios incluidos</p>
-              <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
-                {Number(activePlan?.remanentes?.totales?.servicios_total || 0)}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-              <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Tiempo restante</p>
-              <p className="mt-2 text-lg font-semibold text-[var(--mf-text)]">
-                <Clock3 className="mr-1 inline-block" size={15} />
-                {Number(activePlan?.tiempo_restante?.dias || 0)} d · {Number(activePlan?.tiempo_restante?.horas || 0)} h
-              </p>
-            </div>
-          </div>
 
-          <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
-              Servicios del plan
-            </p>
-            {Array.isArray(activePlan?.remanentes?.servicios) && activePlan.remanentes.servicios.length > 0 ? (
-              <ul className="mt-3 space-y-2">
-                {activePlan.remanentes.servicios.map((service) => (
-                  <li
-                    key={service.id_servicio || service.nombre}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2 text-sm"
-                  >
-                    <span className="text-[var(--mf-text)]">{service.nombre}</span>
-                    <span className="text-[var(--mf-text-2)]">
-                      {Number(service.restante || 0)} de {Number(service.total || 0)} disponibles
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-2 text-sm text-[var(--mf-text-2)]">
-                Tu plan no tiene servicios operativos configurados.
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-5">
+              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Servicios restantes</p>
+                <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
+                  {Number(activePlan?.remanentes?.totales?.servicios_restantes || 0)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Servicios incluidos</p>
+                <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
+                  {Number(activePlan?.remanentes?.totales?.servicios_total || 0)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Cortesias restantes</p>
+                <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
+                  {Number(activePlan?.remanentes?.totales?.cortesias_restantes || 0)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Cortesias incluidas</p>
+                <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
+                  {Number(activePlan?.remanentes?.totales?.cortesias_total || 0)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Tiempo restante</p>
+                <p className="mt-2 text-lg font-semibold text-[var(--mf-text)]">
+                  <Clock3 className="mr-1 inline-block" size={15} />
+                  {Number(activePlan?.tiempo_restante?.dias || 0)} d - {Number(activePlan?.tiempo_restante?.horas || 0)} h
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
+                Servicios del plan
               </p>
-            )}
-          </div>
+              {Array.isArray(activePlan?.remanentes?.servicios) && activePlan.remanentes.servicios.length > 0 ? (
+                <ul className="mt-3 space-y-2">
+                  {activePlan.remanentes.servicios.map((service) => (
+                    <li
+                      key={service.id_servicio || service.nombre}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2 text-sm"
+                    >
+                      <span className="text-[var(--mf-text)]">{service.nombre}</span>
+                      <span className="text-[var(--mf-text-2)]">
+                        {Number(service.restante || 0)} de {Number(service.total || 0)} disponibles
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-sm text-[var(--mf-text-2)]">
+                  Tu plan no tiene servicios operativos configurados.
+                </p>
+              )}
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
+                Cortesias del plan
+              </p>
+              {Array.isArray(activePlan?.remanentes?.cortesias) && activePlan.remanentes.cortesias.length > 0 ? (
+                <ul className="mt-3 space-y-2">
+                  {activePlan.remanentes.cortesias.map((courtesy) => (
+                    <li
+                      key={courtesy.id_cortesia || courtesy.codigo || courtesy.nombre}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2 text-sm"
+                    >
+                      <span className="text-[var(--mf-text)]">{courtesy.nombre}</span>
+                      <span className="text-[var(--mf-text-2)]">
+                        {Number(courtesy.restante || 0)} de {Number(courtesy.total || 0)} disponibles
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-sm text-[var(--mf-text-2)]">
+                  Tu plan no tiene cortesias configuradas.
+                </p>
+              )}
+            </div>
+
+            {Number(activePlan?.remanentes?.totales?.servicios_restantes || 0) === 1 ? (
+              <div className="mt-4 rounded-2xl border border-amber-300/40 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+                Te queda 1 servicio disponible en tu membresia.
+              </div>
+            ) : null}
           </>
         ) : null}
 
-        {!membershipLoading && Array.isArray(membershipState?.historial_consumos) && membershipState.historial_consumos.length > 0 ? (
+        {!membershipLoading && operationalHistory.length > 0 ? (
           <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
-              Últimos consumos del plan
+              Ultimos consumos del plan
             </p>
             <ul className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)]">
-              {membershipState.historial_consumos
-                .filter((entry) => entry?.item_tipo === "servicio")
+              {operationalHistory
                 .slice(0, 5)
                 .map((entry) => (
                 <li key={entry.id_consumo} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
                   <span className="text-[var(--mf-text)]">
-                    Servicio · {entry.item_nombre}
+                    {entry?.item_tipo === "cortesia" ? "Cortesia" : "Servicio"} - {entry.item_nombre}
                   </span>
-                  <span className="text-xs text-[var(--mf-text-2)]">
-                    {formatConsumptionDate(entry.created_at)}
-                  </span>
+                  <div className="text-right text-xs text-[var(--mf-text-2)]">
+                    <p>{formatConsumptionDate(entry.created_at)}</p>
+                    <p>{entry.nombre_sucursal || "Sucursal no disponible"}</p>
+                    {entry.nombre_usuario_ejecutor ? <p>Por: {entry.nombre_usuario_ejecutor}</p> : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {!membershipLoading && Array.isArray(membershipState?.historial_membresias) && membershipState.historial_membresias.length > 0 ? (
+          <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
+              Historial de membresías
+            </p>
+            <ul className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)]">
+              {membershipState.historial_membresias.slice(0, 6).map((item) => (
+                <li key={item.id_suscripcion} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                  <div>
+                    <p className="text-[var(--mf-text)]">{item.nombre_plan}</p>
+                    <p className="text-xs text-[var(--mf-text-2)]">
+                      {MEMBERSHIP_STATUS_LABELS[item.estado_visible] || item.estado_visible || item.estado_suscripcion_codigo}
+                    </p>
+                  </div>
+                  <div className="text-right text-xs text-[var(--mf-text-2)]">
+                    <p>Inicio: {formatConsumptionDate(item.inicio_at)}</p>
+                    <p>Fin: {formatConsumptionDate(item.fin_at)}</p>
+                    {item.motivo_fin_codigo ? <p>Motivo: {item.motivo_fin_codigo}</p> : null}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -454,3 +578,4 @@ export default function ClientePlanesPage() {
     </div>
   );
 }
+

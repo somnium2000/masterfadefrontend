@@ -26,6 +26,7 @@ import {
 } from "../lib/adminPlansApi.js";
 import { listAdminSucursales } from "../lib/adminSucursalesApi.js";
 import { listAdminServicios } from "../lib/adminCatalogApi.js";
+import { listAdminCortesias } from "../lib/adminCortesiasApi.js";
 import { Button } from "../../../components/ui/button.jsx";
 import {
   Dialog,
@@ -81,6 +82,7 @@ const FILTER_DEFAULTS = {
   periodo: "all",
   idSucursal: "all",
 };
+const PLAN_BENEFIT_MAX_CANTIDAD = 999;
 
 function extractMessage(error) {
   return error?.data?.error?.message || error?.message || "Error desconocido.";
@@ -96,14 +98,16 @@ function normalizeBenefits(items = []) {
   return (Array.isArray(items) ? items : [])
     .map((item) => {
       const normalizedServiceId = String(item?.id_servicio || "").trim();
+      const normalizedCourtesyId = String(item?.id_cortesia || "").trim();
       const normalizedTipo = normalizeTipo(item?.tipo);
       // AM: Compatibilidad con beneficios legacy sin tipo cuando existe id_servicio.
       const tipo = normalizedTipo === "cortesia" && normalizedServiceId ? "servicio" : normalizedTipo;
       const codigo = item?.codigo ? String(item.codigo) : "";
-      const nombre = item?.nombre ? String(item.nombre) : (tipo === "cortesia" ? codigo : "");
+      const nombre = item?.nombre ? String(item.nombre) : "";
       return {
         tipo,
         id_servicio: normalizedServiceId,
+        id_cortesia: normalizedCourtesyId,
         codigo,
         nombre,
         cantidad: Number(item?.cantidad ?? 1),
@@ -111,14 +115,30 @@ function normalizeBenefits(items = []) {
     });
 }
 
-function sanitizeBenefitsByServices(items = [], services = []) {
+function sanitizeBenefitsByScope(items = [], services = [], courtesies = [], keepCourtesyIds = []) {
   const validServiceIds = new Set((Array.isArray(services) ? services : []).map((service) => String(service?.id_servicio || "")));
+  const validCourtesyIds = new Set((Array.isArray(courtesies) ? courtesies : []).map((courtesy) => String(courtesy?.id_cortesia || "")));
+  const keepCourtesySet = new Set((Array.isArray(keepCourtesyIds) ? keepCourtesyIds : []).map((id) => String(id || "")));
+
   return (Array.isArray(items) ? items : [])
     .filter((item) => {
       const tipo = normalizeTipo(item?.tipo);
-      if (tipo !== "servicio") return true;
-      return validServiceIds.has(String(item?.id_servicio || ""));
+      if (tipo === "servicio") {
+        return validServiceIds.has(String(item?.id_servicio || ""));
+      }
+
+      const courtesyId = String(item?.id_cortesia || "");
+      if (!courtesyId) return false;
+      return validCourtesyIds.has(courtesyId) || keepCourtesySet.has(courtesyId);
     });
+}
+
+function splitBenefitsByType(items = []) {
+  const benefits = Array.isArray(items) ? items : [];
+  return {
+    servicios: benefits.filter((item) => normalizeTipo(item?.tipo) === "servicio"),
+    cortesias: benefits.filter((item) => normalizeTipo(item?.tipo) === "cortesia"),
+  };
 }
 
 function formatPeriod(value) {
@@ -168,10 +188,13 @@ function validateForm(values) {
   if (!benefits.length) return "Debes agregar al menos un beneficio.";
 
   const seenServices = new Set();
+  const seenCourtesies = new Set();
   for (const benefit of benefits) {
     const tipo = normalizeTipo(benefit?.tipo);
     const cantidad = Number(benefit?.cantidad);
-    if (!Number.isInteger(cantidad) || cantidad < 1) return "Cada beneficio debe tener cantidad valida.";
+    if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > PLAN_BENEFIT_MAX_CANTIDAD) {
+      return `Cada beneficio debe tener cantidad entre 1 y ${PLAN_BENEFIT_MAX_CANTIDAD}.`;
+    }
 
     if (tipo === "servicio") {
       const idServicio = String(benefit?.id_servicio || "").trim();
@@ -179,8 +202,10 @@ function validateForm(values) {
       if (seenServices.has(idServicio)) return "No repitas servicios en beneficios.";
       seenServices.add(idServicio);
     } else {
-      const nombreCortesia = String(benefit?.nombre || "").trim();
-      if (!nombreCortesia) return "Cada cortesia debe tener nombre.";
+      const idCortesia = String(benefit?.id_cortesia || "").trim();
+      if (!idCortesia) return "Cada cortesia debe seleccionar una cortesia valida.";
+      if (seenCourtesies.has(idCortesia)) return "No repitas cortesias en beneficios.";
+      seenCourtesies.add(idCortesia);
     }
   }
 
@@ -271,99 +296,67 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loading 
   );
 }
 
-function PlanBenefitsEditor({ items, onChange, services }) {
-  const benefits = Array.isArray(items) ? items : [];
-  const selectedServiceIds = new Set(
-    benefits
-      .filter((item) => normalizeTipo(item?.tipo) === "servicio")
-      .map((item) => item?.id_servicio)
-      .filter(Boolean)
-  );
+function PlanServicesEditor({ items, onChange, services }) {
+  const selectedServiceIds = new Set((Array.isArray(items) ? items : []).map((item) => item?.id_servicio).filter(Boolean));
 
-  function addItem() {
-    onChange([...benefits, { tipo: "servicio", id_servicio: "", nombre: "", cantidad: 1 }]);
+  function addService() {
+    onChange([...(Array.isArray(items) ? items : []), { tipo: "servicio", id_servicio: "", id_cortesia: "", nombre: "", cantidad: 1 }]);
   }
 
-  function removeItem(index) {
-    onChange(benefits.filter((_, currentIndex) => currentIndex !== index));
+  function removeService(index) {
+    onChange((Array.isArray(items) ? items : []).filter((_, currentIndex) => currentIndex !== index));
   }
 
-  function updateItem(index, field, value) {
-    onChange(benefits.map((item, currentIndex) => {
-      if (currentIndex !== index) return item;
-      if (field === "tipo") {
-        const nextTipo = normalizeTipo(value);
-        if (nextTipo === "servicio") {
-          return { ...item, tipo: "servicio", id_servicio: "", codigo: "", nombre: "" };
-        }
-        return { ...item, tipo: "cortesia", id_servicio: "", codigo: "", nombre: item?.nombre || "" };
-      }
-      return { ...item, [field]: value };
-    }));
+  function updateService(index, field, value) {
+    onChange((Array.isArray(items) ? items : []).map((item, currentIndex) => (
+      currentIndex === index ? { ...item, [field]: value } : item
+    )));
   }
 
   return (
     <div className="flex flex-col gap-3 rounded-[16px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_82%,transparent)] p-3">
       <div className="flex items-center justify-between gap-3">
-        <Label className="text-xs uppercase tracking-widest text-[var(--mf-text-2)]">Beneficios mensuales</Label>
-        <Button type="button" size="sm" variant="outline" onClick={addItem} className="gap-1.5">
-          <Plus size={13} /> Agregar
+        <Label className="text-xs uppercase tracking-widest text-[var(--mf-text-2)]">Servicios</Label>
+        <Button type="button" size="sm" variant="outline" onClick={addService} className="gap-1.5">
+          <Plus size={13} /> Agregar servicio
         </Button>
       </div>
 
-      {!benefits.length ? <p className="text-xs text-[var(--mf-text-2)]">Aun no agregas beneficios.</p> : null}
+      {!items?.length ? <p className="text-xs text-[var(--mf-text-2)]">Aun no agregas servicios.</p> : null}
 
-      {benefits.map((item, index) => {
-        const tipo = normalizeTipo(item?.tipo);
+      {(Array.isArray(items) ? items : []).map((item, index) => {
         const currentServiceId = String(item?.id_servicio || "").trim();
-        const currentCourtesyName = String(item?.nombre || "").trim();
-
         return (
-          <div key={`${index}-${currentServiceId || currentCourtesyName || "new"}`} className="grid grid-cols-1 gap-2 rounded-xl border border-[var(--mf-nav-border)] p-2 sm:grid-cols-[130px_1fr_90px_auto] sm:items-center">
-            <select value={tipo} onChange={(event) => updateItem(index, "tipo", event.target.value)} className="mf-select">
-              <option value="servicio">Servicio</option>
-              <option value="cortesia">Cortesia</option>
+          <div key={`${index}-${currentServiceId || "new-service"}`} className="grid grid-cols-1 gap-2 rounded-xl border border-[var(--mf-nav-border)] p-2 sm:grid-cols-[1fr_90px_auto] sm:items-center">
+            <select
+              value={currentServiceId}
+              onChange={(event) => updateService(index, "id_servicio", event.target.value)}
+              className="mf-select"
+            >
+              <option value="">Seleccionar servicio</option>
+              {services.map((service) => {
+                const optionId = String(service.id_servicio || "");
+                const isTaken = selectedServiceIds.has(optionId) && optionId !== currentServiceId;
+                return <option key={optionId} value={optionId} disabled={isTaken}>{service.nombre_servicio}</option>;
+              })}
             </select>
-
-            {tipo === "servicio" ? (
-              <select
-                value={currentServiceId}
-                onChange={(event) => updateItem(index, "id_servicio", event.target.value)}
-                className="mf-select"
-              >
-                <option value="">Seleccionar servicio</option>
-                {services.map((service) => {
-                  const optionId = service.id_servicio;
-                  const isTaken = selectedServiceIds.has(optionId) && optionId !== currentServiceId;
-                  return <option key={optionId} value={optionId} disabled={isTaken}>{service.nombre_servicio}</option>;
-                })}
-              </select>
-            ) : (
-              <Input
-                type="text"
-                value={currentCourtesyName}
-                onChange={(event) => updateItem(index, "nombre", event.target.value)}
-                placeholder="Nombre de la cortesia"
-              />
-            )}
-
             <Input
               type="number"
               min="1"
+              max={String(PLAN_BENEFIT_MAX_CANTIDAD)}
               value={item?.cantidad ?? 1}
-              onChange={(event) => updateItem(index, "cantidad", event.target.value)}
+              onChange={(event) => updateService(index, "cantidad", event.target.value)}
               className="text-center"
               placeholder="1"
             />
-
             <Button
               type="button"
               size="icon"
               variant="outline"
-              onClick={() => removeItem(index)}
+              onClick={() => removeService(index)}
               className="h-9 w-9 rounded-xl border-red-500/35 text-red-400 hover:bg-red-500/15"
-              aria-label="Quitar beneficio"
-              title="Quitar beneficio"
+              aria-label="Quitar servicio"
+              title="Quitar servicio"
             >
               <X size={13} />
             </Button>
@@ -374,7 +367,117 @@ function PlanBenefitsEditor({ items, onChange, services }) {
   );
 }
 
-function PlanForm({ values, onChange, services, branchLabel }) {
+function PlanCourtesiesEditor({ items, onChange, courtesias, existingCourtesyIds }) {
+  const selectedCourtesyIds = new Set((Array.isArray(items) ? items : []).map((item) => item?.id_cortesia).filter(Boolean));
+  const courtesyById = new Map((Array.isArray(courtesias) ? courtesias : []).map((item) => [String(item.id_cortesia || ""), item]));
+  const existingSet = new Set((Array.isArray(existingCourtesyIds) ? existingCourtesyIds : []).map((id) => String(id || "")));
+
+  function addCourtesy() {
+    onChange([...(Array.isArray(items) ? items : []), { tipo: "cortesia", id_servicio: "", id_cortesia: "", nombre: "", cantidad: 1 }]);
+  }
+
+  function removeCourtesy(index) {
+    onChange((Array.isArray(items) ? items : []).filter((_, currentIndex) => currentIndex !== index));
+  }
+
+  function updateCourtesy(index, field, value) {
+    onChange((Array.isArray(items) ? items : []).map((item, currentIndex) => (
+      currentIndex === index ? { ...item, [field]: value } : item
+    )));
+  }
+
+  return (
+    <div className="flex flex-col gap-3 rounded-[16px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_82%,transparent)] p-3">
+      <div className="flex items-center justify-between gap-3">
+        <Label className="text-xs uppercase tracking-widest text-[var(--mf-text-2)]">Cortesias</Label>
+        <Button type="button" size="sm" variant="outline" onClick={addCourtesy} className="gap-1.5">
+          <Plus size={13} /> Agregar cortesia
+        </Button>
+      </div>
+
+      {!items?.length ? <p className="text-xs text-[var(--mf-text-2)]">Aun no agregas cortesias.</p> : null}
+
+      {(Array.isArray(items) ? items : []).map((item, index) => {
+        const currentCourtesyId = String(item?.id_cortesia || "").trim();
+        const currentCourtesy = courtesyById.get(currentCourtesyId) || null;
+        const scopedOptions = (Array.isArray(courtesias) ? courtesias : []).filter((option) => (
+          Boolean(option?.activa) || String(option?.id_cortesia || "") === currentCourtesyId
+        ));
+        const isCurrentInactive = Boolean(currentCourtesyId) && currentCourtesy?.activa === false;
+        const isCurrentFromLegacy = Boolean(currentCourtesyId) && !currentCourtesy && existingSet.has(currentCourtesyId);
+        return (
+          <div key={`${index}-${currentCourtesyId || "new-courtesy"}`} className="grid grid-cols-1 gap-2 rounded-xl border border-[var(--mf-nav-border)] p-2 sm:grid-cols-[1fr_90px_auto] sm:items-center">
+            <select
+              value={currentCourtesyId}
+              onChange={(event) => updateCourtesy(index, "id_cortesia", event.target.value)}
+              className="mf-select"
+            >
+              <option value="">Seleccionar cortesia</option>
+              {isCurrentFromLegacy ? <option value={currentCourtesyId}>Cortesia heredada</option> : null}
+              {scopedOptions.map((courtesy) => {
+                const optionId = String(courtesy.id_cortesia || "");
+                const isTaken = selectedCourtesyIds.has(optionId) && optionId !== currentCourtesyId;
+                const suffix = courtesy.activa ? "" : " (Inactiva)";
+                return <option key={optionId} value={optionId} disabled={isTaken}>{`${courtesy.nombre}${suffix}`}</option>;
+              })}
+            </select>
+            <Input
+              type="number"
+              min="1"
+              max={String(PLAN_BENEFIT_MAX_CANTIDAD)}
+              value={item?.cantidad ?? 1}
+              onChange={(event) => updateCourtesy(index, "cantidad", event.target.value)}
+              className="text-center"
+              placeholder="1"
+            />
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              onClick={() => removeCourtesy(index)}
+              className="h-9 w-9 rounded-xl border-red-500/35 text-red-400 hover:bg-red-500/15"
+              aria-label="Quitar cortesia"
+              title="Quitar cortesia"
+            >
+              <X size={13} />
+            </Button>
+            {isCurrentInactive ? (
+              <p className="sm:col-span-3 text-xs text-[var(--mf-text-2)]">
+                Esta cortesia esta inactiva, pero puedes conservarla porque ya estaba asociada al plan.
+              </p>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PlanBenefitsEditor({ items, onChange, services, courtesias, existingCourtesyIds }) {
+  const { servicios, cortesias: cortesiasPlan } = splitBenefitsByType(items);
+
+  function updateServicios(nextServicios) {
+    onChange([...(Array.isArray(nextServicios) ? nextServicios : []), ...(Array.isArray(cortesiasPlan) ? cortesiasPlan : [])]);
+  }
+
+  function updateCortesias(nextCortesias) {
+    onChange([...(Array.isArray(servicios) ? servicios : []), ...(Array.isArray(nextCortesias) ? nextCortesias : [])]);
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <PlanServicesEditor items={servicios} onChange={updateServicios} services={services} />
+      <PlanCourtesiesEditor
+        items={cortesiasPlan}
+        onChange={updateCortesias}
+        courtesias={courtesias}
+        existingCourtesyIds={existingCourtesyIds}
+      />
+    </div>
+  );
+}
+
+function PlanForm({ values, onChange, services, courtesias, existingCourtesyIds, branchLabel }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-xs text-[var(--mf-text-2)]">
@@ -437,7 +540,13 @@ function PlanForm({ values, onChange, services, branchLabel }) {
         </label>
       </div>
 
-      <PlanBenefitsEditor items={values.beneficios} onChange={(nextItems) => onChange("beneficios", nextItems)} services={services} />
+      <PlanBenefitsEditor
+        items={values.beneficios}
+        onChange={(nextItems) => onChange("beneficios", nextItems)}
+        services={services}
+        courtesias={courtesias}
+        existingCourtesyIds={existingCourtesyIds}
+      />
     </div>
   );
 }
@@ -446,7 +555,7 @@ export default function AdminPlansCatalogPage() {
   const navigate = useNavigate();
   const { branchIds, roles = [] } = useAuth();
   const notifications = useNotifications();
-  const isSuperAdmin = roles.includes("super_admin");
+  const canManagePlans = roles.includes("super_admin") || roles.includes("admin");
 
   const [allBranches, setAllBranches] = useState([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
@@ -455,6 +564,7 @@ export default function AdminPlansCatalogPage() {
 
   const [planes, setPlanes] = useState([]);
   const [services, setServices] = useState([]);
+  const [courtesies, setCourtesies] = useState([]);
   const [loadingServices, setLoadingServices] = useState(false);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState("");
@@ -476,6 +586,7 @@ export default function AdminPlansCatalogPage() {
   const [editTarget, setEditTarget] = useState(null);
   const [formValues, setFormValues] = useState(FORM_DEFAULTS);
   const [formBranchId, setFormBranchId] = useState("");
+  const [formOriginalCourtesyIds, setFormOriginalCourtesyIds] = useState([]);
   const [formError, setFormError] = useState("");
   const [formLoading, setFormLoading] = useState(false);
 
@@ -564,8 +675,6 @@ export default function AdminPlansCatalogPage() {
   }
 
   const fetchBranches = useCallback(async () => {
-    if (!isSuperAdmin) return;
-
     setLoadingBranches(true);
     setBranchLoadError("");
 
@@ -574,12 +683,15 @@ export default function AdminPlansCatalogPage() {
       const nextBranches = Array.isArray(response?.data?.sucursales)
         ? response.data.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
         : [];
-      setAllBranches(nextBranches);
+      const scopedBranches = branchIds.length > 0
+        ? nextBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
+        : nextBranches;
+      setAllBranches(scopedBranches);
       lastErrorToastRef.current.sucursales = "";
 
-      if (nextBranches.length === 1) {
-        setSucursal(nextBranches[0].id_sucursal);
-      } else if (sucursal && !nextBranches.some((branch) => branch.id_sucursal === sucursal)) {
+      if (scopedBranches.length === 1) {
+        setSucursal(scopedBranches[0].id_sucursal);
+      } else if (sucursal && !scopedBranches.some((branch) => branch.id_sucursal === sucursal)) {
         setSucursal("");
       }
     } catch (error) {
@@ -589,7 +701,7 @@ export default function AdminPlansCatalogPage() {
     } finally {
       setLoadingBranches(false);
     }
-  }, [isSuperAdmin, notifyErrorOnce, sucursal]);
+  }, [branchIds, notifyErrorOnce, sucursal]);
 
   const fetchPlanes = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -641,6 +753,46 @@ export default function AdminPlansCatalogPage() {
     }
   }, [notifications]);
 
+  const fetchCourtesiesForBranch = useCallback(async (branchId) => {
+    if (!branchId) {
+      setCourtesies([]);
+      return [];
+    }
+
+    try {
+      const response = await listAdminCortesias({ id_sucursal: branchId });
+      const list = Array.isArray(response?.data?.cortesias) ? response.data.cortesias : [];
+      const scoped = list
+        .map((courtesy) => {
+          const scope = Array.isArray(courtesy?.sucursales)
+            ? courtesy.sucursales.find((entry) => String(entry?.id_sucursal || "") === String(branchId))
+            : null;
+          if (!scope) return null;
+          return {
+            id_cortesia: courtesy.id,
+            nombre: courtesy.nombre,
+            activa: Boolean(scope.activa),
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es"));
+      setCourtesies(scoped);
+      return scoped;
+    } catch (error) {
+      notifications.warning(extractMessage(error));
+      setCourtesies([]);
+      return [];
+    }
+  }, [notifications]);
+
+  const fetchCatalogOptionsForBranch = useCallback(async (branchId) => {
+    const [scopedServices, scopedCourtesies] = await Promise.all([
+      fetchServicesForBranch(branchId),
+      fetchCourtesiesForBranch(branchId),
+    ]);
+    return { scopedServices, scopedCourtesies };
+  }, [fetchCourtesiesForBranch, fetchServicesForBranch]);
+
   useEffect(() => {
     try {
       localStorage.setItem("mf-view-planes", view);
@@ -650,33 +802,33 @@ export default function AdminPlansCatalogPage() {
   }, [view]);
 
   useEffect(() => {
-    if (!isSuperAdmin) {
+    if (!canManagePlans) {
       navigate("/unauthorized", { replace: true });
     }
-  }, [isSuperAdmin, navigate]);
+  }, [canManagePlans, navigate]);
 
   useEffect(() => {
-    if (!isSuperAdmin) return;
+    if (!canManagePlans) return;
     void fetchBranches();
-  }, [isSuperAdmin, fetchBranches]);
+  }, [canManagePlans, fetchBranches]);
 
   useEffect(() => {
-    if (!isSuperAdmin) return;
+    if (!canManagePlans) return;
     void fetchPlanes();
-    void fetchServicesForBranch(sucursal);
-  }, [fetchPlanes, fetchServicesForBranch, isSuperAdmin, sucursal]);
+    void fetchCatalogOptionsForBranch(sucursal);
+  }, [canManagePlans, fetchCatalogOptionsForBranch, fetchPlanes, sucursal]);
 
   useEffect(() => {
     if (!dialogOpen) return;
     setFormValues((previous) => {
-      const nextBenefits = sanitizeBenefitsByServices(previous?.beneficios, services);
+      const nextBenefits = sanitizeBenefitsByScope(previous?.beneficios, services, courtesies, formOriginalCourtesyIds);
       if (nextBenefits.length === (Array.isArray(previous?.beneficios) ? previous.beneficios.length : 0)) {
         return previous;
       }
       // AM: Limpia beneficios inválidos si cambia la sucursal o el set de servicios operativos.
       return { ...previous, beneficios: nextBenefits };
     });
-  }, [dialogOpen, services]);
+  }, [courtesies, dialogOpen, formOriginalCourtesyIds, services]);
 
   function handleFormChange(field, value) {
     setFormValues((previous) => ({ ...previous, [field]: value }));
@@ -689,8 +841,9 @@ export default function AdminPlansCatalogPage() {
       return;
     }
 
-    await fetchServicesForBranch(branchId);
+    await fetchCatalogOptionsForBranch(branchId);
     setFormBranchId(branchId);
+    setFormOriginalCourtesyIds([]);
     setEditTarget(null);
     setFormValues({ ...FORM_DEFAULTS });
     setFormError("");
@@ -704,10 +857,15 @@ export default function AdminPlansCatalogPage() {
       return;
     }
 
-    const scopedServices = await fetchServicesForBranch(branchId);
+    const { scopedServices, scopedCourtesies } = await fetchCatalogOptionsForBranch(branchId);
     setFormBranchId(branchId);
     setEditTarget(plan);
-    const nextBenefits = sanitizeBenefitsByServices(normalizeBenefits(plan?.beneficios), scopedServices);
+    const existingCourtesyIds = normalizeBenefits(plan?.beneficios)
+      .filter((item) => normalizeTipo(item?.tipo) === "cortesia")
+      .map((item) => String(item?.id_cortesia || "").trim())
+      .filter(Boolean);
+    setFormOriginalCourtesyIds(existingCourtesyIds);
+    const nextBenefits = sanitizeBenefitsByScope(normalizeBenefits(plan?.beneficios), scopedServices, scopedCourtesies, existingCourtesyIds);
     setFormValues({
       nombre_plan: plan?.nombre_plan || "",
       descripcion: plan?.descripcion || "",
@@ -762,6 +920,21 @@ export default function AdminPlansCatalogPage() {
       return;
     }
 
+    const courtesyById = new Map((Array.isArray(courtesies) ? courtesies : []).map((courtesy) => [String(courtesy?.id_cortesia || ""), courtesy]));
+    const existingCourtesySet = new Set((Array.isArray(formOriginalCourtesyIds) ? formOriginalCourtesyIds : []).map((id) => String(id || "")));
+    const invalidCourtesyBenefit = normalizeBenefits(formValues?.beneficios).find((item) => {
+      if (normalizeTipo(item?.tipo) !== "cortesia") return false;
+      const courtesyId = String(item?.id_cortesia || "");
+      const courtesy = courtesyById.get(courtesyId);
+      if (!courtesy) return true;
+      if (courtesy.activa) return false;
+      return !existingCourtesySet.has(courtesyId);
+    });
+    if (invalidCourtesyBenefit) {
+      setFormError("Una o mas cortesias no son validas para la sucursal actual.");
+      return;
+    }
+
     setFormLoading(true);
     setFormError("");
 
@@ -777,9 +950,7 @@ export default function AdminPlansCatalogPage() {
         if (tipo === "servicio") {
           payloadItem.id_servicio = String(item?.id_servicio || "").trim();
         } else {
-          payloadItem.nombre = String(item?.nombre || "").trim();
-          const codigo = String(item?.codigo || "").trim();
-          if (codigo) payloadItem.codigo = codigo;
+          payloadItem.id_cortesia = String(item?.id_cortesia || "").trim();
         }
         return payloadItem;
       }),
@@ -804,6 +975,7 @@ export default function AdminPlansCatalogPage() {
       setEditTarget(null);
       setFormValues({ ...FORM_DEFAULTS });
       setFormBranchId(branchId);
+      setFormOriginalCourtesyIds([]);
       void fetchPlanes({ silent: true });
     } catch (error) {
       setFormError(extractMessage(error));
@@ -929,7 +1101,10 @@ export default function AdminPlansCatalogPage() {
                 { label: "Precio", value: <span className="font-mono font-bold text-[var(--mf-accent)]">L {Number(plan.precio_hnl ?? 0).toFixed(2)}</span> },
                 { label: "Orden visual", value: Number(plan.orden_visual ?? 100) },
                 { label: "Público", value: <PlanVisibilityBadge visible={Boolean(plan.visible_publico)} activo={Boolean(plan.activo)} /> },
-                { label: "Beneficios", value: Array.isArray(plan?.beneficios) ? plan.beneficios.length : 0 },
+                { label: "Servicios / Cortesias", value: (() => {
+                  const split = splitBenefitsByType(plan?.beneficios);
+                  return `${split.servicios.length} / ${split.cortesias.length}`;
+                })() },
               ]}
               actions={renderActions(plan)}
             />
@@ -966,7 +1141,12 @@ export default function AdminPlansCatalogPage() {
                   <TableCell className="text-center"><PlanPeriodBadge period={plan.periodo_membresia_codigo} /></TableCell>
                   <TableCell className="text-right font-mono font-semibold text-[var(--mf-accent)]">L {Number(plan.precio_hnl ?? 0).toFixed(2)}</TableCell>
                   <TableCell className="text-center text-[var(--mf-text-2)]">{Number(plan.orden_visual ?? 100)}</TableCell>
-                  <TableCell className="text-center hidden md:table-cell text-[var(--mf-text-2)]">{Array.isArray(plan?.beneficios) ? plan.beneficios.length : 0}</TableCell>
+                  <TableCell className="text-center hidden md:table-cell text-[var(--mf-text-2)]">
+                    {(() => {
+                      const split = splitBenefitsByType(plan?.beneficios);
+                      return `${split.servicios.length} / ${split.cortesias.length}`;
+                    })()}
+                  </TableCell>
                   <TableCell className="text-center hidden md:table-cell"><PlanVisibilityBadge visible={Boolean(plan.visible_publico)} activo={Boolean(plan.activo)} /></TableCell>
                   <TableCell className="text-center"><PlanStatusBadge activo={Boolean(plan.activo)} /></TableCell>
                   <TableCell className="text-right"><div className="flex items-center justify-end gap-1.5">{renderActions(plan)}</div></TableCell>
@@ -983,8 +1163,15 @@ export default function AdminPlansCatalogPage() {
             <DialogTitle>{editTarget ? "Editar plan" : "Nuevo plan"}</DialogTitle>
             <DialogDescription className="sr-only">Configura nombre, precio, visibilidad y beneficios mensuales del plan VIP.</DialogDescription>
           </DialogHeader>
-          <PlanForm values={formValues} onChange={handleFormChange} services={services} branchLabel={branchNameById[formBranchId]} />
-          {loadingServices ? <p className="text-xs text-[var(--mf-text-2)] flex items-center gap-2"><Loader2 size={13} className="animate-spin" />Cargando servicios operativos para beneficios...</p> : null}
+          <PlanForm
+            values={formValues}
+            onChange={handleFormChange}
+            services={services}
+            courtesias={courtesies}
+            existingCourtesyIds={formOriginalCourtesyIds}
+            branchLabel={branchNameById[formBranchId]}
+          />
+          {loadingServices ? <p className="text-xs text-[var(--mf-text-2)] flex items-center gap-2"><Loader2 size={13} className="animate-spin" />Cargando opciones de servicios y cortesias...</p> : null}
           {formError ? <ErrorBanner message={formError} /> : null}
           <DialogFooter className="mt-2">
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>Cancelar</Button>
@@ -1021,21 +1208,45 @@ export default function AdminPlansCatalogPage() {
                   title: "Beneficios del plan",
                   icon: <Scissors size={14} />,
                   fields: [
-                    { label: "Total beneficios", value: Array.isArray(detailTarget?.beneficios) ? detailTarget.beneficios.length : 0 },
                     {
-                      label: "Detalle",
+                      label: "Total beneficios",
+                      value: Array.isArray(detailTarget?.beneficios) ? detailTarget.beneficios.length : 0,
+                    },
+                    {
+                      label: "Servicios incluidos",
+                      value: (() => {
+                        const split = splitBenefitsByType(detailTarget?.beneficios);
+                        if (!split.servicios.length) return "Ninguno";
+                        return (
+                          <div className="flex flex-col gap-2">
+                            {split.servicios.map((benefit, index) => (
+                              <div key={`serv-${index}-${benefit?.id_servicio || benefit?.nombre || "benefit"}`} className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2 text-sm">
+                                <span className="font-semibold text-[var(--mf-text)]">{Number(benefit?.cantidad || 0)}x</span>{" "}
+                                <span className="text-[var(--mf-text)]">{benefit?.nombre || "Servicio"}</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })(),
+                      span: "full",
+                    },
+                    {
+                      label: "Cortesias incluidas",
                       value: (
-                        <div className="flex flex-col gap-2">
-                          {(Array.isArray(detailTarget?.beneficios) ? detailTarget.beneficios : []).map((benefit, index) => (
-                            <div key={`${index}-${benefit?.id_servicio || benefit?.codigo || benefit?.nombre || "benefit"}`} className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2 text-sm">
-                              <span className="font-semibold text-[var(--mf-text)]">{Number(benefit?.cantidad || 0)}x</span>{" "}
-                              <span className="text-[var(--mf-text)]">{benefit?.nombre || benefit?.codigo || "Beneficio"}</span>
-                              <span className="ml-2 text-xs text-[var(--mf-text-2)]">
-                                ({normalizeTipo(benefit?.tipo) === "servicio" ? "Servicio" : "Cortesia"})
-                              </span>
+                        (() => {
+                          const split = splitBenefitsByType(detailTarget?.beneficios);
+                          if (!split.cortesias.length) return "Ninguna";
+                          return (
+                            <div className="flex flex-col gap-2">
+                              {split.cortesias.map((benefit, index) => (
+                                <div key={`cor-${index}-${benefit?.id_cortesia || benefit?.nombre || "benefit"}`} className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2 text-sm">
+                                  <span className="font-semibold text-[var(--mf-text)]">{Number(benefit?.cantidad || 0)}x</span>{" "}
+                                  <span className="text-[var(--mf-text)]">{benefit?.nombre || "Cortesia"}</span>
+                                </div>
+                              ))}
                             </div>
-                          ))}
-                        </div>
+                          );
+                        })()
                       ),
                       span: "full",
                     },
