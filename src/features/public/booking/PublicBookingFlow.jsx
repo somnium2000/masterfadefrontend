@@ -29,7 +29,6 @@ import {
 import {
   MAX_COMPANIONS,
   addMinutesToTimeKey,
-  buildTimeSlots,
   extractMessage,
   getCurrentTimeKeyInTimeZone,
   getTodayDateKeyInTimeZone,
@@ -47,6 +46,7 @@ const EMPTY_CONTEXT = {
   parametros: {},
 };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SLOT_GRID_STEP_MINUTES = 5;
 
 const PublicBookingContext = createContext(null);
 
@@ -89,40 +89,34 @@ function isValidEmail(value) {
 
 function buildDynamicSlots({
   horarios,
-  horaInicio,
-  horaFin,
   duracionTotalMin,
-  bufferTotalMin,
 }) {
-  const start = normalizeHourMinute(horaInicio);
-  const end = normalizeHourMinute(horaFin);
   const list = Array.isArray(horarios) ? horarios : [];
-  const totalBlockMinutes = Math.max(Number(duracionTotalMin || 0) + Number(bufferTotalMin || 0), 0);
-  const firstAvailableStart = normalizeHourMinute(list[0]?.hora);
-  const lastAvailableEnd = list.length > 0
-    ? addMinutesToTimeKey(normalizeHourMinute(list[list.length - 1]?.hora), totalBlockMinutes)
-    : null;
-  const resolvedStart = start || firstAvailableStart;
-  const resolvedEnd = end || lastAvailableEnd;
-  const startMinutes = timeKeyToMinutes(resolvedStart);
-  const endMinutes = timeKeyToMinutes(resolvedEnd);
-  const lastCandidateMinutes = endMinutes != null && totalBlockMinutes > 0
-    ? endMinutes - totalBlockMinutes
-    : endMinutes;
-
-  if (startMinutes == null || endMinutes == null || lastCandidateMinutes == null || lastCandidateMinutes < startMinutes) {
-    return [];
-  }
-
-  const candidateTimes = buildTimeSlots(resolvedStart, addMinutesToTimeKey(resolvedStart, lastCandidateMinutes - startMinutes), 30);
-  const availableTimes = new Set(list.map((slot) => normalizeHourMinute(slot?.hora)).filter(Boolean));
-
-  return candidateTimes.map((hora) => ({
-    hora,
-    horaFin: addMinutesToTimeKey(hora, totalBlockMinutes) || hora,
-    disponible: availableTimes.has(hora),
-    duracionBloqueMin: totalBlockMinutes,
-  }));
+  const fallbackVisibleDurationMinutes = Math.max(Number(duracionTotalMin || 0), 0);
+  return list
+    .map((slot) => {
+      const hora = normalizeHourMinute(slot?.hora);
+      if (!hora) return null;
+      const visibleDurationMinutes = Math.max(
+        Number(slot?.duracion_visible_min ?? fallbackVisibleDurationMinutes),
+        0
+      );
+      const horaFinVisible = normalizeHourMinute(slot?.hora_fin_visible)
+        || addMinutesToTimeKey(hora, visibleDurationMinutes)
+        || hora;
+      return {
+        hora,
+        horaFin: horaFinVisible,
+        disponible: Boolean(slot?.disponible ?? true),
+        duracionVisibleMin: visibleDurationMinutes,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftMin = timeKeyToMinutes(left.hora) ?? 0;
+      const rightMin = timeKeyToMinutes(right.hora) ?? 0;
+      return leftMin - rightMin;
+    });
 }
 
 function createBlockId() {
@@ -847,10 +841,7 @@ export default function PublicBookingFlow() {
       const payload = response?.data ?? response;
       const mapped = buildDynamicSlots({
         horarios: payload?.horarios,
-        horaInicio: payload?.hora_inicio,
-        horaFin: payload?.hora_fin,
         duracionTotalMin: payload?.duracion_total_min,
-        bufferTotalMin: payload?.buffer_total_min,
       });
       const metrics = {
         duracionTotalMin: Number(payload?.duracion_total_min || 0),
@@ -923,10 +914,7 @@ export default function PublicBookingFlow() {
     const payload = response?.data ?? response;
     const mapped = buildDynamicSlots({
       horarios: payload?.horarios,
-      horaInicio: payload?.hora_inicio,
-      horaFin: payload?.hora_fin,
       duracionTotalMin: payload?.duracion_total_min,
-      bufferTotalMin: payload?.buffer_total_min,
     });
     slotsCacheRef.current.set(cacheKey, {
       slots: mapped,
@@ -1206,6 +1194,13 @@ export default function PublicBookingFlow() {
   }, [location.pathname, navigate, selectedBarberId, selectedBranchId]);
 
   useEffect(() => {
+    if (!holdResult) return;
+    if (location.pathname !== '/agendar/confirmar') {
+      navigate('/agendar/confirmar', { replace: true });
+    }
+  }, [holdResult, location.pathname, navigate]);
+
+  useEffect(() => {
     setHoldResult(null);
     if (!allBlocksComplete) {
       setHoldCountdownStartedAt(null);
@@ -1240,6 +1235,8 @@ export default function PublicBookingFlow() {
     updateBlockAtIndex(0, (currentBlock) => ({
       ...currentBlock,
       idBarbero: barberId,
+      selectionType: 'services',
+      packageId: '',
       selectedDate: '',
       selectedTime: '',
     }));
@@ -1271,24 +1268,49 @@ export default function PublicBookingFlow() {
   }, [effectiveActiveBlockIndex, resetAvailabilityViewState]);
 
   const goToAgenda = useCallback(() => {
+    if (holdResult) return;
     if (!selectedBranchId || !selectedBarberId) return;
+    if (selectionType === 'package' && packages.length === 0) {
+      updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
+        ...normalizeBookingBlock(currentBlock, effectiveActiveBlockIndex),
+        selectionType: 'services',
+        packageId: '',
+        selectedDate: '',
+        selectedTime: '',
+      }));
+      notifications.info('No hay paquetes disponibles por ahora. Puedes continuar reservando por servicios.', {
+        dedupeKey: 'public-booking-packages-empty-fallback',
+      });
+    }
     navigate('/agendar/agenda');
-  }, [navigate, selectedBarberId, selectedBranchId]);
+  }, [
+    holdResult,
+    selectedBranchId,
+    selectedBarberId,
+    selectionType,
+    packages.length,
+    effectiveActiveBlockIndex,
+    updateBlockAtIndex,
+    notifications,
+    navigate,
+  ]);
 
   const goToBarberos = useCallback(() => {
+    if (holdResult) return;
     navigate('/agendar/barberos');
-  }, [navigate]);
+  }, [holdResult, navigate]);
 
   const goToConfirm = useCallback(() => {
+    if (holdResult) return;
     if (!allBlocksComplete) return;
     navigate('/agendar/confirmar');
-  }, [allBlocksComplete, navigate]);
+  }, [allBlocksComplete, holdResult, navigate]);
 
   const completeBookingFlow = useCallback(() => {
     setHoldResult(null);
     setHoldCountdownStartedAt(null);
     resetFlowForBranchChange();
-    navigate('/');
+    navigate('/', { replace: true });
   }, [navigate, resetFlowForBranchChange]);
 
   const toggleService = useCallback((serviceId) => {
@@ -1660,7 +1682,6 @@ export default function PublicBookingFlow() {
         : await createPublicCitaHold(holdPayload);
       const payload = response?.data ?? response;
       setHoldResult(payload);
-      notifications.success('Reserva creada correctamente.', { dedupeKey: 'public-booking-hold-success' });
       return true;
     } catch (err) {
       if (err?.status === 409) {
@@ -1769,6 +1790,7 @@ export default function PublicBookingFlow() {
       slotSuggestionsLoading,
       slots,
       slotsLoading,
+      slotGridStepMinutes: SLOT_GRID_STEP_MINUTES,
       submitHold,
       syncServicesScrollState,
       toggleService,

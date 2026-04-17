@@ -1,4 +1,4 @@
-import { ArrowLeft, CheckCircle2, Clock3, Loader2 } from 'lucide-react';
+﻿import { ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
 import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
@@ -21,6 +21,7 @@ function getServicesLabel(block, bookingBlocksSummary) {
   const source = Array.isArray(bookingBlocksSummary)
     ? bookingBlocksSummary.find((item) => item?.id === block?.id || item?.alias === block?.alias)
     : null;
+
   if (source?.selection_type === 'package') {
     return `Paquete: ${source?.selectedPackage?.nombre_paquete || 'Sin paquete'}`;
   }
@@ -32,64 +33,92 @@ function getServicesLabel(block, bookingBlocksSummary) {
   return services.length ? services.join(', ') : 'Sin servicios';
 }
 
-function HoldResultSummary({ holdResult, holdDurationMin, bookingBlocksSummary, mode = 'public', onBackHome, simulationNoPayment = false }) {
+function normalizeDateKey(rawDate) {
+  const normalized = String(rawDate || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : '';
+}
+
+function buildFriendlyReservationCode(holdResult) {
+  const sourceId = String(holdResult?.id_grupo_cita || holdResult?.bloques?.[0]?.id_cita || '').replace(/-/g, '').toUpperCase();
+  const dateRaw = normalizeDateKey(holdResult?.bloques?.[0]?.fecha);
+  const datePart = dateRaw ? dateRaw.replace(/-/g, '') : new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const suffix = sourceId.slice(0, 4).padEnd(4, 'X');
+  return `MF-${datePart}-${suffix}`;
+}
+
+function getConfirmationTitle(holdResult) {
+  const blockCount = Array.isArray(holdResult?.bloques) ? holdResult.bloques.length : 0;
+  return blockCount > 1 ? 'Reserva grupal confirmada' : 'Cita confirmada';
+}
+
+function FinalConfirmationPanel({
+  holdResult,
+  bookingBlocksSummary,
+  onBackHome,
+  selectedBranch,
+  simulationNoPayment,
+}) {
   if (!holdResult) return null;
 
-  const expiresAt = holdResult.expires_at ? new Date(holdResult.expires_at) : null;
-  const bloques = Array.isArray(holdResult.bloques) ? holdResult.bloques : [];
+  const bloques = Array.isArray(holdResult?.bloques) ? holdResult.bloques : [];
+  const titular = String(bookingBlocksSummary?.[0]?.contactName || bookingBlocksSummary?.[0]?.alias || 'Titular').trim();
+  const firstBlock = bloques[0] || null;
+  const branchName = selectedBranch?.nombre_sucursal || 'Sucursal seleccionada';
+  const reservationCode = buildFriendlyReservationCode(holdResult);
+  const title = getConfirmationTitle(holdResult);
 
   return (
-    <div className="public-booking-success">
+    <div className="public-booking-success public-booking-final-sheet">
       <div className="public-booking-success-head">
-        <CheckCircle2 size={18} />
-        <span>{mode === 'preview' ? 'Simulacion completada' : 'Reserva confirmada con exito'}</span>
+        <CheckCircle2 size={20} />
+        <span>{title}</span>
       </div>
 
-      <p className="citas-selected-date mt-2">Puedes tomar una captura de esta pantalla como comprobante de tu cita.</p>
+      <div className="public-booking-final-code">Código de reserva: <strong>{reservationCode}</strong></div>
 
       <div className="citas-confirm-row">
-        <span>ID grupo</span>
-        <span>{holdResult.id_grupo_cita || 'N/D'}</span>
+        <span>Titular</span>
+        <span>{titular || 'Titular'}</span>
       </div>
       <div className="citas-confirm-row">
-        <span>Integrantes</span>
-        <span>{bloques.length}</span>
+        <span>Sucursal</span>
+        <span>{branchName}</span>
       </div>
       <div className="citas-confirm-row">
-        <span>Total servicios</span>
-        <span>{formatCurrencyHnl(holdResult.monto_total_hnl || 0)}</span>
+        <span>Barbero</span>
+        <span>{firstBlock?.nombre_barbero || 'Asignado'}</span>
       </div>
       <div className="citas-confirm-row">
-        <span>Cubierto por plan</span>
-        <span>{formatCurrencyHnl(holdResult.descuento_total_hnl || 0)}</span>
+        <span>Fecha y hora</span>
+        <span>{formatDateOnly(firstBlock?.fecha || '')} {formatTime12Hour(firstBlock?.hora || '')}</span>
       </div>
       <div className="citas-confirm-row">
-        <span>Extras pendientes</span>
-        <span>{formatCurrencyHnl(holdResult.total_pagar_hnl || holdResult.extras_pendientes_hnl || 0)}</span>
+        <span>Estado</span>
+        <span>Confirmada</span>
       </div>
-      {!simulationNoPayment ? (
-        <>
-          <div className="citas-confirm-row">
-            <span>Expira hold</span>
-            <span>{expiresAt ? expiresAt.toLocaleString('es-HN', { timeZone: HONDURAS_TIME_ZONE }) : 'N/D'}</span>
-          </div>
-          <div className="citas-confirm-row">
-            <span>Duracion de hold</span>
-            <span>{holdDurationMin} min</span>
-          </div>
-        </>
-      ) : null}
+      <div className="citas-confirm-row">
+        <span>Total</span>
+        <span>{formatCurrencyHnl(holdResult?.monto_total_hnl || 0)}</span>
+      </div>
+
+      <div className="public-booking-payment-note mt-4">
+        <span>
+          {simulationNoPayment
+            ? 'Modo actual: simulación sin pago activa. Esta base queda lista para conectar luego "Continuar al pago".'
+            : 'Base de pago preparada: aquí se conectará el flujo real de redirección y confirmación de pago.'}
+        </span>
+      </div>
 
       {bloques.length > 0 ? (
-        <div className="citas-confirm-services mt-3">
-          <h4 className="citas-confirm-subtitle">Resumen confirmado</h4>
+        <div className="citas-confirm-services mt-4">
+          <h4 className="citas-confirm-subtitle">Resumen por integrante</h4>
           {bloques.map((block) => (
             <div key={block.id_cita || `${block.orden_integrante}-${block.alias}`} className="citas-confirm-service-item">
               <span>
-                {block.alias || `Integrante ${block.orden_integrante || ''}`}: {block.nombre_barbero || 'Barbero'}
+                {block.alias || `Integrante ${block.orden_integrante || ''}`}: {getServicesLabel(block, bookingBlocksSummary)}
               </span>
-              <span>{formatDateOnly(block.fecha || '')} {formatTime12Hour(block.hora || '')}</span>
-              <span>{getServicesLabel(block, bookingBlocksSummary)}</span>
+              <span>{block.nombre_barbero || 'Barbero'} · {formatDateOnly(block.fecha || '')} {formatTime12Hour(block.hora || '')}</span>
+              <span>{formatCurrencyHnl(block.monto_total_hnl || 0)}</span>
             </div>
           ))}
         </div>
@@ -97,7 +126,7 @@ function HoldResultSummary({ holdResult, holdDurationMin, bookingBlocksSummary, 
 
       <div className="public-booking-actions is-inline mt-4">
         <Button className="gap-2" onClick={onBackHome}>
-          Volver al inicio
+          Ir al inicio
         </Button>
       </div>
     </div>
@@ -117,18 +146,23 @@ export default function PublicBookingConfirmStep() {
     holdSubmitting,
     mode = 'public',
     paymentRequired,
+    selectedBranch,
     simulationNoPayment,
     submitHold,
     totalToPay,
     goToAgenda,
   } = booking;
 
+  const nextActionLabel = simulationNoPayment
+    ? (mode === 'preview' ? 'Simular y confirmar reserva' : 'Confirmar reserva')
+    : (mode === 'preview' ? 'Preparar confirmación' : 'Confirmar y continuar');
+
   return (
     <>
       <div className="citas-confirm-wrap">
         <div className="citas-surface p-5">
           <h3 className="citas-confirm-title">
-            {mode === 'preview' ? 'Simular reserva grupal' : 'Confirmar Reserva'}
+            {mode === 'preview' ? 'Validar reserva grupal' : 'Confirmar reserva'}
           </h3>
 
           <div className="mt-4">
@@ -136,37 +170,36 @@ export default function PublicBookingConfirmStep() {
               <span>Integrantes</span>
               <span>{bookingBlocksSummary.length}</span>
             </div>
+            <div className="citas-confirm-row">
+              <span>Total servicios</span>
+              <span>{formatCurrencyHnl(totalToPay)}</span>
+            </div>
             {!simulationNoPayment ? (
               <>
                 <div className="citas-confirm-row">
-                  <span>Tiempo restante</span>
+                  <span>Tiempo de confirmación</span>
                   <span>{formatRemainingTime(holdRemainingMs)}</span>
                 </div>
                 <div className="citas-confirm-row">
-                  <span>Expira a las</span>
+                  <span>Vence a las</span>
                   <span>
                     {holdExpiresAtIso
-                      ? new Date(holdExpiresAtIso).toLocaleTimeString('es-HN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: HONDURAS_TIME_ZONE })
+                      ? new Date(holdExpiresAtIso).toLocaleTimeString('es-HN', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false,
+                        timeZone: HONDURAS_TIME_ZONE,
+                      })
                       : 'N/D'}
                   </span>
                 </div>
                 <div className="citas-confirm-row">
-                  <span>Duracion hold</span>
+                  <span>Ventana configurada</span>
                   <span>{holdDurationMin} min</span>
                 </div>
               </>
             ) : null}
-      <div className="citas-confirm-row">
-        <span>Total servicios</span>
-        <span>{formatCurrencyHnl(totalToPay)}</span>
-      </div>
-      {holdResult?.membresia?.cobertura_activa ? (
-        <div className="citas-confirm-row">
-          <span>Plan activo</span>
-          <span>{holdResult?.membresia?.nombre_plan || 'Membresía activa'}</span>
-        </div>
-      ) : null}
-    </div>
+          </div>
 
           <div className="citas-confirm-services mt-4">
             <h4 className="citas-confirm-subtitle">Resumen por integrante</h4>
@@ -185,19 +218,18 @@ export default function PublicBookingConfirmStep() {
           </div>
 
           <div className="public-booking-payment-note mt-4">
-            <Clock3 size={14} />
             <span>
               {simulationNoPayment
-                ? 'Simulacion activa: por pruebas, no se realizara cobro ni pasarela en esta fase.'
+                ? 'Modo simulado activo: no se ejecuta cobro real. Esta pantalla ya está preparada para evolucionar a estados de pago (redirigiendo, pendiente, confirmado, fallido, cancelado, expirado).'
                 : paymentRequired
-                  ? 'Pago total obligatorio activo. La pasarela se integra en la siguiente iteracion.'
-                  : 'La pasarela de pago aun no esta integrada en este flujo.'}
+                  ? 'Pago total obligatorio activo. El botón principal se conectará luego con el proveedor de pago real.'
+                  : 'Pago opcional activo. Se integrará el flujo real en la siguiente fase.'}
             </span>
           </div>
 
           {!simulationNoPayment && holdExpired ? (
             <p className="mt-3 rounded-[12px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-              El tiempo de confirmacion expiro. Si la hora sigue libre, puedes crear la reserva de nuevo.
+              El tiempo de confirmación expiró. Si la hora sigue libre, vuelve a agenda para intentarlo de nuevo.
             </p>
           ) : null}
 
@@ -209,29 +241,26 @@ export default function PublicBookingConfirmStep() {
             <Button className="gap-2" onClick={submitHold} disabled={holdSubmitting || Boolean(holdResult)}>
               {holdSubmitting ? <Loader2 size={16} className="animate-spin" /> : null}
               {holdSubmitting
-                ? (mode === 'preview' ? 'Simulando reserva...' : 'Creando Reserva...')
-                : (mode === 'preview' ? 'Simular reserva grupal' : 'Crear Reserva')}
+                ? (mode === 'preview' ? 'Procesando simulación...' : 'Confirmando reserva...')
+                : nextActionLabel}
             </Button>
           </div>
         </div>
 
-        <Dialog
-          open={Boolean(holdResult)}
-          onOpenChange={(open) => {
-            if (!open && holdResult) {
-              completeBookingFlow();
-            }
-          }}
-        >
-          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <Dialog open={Boolean(holdResult)} onOpenChange={() => {}}>
+          <DialogContent
+            className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"
+            onEscapeKeyDown={(event) => event.preventDefault()}
+            onPointerDownOutside={(event) => event.preventDefault()}
+            onInteractOutside={(event) => event.preventDefault()}
+          >
             <DialogHeader>
-              <DialogTitle>Detalle de cita confirmada</DialogTitle>
+              <DialogTitle>{getConfirmationTitle(holdResult)}</DialogTitle>
             </DialogHeader>
-            <HoldResultSummary
+            <FinalConfirmationPanel
               holdResult={holdResult}
-              holdDurationMin={holdDurationMin}
               bookingBlocksSummary={bookingBlocksSummary}
-              mode={mode}
+              selectedBranch={selectedBranch}
               simulationNoPayment={simulationNoPayment}
               onBackHome={completeBookingFlow}
             />

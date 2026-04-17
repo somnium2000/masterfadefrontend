@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarRange, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
@@ -27,6 +27,7 @@ const STATE_LABELS = {
   pendiente_pago: 'Pendiente de pago',
   confirmada: 'Confirmada',
   en_salon: 'En salón',
+  en_atencion: 'En atención',
   completada: 'Completada',
   cancelada: 'Cancelada',
   expirada: 'Expirada',
@@ -59,7 +60,7 @@ function formatCurrencyHnl(value) {
 
 function getStateBadgeClass(state) {
   const normalized = String(state || '').toLowerCase();
-  if (['completada', 'confirmada', 'en_salon'].includes(normalized)) return 'mf-badge mf-badge-green';
+  if (['completada', 'confirmada', 'en_salon', 'en_atencion'].includes(normalized)) return 'mf-badge mf-badge-green';
   if (['en_espera', 'pendiente_pago'].includes(normalized)) return 'mf-badge mf-badge-gold';
   if (['cancelada', 'expirada', 'no_show', 'anulada'].includes(normalized)) return 'mf-badge mf-badge-red';
   return 'mf-badge mf-badge-muted';
@@ -229,7 +230,7 @@ export default function AdminAgendamientoHistorialPage() {
               animationDelay={(pageIndex * 0.02) + (index * 0.05)}
               avatar={<CalendarRange size={16} />}
               title={cita.nombre_cliente || 'Cliente'}
-              subtitle={`${cita.nombre_barbero || '-'} · ${formatDateTime(cita.inicio_at)}`}
+              subtitle={`${cita.nombre_barbero || '-'} Â· ${formatDateTime(cita.inicio_at)}`}
               badge={<span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>}
               fields={[
                 { label: 'Sucursal', value: cita.nombre_sucursal || '-' },
@@ -319,3 +320,4 @@ export default function AdminAgendamientoHistorialPage() {
     </div>
   );
 }
+

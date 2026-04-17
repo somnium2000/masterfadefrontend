@@ -38,6 +38,10 @@ export async function postAdminCitaIniciarAtencion(idCita) {
   return http.post(`/v1/admin/citas/${encodeURIComponent(idCita)}/iniciar-atencion`, {});
 }
 
+export async function postAdminCitaRegistrarLlegada(idCita) {
+  return http.post(`/v1/admin/citas/${encodeURIComponent(idCita)}/registrar-llegada`, {});
+}
+
 export async function postAdminCitaFinalizarAtencion(idCita) {
   return http.post(`/v1/admin/citas/${encodeURIComponent(idCita)}/finalizar-atencion`, {});
 }

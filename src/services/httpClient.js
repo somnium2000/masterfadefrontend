@@ -1,17 +1,9 @@
 // src/services/httpClient.js
 // Cliente HTTP (fetch) para consumir la API de Master Fade.
 // - Usa VITE_API_URL como base.
-// - Inyecta token Bearer automáticamente si hay un tokenGetter registrado.
+// - Usa cookies HttpOnly de sesion con credentials: 'include'.
+// - Adjunta X-CSRF-Token en metodos mutables desde cookie no-httpOnly.
 
-// Token interceptor
-// AuthContext debe llamar setTokenGetter(() => token) al montar.
-let _tokenGetter = null;
-
-export function setTokenGetter(fn) {
-  _tokenGetter = typeof fn === "function" ? fn : null;
-}
-
-// URL helper
 function joinUrl(baseUrl, path) {
   const base = String(baseUrl || "").trim();
   const p = String(path || "").trim();
@@ -25,7 +17,18 @@ function joinUrl(baseUrl, path) {
   return `${baseClean}${pathClean}`;
 }
 
-// Response parser
+function readCookie(name) {
+  if (typeof document === "undefined") return "";
+  const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = document.cookie.match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+function isUnsafeMethod(method) {
+  const normalized = String(method || "GET").toUpperCase();
+  return ["POST", "PUT", "PATCH", "DELETE"].includes(normalized);
+}
+
 async function parseResponse(response) {
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -34,25 +37,23 @@ async function parseResponse(response) {
   return response.text();
 }
 
-// Core request
 export async function request(path, options = {}) {
-  const { method = "GET", body, token, headers = {}, signal } = options;
+  const { method = "GET", body, headers = {}, signal } = options;
 
   const baseUrl = import.meta.env.VITE_API_URL;
   const url = joinUrl(baseUrl, path);
-
   const finalHeaders = { ...headers };
 
-  // Si enviamos body, por defecto JSON
   const hasBody = body !== undefined && body !== null;
   if (hasBody && !finalHeaders["Content-Type"]) {
     finalHeaders["Content-Type"] = "application/json";
   }
 
-  // Token: explícito > interceptor > nada
-  const effectiveToken = token ?? (_tokenGetter ? _tokenGetter() : null);
-  if (effectiveToken) {
-    finalHeaders.Authorization = `Bearer ${effectiveToken}`;
+  if (isUnsafeMethod(method) && !finalHeaders["X-CSRF-Token"]) {
+    const csrfToken = readCookie("mf_csrf");
+    if (csrfToken) {
+      finalHeaders["X-CSRF-Token"] = csrfToken;
+    }
   }
 
   const response = await fetch(url, {
@@ -60,6 +61,7 @@ export async function request(path, options = {}) {
     headers: finalHeaders,
     body: hasBody ? JSON.stringify(body) : undefined,
     signal,
+    credentials: "include",
   });
 
   const data = await parseResponse(response);
@@ -79,7 +81,6 @@ export async function request(path, options = {}) {
   return data;
 }
 
-// Convenience methods
 export const http = {
   get: (path, opts = {}) => request(path, { ...opts, method: "GET" }),
   post: (path, body, opts = {}) =>

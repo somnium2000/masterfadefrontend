@@ -17,8 +17,12 @@ const STATUS_META = {
     className: 'border-emerald-400/25 bg-emerald-500/10 text-emerald-300',
   },
   en_salon: {
-    label: 'En proceso',
+    label: 'En salón',
     className: 'border-amber-400/25 bg-amber-500/10 text-amber-300',
+  },
+  en_atencion: {
+    label: 'En atención',
+    className: 'border-indigo-400/25 bg-indigo-500/10 text-indigo-300',
   },
   en_espera: {
     label: 'En espera',
@@ -29,6 +33,7 @@ const STATUS_META = {
     className: 'border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]',
   },
 };
+const FINISH_ALERT_THRESHOLD_MIN = 7;
 
 function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
@@ -128,6 +133,25 @@ function formatRelativeFinish(isoValue, nowMs) {
   if (diff <= 0) return 'Tiempo cumplido';
   if (diff === 1) return 'Falta 1 minuto';
   return `Faltan ${diff} minutos`;
+}
+
+function getFinishAlertMeta(isoValue, nowMs) {
+  const finish = toTimestamp(isoValue);
+  if (!finish) return null;
+  const diff = Math.round((finish - nowMs) / 60000);
+  if (diff <= 0) {
+    return {
+      toneClass: 'border-red-500/40 bg-red-500/10 text-red-300',
+      message: 'La cita actual ya debio finalizar. Revisa estado y cierre de atencion.',
+    };
+  }
+  if (diff <= FINISH_ALERT_THRESHOLD_MIN) {
+    return {
+      toneClass: 'border-amber-400/40 bg-amber-500/10 text-amber-200',
+      message: `Alerta operativa: faltan ${diff} minuto${diff === 1 ? '' : 's'} para finalizar la atencion actual.`,
+    };
+  }
+  return null;
 }
 
 function InlineEmptyState({ title, description }) {
@@ -246,28 +270,44 @@ export default function BarberoHomePage() {
   const totalToday = todayAppointments.length + completedToday.length;
   const remainingCount = todayAppointments.length;
   const completedCount = completedToday.length;
+  const upcomingAppointments = useMemo(() => {
+    const source = Array.isArray(todayAppointments) ? todayAppointments : [];
+    const future = source.filter((item) => toTimestamp(item?.inicio_at) >= nowMs);
+    if (future.length > 0) return future.slice(0, 4);
+    return source
+      .filter((item) => ['en_salon', 'en_atencion'].includes(String(item?.estado_cita_codigo || '').trim().toLowerCase()))
+      .slice(0, 4);
+  }, [nowMs, todayAppointments]);
   const currentAppointment = useMemo(
-    () => todayAppointments.find((item) => String(item?.estado_cita_codigo || '').trim().toLowerCase() === 'en_salon') || null,
+    () => {
+      const source = Array.isArray(todayAppointments) ? todayAppointments : [];
+      const inAttention = source.find((item) => String(item?.estado_cita_codigo || '').trim().toLowerCase() === 'en_atencion');
+      if (inAttention) return inAttention;
+      return source.find(
+        (item) =>
+          String(item?.estado_cita_codigo || '').trim().toLowerCase() === 'en_salon'
+          && Boolean(item?.atencion_iniciada_at)
+      ) || null;
+    },
     [todayAppointments]
   );
   const currentEstimatedEnd = useMemo(
     () => (currentAppointment?.atencion_iniciada_at
-      ? addMinutes(currentAppointment.atencion_iniciada_at, currentAppointment.duracion_total_min)
+      ? addMinutes(currentAppointment.atencion_iniciada_at, Number(currentAppointment.duracion_total_min || 0))
       : null),
     [currentAppointment]
   );
+  const currentFinishAlert = useMemo(
+    () => (currentEstimatedEnd ? getFinishAlertMeta(currentEstimatedEnd.toISOString(), nowMs) : null),
+    [currentEstimatedEnd, nowMs]
+  );
   const nextAdjustedAppointment = useMemo(() => {
     if (!currentAppointment) return upcomingAppointments[0] || null;
-    return todayAppointments.find((item) => toTimestamp(item?.inicio_at) > toTimestamp(currentAppointment?.inicio_at)) || null;
+    const currentStart = toTimestamp(currentAppointment?.inicio_at);
+    if (!currentStart) return upcomingAppointments[0] || null;
+    const source = Array.isArray(todayAppointments) ? todayAppointments : [];
+    return source.find((item) => toTimestamp(item?.inicio_at) > currentStart) || null;
   }, [currentAppointment, todayAppointments, upcomingAppointments]);
-
-  const upcomingAppointments = useMemo(() => {
-    const future = todayAppointments.filter((item) => toTimestamp(item?.inicio_at) >= nowMs);
-    if (future.length > 0) return future.slice(0, 4);
-    return todayAppointments
-      .filter((item) => String(item?.estado_cita_codigo || '').trim().toLowerCase() === 'en_salon')
-      .slice(0, 4);
-  }, [nowMs, todayAppointments]);
 
   const handleAuthError = useCallback((err) => {
     if (err?.status === 401) {
@@ -400,12 +440,17 @@ export default function BarberoHomePage() {
                   {currentEstimatedEnd ? (
                     <p className="text-amber-300">{formatRelativeFinish(currentEstimatedEnd.toISOString(), nowMs)}</p>
                   ) : null}
+                  {currentFinishAlert ? (
+                    <div className={`mt-2 rounded-[12px] border px-3 py-2 text-xs font-medium ${currentFinishAlert.toneClass}`}>
+                      {currentFinishAlert.message}
+                    </div>
+                  ) : null}
                   {nextAdjustedAppointment ? (
                     <p><strong className="text-[var(--mf-text)]">Proxima cita ajustada:</strong> {nextAdjustedAppointment.nombre_cliente || 'Cliente'} - {formatHour(nextAdjustedAppointment.inicio_at)}</p>
                   ) : null}
                 </div>
               ) : (
-                <p className="mt-2 text-sm text-[var(--mf-text-2)]">No hay cita en salon en este momento.</p>
+                <p className="mt-2 text-sm text-[var(--mf-text-2)]">No hay cita en atención en este momento.</p>
               )}
               <div className="mt-3 text-xs text-[var(--mf-text-2)]">
                 Retrasos propagados hoy: {Number(context?.retraso_operativo?.citas_reagendadas_hoy || 0)}.

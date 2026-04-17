@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log*
+*.log
+*.zip
+.env
+.env.*
+.git
+.gitignore
+coverage
+dist
+build
+tmp
+.cache

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../config/supabaseClient.js';
@@ -29,20 +29,35 @@ function getSafeNextPath(rawPath) {
   return value;
 }
 
-async function resolveOAuthSessionToken(supabase) {
-  const query = new URLSearchParams(window.location.search);
-  const hash = readHashParams();
-  const authCode = String(query.get('code') || '').trim();
+function resolveCallbackErrorMessage(errorLike) {
+  const raw = String(errorLike?.data?.error?.message || errorLike?.message || '').trim();
+  if (!raw) return 'No se pudo completar el ingreso con Google.';
+  if (/payload oauth|exchange/i.test(raw)) {
+    return 'La sesion social ya no esta disponible. Inicia nuevamente con Google.';
+  }
+  if (/supabase|config|provider|jwt|database|db/i.test(raw)) {
+    return 'No se pudo completar el ingreso con Google.';
+  }
+  return raw;
+}
+
+async function resolveOAuthSessionToken(supabase, { authCode, hashAccessToken, hashRefreshToken }) {
+  // AM: Si el callback trae access_token en hash, priorizamos ese valor
+  // y evitamos depender de que supabase-js procese la URL.
+  if (hashAccessToken) {
+    return hashAccessToken;
+  }
 
   if (authCode) {
+    if (!supabase) {
+      throw new Error('No se pudo resolver el codigo OAuth por configuracion de Supabase.');
+    }
     const { data, error } = await supabase.auth.exchangeCodeForSession(authCode);
     if (error) throw error;
     const codeToken = String(data?.session?.access_token || '').trim();
     if (codeToken) return codeToken;
   }
 
-  const hashAccessToken = String(hash.get('access_token') || '').trim();
-  const hashRefreshToken = String(hash.get('refresh_token') || '').trim();
   if (hashAccessToken && hashRefreshToken) {
     const { data, error } = await supabase.auth.setSession({
       access_token: hashAccessToken,
@@ -53,14 +68,9 @@ async function resolveOAuthSessionToken(supabase) {
     if (hashToken) return hashToken;
   }
 
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  const supabaseToken = String(sessionData?.session?.access_token || '').trim();
-  if (!supabaseToken) {
-    throw new Error('No se encontro sesion de Supabase para completar el exchange.');
-  }
-
-  return supabaseToken;
+  // AM: Si no llega code ni tokens hash, evitamos llamadas repetitivas a Supabase
+  // (caso comun al volver atras a /auth/callback sin payload OAuth).
+  throw new Error('No se encontro payload OAuth para completar el exchange.');
 }
 
 export default function AuthCallbackPage() {
@@ -73,6 +83,11 @@ export default function AuthCallbackPage() {
   const [showInvalidUserAuthBox, setShowInvalidUserAuthBox] = useState(false);
   const [pendingSocialConfirmation, setPendingSocialConfirmation] = useState(null);
   const [stepMessage, setStepMessage] = useState('Validando identidad con Google...');
+  const exchangeStartedRef = useRef(false);
+  const callbackSignature = useMemo(
+    () => `${window.location.pathname}|${window.location.search}|${window.location.hash}`,
+    []
+  );
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -83,11 +98,19 @@ export default function AuthCallbackPage() {
     let cancelled = false;
     let timeoutId = null;
 
+    if (exchangeStartedRef.current) {
+      return undefined;
+    }
+    exchangeStartedRef.current = true;
+
     async function runExchange() {
       const query = new URLSearchParams(window.location.search);
       const hash = readHashParams();
       const callbackNextPath = getSafeNextPath(query.get('next'));
       const socialConfirmToken = String(query.get('social_confirm_token') || '').trim();
+      const oauthCode = String(query.get('code') || '').trim();
+      const hashAccessToken = String(hash.get('access_token') || '').trim();
+      const hashRefreshToken = String(hash.get('refresh_token') || '').trim();
 
       if (socialConfirmToken) {
         try {
@@ -100,17 +123,16 @@ export default function AuthCallbackPage() {
             social_confirm_token: socialConfirmToken,
           });
           const confirmationPayload = confirmationResponse?.data || confirmationResponse;
-          const appToken = String(confirmationPayload?.token || '').trim();
-          if (!appToken) {
-            throw new Error('No se recibio APP JWT tras confirmar correo social.');
+          if (!confirmationResponse?.ok || !confirmationPayload?.session?.authenticated) {
+            throw new Error('No se pudo establecer la sesion tras confirmar el correo.');
           }
 
           if (window.location.hash || window.location.search) {
             window.history.replaceState({}, document.title, window.location.pathname);
           }
 
-          setStepMessage('Preparando panel privado...');
-          const completed = await completeExchangeLogin(appToken, { remember: true });
+          setStepMessage('Preparando sesion segura...');
+          const completed = await completeExchangeLogin();
           if (!completed.ok) {
             throw new Error(completed.message || 'No se pudo completar la sesion tras confirmar el correo.');
           }
@@ -140,6 +162,23 @@ export default function AuthCallbackPage() {
       const oauthErrorDescription = String(query.get('error_description') || '').trim();
       const oauthHashError = String(hash.get('error') || '').trim();
       const oauthHashErrorDescription = String(hash.get('error_description') || '').trim();
+      const hasEphemeralPayload = Boolean(
+        socialConfirmToken ||
+        oauthCode ||
+        hashAccessToken ||
+        hashRefreshToken ||
+        oauthError ||
+        oauthHashError ||
+        oauthErrorDescription ||
+        oauthHashErrorDescription
+      );
+
+      if (hasEphemeralPayload) {
+        const cleanQuery = callbackNextPath
+          ? `?next=${encodeURIComponent(callbackNextPath)}`
+          : '';
+        window.history.replaceState({}, document.title, `${window.location.pathname}${cleanQuery}`);
+      }
 
       if (oauthError || oauthHashError) {
         const message =
@@ -155,8 +194,8 @@ export default function AuthCallbackPage() {
         return;
       }
 
-      if (!supabase) {
-        const message = 'Supabase no esta configurado en frontend.';
+      if (!supabase && !oauthCode && !hashAccessToken) {
+        const message = 'No se pudo completar el ingreso con Google.';
         setShowInvalidUserAuthBox(false);
         setError(message);
         notifications.error(message, { dedupeKey: 'auth-callback-supabase-missing' });
@@ -165,11 +204,11 @@ export default function AuthCallbackPage() {
 
       try {
         setStepMessage('Validando sesion social...');
-        const supabaseToken = await resolveOAuthSessionToken(supabase);
-
-        if (window.location.hash || window.location.search) {
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
+        const supabaseToken = await resolveOAuthSessionToken(supabase, {
+          authCode: oauthCode,
+          hashAccessToken,
+          hashRefreshToken,
+        });
 
         setStepMessage('Verificando cuenta MasterFade...');
         const exchangeResponse = await http.post('/v1/auth/exchange', {
@@ -194,13 +233,12 @@ export default function AuthCallbackPage() {
           return;
         }
 
-        const appToken = String(payload?.token || '').trim();
-        if (!appToken) {
-          throw new Error('Backend no devolvio APP JWT en auth exchange.');
+        if (!exchangeResponse?.ok || !payload?.session?.authenticated) {
+          throw new Error('Backend no pudo establecer sesion en auth exchange.');
         }
 
-        setStepMessage('Preparando panel privado...');
-        const completed = await completeExchangeLogin(appToken, { remember: true });
+        setStepMessage('Preparando sesion segura...');
+        const completed = await completeExchangeLogin();
         if (!completed.ok) {
           throw new Error(completed.message || 'No se pudo completar la sesion.');
         }
@@ -219,10 +257,7 @@ export default function AuthCallbackPage() {
         }
 
         setShowInvalidUserAuthBox(false);
-        const message =
-          exchangeError?.data?.error?.message ||
-          exchangeError?.message ||
-          'No se pudo completar el ingreso con Google.';
+          const message = resolveCallbackErrorMessage(exchangeError);
         setError(message);
         notifications.error(message, { dedupeKey: 'auth-callback-exchange-error' });
         await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
@@ -238,11 +273,14 @@ export default function AuthCallbackPage() {
 
     return () => {
       cancelled = true;
+      // AM: En StrictMode dev, React ejecuta cleanup + rerun del efecto.
+      // Si no reseteamos este guard, el segundo ciclo no intenta el exchange.
+      exchangeStartedRef.current = false;
       if (timeoutId) {
         window.clearTimeout(timeoutId);
       }
     };
-  }, [completeExchangeLogin, isAuthenticated, navigate, notifications, safeNextPath]);
+  }, [callbackSignature, completeExchangeLogin, isAuthenticated, navigate, notifications, safeNextPath]);
 
   return (
     <div className="mf-page-gradient min-h-screen px-6 py-6">

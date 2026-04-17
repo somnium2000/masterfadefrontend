@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, ChevronDown, Clock3, Plus, Scissors, UserRound, Package } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
@@ -18,6 +18,24 @@ import {
 } from './bookingUtils.js';
 
 const LANDING_EASE = [0.25, 0.46, 0.45, 0.94];
+const SLOT_TIME_PERIODS = [
+  { key: 'manana', label: 'Mañana' },
+  { key: 'tarde', label: 'Tarde' },
+  { key: 'noche', label: 'Noche' },
+];
+
+function getSlotPeriodKey(timeKey) {
+  const normalized = String(timeKey || '').trim();
+  const match = normalized.match(/^(\d{2}):(\d{2})/);
+  if (!match) return 'noche';
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return 'noche';
+  const totalMinutes = (hour * 60) + minute;
+  if (totalMinutes >= 6 * 60 && totalMinutes < 12 * 60) return 'manana';
+  if (totalMinutes >= 12 * 60 && totalMinutes < 18 * 60) return 'tarde';
+  return 'noche';
+}
 
 function BookingBlocksSummary({ bookingBlocksSummary, totalToPay }) {
   const completedBlocks = bookingBlocksSummary.filter((block) => block.isComplete);
@@ -81,14 +99,12 @@ export default function PublicBookingAgendaStep() {
     onSelectDay,
     onSelectTime,
     selectSuggestedBarber,
-    barberPrepTime,
     selectedDate,
     selectionType,
     selectSelectionType,
     selectedPackage,
     selectedPackageId,
     selectPackage,
-    selectedBlockTotalMinutes,
     selectedServicesDurationSum,
     selectedServices,
     selectedTime,
@@ -130,6 +146,31 @@ export default function PublicBookingAgendaStep() {
     ? 'Ingresa el nombre del titular para continuar con la selección de servicios.'
     : 'Ingresa el nombre del acompañante antes de elegir servicios.';
   const canSelectServices = Boolean(activeContactName.trim());
+  const [preferredSlotPeriod, setPreferredSlotPeriod] = useState('manana');
+  const availableSlotsByPeriod = useMemo(() => {
+    const grouped = {
+      manana: [],
+      tarde: [],
+      noche: [],
+    };
+    (Array.isArray(slots) ? slots : []).forEach((slot) => {
+      if (!slot?.disponible) return;
+      if (selectedDate && isPastSlotForToday(selectedDate, slot?.hora)) return;
+      const key = getSlotPeriodKey(slot?.hora);
+      grouped[key].push(slot);
+    });
+    return grouped;
+  }, [isPastSlotForToday, selectedDate, slots]);
+  const totalAvailableSlots = useMemo(
+    () => SLOT_TIME_PERIODS.reduce((total, period) => total + (availableSlotsByPeriod[period.key] || []).length, 0),
+    [availableSlotsByPeriod]
+  );
+  const activeSlotPeriod = useMemo(() => {
+    if ((availableSlotsByPeriod[preferredSlotPeriod] || []).length > 0) return preferredSlotPeriod;
+    const firstWithAvailable = SLOT_TIME_PERIODS.find((period) => (availableSlotsByPeriod[period.key] || []).length > 0);
+    return firstWithAvailable ? firstWithAvailable.key : 'manana';
+  }, [availableSlotsByPeriod, preferredSlotPeriod]);
+  const currentPeriodSlots = availableSlotsByPeriod[activeSlotPeriod] || [];
 
   useEffect(() => {
     syncServicesScrollState();
@@ -165,16 +206,6 @@ export default function PublicBookingAgendaStep() {
         description={selectedBarber
           ? `No hay servicios ofrecidos configurados para ${selectedBarber.nombre_completo}.`
           : 'No hay servicios activos para esta sucursal.'}
-      />
-    );
-  }
-
-  if (selectionType === 'package' && packages.length === 0) {
-    return (
-      <EmptyState
-        icon={Package}
-        title="Sin paquetes disponibles"
-        description="No hay paquetes activos para esta sucursal."
       />
     );
   }
@@ -345,6 +376,20 @@ export default function PublicBookingAgendaStep() {
                   </div>
                 </button>
               ))}
+              {selectionType === 'package' && packages.length === 0 ? (
+                <div className="public-booking-packages-empty">
+                  <EmptyState
+                    icon={Package}
+                    title="No hay paquetes disponibles por ahora"
+                    description="Puedes continuar reservando por servicios."
+                  />
+                  <div className="mt-3 flex justify-center">
+                    <Button type="button" variant="outline" size="sm" onClick={() => selectSelectionType('services')}>
+                      Volver a servicios
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -443,8 +488,7 @@ export default function PublicBookingAgendaStep() {
                 </p>
                 <div className="public-booking-slot-summary">
                   <span>Duración estimada de la cita: {formatDurationHuman(selectedServicesDurationSum)}</span>
-                  <span>Tiempo interno de preparación: + {formatDurationHuman(barberPrepTime)}</span>
-                  <strong>Bloque operativo total: {formatDurationHuman(selectedBlockTotalMinutes)}</strong>
+                  <span>Selecciona una hora disponible para continuar con tu reserva.</span>
                 </div>
                 {selectionType === 'package' && selectedPackage ? (
                   <p className="citas-selected-date">
@@ -485,33 +529,53 @@ export default function PublicBookingAgendaStep() {
                 {slotsLoading ? (
                   <LoadingSpinner />
                 ) : (
-                  <div className="public-booking-time-block-list">
-                    {slots.map((slot) => (
-                      <SlotButton
-                        key={slot.hora}
-                        slot={slot}
-                        isDisabled={isPastSlotForToday(selectedDate, slot.hora)}
-                        selectedTime={selectedTime}
-                        onSelect={onSelectTime}
-                      />
-                    ))}
-                  </div>
-                )}
+                  <>
+                    <div className="public-booking-time-period-tabs">
+                      {SLOT_TIME_PERIODS.map((period) => (
+                        <button
+                          key={period.key}
+                          type="button"
+                          className={`public-booking-time-period-tab ${activeSlotPeriod === period.key ? 'is-active' : ''}`}
+                          onClick={() => setPreferredSlotPeriod(period.key)}
+                        >
+                          <span>{period.label}</span>
+                          <span className="public-booking-time-period-count">{(availableSlotsByPeriod[period.key] || []).length}</span>
+                        </button>
+                      ))}
+                    </div>
 
-                <div className="citas-slot-legend">
-                  <span>
-                    <span className="citas-slot-dot is-available" />
-                    Disponible
-                  </span>
-                  <span>
-                    <span className="citas-slot-dot is-unavailable" />
-                    No disponible
-                  </span>
-                  <span>
-                    <span className="citas-slot-dot is-selected" />
-                    Seleccionado
-                  </span>
-                </div>
+                    <div className="public-booking-time-blocks-shell">
+                      {totalAvailableSlots === 0 ? (
+                        <div className="public-booking-period-empty">
+                          <p className="text-sm font-semibold text-[var(--mf-text)]">
+                            No hay horarios disponibles para este día.
+                          </p>
+                          <p className="text-sm text-[var(--mf-text-2)]">Prueba con otra fecha para ver más opciones.</p>
+                        </div>
+                      ) : (
+                        <div className="public-booking-time-block-list">
+                          {currentPeriodSlots.length > 0 ? (
+                            currentPeriodSlots.map((slot) => (
+                              <SlotButton
+                                key={slot.hora}
+                                slot={slot}
+                                selectedTime={selectedTime}
+                                onSelect={onSelectTime}
+                              />
+                            ))
+                          ) : (
+                            <div className="public-booking-period-empty">
+                              <p className="text-sm font-semibold text-[var(--mf-text)]">
+                                No hay horarios disponibles en {SLOT_TIME_PERIODS.find((period) => period.key === activeSlotPeriod)?.label || 'esta franja'}.
+                              </p>
+                              <p className="text-sm text-[var(--mf-text-2)]">Prueba con otra franja del día.</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
 
                 <div className="public-booking-slot-hint">
                   <Clock3 size={14} />
@@ -560,4 +624,7 @@ export default function PublicBookingAgendaStep() {
     </>
   );
 }
+
+
+
 

@@ -57,7 +57,7 @@ function InfoRow({ icon: Icon, label, value, highlight = false }) {
 export default function ClientePerfilPage() {
   const navigate = useNavigate();
   const { error: notifyError } = useNotifications();
-  const { isAuthenticated, isHydrated, isHydrating, token, logout } = useAuth();
+  const { isAuthenticated, isHydrated, isHydrating, logout } = useAuth();
   const outletContext = useOutletContext() || {};
   const { refreshClienteProfile } = outletContext;
 
@@ -65,7 +65,7 @@ export default function ClientePerfilPage() {
   const [data, setData] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
 
-  const canLoadProfile = Boolean(isAuthenticated && isHydrated && !isHydrating && token);
+  const canLoadProfile = Boolean(isAuthenticated && isHydrated && !isHydrating  );
 
   const loadProfile = useCallback(async ({ silent = false } = {}) => {
     if (!canLoadProfile) return;
@@ -222,3 +222,4 @@ export default function ClientePerfilPage() {
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-import { Check, Clock3, Lock } from 'lucide-react';
+import { Check, Clock3 } from 'lucide-react';
 import {
   formatTime12Hour,
   formatCurrencyHnl,
@@ -97,33 +97,30 @@ export function SlotButton({
   slot,
   selectedTime,
   onSelect,
-  isDisabled = false,
 }) {
   const isSelected = selectedTime === slot.hora;
-  const isUnavailable = !slot.disponible || isDisabled;
   const classes = [
     'public-booking-time-block',
-    isUnavailable ? 'is-unavailable' : 'is-available',
+    'is-available',
     isSelected ? 'is-selected' : '',
   ].join(' ');
   const startLabel = formatTime12Hour(slot.hora);
   const endLabel = formatTime12Hour(slot.horaFin || slot.hora);
-  const statusLabel = isSelected ? 'SELECCIONADO' : isUnavailable ? 'NO DISPONIBLE' : 'DISPONIBLE';
+  const durationLabel = `${Math.max(0, Number(slot?.duracionVisibleMin || 0))} min`;
 
   return (
     <button
       type="button"
       className={classes}
-      disabled={isUnavailable}
-      onClick={() => onSelect(slot.hora, !isUnavailable)}
+      onClick={() => onSelect(slot.hora, true)}
       aria-pressed={isSelected}
     >
       <span className="public-booking-time-block-copy">
-        <span className="public-booking-time-block-range">[ {startLabel} - {endLabel} ]</span>
-        <span className="public-booking-time-block-status">{statusLabel}</span>
+        <span className="public-booking-time-block-range">{startLabel} - {endLabel}</span>
+        <span className="public-booking-time-block-status">{durationLabel}</span>
       </span>
       <span className="public-booking-time-block-icon" aria-hidden="true">
-        {isUnavailable ? <Lock size={15} /> : isSelected ? <Check size={16} /> : <Clock3 size={15} />}
+        {isSelected ? <Check size={16} /> : <Clock3 size={15} />}
       </span>
     </button>
   );

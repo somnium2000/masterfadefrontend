@@ -44,14 +44,14 @@ export default function ClienteAppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const { error: notifyError } = useNotifications();
-  const { user, logout, isAuthenticated, isHydrated, isHydrating, token } = useAuth();
+  const { user, logout, isAuthenticated, isHydrated, isHydrating } = useAuth();
 
   const redirectedUnauthorizedRef = useRef(false);
 
   const activeTab = useMemo(() => resolveActiveTab(location.pathname), [location.pathname]);
   const sectionTitle = useMemo(() => resolveSectionTitle(location.pathname), [location.pathname]);
   const displayName = getUserDisplayName(user);
-  const canLoadClienteProfile = Boolean(isAuthenticated && isHydrated && !isHydrating && token);
+  const canLoadClienteProfile = Boolean(isAuthenticated && isHydrated && !isHydrating  );
 
   const refreshClienteProfile = useCallback(async ({ silent = false } = {}) => {
     if (!canLoadClienteProfile) return null;
@@ -223,3 +223,4 @@ export default function ClienteAppShell() {
     </div>
   );
 }
+
