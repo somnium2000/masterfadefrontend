@@ -34,6 +34,18 @@ export async function patchAdminCitaEstado(idCita, payload) {
   return http.patch(`/v1/admin/citas/${encodeURIComponent(idCita)}/estado`, payload);
 }
 
+export async function postAdminCitaIniciarAtencion(idCita) {
+  return http.post(`/v1/admin/citas/${encodeURIComponent(idCita)}/iniciar-atencion`, {});
+}
+
+export async function postAdminCitaRegistrarLlegada(idCita) {
+  return http.post(`/v1/admin/citas/${encodeURIComponent(idCita)}/registrar-llegada`, {});
+}
+
+export async function postAdminCitaFinalizarAtencion(idCita) {
+  return http.post(`/v1/admin/citas/${encodeURIComponent(idCita)}/finalizar-atencion`, {});
+}
+
 export async function listAdminCitasAfectadasReagendacion(params = {}) {
   return http.get(`/v1/admin/citas/reagendacion/afectadas${toQueryString(params)}`);
 }

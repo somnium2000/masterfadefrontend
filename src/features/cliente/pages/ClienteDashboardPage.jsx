@@ -61,7 +61,7 @@ async function resolveFavoriteServices(citas = []) {
 export default function ClienteDashboardPage() {
   const navigate = useNavigate();
   const { error: notifyError } = useNotifications();
-  const { isAuthenticated, isHydrated, isHydrating, token, logout } = useAuth();
+  const { isAuthenticated, isHydrated, isHydrating, logout } = useAuth();
   const outletContext = useOutletContext() || {};
   const { refreshClienteProfile } = outletContext;
 
@@ -71,7 +71,7 @@ export default function ClienteDashboardPage() {
   const [favoriteServices, setFavoriteServices] = useState([]);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
 
-  const canLoadDashboard = Boolean(isAuthenticated && isHydrated && !isHydrating && token);
+  const canLoadDashboard = Boolean(isAuthenticated && isHydrated && !isHydrating  );
 
   const loadDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!canLoadDashboard) return;
@@ -232,3 +232,4 @@ export default function ClienteDashboardPage() {
     </div>
   );
 }
+

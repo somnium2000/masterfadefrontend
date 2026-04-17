@@ -58,12 +58,12 @@ function CitaCard({ cita }) {
 export default function ClienteHistorialCitasPage() {
   const navigate = useNavigate();
   const { error: notifyError } = useNotifications();
-  const { isAuthenticated, isHydrated, isHydrating, token, logout } = useAuth();
+  const { isAuthenticated, isHydrated, isHydrating, logout } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [citas, setCitas] = useState([]);
 
-  const canLoad = Boolean(isAuthenticated && isHydrated && !isHydrating && token);
+  const canLoad = Boolean(isAuthenticated && isHydrated && !isHydrating  );
 
   const loadCitas = useCallback(async () => {
     if (!canLoad) return;
@@ -151,3 +151,4 @@ export default function ClienteHistorialCitasPage() {
     </div>
   );
 }
+
