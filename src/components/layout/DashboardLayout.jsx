@@ -102,6 +102,7 @@ function buildNavModules(basePath, role) {
             path: `${basePath}/catalog/servicios`,
             subItems: [
                 { id: 'cat-servicios', label: 'Servicios', path: `${basePath}/catalog/servicios` },
+                { id: 'cortesias', label: 'Cortesías', path: `${basePath}/catalog/cortesias` },
                 { id: 'paquetes', label: 'Paquetes', path: `${basePath}/catalog/paquetes` },
                 { id: 'planes', label: 'Planes', path: `${basePath}/catalog/planes` },
                 { id: 'cat-publico', label: 'Catálogo público', path: `${basePath}/catalog/servicios/publico` },

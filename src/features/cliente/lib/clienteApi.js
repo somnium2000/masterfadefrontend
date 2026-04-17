@@ -146,6 +146,11 @@ export async function acquireClientePlan(payload) {
   return normalizeResponsePayload(response);
 }
 
+export async function cancelClientePlan(payload = {}) {
+  const response = await http.post(`${BASE}/planes/cancelar`, payload);
+  return normalizeResponsePayload(response);
+}
+
 export async function createClienteCitaHold(payload) {
   const response = await http.post(`${CITA_BASE}/hold`, payload);
   return normalizeResponsePayload(response);

@@ -44,6 +44,8 @@ function formatUpgradeBlockedMessage(details = {}) {
 
 function PlanCard({ plan, onSelect, isSpotlight = false, ctaLabel = "Quiero este plan", disabled = false, loading = false }) {
   const benefits = Array.isArray(plan?.beneficios) ? plan.beneficios : [];
+  const serviceBenefits = benefits.filter((benefit) => String(benefit?.tipo || "").toLowerCase() !== "cortesia");
+  const courtesyBenefits = benefits.filter((benefit) => String(benefit?.tipo || "").toLowerCase() === "cortesia");
   const categoryLevel = normalizePlanCategory(plan?.categoria_nivel, 1);
   const categoryTheme = getPlanCategoryTheme(categoryLevel);
   const CategoryIcon = CATEGORY_ICONS[categoryLevel] || Crown;
@@ -92,17 +94,35 @@ function PlanCard({ plan, onSelect, isSpotlight = false, ctaLabel = "Quiero este
 
       <div className="mt-4 flex-1">
         {plan.descripcion ? <p className="mb-4 text-sm leading-6 text-[var(--mf-text-2)]">{plan.descripcion}</p> : null}
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-text-2)]">Incluye</p>
-        <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--mf-text)]">
-          {benefits.map((benefit, index) => (
-            <li key={`${plan.id_plan}-${index}`} className="flex items-start gap-3">
-              <CheckCircle2 size={14} className="mt-1 shrink-0 text-[var(--mf-accent)]" />
-              <span>
-                {Number(benefit?.cantidad || 0)}x {benefit?.nombre || benefit?.codigo || "Beneficio"}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-text-2)]">Servicios incluidos</p>
+            {serviceBenefits.length ? (
+              <ul className="mt-2 space-y-2 text-sm leading-6 text-[var(--mf-text)]">
+                {serviceBenefits.map((benefit, index) => (
+                  <li key={`${plan.id_plan}-srv-${index}`} className="flex items-start gap-3">
+                    <CheckCircle2 size={14} className="mt-1 shrink-0 text-[var(--mf-accent)]" />
+                    <span>{Number(benefit?.cantidad || 0)}x {benefit?.nombre || "Servicio"}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="mt-2 text-xs text-[var(--mf-text-2)]">No incluye servicios.</p>}
+          </div>
+
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-text-2)]">Cortesias incluidas</p>
+            {courtesyBenefits.length ? (
+              <ul className="mt-2 space-y-2 text-sm leading-6 text-[var(--mf-text)]">
+                {courtesyBenefits.map((benefit, index) => (
+                  <li key={`${plan.id_plan}-cor-${index}`} className="flex items-start gap-3">
+                    <CheckCircle2 size={14} className="mt-1 shrink-0 text-[var(--mf-accent)]" />
+                    <span>{Number(benefit?.cantidad || 0)}x {benefit?.nombre || benefit?.codigo || "Cortesia"}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="mt-2 text-xs text-[var(--mf-text-2)]">No incluye cortesias.</p>}
+          </div>
+        </div>
       </div>
 
       <div className="mt-5">
