@@ -73,3 +73,26 @@ export async function getPublicCatalog({ id_sucursal } = {}) {
     packages: packagesResult.status === 'fulfilled' ? packagesResult.value?.data?.paquetes || [] : [],
   };
 }
+
+export async function searchPublicCatalog({ q, id_sucursal } = {}) {
+  const query = String(q || '').trim();
+  if (!query) {
+    return {
+      services: [],
+      packages: [],
+      plans: [],
+    };
+  }
+
+  const branchId = normalizeBranchId(id_sucursal);
+  const params = new URLSearchParams();
+  params.set('q', query);
+  if (branchId) params.set('id_sucursal', branchId);
+
+  const response = await http.get(`/v1/public/catalog/busqueda?${params.toString()}`);
+  return {
+    services: response?.data?.servicios || [],
+    packages: response?.data?.paquetes || [],
+    plans: response?.data?.planes || [],
+  };
+}

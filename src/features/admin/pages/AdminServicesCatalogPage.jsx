@@ -37,7 +37,19 @@ import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialo
 import { emitCatalogSync } from '../../../lib/catalogSync.js';
 
 function extractMessage(err) {
-    return err?.data?.error?.message || err?.message || 'Error desconocido.';
+    const apiMessage = err?.data?.error?.message;
+    if (typeof apiMessage === 'string' && apiMessage.trim()) return apiMessage.trim();
+    return 'No se pudo completar la operación de servicios.';
+}
+
+function getPendingAppointmentsWarning(err) {
+    const code = err?.data?.error?.code;
+    if (code !== 'CATALOG_SERVICE_PENDING_APPOINTMENTS_CONFIRMATION_REQUIRED') return null;
+    const total = Number(err?.data?.error?.details?.total_citas_futuras ?? 0);
+    if (!Number.isFinite(total) || total <= 0) {
+        return 'Este servicio tiene citas futuras asociadas. Confirma nuevamente para inactivarlo.';
+    }
+    return `Este servicio tiene ${total} cita(s) futura(s) asociada(s). Si continúas, quedará inactivo para agendamiento/catálogo pero se conservará en esas citas ya creadas.`;
 }
 
 /**
@@ -320,6 +332,12 @@ function buildServicioScopeKey(servicio) {
     const serviceId = String(servicio?.id_servicio ?? servicio?.id ?? '').trim() || 'servicio';
     const branchId = String(servicio?.id_sucursal ?? '').trim() || 'all';
     return `${serviceId}:${branchId}`;
+}
+
+function formatServicePrice(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) return 'Sin tarifa';
+    return `L ${numeric.toFixed(2)}`;
 }
 
 export default function AdminServicesCatalogPage() {
@@ -749,6 +767,8 @@ export default function AdminServicesCatalogPage() {
             ...servicio,
             _nextActivo: !servicio?.activo,
             _mutation_branch_id: mutationBranchId,
+            _forcePendingAppointmentsConfirm: false,
+            _pendingAppointmentsWarning: '',
         });
         setConfirmOpen(true);
     }
@@ -767,6 +787,9 @@ export default function AdminServicesCatalogPage() {
                 activo: Boolean(stateTarget._nextActivo),
                 id_sucursal: mutationBranchId,
             };
+            if (!payload.activo && stateTarget?._forcePendingAppointmentsConfirm) {
+                payload.confirmar_citas_pendientes = true;
+            }
 
             if (payload.activo && Number.isFinite(Number(stateTarget.precio_hnl))) {
                 payload.precio_hnl = Number(stateTarget.precio_hnl);
@@ -785,6 +808,16 @@ export default function AdminServicesCatalogPage() {
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
+            const pendingWarning = getPendingAppointmentsWarning(err);
+            if (pendingWarning && !stateTarget?._nextActivo) {
+                setStateTarget((prev) => (prev ? ({
+                    ...prev,
+                    _forcePendingAppointmentsConfirm: true,
+                    _pendingAppointmentsWarning: pendingWarning,
+                }) : prev));
+                notifications.warning(pendingWarning, { dedupeKey: 'servicios-state-pending-appointments' });
+                return;
+            }
             notifications.error(extractMessage(err), { dedupeKey: 'servicios-state-error' });
         } finally {
             setStateLoading(false);
@@ -824,7 +857,7 @@ export default function AdminServicesCatalogPage() {
                         }
                         fields={[
                             { label: 'Tipo', value: s.servicio_informativo ? 'Informativo' : 'Agendable' },
-                            { label: 'Precio', value: <span className="font-mono font-bold text-[var(--mf-accent)]">L {Number(s.precio_hnl).toFixed(2)}</span> },
+                            { label: 'Precio', value: <span className="font-mono font-bold text-[var(--mf-accent)]">{formatServicePrice(s.precio_hnl)}</span> },
                             { label: 'Duracion', value: `${s.duracion_min} min` },
                             ...(isSuperAdmin ? [{ label: 'Barberos', value: summarizeAssignedBarbers(s.barberos_ofrecen) }] : []),
                             { label: 'Orden visual', value: Number(s.orden_visual ?? 100) },
@@ -1037,7 +1070,7 @@ export default function AdminServicesCatalogPage() {
                                         <TableCell className="text-center text-[var(--mf-text-2)]">{s.duracion_min}</TableCell>
                                         <TableCell className="text-center text-[var(--mf-text-2)]">{Number(s.orden_visual ?? 100)}</TableCell>
                                         <TableCell className="text-right font-mono font-semibold text-[var(--mf-accent)]">
-                                            L {Number(s.precio_hnl).toFixed(2)}
+                                            {formatServicePrice(s.precio_hnl)}
                                         </TableCell>
                                         <TableCell className="text-center">
                                             <ServiceVisibilityBadge visiblePublico={Boolean(s.visible_publico)} />
@@ -1085,7 +1118,7 @@ export default function AdminServicesCatalogPage() {
 
             {/* Dialog Crear / Editar */}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogContent className={isSuperAdmin && editTarget ? 'sm:max-w-2xl' : 'sm:max-w-md'}>
+                <DialogContent className={`w-[calc(100vw-1rem)] max-h-[calc(100vh-1.5rem)] overflow-y-auto ${isSuperAdmin && editTarget ? 'sm:max-w-2xl' : 'sm:max-w-md'}`}>
                     <DialogHeader>
                         <DialogTitle>{editTarget ? 'Editar servicio' : 'Nuevo servicio'}</DialogTitle>
                         <DialogDescription className="sr-only">
@@ -1233,7 +1266,7 @@ export default function AdminServicesCatalogPage() {
                                     icon: <ToggleRight size={14} />,
                                     fields: [
                                         { label: 'Duracion', value: `${detailTarget.duracion_min ?? 0} min` },
-                                        { label: 'Precio HNL', value: `L ${Number(detailTarget.precio_hnl ?? 0).toFixed(2)}` },
+                                        { label: 'Precio HNL', value: formatServicePrice(detailTarget.precio_hnl) },
                                         { label: 'Tarifa activa', value: detailTarget.tarifa_activa ? 'Si' : 'No' },
                                     ],
                                 },
@@ -1391,13 +1424,30 @@ export default function AdminServicesCatalogPage() {
                     }
                 }}
                 tone={stateTarget?._nextActivo ? 'warning' : 'danger'}
-                title={stateTarget?._nextActivo ? 'Activar servicio' : 'Inactivar servicio'}
+                title={
+                    stateTarget?._nextActivo
+                        ? 'Activar servicio'
+                        : stateTarget?._forcePendingAppointmentsConfirm
+                            ? 'Confirmar inactivación con citas pendientes'
+                            : 'Inactivar servicio'
+                }
                 description={
                     stateTarget
-                        ? `Se ${stateTarget._nextActivo ? 'activara' : 'inactivara'} ${stateTarget.nombre_servicio}.`
+                        ? (
+                            stateTarget?._nextActivo
+                                ? `Se activara ${stateTarget.nombre_servicio}.`
+                                : stateTarget?._pendingAppointmentsWarning
+                                    || `Se inactivara ${stateTarget.nombre_servicio}.`
+                        )
                         : ''
                 }
-                confirmLabel={stateTarget?._nextActivo ? 'Activar' : 'Inactivar'}
+                confirmLabel={
+                    stateTarget?._nextActivo
+                        ? 'Activar'
+                        : stateTarget?._forcePendingAppointmentsConfirm
+                            ? 'Sí, inactivar'
+                            : 'Inactivar'
+                }
                 cancelLabel="Cancelar"
                 loading={stateLoading}
                 onConfirm={handleConfirmState}

@@ -1,12 +1,13 @@
 ﻿import { motion } from 'framer-motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Package, Scissors, Sparkles, Tag } from 'lucide-react';
+import { Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Package, Scissors, Search, Sparkles, Tag } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
   getPublicCatalog,
   listPublicCatalogBranches,
   listPublicCatalogPromotions,
+  searchPublicCatalog,
 } from '../../public/lib/catalogApi.js';
 import {
   getStoredClienteCatalogBranchId,
@@ -385,13 +386,17 @@ export default function ClienteCatalogoPage() {
   const [packages, setPackages] = useState([]);
   const [promotions, setPromotions] = useState([]);
   const [activeSection, setActiveSection] = useState('servicios');
+  const [search, setSearch] = useState('');
 
   const promotionsRef = useRef(null);
   const promotionsCarouselRef = useRef(null);
 
-  const fetchCatalogData = useCallback(async (selectedBranchId) => {
+  const fetchCatalogData = useCallback(async (selectedBranchId, searchTerm = '') => {
+    const normalizedSearch = String(searchTerm || '').trim();
     const [catalogPayload, promotionsPayload] = await Promise.all([
-      getPublicCatalog({ id_sucursal: selectedBranchId || undefined }),
+      normalizedSearch
+        ? searchPublicCatalog({ q: normalizedSearch, id_sucursal: selectedBranchId || undefined })
+        : getPublicCatalog({ id_sucursal: selectedBranchId || undefined }),
       listPublicCatalogPromotions({ id_sucursal: selectedBranchId || undefined }),
     ]);
 
@@ -412,7 +417,7 @@ export default function ClienteCatalogoPage() {
       setBranchId(resolvedBranchId);
       setStoredClienteCatalogBranchId(resolvedBranchId);
 
-      await fetchCatalogData(resolvedBranchId);
+      await fetchCatalogData(resolvedBranchId, '');
     } catch (error) {
       notifyError(error?.data?.error?.message || error?.message || 'No se pudo cargar el catálogo de cliente.');
     } finally {
@@ -440,13 +445,37 @@ export default function ClienteCatalogoPage() {
 
     setLoading(true);
     try {
-      await fetchCatalogData(nextBranchId);
+      await fetchCatalogData(nextBranchId, search);
     } catch (error) {
       notifyError(error?.data?.error?.message || error?.message || 'No se pudo actualizar el catálogo para la sucursal.');
     } finally {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    const normalizedSearch = String(search || '').trim();
+    if (!normalizedSearch) return;
+    const controller = new AbortController();
+    const timerId = window.setTimeout(() => {
+      void (async () => {
+        setLoading(true);
+        try {
+          await fetchCatalogData(branchId, normalizedSearch);
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            notifyError(error?.data?.error?.message || error?.message || 'No se pudo buscar en el catálogo.');
+          }
+        } finally {
+          if (!controller.signal.aborted) setLoading(false);
+        }
+      })();
+    }, 280);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timerId);
+    };
+  }, [branchId, fetchCatalogData, notifyError, search]);
 
   const agendables = useMemo(() => services.filter((item) => !item?.servicio_informativo), [services]);
   const sortedPromotions = useMemo(() => {
@@ -520,6 +549,20 @@ export default function ClienteCatalogoPage() {
             </select>
           </div>
         </div>
+
+        <div className="mt-3 w-full max-w-sm">
+          <label className="mf-label">Búsqueda global</label>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" size={14} />
+            <input
+              type="text"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar servicios o paquetes..."
+              className="mf-input w-full pl-11"
+            />
+          </div>
+        </div>
       </section>
 
       {loading ? (
@@ -544,7 +587,7 @@ export default function ClienteCatalogoPage() {
                 key={item.id_servicio}
                 title={item.nombre_servicio}
                 description={item.descripcion || ''}
-                price={formatPrice(item.precio_hnl)}
+                price={Number(item?.precio_hnl) > 0 ? formatPrice(item.precio_hnl) : null}
                 footer={<p className="mt-2 text-xs text-[var(--mf-text-2)]">Duración: {item.duracion_min} min</p>}
               />
             )}
@@ -565,7 +608,7 @@ export default function ClienteCatalogoPage() {
                 key={item.id_paquete}
                 title={item.nombre_paquete}
                 description={item.descripcion || ''}
-                price={formatPrice(item.precio_hnl)}
+                price={Number(item?.precio_hnl) > 0 ? formatPrice(item.precio_hnl) : null}
                 footer={Array.isArray(item.items) && item.items.length ? (
                   <ul className="mt-2 space-y-1 text-xs text-[var(--mf-text-2)]">
                     {item.items.map((detail) => (

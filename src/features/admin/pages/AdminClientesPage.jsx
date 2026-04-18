@@ -47,6 +47,11 @@ const ACCESS_LABELS = {
   bloqueado: 'Bloqueado',
   inactivo: 'Inactivo',
 };
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DNI_PATTERN = /^\d{13}$/;
+const RTN_PATTERN = /^\d{14}$/;
+const TABLE_PAGE_SIZE = 10;
+const CARDS_PAGE_SIZE = 6;
 
 const FORM_DEFAULTS = {
   nombres: '',
@@ -59,7 +64,7 @@ const FORM_DEFAULTS = {
   telefono_principal: '',
   direccion_texto: '',
   observaciones: '',
-  habilitar_acceso: false,
+  habilitar_acceso: true,
   correo_principal: '',
   id_sucursal_origen: '',
   estado: true,
@@ -93,7 +98,22 @@ function quickFilterButtonClass(isActive) {
 }
 
 function extractMessage(err) {
-  return err?.data?.error?.message || err?.message || 'Error desconocido.';
+  const rawMessage = String(err?.data?.error?.message || err?.message || '').trim();
+  if (!rawMessage) return 'No se pudo completar la operacion de clientes.';
+  const lowered = rawMessage.toLowerCase();
+  const hasSensitivePattern =
+    lowered.includes('sql')
+    || lowered.includes('syntax error')
+    || lowered.includes('supabase')
+    || lowered.includes('auth.users')
+    || lowered.includes('stack')
+    || lowered.includes('trace')
+    || lowered.includes('relation')
+    || lowered.includes('constraint');
+  if (hasSensitivePattern) {
+    return 'Ocurrio un error procesando la solicitud. Intenta nuevamente.';
+  }
+  return rawMessage;
 }
 
 function normalizeDigits(value) {
@@ -137,9 +157,16 @@ function mapClienteToForm(cliente) {
 function validateForm(values, { isEditing, selectedCliente }) {
   if (!normalizeUnicodeText(values.nombres)) return 'Nombres es obligatorio.';
   if (!normalizeUnicodeText(values.apellidos)) return 'Apellidos es obligatorio.';
-  if (!values.correo_principal.trim() || !values.correo_principal.includes('@')) {
+  const correo = values.correo_principal.trim().toLowerCase();
+  if (!correo || !EMAIL_PATTERN.test(correo)) {
     return 'Correo principal es obligatorio y debe ser valido.';
   }
+  const dni = normalizeDigits(values.dni);
+  if (!dni) return 'DNI es obligatorio.';
+  if (!DNI_PATTERN.test(dni)) return 'DNI debe tener 13 digitos.';
+  if (!normalizeUnicodeText(values.telefono_principal)) return 'Telefono es obligatorio.';
+  const rtn = normalizeDigits(values.rtn);
+  if (rtn && !RTN_PATTERN.test(rtn)) return 'RTN debe tener 14 digitos si se proporciona.';
 
   if (values.fecha_nacimiento) {
     const birth = new Date(`${values.fecha_nacimiento}T00:00:00`);
@@ -149,15 +176,6 @@ function validateForm(values, { isEditing, selectedCliente }) {
     // AM: "Fecha de cliente" no debe registrar fechas futuras para evitar trazabilidad invalida.
     const since = new Date(`${values.fecha_ingreso}T00:00:00`);
     if (since.getTime() > Date.now()) return 'Fecha de cliente no puede ser futura.';
-  }
-
-  if (values.habilitar_acceso) {
-    if (!values.id_sucursal_origen) {
-      return 'Cliente con acceso requiere sucursal de origen.';
-    }
-    if (!values.acepta_terminos) {
-      return 'Cliente con acceso debe aceptar terminos.';
-    }
   }
 
   // AM: Si el cliente ya tiene usuario interno, el acceso se administra por estado (no deshabilitando toggle).
@@ -182,7 +200,7 @@ function buildPayload(values) {
       observaciones: normalizeUnicodeText(values.observaciones) || null,
     },
     acceso: {
-      habilitar_acceso: Boolean(values.habilitar_acceso),
+      habilitar_acceso: true,
       correo_principal: values.correo_principal.trim().toLowerCase(),
     },
     cliente: {
@@ -232,6 +250,7 @@ export default function AdminClientesPage() {
   const [actionLoadingId, setActionLoadingId] = useState('');
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState(CLIENTE_FILTER_DEFAULTS);
   const notifications = useNotifications();
@@ -275,6 +294,13 @@ export default function AdminClientesPage() {
     () => Object.values(filters).filter((value) => value !== 'all').length,
     [filters]
   );
+  const currentPageSize = view === 'table' ? TABLE_PAGE_SIZE : CARDS_PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(filteredClientes.length / currentPageSize));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const pagedClientes = useMemo(() => {
+    const start = (safePage - 1) * currentPageSize;
+    return filteredClientes.slice(start, start + currentPageSize);
+  }, [currentPageSize, filteredClientes, safePage]);
 
   const activeFilterChips = useMemo(() => {
     const chips = [];
@@ -297,15 +323,22 @@ export default function AdminClientesPage() {
   function clearAllFilters() {
     setSearch('');
     setFilters(CLIENTE_FILTER_DEFAULTS);
+    setPage(1);
   }
 
   function clearFilterChip(key) {
     if (key === 'search') {
       setSearch('');
+      setPage(1);
       return;
     }
     setFilters((prev) => ({ ...prev, [key]: 'all' }));
+    setPage(1);
   }
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, filters, view]);
 
   const fetchClientes = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -385,6 +418,7 @@ export default function AdminClientesPage() {
   }
 
   async function handleSubmit() {
+    if (formLoading) return;
     const error = validateForm(formValues, { isEditing: Boolean(editingId), selectedCliente });
     if (error) {
       setFormError(error);
@@ -428,7 +462,7 @@ export default function AdminClientesPage() {
 
   async function handleToggleLifecycle() {
     const cliente = confirmTarget;
-    if (!cliente) return;
+    if (!cliente || actionLoadingId) return;
     const isActive = Boolean(cliente?.estado_cliente);
     setActionLoadingId(cliente.id_cliente);
     try {
@@ -486,8 +520,6 @@ export default function AdminClientesPage() {
       </div>
     );
   }
-
-  const lockAccessToggle = Boolean(editingId && selectedCliente?.id_usuario);
 
   return (
     <div className="space-y-4 px-2 pb-4 sm:px-4 sm:pb-6">
@@ -585,7 +617,7 @@ export default function AdminClientesPage() {
 
       {!loading && !listError && filteredClientes.length > 0 && view === 'cards' && (
         <CardsCarousel
-          items={filteredClientes}
+          items={pagedClientes}
           getItemKey={(cliente) => cliente?.id_cliente}
           renderItem={(cliente, index, pageIndex) => (
             <DataCard
@@ -618,7 +650,7 @@ export default function AdminClientesPage() {
                 </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredClientes.map((cliente) => (
+              {pagedClientes.map((cliente) => (
                 <TableRow key={cliente.id_cliente} className="border-[var(--mf-nav-border)]">
                   <TableCell className="font-medium">{cliente.nombre_completo || 'Cliente'}</TableCell>
                   <TableCell>{cliente.correo_principal || 'Sin correo'}</TableCell>
@@ -630,6 +662,35 @@ export default function AdminClientesPage() {
           </Table>
         </div>
       )}
+
+      {!loading && !listError && filteredClientes.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2">
+          <p className="text-xs text-[var(--mf-text-2)]">
+            Mostrando {pagedClientes.length} registro(s) de {filteredClientes.length}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={safePage <= 1}
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+            >
+              Anterior
+            </Button>
+            <span className="text-xs text-[var(--mf-text-2)]">Pagina {safePage} de {totalPages}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={safePage >= totalPages}
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -714,43 +775,28 @@ export default function AdminClientesPage() {
           </div>
 
           <div className="mt-3 rounded-[12px] border border-[var(--mf-nav-border)] p-3 text-sm">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={formValues.habilitar_acceso}
-                disabled={lockAccessToggle}
-                onChange={(e) => setFormValues((p) => ({ ...p, habilitar_acceso: e.target.checked }))}
-              />
-              <span>Cliente con acceso al sistema</span>
-            </label>
-
-            {lockAccessToggle && (
-              <p className="mt-2 text-xs text-[var(--mf-text-2)]">
-                Este cliente ya tiene usuario creado. Para restringir acceso usa Inactivar.
-              </p>
-            )}
-
-            {formValues.habilitar_acceso && (
-              <div className="mt-3 grid grid-cols-1 gap-2">
-                <div>
-                  <Label className="mf-label">Sucursal de acceso *</Label>
-                  <select className="mf-select mt-1" value={formValues.id_sucursal_origen} onChange={(e) => setFormValues((p) => ({ ...p, id_sucursal_origen: e.target.value }))}>
-                    <option value="">Selecciona sucursal</option>
-                    {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
-                  </select>
-                </div>
-                <p className="text-xs text-[var(--mf-text-2)]">El cliente crearÃ¡ su propia contraseÃ±a con flujo seguro.</p>
-
-                <label className="mt-1 flex items-center gap-2">
-                  <input type="checkbox" checked={formValues.consentimiento_marketing} onChange={(e) => setFormValues((p) => ({ ...p, consentimiento_marketing: e.target.checked }))} />
-                  <span>Consentimiento de marketing</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={formValues.acepta_terminos} onChange={(e) => setFormValues((p) => ({ ...p, acepta_terminos: e.target.checked }))} />
-                  <span>Aceptacion de terminos</span>
-                </label>
+            <p className="text-xs text-[var(--mf-text-2)]">
+              Cliente con acceso habilitado. Para restringir el login utiliza la accion de inactivar.
+            </p>
+            <div className="mt-3 grid grid-cols-1 gap-2">
+              <div>
+                <Label className="mf-label">Sucursal de origen (opcional)</Label>
+                <select className="mf-select mt-1" value={formValues.id_sucursal_origen} onChange={(e) => setFormValues((p) => ({ ...p, id_sucursal_origen: e.target.value }))}>
+                  <option value="">Sin sucursal de origen</option>
+                  {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
+                </select>
               </div>
-            )}
+              <p className="text-xs text-[var(--mf-text-2)]">El cliente creara su propia contrasena con flujo seguro.</p>
+
+              <label className="mt-1 flex items-center gap-2">
+                <input type="checkbox" checked={formValues.consentimiento_marketing} onChange={(e) => setFormValues((p) => ({ ...p, consentimiento_marketing: e.target.checked }))} />
+                <span>Consentimiento de marketing</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={formValues.acepta_terminos} onChange={(e) => setFormValues((p) => ({ ...p, acepta_terminos: e.target.checked }))} />
+                <span>Aceptacion de terminos</span>
+              </label>
+            </div>
           </div>
 
           {formError && <p className="mt-2 rounded-[12px] bg-red-500/10 px-3 py-2 text-sm text-red-400">{formError}</p>}

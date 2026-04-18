@@ -63,6 +63,10 @@ function extractMessage(err) {
     return err?.data?.error?.message || err?.message || 'Error desconocido.';
 }
 
+function extractErrorCode(err) {
+    return String(err?.data?.error?.code || '').trim();
+}
+
 const FORM_DEFAULTS = {
     nombre_paquete: '',
     descripcion: '',
@@ -237,12 +241,12 @@ function validateForm(values) {
     if (!values.nombre_paquete.trim()) return 'El nombre del paquete es requerido.';
 
     const precio = Number(values.precio_hnl);
-    if (!Number.isFinite(precio) || precio < 0) return 'El precio debe ser mayor o igual a 0.';
+    if (!Number.isFinite(precio) || precio <= 0) return 'El precio debe ser mayor a 0.';
     const orden = Number(values.orden_visual);
     if (!Number.isFinite(orden) || orden < 0) return 'El orden visual debe ser mayor o igual a 0.';
 
-    if (!Array.isArray(values.items) || values.items.length === 0) {
-        return 'Agrega al menos un servicio al paquete.';
+    if (!Array.isArray(values.items) || values.items.length < 2) {
+        return 'Agrega al menos 2 servicios al paquete.';
     }
 
     const seen = new Set();
@@ -370,7 +374,7 @@ function PaqueteForm({ values, onChange, serviciosList }) {
                 <Input
                     id="fp-precio"
                     type="number"
-                    min="0"
+                    min="0.01"
                     step="0.01"
                     value={values.precio_hnl}
                     onChange={(event) => onChange('precio_hnl', event.target.value)}
@@ -781,6 +785,7 @@ export default function AdminPackagesCatalogPage() {
             const response = await setAdminPaqueteEstado(stateTarget.id_paquete, {
                 activo: stateTarget._nextActivo,
                 id_sucursal: mutationBranchId,
+                confirmar_citas_pendientes: stateTarget._confirmPendingAppointments === true,
             });
             const result = response?.data ?? response;
 
@@ -799,6 +804,22 @@ export default function AdminPackagesCatalogPage() {
             }
             if (err.status === 403) {
                 navigate('/unauthorized');
+                return;
+            }
+
+            const errorCode = extractErrorCode(err);
+            if (
+                errorCode === 'CATALOG_PACKAGE_PENDING_APPOINTMENTS_CONFIRMATION_REQUIRED'
+                && stateTarget
+                && !stateTarget._nextActivo
+            ) {
+                const totalFutureAppointments = Number(err?.data?.error?.details?.total_citas_futuras || 0);
+                setStateTarget((prev) => (prev ? ({
+                    ...prev,
+                    _confirmPendingAppointments: true,
+                    _totalFutureAppointments: totalFutureAppointments,
+                }) : prev));
+                notifications.warning(extractMessage(err), { dedupeKey: 'paquetes-state-pending-warning' });
                 return;
             }
 
@@ -1256,7 +1277,11 @@ export default function AdminPackagesCatalogPage() {
                 title={stateTarget?._nextActivo ? 'Activar paquete' : 'Inactivar paquete'}
                 description={
                     stateTarget
-                        ? `Se ${stateTarget._nextActivo ? 'activara' : 'inactivara'} ${stateTarget.nombre_paquete}.`
+                        ? stateTarget._nextActivo
+                            ? `Se activara ${stateTarget.nombre_paquete}.`
+                            : stateTarget._confirmPendingAppointments
+                                ? `Este paquete tiene ${Number(stateTarget?._totalFutureAppointments || 0)} cita(s) futura(s). Al confirmar, se inactivara para nuevos usos y se conservara solo en citas ya creadas.`
+                                : `Se inactivara ${stateTarget.nombre_paquete}.`
                         : ''
                 }
                 confirmLabel={stateTarget?._nextActivo ? 'Activar' : 'Inactivar'}

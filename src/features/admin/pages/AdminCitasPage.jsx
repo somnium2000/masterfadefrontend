@@ -559,7 +559,17 @@ export default function AdminCitasPage() {
     try {
       const response = await listAdminServicios({ id_sucursal: selectedBranchId });
       const payload = response?.data ?? response;
-      setServices(Array.isArray(payload?.servicios) ? payload.servicios : []);
+      const scopedServices = Array.isArray(payload?.servicios)
+        ? payload.servicios.filter((service) => (
+          Boolean(service?.activo)
+          && Boolean(service?.tarifa_activa)
+          && service?.servicio_informativo !== true
+          && String(service?.id_sucursal || '') === String(selectedBranchId)
+          && Number.isFinite(Number(service?.precio_hnl))
+          && Number(service?.duracion_min) > 0
+        ))
+        : [];
+      setServices(scopedServices);
     } catch (err) {
       if (handleAuthError(err)) return;
       setServices([]);

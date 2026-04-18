@@ -5,41 +5,41 @@ export const DEFAULT_PLAN_CATEGORY = 1;
 const CATEGORY_BASE = [
   {
     value: 1,
-    label: "Esencial",
-    helper: "Acceso base con presencia premium.",
-    spotlight: "Entrada",
+    label: "Classic",
+    helper: "Acceso premium de entrada.",
+    spotlight: "Classic",
     accent: "#D8AF67",
     glow: "rgba(204, 163, 92, 0.45)",
   },
   {
     value: 2,
-    label: "Selecta",
-    helper: "Beneficios refinados para un ritmo frecuente.",
-    spotlight: "Evolución",
+    label: "Silver",
+    helper: "Beneficios equilibrados para clientes frecuentes.",
+    spotlight: "Silver",
     accent: "#4EB6C7",
     glow: "rgba(78, 182, 199, 0.44)",
   },
   {
     value: 3,
-    label: "Superior",
-    helper: "Balance estratégico de valor y estatus.",
-    spotlight: "Balance",
+    label: "Platinum",
+    helper: "Balance alto de valor y estatus.",
+    spotlight: "Platinum",
     accent: "#768CF6",
     glow: "rgba(118, 140, 246, 0.46)",
   },
   {
     value: 4,
-    label: "Signature",
-    helper: "Experiencia exclusiva con carácter distintivo.",
-    spotlight: "Exclusivo",
+    label: "Prestige",
+    helper: "Experiencia exclusiva con enfoque distintivo.",
+    spotlight: "Prestige",
     accent: "#E1A05F",
     glow: "rgba(225, 160, 95, 0.47)",
   },
   {
     value: 5,
-    label: "Élite",
-    helper: "Máximo nivel de prestigio MasterFade.",
-    spotlight: "Top",
+    label: "Diamond",
+    helper: "Maximo nivel de prestigio MasterFade.",
+    spotlight: "Diamond",
     accent: "#F0C270",
     glow: "rgba(240, 194, 112, 0.52)",
   },
@@ -95,4 +95,3 @@ export function getPlanCategoryTheme(value) {
 export function getPlanCategoryLabel(value) {
   return getPlanCategoryTheme(value).label;
 }
-

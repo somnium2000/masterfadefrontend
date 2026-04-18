@@ -43,6 +43,8 @@ const ACCESS_LABELS = {
   bloqueado: 'Bloqueado',
   inactivo: 'Inactivo',
 };
+const TABLE_PAGE_SIZE = 10;
+const CARDS_PAGE_SIZE = 6;
 
 const ROLE_LABELS = {
   super_admin: 'Super Admin',
@@ -65,7 +67,22 @@ function quickFilterButtonClass(isActive) {
 }
 
 function extractMessage(err) {
-  return err?.data?.error?.message || err?.message || 'Error desconocido.';
+  const rawMessage = String(err?.data?.error?.message || err?.message || '').trim();
+  if (!rawMessage) return 'No se pudo completar la operacion de usuarios.';
+  const lowered = rawMessage.toLowerCase();
+  const hasSensitivePattern =
+    lowered.includes('sql')
+    || lowered.includes('syntax error')
+    || lowered.includes('supabase')
+    || lowered.includes('auth.users')
+    || lowered.includes('stack')
+    || lowered.includes('trace')
+    || lowered.includes('relation')
+    || lowered.includes('constraint');
+  if (hasSensitivePattern) {
+    return 'Ocurrio un error procesando la solicitud. Intenta nuevamente.';
+  }
+  return rawMessage;
 }
 
 function AccessBadge({ estadoAcceso }) {
@@ -111,6 +128,7 @@ export default function AdminUsuariosPage() {
   const [selectedUsuario, setSelectedUsuario] = useState(null);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState(USER_FILTER_DEFAULTS);
   const notifications = useNotifications();
@@ -177,6 +195,13 @@ export default function AdminUsuariosPage() {
     () => Object.values(filters).filter((value) => value !== 'all').length,
     [filters]
   );
+  const currentPageSize = view === 'table' ? TABLE_PAGE_SIZE : CARDS_PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(filteredUsuarios.length / currentPageSize));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const pagedUsuarios = useMemo(() => {
+    const start = (safePage - 1) * currentPageSize;
+    return filteredUsuarios.slice(start, start + currentPageSize);
+  }, [currentPageSize, filteredUsuarios, safePage]);
 
   const activeFilterChips = useMemo(() => {
     const chips = [];
@@ -199,15 +224,22 @@ export default function AdminUsuariosPage() {
   function clearAllFilters() {
     setSearch('');
     setFilters(USER_FILTER_DEFAULTS);
+    setPage(1);
   }
 
   function clearFilterChip(key) {
     if (key === 'search') {
       setSearch('');
+      setPage(1);
       return;
     }
     setFilters((prev) => ({ ...prev, [key]: 'all' }));
+    setPage(1);
   }
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, filters, view]);
 
   const fetchUsuarios = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -241,6 +273,7 @@ export default function AdminUsuariosPage() {
   }
 
   async function runUserAction(userId, action, options) {
+    if (!userId || loadingUserId) return;
     const successMessage = options?.successMessage || 'Operacion completada.';
     const loadingMessage = options?.loadingMessage || '';
     const loadingId = loadingMessage
@@ -283,23 +316,23 @@ export default function AdminUsuariosPage() {
   }
 
   async function handleResendSetup(idUsuario) {
+    if (!idUsuario || loadingUserId) return;
     await runUserAction(
       idUsuario,
       async (userId) => {
         const response = await sendAdminPersonaUserPasswordSetup(userId, { marcar_pendiente_password: true });
         const payload = response?.data ?? response;
         if (!payload?.setup_password?.enviado) {
-          const errorMessage = payload?.setup_password?.mensaje || 'No se pudo enviar el mensaje de configuración.';
-          const error = new Error(errorMessage);
-          // AM: Normaliza error de servicio SMTP para mantener feedback consistente en UI.
-          error.data = { error: { message: errorMessage } };
+          const message = payload?.setup_password?.mensaje || 'No se pudo enviar el mensaje de configuracion en este momento.';
+          const error = new Error(message);
+          error.data = { error: { message } };
           throw error;
         }
         return response;
       },
       {
-        successMessage: 'Mensaje de nueva contraseña enviado.',
-        loadingMessage: 'Enviando mensaje de configuración...',
+        successMessage: 'Mensaje de nueva contrasena enviado.',
+        loadingMessage: 'Enviando mensaje de configuracion...',
         loadingDedupeKey: 'personas-usuarios-resend-loading',
       }
     );
@@ -453,7 +486,7 @@ export default function AdminUsuariosPage() {
 
       {!loading && !listError && filteredUsuarios.length > 0 && view === 'cards' && (
         <CardsCarousel
-          items={filteredUsuarios}
+          items={pagedUsuarios}
           getItemKey={(usuario) => usuario?.id_usuario}
           renderItem={(usuario, index, pageIndex) => (
             <DataCard
@@ -487,7 +520,7 @@ export default function AdminUsuariosPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredUsuarios.map((usuario) => (
+              {pagedUsuarios.map((usuario) => (
                 <TableRow key={usuario.id_usuario} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">
                   <TableCell className="font-medium text-[var(--mf-text)]">{usuario.nombre_completo || 'Usuario'}</TableCell>
                   <TableCell className="text-[var(--mf-text-2)] text-sm">{usuario.email || 'Sin correo'}</TableCell>
@@ -500,6 +533,35 @@ export default function AdminUsuariosPage() {
           </Table>
         </div>
       )}
+
+      {!loading && !listError && filteredUsuarios.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2">
+          <p className="text-xs text-[var(--mf-text-2)]">
+            Mostrando {pagedUsuarios.length} registro(s) de {filteredUsuarios.length}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={safePage <= 1}
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+            >
+              Anterior
+            </Button>
+            <span className="text-xs text-[var(--mf-text-2)]">Pagina {safePage} de {totalPages}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={safePage >= totalPages}
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-4xl">
@@ -541,7 +603,14 @@ export default function AdminUsuariosPage() {
                   icon: <Building2 size={14} />,
                   fields: [
                     { label: 'Origen', value: selectedUsuario.origen || 'interno' },
-                    { label: 'Usuario', value: selectedUsuario.id_usuario || '-' },
+                    {
+                      label: 'Perfil vinculado',
+                      value: selectedUsuario.tiene_empleado
+                        ? 'Empleado'
+                        : selectedUsuario.tiene_cliente
+                          ? 'Cliente'
+                          : 'Super Admin interno',
+                    },
                   ],
                 },
               ]}
@@ -627,7 +696,7 @@ export default function AdminUsuariosPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFilters(USER_FILTER_DEFAULTS)}>
+            <Button variant="outline" onClick={() => { setFilters(USER_FILTER_DEFAULTS); setPage(1); }}>
               Limpiar filtros
             </Button>
             <Button onClick={() => setFiltersOpen(false)}>Cerrar</Button>
@@ -655,3 +724,4 @@ export default function AdminUsuariosPage() {
     </div>
   );
 }
+

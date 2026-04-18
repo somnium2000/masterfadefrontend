@@ -2,7 +2,7 @@ import { http } from '../../../services/httpClient.js';
 
 const BASE = '/v1/admin/personas';
 
-// AM: Cliente API central del modulo Personas para SUPER_ADMIN.
+// AM: Cliente API central del modulo Personas (permisos segun cada ruta).
 export async function listAdminPersonas() {
   return http.get(BASE);
 }
