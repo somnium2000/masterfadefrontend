@@ -372,6 +372,8 @@ export default function BarberoHomePage() {
       setNowMs(Date.now());
     }, 60000);
 
+    // AM: Polling cada 30s es intencional — dashboard operativo en vivo.
+    // El guard de in-flight en fetchDashboard evita ráfagas si la red es lenta.
     const refreshId = window.setInterval(() => {
       void fetchDashboard({ silent: true });
     }, 30000);

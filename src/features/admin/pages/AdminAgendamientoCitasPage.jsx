@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -433,7 +433,8 @@ export default function AdminAgendamientoCitasPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_reagendaciones' }, () => { scheduleLiveRefresh(); })
       .subscribe((status) => {
         realtimeStatusRef.current = status;
-        if (status === 'SUBSCRIBED') scheduleLiveRefresh({ immediate: true });
+        // Se omite el refresh en SUBSCRIBED para evitar ráfaga doble de red en el montaje, 
+        // ya que el useEffect superior ya dispara fetchCitas.
       });
     return () => {
       if (liveRefreshTimeoutRef.current) {

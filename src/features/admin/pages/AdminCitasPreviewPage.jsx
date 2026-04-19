@@ -20,6 +20,7 @@ import {
   listPublicAgendaBarberos,
   listPublicAgendaDisponibilidad,
   listPublicAgendaHorarios,
+  listPublicCatalogPaquetes,
   listPublicCatalogServicios,
 } from '../../public/booking/publicBookingApi.js';
 import {
@@ -101,14 +102,22 @@ function normalizeBookingBlock(block, index) {
   const nextServiceIds = Array.isArray(block?.serviceIds)
     ? Array.from(new Set(block.serviceIds.map((id) => String(id || '').trim()).filter(Boolean)))
     : [];
+  const contactName = String(block?.contactName || '').trim();
+  const resolvedAlias = contactName || String(block?.alias || '').trim() || fallbackAlias;
 
   return {
     id: String(block?.id || '').trim() || createBlockId(),
-    alias: String(block?.alias || '').trim() || fallbackAlias,
+    alias: resolvedAlias,
     idBarbero: String(block?.idBarbero || '').trim(),
+    selectionType: String(block?.selectionType || 'services').trim().toLowerCase() === 'package' ? 'package' : 'services',
+    packageId: String(block?.packageId || '').trim(),
     serviceIds: nextServiceIds,
     selectedDate: String(block?.selectedDate || '').trim(),
     selectedTime: String(block?.selectedTime || '').trim(),
+    // AM: Campos de contacto deben persistir a través de normalizaciones.
+    contactName,
+    contactEmail: String(block?.contactEmail || '').trim(),
+    contactPhone: String(block?.contactPhone || '').trim(),
   };
 }
 
@@ -117,8 +126,13 @@ function areBlocksEqual(left, right) {
   return left.id === right.id
     && left.alias === right.alias
     && left.idBarbero === right.idBarbero
+    && left.selectionType === right.selectionType
+    && left.packageId === right.packageId
     && left.selectedDate === right.selectedDate
     && left.selectedTime === right.selectedTime
+    && left.contactName === right.contactName
+    && left.contactEmail === right.contactEmail
+    && left.contactPhone === right.contactPhone
     && areServiceIdsEqual(left.serviceIds, right.serviceIds);
 }
 
@@ -128,9 +142,14 @@ function createBookingBlock({ alias = '', idBarbero = '' } = {}) {
       id: createBlockId(),
       alias,
       idBarbero,
+      selectionType: 'services',
+      packageId: '',
       serviceIds: [],
       selectedDate: '',
       selectedTime: '',
+      contactName: '',
+      contactEmail: '',
+      contactPhone: '',
     },
     alias === 'Titular' ? 0 : 1
   );
@@ -156,6 +175,8 @@ export default function AdminCitasPreviewPage() {
 
   const [servicesLoading, setServicesLoading] = useState(false);
   const [services, setServices] = useState([]);
+  const [packagesLoading, setPackagesLoading] = useState(false);
+  const [packages, setPackages] = useState([]);
 
   const [bookingBlocks, setBookingBlocks] = useState(() => [createBookingBlock({ alias: 'Titular' })]);
   const [activeBlockIndex, setActiveBlockIndex] = useState(0);
@@ -209,6 +230,8 @@ export default function AdminCitasPreviewPage() {
     () => (Array.isArray(activeBlock?.serviceIds) ? activeBlock.serviceIds : []),
     [activeBlock]
   );
+  const selectionType = activeBlock?.selectionType || 'services';
+  const selectedPackageId = activeBlock?.packageId || '';
   const selectedDate = activeBlock?.selectedDate || '';
   const selectedTime = activeBlock?.selectedTime || '';
 
@@ -255,6 +278,20 @@ export default function AdminCitasPreviewPage() {
     [activeBlockBarberId, barbersById]
   );
 
+  const packagesById = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(packages) ? packages : []).forEach((pkg) => {
+      if (!pkg?.id_paquete) return;
+      map.set(pkg.id_paquete, pkg);
+    });
+    return map;
+  }, [packages]);
+
+  const selectedPackage = useMemo(
+    () => packagesById.get(selectedPackageId) || null,
+    [packagesById, selectedPackageId]
+  );
+
   const servicesById = useMemo(() => {
     const map = new Map();
     (Array.isArray(services) ? services : []).forEach((service) => {
@@ -274,26 +311,39 @@ export default function AdminCitasPreviewPage() {
   const bookingBlocksSummary = useMemo(
     () =>
       bookingBlocks.map((block, index) => {
-        const blockServices = block.serviceIds
+        const blockServices = (Array.isArray(block.serviceIds) ? block.serviceIds : [])
           .map((serviceId) => servicesById.get(serviceId))
           .filter(Boolean);
         const blockTotal = blockServices.reduce((total, service) => total + Number(service?.precio_hnl || 0), 0);
+        const blockPackage = packagesById.get(block.packageId) || null;
+        
+        let finalTotal = blockTotal;
+        if (block.selectionType === 'package' && blockPackage) {
+            finalTotal = blockPackage.precio_hnl != null ? Number(blockPackage.precio_hnl) : blockTotal;
+        }
+
+        const contactName = String(block?.contactName || '').trim();
+        const hasSelection = block.selectionType === 'package' ? Boolean(block.packageId) : blockServices.length > 0;
+
         return {
           ...block,
           index,
           alias: block.alias || (index === 0 ? 'Titular' : `Acompañante ${index}`),
           barbero: barbersById.get(block.idBarbero) || null,
           selectedServices: blockServices,
-          total_hnl: blockTotal,
+          selection_type: block.selectionType || 'services',
+          selectedPackage: blockPackage,
+          total_hnl: finalTotal,
           isComplete: Boolean(
             block.idBarbero
-              && blockServices.length > 0
+              && hasSelection
               && block.selectedDate
               && block.selectedTime
+              && contactName
           ),
         };
       }),
-    [bookingBlocks, servicesById, barbersById]
+    [bookingBlocks, servicesById, barbersById, packagesById]
   );
 
   const totalToPay = useMemo(
@@ -429,21 +479,26 @@ export default function AdminCitasPreviewPage() {
     setAvailabilityError('');
 
     try {
-      const [barbersResponse, servicesResponse] = await Promise.all([
+      const [barbersResponse, servicesResponse, packagesResponse] = await Promise.all([
         listPublicAgendaBarberos({ id_sucursal: selectedBranchId }),
         listPublicCatalogServicios({ id_sucursal: selectedBranchId }),
+        listPublicCatalogPaquetes({ id_sucursal: selectedBranchId }),
       ]);
       if (requestSeq !== branchDataRequestSeqRef.current) return;
 
       const barbersPayload = barbersResponse?.data ?? barbersResponse;
       const servicesPayload = servicesResponse?.data ?? servicesResponse;
+      const packagesPayload = packagesResponse?.data ?? packagesResponse;
+      
       const nextBarbers = Array.isArray(barbersPayload?.barberos) ? barbersPayload.barberos : [];
       const nextServices = Array.isArray(servicesPayload?.servicios) ? servicesPayload.servicios : [];
+      const nextPackages = Array.isArray(packagesPayload?.paquetes) ? packagesPayload.paquetes : [];
       const validBarberIds = new Set(nextBarbers.map((barber) => barber.id_empleado));
       const fallbackBarberId = nextBarbers[0]?.id_empleado || '';
 
       setBarbers(nextBarbers);
       setServices(nextServices);
+      setPackages(nextPackages);
 
       setBookingBlocks((prev) => {
         const sourceBlocks = prev.length > 0
@@ -487,13 +542,14 @@ export default function AdminCitasPreviewPage() {
   }, [notifications, selectedBranchId]);
 
   const fetchAvailability = useCallback(async () => {
-    if (!selectedBranchId || !activeBlockBarberId || !servicesCsv) {
+    const hasSelection = selectionType === 'package' ? Boolean(selectedPackageId) : Boolean(servicesCsv);
+    if (!selectedBranchId || !activeBlockBarberId || !hasSelection) {
       setAvailabilityMap({});
       setAvailabilityLoading(false);
       return;
     }
 
-    const cacheKey = [selectedBranchId, activeBlockBarberId, servicesCsv, monthRange.from, monthRange.to].join('|');
+    const cacheKey = [selectedBranchId, activeBlockBarberId || 'auto', selectionType, selectedPackageId, servicesCsv, monthRange.from, monthRange.to].join('|');
     const cached = availabilityCacheRef.current.get(cacheKey);
     if (cached) {
       setAvailabilityMap(cached);
@@ -526,8 +582,10 @@ export default function AdminCitasPreviewPage() {
       const response = await listPublicAgendaDisponibilidad(
         {
           id_sucursal: selectedBranchId,
-          id_barbero: activeBlockBarberId,
-          servicios: servicesCsv,
+          id_barbero: activeBlockBarberId || undefined,
+          selection_type: selectionType,
+          servicios: selectionType === 'services' ? servicesCsv : undefined,
+          id_paquete: selectionType === 'package' ? selectedPackageId : undefined,
           fecha_desde: monthRange.from,
           fecha_hasta: monthRange.to,
         },
@@ -574,17 +632,20 @@ export default function AdminCitasPreviewPage() {
     selectedBranchId,
     selectedDate,
     servicesCsv,
+    selectionType,
+    selectedPackageId,
     updateBlockAtIndex,
   ]);
 
   const fetchSlots = useCallback(async () => {
-    if (!selectedBranchId || !activeBlockBarberId || !servicesCsv || !selectedDate) {
+    const hasSelection = selectionType === 'package' ? Boolean(selectedPackageId) : Boolean(servicesCsv);
+    if (!selectedBranchId || !activeBlockBarberId || !hasSelection || !selectedDate) {
       setSlots(buildDefaultSlots());
       setSlotsLoading(false);
       return;
     }
 
-    const cacheKey = [selectedBranchId, activeBlockBarberId, servicesCsv, selectedDate].join('|');
+    const cacheKey = [selectedBranchId, activeBlockBarberId || 'auto', selectionType, selectedPackageId, servicesCsv, selectedDate].join('|');
     const cached = slotsCacheRef.current.get(cacheKey);
     if (cached) {
       setSlots(cached);
@@ -605,8 +666,10 @@ export default function AdminCitasPreviewPage() {
       const response = await listPublicAgendaHorarios(
         {
           id_sucursal: selectedBranchId,
-          id_barbero: activeBlockBarberId,
-          servicios: servicesCsv,
+          id_barbero: activeBlockBarberId || undefined,
+          selection_type: selectionType,
+          servicios: selectionType === 'services' ? servicesCsv : undefined,
+          id_paquete: selectionType === 'package' ? selectedPackageId : undefined,
           fecha: selectedDate,
         },
         { signal: controller.signal }
@@ -649,22 +712,27 @@ export default function AdminCitasPreviewPage() {
     selectedDate,
     selectedTime,
     servicesCsv,
+    selectionType,
+    selectedPackageId,
     updateBlockAtIndex,
   ]);
 
-  const fetchSlotsForBarber = useCallback(async ({ barberId, dateKey, servicesCsvValue }) => {
-    if (!selectedBranchId || !barberId || !dateKey || !servicesCsvValue) {
+  const fetchSlotsForBarber = useCallback(async ({ barberId, dateKey, servicesCsvValue, selectionTypeValue, packageIdValue }) => {
+    const hasSel = selectionTypeValue === 'package' ? Boolean(packageIdValue) : Boolean(servicesCsvValue);
+    if (!selectedBranchId || !barberId || !dateKey || !hasSel) {
       return buildDefaultSlots();
     }
 
-    const cacheKey = [selectedBranchId, barberId, servicesCsvValue, dateKey].join('|');
+    const cacheKey = [selectedBranchId, barberId, selectionTypeValue, packageIdValue, servicesCsvValue, dateKey].join('|');
     const cached = slotsCacheRef.current.get(cacheKey);
     if (cached) return cached;
 
     const response = await listPublicAgendaHorarios({
       id_sucursal: selectedBranchId,
       id_barbero: barberId,
-      servicios: servicesCsvValue,
+      selection_type: selectionTypeValue,
+      servicios: selectionTypeValue === 'services' ? servicesCsvValue : undefined,
+      id_paquete: selectionTypeValue === 'package' ? packageIdValue : undefined,
       fecha: dateKey,
     });
 
@@ -911,23 +979,34 @@ export default function AdminCitasPreviewPage() {
 
   const toggleService = useCallback((serviceId) => {
     if (!serviceId) return;
+    const currentBlock = bookingBlocks[effectiveActiveBlockIndex];
+    const contactName = String(currentBlock?.contactName || '').trim();
+    if (!contactName) {
+      notifications.warning(
+        effectiveActiveBlockIndex === 0
+          ? 'Completa el nombre del titular antes de elegir servicios.'
+          : 'Completa el nombre del acompañante antes de elegir servicios.',
+        { dedupeKey: 'public-booking-contact-name-required' }
+      );
+      return;
+    }
 
-    updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => {
-      const exists = currentBlock.serviceIds.includes(serviceId);
+    updateBlockAtIndex(effectiveActiveBlockIndex, (block) => {
+      const exists = (Array.isArray(block.serviceIds) ? block.serviceIds : []).includes(serviceId);
       const nextServiceIds = exists
-        ? currentBlock.serviceIds.filter((id) => id !== serviceId)
-        : [...currentBlock.serviceIds, serviceId];
+        ? block.serviceIds.filter((id) => id !== serviceId)
+        : [...(block.serviceIds || []), serviceId];
 
       return {
-        ...currentBlock,
+        ...block,
         serviceIds: nextServiceIds,
-        selectedDate: nextServiceIds.length > 0 ? currentBlock.selectedDate : '',
+        selectedDate: nextServiceIds.length > 0 ? block.selectedDate : '',
         selectedTime: '',
       };
     });
 
     resetAvailabilityViewState();
-  }, [effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
+  }, [bookingBlocks, effectiveActiveBlockIndex, notifications, resetAvailabilityViewState, updateBlockAtIndex]);
 
   const updateActiveBlockBarber = useCallback((barberId) => {
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
@@ -939,6 +1018,26 @@ export default function AdminCitasPreviewPage() {
 
     resetAvailabilityViewState();
   }, [effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
+
+  const selectSelectionType = useCallback((type) => {
+    updateBlockAtIndex(effectiveActiveBlockIndex, {
+      selectionType: type,
+      packageId: '',
+      serviceIds: [],
+      selectedDate: '',
+      selectedTime: '',
+    });
+  }, [effectiveActiveBlockIndex, updateBlockAtIndex]);
+
+  const selectPackage = useCallback((pkgId) => {
+    updateBlockAtIndex(effectiveActiveBlockIndex, {
+      selectionType: 'package',
+      packageId: pkgId,
+      serviceIds: [],
+      selectedDate: '',
+      selectedTime: '',
+    });
+  }, [effectiveActiveBlockIndex, updateBlockAtIndex]);
 
   const selectSuggestedBarber = useCallback((barberId) => {
     const nextBarberId = String(barberId || '').trim();
@@ -1212,6 +1311,25 @@ export default function AdminCitasPreviewPage() {
       selectBarber,
       selectBranch,
       fetchAvailability,
+      packages,
+      packagesLoading,
+      selectionType,
+      selectedPackage,
+      selectedPackageId,
+      selectPackage,
+      selectSelectionType,
+      selectedServicesDurationSum: selectedServices.reduce(
+        (total, service) => total + Number(service?.duracion_min || 0),
+        0
+      ),
+      updateActiveBlockContact: (patch) => {
+        updateBlockAtIndex(effectiveActiveBlockIndex, (block) => {
+          const next = { ...block, ...patch };
+          const normalizedName = String(next.contactName || '').trim();
+          next.alias = normalizedName || (effectiveActiveBlockIndex === 0 ? 'Titular' : `Acompañante ${effectiveActiveBlockIndex}`);
+          return next;
+        });
+      },
     }),
     [
       activeBlock,
@@ -1269,6 +1387,7 @@ export default function AdminCitasPreviewPage() {
       toggleService,
       totalToPay,
       updateActiveBlockBarber,
+      updateBlockAtIndex,
       selectBarber,
       selectBranch,
     ]

@@ -51,12 +51,12 @@ export default function ProtectedRoute({ children, allowedRoles }) {
     };
   }, [hydrateSession, needsRouteRehydration]);
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
   if (isHydrating || needsRouteRehydration) {
     return <ProtectedRouteLoader />;
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
   }
 
   if (allowedRoles && allowedRoles.length > 0) {
