@@ -22,7 +22,7 @@ import PremiumBottomNav from "../../../components/navigation/PremiumBottomNav.js
 import ThemeSwitcher from "../../../components/theme/ThemeSwitcher.jsx";
 import { useAuth } from "../../../context/AuthContext.jsx";
 import { useNotifications } from "../../../context/NotificationsContext.jsx";
-import { listPublicCatalogBranches, listPublicCatalogPlans } from "../lib/catalogApi.js";
+import { listPublicCatalogBranches, listPublicCatalogPlans, searchPublicCatalog } from "../lib/catalogApi.js";
 import { subscribeCatalogSync } from "../../../lib/catalogSync.js";
 import { getPlanCategoryTheme, normalizePlanCategory } from "../../plans/lib/planCategoryTheme.js";
 import { acquireClientePlan, getClientePlanEstado } from "../../cliente/lib/clienteApi.js";
@@ -127,7 +127,7 @@ function PlanCard({ plan, onSelect, isSpotlight = false, ctaLabel = "Quiero este
 
       <div className="mt-5">
         <p className="text-3xl font-semibold text-[var(--mf-text)]">
-          {Number.isFinite(Number(plan?.precio_hnl)) ? `L ${Number(plan.precio_hnl).toFixed(2)}` : "Precio por confirmar"}
+          {`L ${Number(plan.precio_hnl).toFixed(2)}`}
         </p>
       </div>
 
@@ -164,20 +164,31 @@ export default function MembershipPlansPage() {
   const [selectedBranchId, setSelectedBranchId] = useState("");
   const [plans, setPlans] = useState([]);
   const [errorMessage, setErrorMessage] = useState("");
+  const [search, setSearch] = useState("");
   const [membershipState, setMembershipState] = useState(null);
   const [membershipLoading, setMembershipLoading] = useState(false);
   const [acquiringPlanId, setAcquiringPlanId] = useState("");
 
   const scrollRef = useRef(null);
 
-  const loadPlans = useCallback(async ({ silent = false, branchId = selectedBranchRef.current } = {}) => {
+  const loadPlans = useCallback(async ({ silent = false, branchId = selectedBranchRef.current, searchTerm = "" } = {}) => {
     if (!silent) setStatus("loading");
     setErrorMessage("");
 
     try {
-      const result = await listPublicCatalogPlans({ id_sucursal: branchId || undefined });
+      const normalizedSearch = String(searchTerm || "").trim();
+      const result = normalizedSearch
+        ? await searchPublicCatalog({ q: normalizedSearch, id_sucursal: branchId || undefined })
+        : await listPublicCatalogPlans({ id_sucursal: branchId || undefined });
       if (!isMountedRef.current) return;
-      setPlans(result.plans);
+      const rawPlans = Array.isArray(result?.plans) ? result.plans : [];
+      const validPlans = rawPlans.filter((plan) => {
+        const price = Number(plan?.precio_hnl);
+        if (!Number.isFinite(price) || price <= 0) return false;
+        const benefits = Array.isArray(plan?.beneficios) ? plan.beneficios : [];
+        return benefits.some((benefit) => String(benefit?.tipo || "").toLowerCase() === "servicio");
+      });
+      setPlans(validPlans);
       setStatus("success");
     } catch (error) {
       if (!isMountedRef.current) return;
@@ -230,7 +241,7 @@ export default function MembershipPlansPage() {
           selectedBranchRef.current = initialBranchId;
           setSelectedBranchId(initialBranchId);
 
-          await loadPlans({ branchId: initialBranchId });
+          await loadPlans({ branchId: initialBranchId, searchTerm: search });
         } catch (error) {
           if (!isMountedRef.current) return;
           setErrorMessage(error?.data?.error?.message || error?.message || "No se pudo cargar membresías.");
@@ -242,14 +253,14 @@ export default function MembershipPlansPage() {
     const unsubscribe = subscribeCatalogSync(() => {
       if (!isMountedRef.current) return;
       // AM: Refresco silencioso para mantener pantalla VIP alineada con cambios del admin.
-      void loadPlans({ silent: true, branchId: selectedBranchRef.current });
+      void loadPlans({ silent: true, branchId: selectedBranchRef.current, searchTerm: search });
     });
 
     return () => {
       isMountedRef.current = false;
       unsubscribe();
     };
-  }, [loadPlans]);
+  }, [loadPlans, search]);
 
   useEffect(() => {
     if (!isClienteSession) {
@@ -260,11 +271,19 @@ export default function MembershipPlansPage() {
     void loadMembershipState({ notifyOnError: true });
   }, [isClienteSession, loadMembershipState]);
 
+  useEffect(() => {
+    if (status === "loading") return;
+    const timerId = window.setTimeout(() => {
+      void loadPlans({ silent: true, branchId: selectedBranchRef.current, searchTerm: search });
+    }, 280);
+    return () => window.clearTimeout(timerId);
+  }, [loadPlans, search, status]);
+
   function handleBranchChange(nextBranchId) {
     if (!nextBranchId || nextBranchId === selectedBranchRef.current) return;
     selectedBranchRef.current = nextBranchId;
     setSelectedBranchId(nextBranchId);
-    void loadPlans({ branchId: nextBranchId, silent: true });
+    void loadPlans({ branchId: nextBranchId, silent: true, searchTerm: search });
   }
 
   function handleScroll(direction) {

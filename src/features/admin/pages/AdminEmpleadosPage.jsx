@@ -69,7 +69,7 @@ const FORM_DEFAULTS = {
   id_sucursal: '',
   fecha_ingreso: '',
   salario_base: '',
-  rol_principal: 'admin',
+  roles: ['admin'],
 };
 
 const EMPLEADO_FILTER_DEFAULTS = {
@@ -83,6 +83,8 @@ const EMPLEADO_ESTADO_LABELS = {
   activo: 'Laboral: Activo',
   inactivo: 'Laboral: Inactivo',
 };
+const TABLE_PAGE_SIZE = 10;
+const CARDS_PAGE_SIZE = 6;
 
 function quickFilterButtonClass(isActive) {
   // AM: Estado visual montado para que el usuario identifique filtros rapidos activos al instante.
@@ -92,7 +94,7 @@ function quickFilterButtonClass(isActive) {
 }
 
 function extractMessage(err) {
-  return err?.data?.error?.message || err?.message || 'Error desconocido.';
+  return err?.data?.error?.message || 'No se pudo completar la operación. Intenta nuevamente.';
 }
 
 function toDateTimeIso(dateValue) {
@@ -110,12 +112,26 @@ function normalizeUnicodeText(value) {
   return String(value || '').normalize('NFC').trim();
 }
 
-function resolvePrimaryRole(roles) {
-  const currentRoles = Array.isArray(roles) ? roles : [];
-  if (currentRoles.includes('super_admin')) return 'super_admin';
-  if (currentRoles.includes('admin')) return 'admin';
-  if (currentRoles.includes('barbero')) return 'barbero';
-  return 'admin';
+function normalizeRoleCodes(values) {
+  if (!Array.isArray(values)) return [];
+  return [...new Set(values.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean))];
+}
+
+function formatRoleLabels(roles, labelByCode) {
+  const currentRoles = normalizeRoleCodes(roles);
+  if (!currentRoles.length) return '-';
+  return currentRoles.map((role) => labelByCode[role] || role).join(', ');
+}
+
+function hasRole(roles, roleCode) {
+  return normalizeRoleCodes(roles).includes(roleCode);
+}
+
+function toggleRoleSelection(currentRoles, roleCode, enabled) {
+  const next = new Set(normalizeRoleCodes(currentRoles));
+  if (enabled) next.add(roleCode);
+  else next.delete(roleCode);
+  return [...next];
 }
 
 function mapEmpleadoToForm(empleado) {
@@ -133,21 +149,28 @@ function mapEmpleadoToForm(empleado) {
     id_sucursal: empleado?.id_sucursal || '',
     fecha_ingreso: empleado?.fecha_ingreso ? String(empleado.fecha_ingreso).slice(0, 10) : '',
     salario_base: empleado?.salario_base ?? '',
-    rol_principal: resolvePrimaryRole(empleado?.roles),
+    roles: normalizeRoleCodes(empleado?.roles),
   };
 }
 
 function validateForm(values) {
   if (!normalizeUnicodeText(values.nombres)) return 'Nombres es obligatorio.';
   if (!normalizeUnicodeText(values.apellidos)) return 'Apellidos es obligatorio.';
-  if (!values.correo_principal.trim() || !values.correo_principal.includes('@')) return 'Correo de acceso invalido.';
+  if (!values.correo_principal.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.correo_principal.trim())) return 'Correo de acceso invalido.';
   if (!values.id_sucursal) return 'Sucursal es obligatoria.';
+  if (!normalizeRoleCodes(values.roles).length) return 'Debes seleccionar al menos un rol.';
 
   const birth = values.fecha_nacimiento ? new Date(`${values.fecha_nacimiento}T00:00:00`) : null;
   if (birth && birth.getTime() > Date.now()) return 'fecha_nacimiento no puede ser futura.';
 
   const dni = normalizeDigits(values.dni);
-  if (dni && !DNI_PATTERN.test(dni)) return 'DNI debe tener 13 digitos.';
+  if (!dni) return 'DNI es obligatorio.';
+  if (!DNI_PATTERN.test(dni)) return 'DNI debe tener 13 digitos.';
+
+  const rtn = normalizeDigits(values.rtn);
+  if (rtn && !/^\d{14}$/.test(rtn)) return 'RTN debe tener 14 digitos.';
+
+  if (!normalizeUnicodeText(values.telefono_principal)) return 'Telefono es obligatorio.';
 
   const salary = values.salario_base === '' ? null : Number(values.salario_base);
   if (salary !== null && (!Number.isFinite(salary) || salary < 0)) return 'Salario base debe ser >= 0.';
@@ -156,7 +179,8 @@ function validateForm(values) {
 }
 
 function buildPayload(values) {
-  const rolPrincipal = values.rol_principal;
+  const roles = normalizeRoleCodes(values.roles);
+  const esBarbero = roles.includes('barbero');
   return {
     persona: {
       nombres: normalizeUnicodeText(values.nombres),
@@ -171,14 +195,13 @@ function buildPayload(values) {
     },
     acceso: {
       correo_principal: values.correo_principal.trim().toLowerCase(),
-      roles: [rolPrincipal],
+      roles,
     },
     empleado: {
       id_sucursal: values.id_sucursal,
       fecha_ingreso: toDateTimeIso(values.fecha_ingreso),
       salario_base: values.salario_base === '' ? null : Number(values.salario_base),
-      // AM: Regla UX simplificada: rol principal barbero determina es_barbero.
-      es_barbero: rolPrincipal === 'barbero',
+      es_barbero: esBarbero,
     },
   };
 }
@@ -216,6 +239,7 @@ export default function AdminEmpleadosPage() {
   const [selectedEmpleado, setSelectedEmpleado] = useState(null);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState(EMPLEADO_FILTER_DEFAULTS);
   const notifications = useNotifications();
@@ -272,7 +296,7 @@ export default function AdminEmpleadosPage() {
         return false;
       }
 
-      if (filters.rol !== 'all' && resolvePrimaryRole(empleado?.roles) !== filters.rol) {
+      if (filters.rol !== 'all' && !hasRole(empleado?.roles, filters.rol)) {
         return false;
       }
 
@@ -289,6 +313,14 @@ export default function AdminEmpleadosPage() {
     [filters]
   );
 
+  const currentPageSize = view === 'table' ? TABLE_PAGE_SIZE : CARDS_PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(filteredEmpleados.length / currentPageSize));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const pagedEmpleados = useMemo(() => {
+    const start = (safePage - 1) * currentPageSize;
+    return filteredEmpleados.slice(start, start + currentPageSize);
+  }, [currentPageSize, filteredEmpleados, safePage]);
+
   const activeFilterChips = useMemo(() => {
     const chips = [];
     const trimmedSearch = search.trim();
@@ -302,7 +334,7 @@ export default function AdminEmpleadosPage() {
       chips.push({ key: 'estadoAcceso', label: `Acceso: ${ACCESS_LABELS[filters.estadoAcceso] || filters.estadoAcceso}` });
     }
     if (filters.rol !== 'all') {
-      chips.push({ key: 'rol', label: `Rol: ${roleLabelByCode[filters.rol] || filters.rol}` });
+      chips.push({ key: 'rol', label: `Incluye rol: ${roleLabelByCode[filters.rol] || filters.rol}` });
     }
     if (filters.idSucursal !== 'all') {
       chips.push({ key: 'idSucursal', label: `Sucursal: ${sucursalNameById.get(filters.idSucursal) || 'Seleccionada'}` });
@@ -313,15 +345,22 @@ export default function AdminEmpleadosPage() {
   function clearAllFilters() {
     setSearch('');
     setFilters(EMPLEADO_FILTER_DEFAULTS);
+    setPage(1);
   }
 
   function clearFilterChip(key) {
     if (key === 'search') {
       setSearch('');
+      setPage(1);
       return;
     }
     setFilters((prev) => ({ ...prev, [key]: 'all' }));
+    setPage(1);
   }
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, filters, view]);
 
   const fetchEmpleados = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -521,7 +560,7 @@ export default function AdminEmpleadosPage() {
           <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[560px]">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm text-[var(--mf-text-2)]">
-                {loading ? 'Cargando...' : `${filteredEmpleados.length} de ${empleados.length} registro(s)`}
+                {loading ? 'Cargando...' : `${filteredEmpleados.length} de ${empleados.length} registro(s) · página ${safePage}/${totalPages}`}
               </span>
               <ViewToggle defaultView={view} onViewChange={setView} storageKey="empleados" />
             </div>
@@ -604,7 +643,7 @@ export default function AdminEmpleadosPage() {
 
       {!loading && !listError && filteredEmpleados.length > 0 && view === 'cards' && (
         <CardsCarousel
-          items={filteredEmpleados}
+          items={pagedEmpleados}
           getItemKey={(empleado) => empleado?.id_empleado}
           renderItem={(empleado, index, pageIndex) => (
             <DataCard
@@ -616,7 +655,7 @@ export default function AdminEmpleadosPage() {
               badge={<EstadoAccesoBadge estado={empleado.estado_acceso} />}
               fields={[
                 { label: 'Sucursal', value: empleado.nombre_sucursal || sucursalNameById.get(empleado.id_sucursal) || 'Sin sucursal' },
-                { label: 'Rol principal', value: roleLabelByCode[resolvePrimaryRole(empleado.roles)] || '-' },
+                { label: 'Roles', value: formatRoleLabels(empleado.roles, roleLabelByCode) },
                 { label: 'Estado laboral', value: empleado.estado_laboral ? 'Activo' : 'Inactivo' },
               ]}
               actions={renderActions(empleado)}
@@ -632,18 +671,18 @@ export default function AdminEmpleadosPage() {
               <TableRow className="border-[var(--mf-nav-border)]">
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Correo</TableHead>
-                <TableHead className="hidden md:table-cell text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Rol</TableHead>
+                <TableHead className="hidden md:table-cell text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Roles</TableHead>
                 <TableHead className="hidden md:table-cell text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursal</TableHead>
                 <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acceso</TableHead>
                 <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredEmpleados.map((empleado) => (
+              {pagedEmpleados.map((empleado) => (
                 <TableRow key={empleado.id_empleado} className="border-[var(--mf-nav-border)]">
                   <TableCell className="font-medium">{empleado.nombre_completo}</TableCell>
                   <TableCell>{empleado.correo_principal || '-'}</TableCell>
-                  <TableCell className="hidden md:table-cell">{roleLabelByCode[resolvePrimaryRole(empleado.roles)] || '-'}</TableCell>
+                  <TableCell className="hidden md:table-cell">{formatRoleLabels(empleado.roles, roleLabelByCode)}</TableCell>
                   <TableCell className="hidden md:table-cell">{empleado.nombre_sucursal || '-'}</TableCell>
                   <TableCell className="text-center"><EstadoAccesoBadge estado={empleado.estado_acceso} /></TableCell>
                   <TableCell className="text-center">{renderActions(empleado)}</TableCell>
@@ -653,6 +692,35 @@ export default function AdminEmpleadosPage() {
           </Table>
         </div>
       )}
+
+      {!loading && !listError && filteredEmpleados.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2">
+          <p className="text-xs text-[var(--mf-text-2)]">
+            Mostrando {pagedEmpleados.length} registro(s) de {filteredEmpleados.length}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={safePage <= 1}
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+            >
+              Anterior
+            </Button>
+            <span className="text-xs text-[var(--mf-text-2)]">Página {safePage} de {totalPages}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={safePage >= totalPages}
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -673,7 +741,7 @@ export default function AdminEmpleadosPage() {
               <Input type="date" className="mf-input mt-1" value={formValues.fecha_nacimiento} onChange={(e) => setFormValues((p) => ({ ...p, fecha_nacimiento: e.target.value }))} />
             </div>
             <div>
-              <Label className="mf-label">DNI</Label>
+              <Label className="mf-label">DNI *</Label>
               <Input className="mf-input mt-1" value={formValues.dni} onChange={(e) => setFormValues((p) => ({ ...p, dni: e.target.value }))} />
             </div>
             <div>
@@ -686,16 +754,31 @@ export default function AdminEmpleadosPage() {
               <Input className="mf-input mt-1" type="email" value={formValues.correo_principal} onChange={(e) => setFormValues((p) => ({ ...p, correo_principal: e.target.value }))} />
             </div>
 
-            <div>
-              <Label className="mf-label">Rol principal *</Label>
-              <select
-                className="mf-select mt-1"
-                value={formValues.rol_principal}
-                onChange={(e) => setFormValues((p) => ({ ...p, rol_principal: e.target.value }))}
-              >
-                {roleOptions.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
-              </select>
-              <p className="mt-1 text-xs text-[var(--mf-text-2)]">Si el rol es barbero, el sistema marca es_barbero automaticamente.</p>
+            <div className="sm:col-span-2">
+              <Label className="mf-label">Roles *</Label>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {roleOptions.map((role) => {
+                  const selected = hasRole(formValues.roles, role.value);
+                  return (
+                    <label
+                      key={role.value}
+                      className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${selected ? 'border-[var(--mf-accent)] bg-[color:color-mix(in_srgb,var(--mf-accent)_16%,transparent)] text-[var(--mf-text)]' : 'border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)]'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-[var(--mf-accent)]"
+                        checked={selected}
+                        onChange={(event) => setFormValues((prev) => ({
+                          ...prev,
+                          roles: toggleRoleSelection(prev.roles, role.value, event.target.checked),
+                        }))}
+                      />
+                      <span>{role.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-xs text-[var(--mf-text-2)]">Puedes asignar varios roles, incluyendo Super Admin + Barbero.</p>
             </div>
             <div>
               <Label className="mf-label">Sucursal *</Label>
@@ -706,7 +789,7 @@ export default function AdminEmpleadosPage() {
             </div>
 
             <div>
-              <Label className="mf-label">Telefono</Label>
+              <Label className="mf-label">Telefono *</Label>
               <Input className="mf-input mt-1" value={formValues.telefono_principal} onChange={(e) => setFormValues((p) => ({ ...p, telefono_principal: e.target.value }))} />
             </div>
             <div>
@@ -770,7 +853,7 @@ export default function AdminEmpleadosPage() {
                   title: 'Laboral',
                   icon: <Building2 size={14} />,
                   fields: [
-                    { label: 'Rol principal', value: roleLabelByCode[resolvePrimaryRole(selectedEmpleado.roles)] || '-' },
+                    { label: 'Roles', value: formatRoleLabels(selectedEmpleado.roles, roleLabelByCode) },
                     { label: 'Sucursal', value: selectedEmpleado.nombre_sucursal || '-' },
                     { label: 'Fecha ingreso', value: selectedEmpleado.fecha_ingreso ? String(selectedEmpleado.fecha_ingreso).slice(0, 10) : '-' },
                     { label: 'Salario base', value: selectedEmpleado.salario_base ?? '-' },
@@ -874,7 +957,7 @@ export default function AdminEmpleadosPage() {
               </select>
             </div>
             <div>
-              <Label className="mf-label">Rol principal</Label>
+              <Label className="mf-label">Incluye rol</Label>
               <select
                 className="mf-select mt-1"
                 value={filters.rol}

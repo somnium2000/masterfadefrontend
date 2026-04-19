@@ -88,6 +88,14 @@ function extractMessage(error) {
   return error?.data?.error?.message || error?.message || "Error desconocido.";
 }
 
+function extractActiveSubscribersCount(error) {
+  const firstCandidate = Number(error?.data?.error?.details?.total_clientes_activos);
+  if (Number.isInteger(firstCandidate) && firstCandidate > 0) return firstCandidate;
+  const secondCandidate = Number(error?.response?.data?.error?.details?.total_clientes_activos);
+  if (Number.isInteger(secondCandidate) && secondCandidate > 0) return secondCandidate;
+  return 0;
+}
+
 function normalizeTipo(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "cortesia") return "cortesia";
@@ -178,7 +186,7 @@ function upsertScopedPlan(list = [], nextPlan) {
 function validateForm(values) {
   if (!String(values?.nombre_plan || "").trim()) return "El nombre del plan es requerido.";
   const precio = Number(values?.precio_hnl);
-  if (!Number.isFinite(precio) || precio < 0) return "El precio debe ser mayor o igual a 0.";
+  if (!Number.isFinite(precio) || precio <= 0) return "El precio debe ser mayor a 0.";
   const ordenVisual = Number(values?.orden_visual);
   if (!Number.isFinite(ordenVisual) || ordenVisual < 0) return "El orden visual debe ser mayor o igual a 0.";
   const categoriaNivel = normalizePlanCategory(values?.categoria_nivel, NaN);
@@ -207,6 +215,10 @@ function validateForm(values) {
       if (seenCourtesies.has(idCortesia)) return "No repitas cortesias en beneficios.";
       seenCourtesies.add(idCortesia);
     }
+  }
+
+  if (!benefits.some((benefit) => normalizeTipo(benefit?.tipo) === "servicio")) {
+    return "El plan debe incluir al menos un servicio.";
   }
 
   return null;
@@ -497,7 +509,7 @@ function PlanForm({ values, onChange, services, courtesias, existingCourtesyIds,
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1">
           <Label htmlFor="plan-price">Precio HNL *</Label>
-          <Input id="plan-price" type="number" min="0" step="0.01" value={values.precio_hnl} onChange={(event) => onChange("precio_hnl", event.target.value)} placeholder="2400.00" />
+          <Input id="plan-price" type="number" min="0.01" step="0.01" value={values.precio_hnl} onChange={(event) => onChange("precio_hnl", event.target.value)} placeholder="2400.00" />
         </div>
 
         <div className="flex flex-col gap-1">
@@ -892,7 +904,7 @@ export default function AdminPlansCatalogPage() {
       return;
     }
 
-    setStateTarget({ ...plan, _nextActivo: !plan?.activo, _branchId: branchId });
+    setStateTarget({ ...plan, _nextActivo: !plan?.activo, _branchId: branchId, _forceConfirm: false, _activeSubscribersCount: 0 });
     setConfirmOpen(true);
   }
 
@@ -990,10 +1002,15 @@ export default function AdminPlansCatalogPage() {
 
     setStateLoading(true);
     try {
-      const response = await setAdminPlanEstado(stateTarget.id_plan, {
+      const payload = {
         activo: Boolean(stateTarget._nextActivo),
         id_sucursal: stateTarget._branchId,
-      });
+      };
+      if (!stateTarget._nextActivo && stateTarget._forceConfirm) {
+        payload.confirmar_clientes_activos = true;
+      }
+
+      const response = await setAdminPlanEstado(stateTarget.id_plan, payload);
 
       setPlanes((current) => upsertScopedPlan(current, response?.data));
       notifications.success(stateTarget._nextActivo ? "Plan activado." : "Plan inactivado.");
@@ -1002,6 +1019,19 @@ export default function AdminPlansCatalogPage() {
       setStateTarget(null);
       void fetchPlanes({ silent: true });
     } catch (error) {
+      const backendCode = String(error?.data?.error?.code || error?.response?.data?.error?.code || "");
+      if (backendCode === "CATALOG_PLAN_ACTIVE_SUBSCRIPTIONS_CONFIRM_REQUIRED") {
+        const totalClientesActivos = extractActiveSubscribersCount(error);
+        setStateTarget((current) => current
+          ? { ...current, _forceConfirm: true, _activeSubscribersCount: totalClientesActivos }
+          : current);
+        notifications.warning(
+          totalClientesActivos > 0
+            ? `Este plan tiene ${totalClientesActivos} cliente(s) con suscripcion vigente. Confirma de nuevo para continuar.`
+            : "Este plan tiene suscripciones activas. Confirma de nuevo para continuar."
+        );
+        return;
+      }
       notifications.error(extractMessage(error));
     } finally {
       setStateLoading(false);
@@ -1342,7 +1372,13 @@ export default function AdminPlansCatalogPage() {
         }}
         tone={stateTarget?._nextActivo ? "warning" : "danger"}
         title={stateTarget?._nextActivo ? "Activar plan" : "Inactivar plan"}
-        description={stateTarget ? `Se ${stateTarget._nextActivo ? "activara" : "inactivara"} ${stateTarget.nombre_plan}.` : ""}
+        description={stateTarget
+          ? (
+            !stateTarget?._nextActivo && stateTarget?._forceConfirm
+              ? `Este plan tiene ${Number(stateTarget?._activeSubscribersCount || 0)} cliente(s) con suscripcion vigente en esta sucursal. Se ocultara para nuevas ventas, pero las suscripciones actuales seguiran operativas hasta vencer.`
+              : `Se ${stateTarget._nextActivo ? "activara" : "inactivara"} ${stateTarget.nombre_plan}.`
+          )
+          : ""}
         confirmLabel={stateTarget?._nextActivo ? "Activar" : "Inactivar"}
         cancelLabel="Cancelar"
         loading={stateLoading}
