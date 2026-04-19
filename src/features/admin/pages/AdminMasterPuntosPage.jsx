@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Clock3, Gift, Search, Settings2, SlidersHorizontal, Star, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.jsx";
@@ -99,7 +99,7 @@ function StarsInfo({ count }) {
 export default function AdminMasterPuntosPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
-  const { roles } = useAuth();
+  const { roles, isAuthenticated } = useAuth();
 
   const [contexto, setContexto] = useState({
     sucursales: [],
@@ -148,12 +148,34 @@ export default function AdminMasterPuntosPage() {
   const [legacyCandidatesLoading, setLegacyCandidatesLoading] = useState(false);
   const [legacyClientPickerOpen, setLegacyClientPickerOpen] = useState(false);
   const [legacyClientQuery, setLegacyClientQuery] = useState("");
+
   const scopeBranch = selectedBranch === "all" ? undefined : selectedBranch;
+
   const canManageLegacyPoints = useMemo(() => {
     const roleList = Array.isArray(roles) ? roles.map((role) => String(role || "").toLowerCase()) : [];
     return roleList.includes("admin") || roleList.includes("super_admin");
   }, [roles]);
+
   const legacyMigrationEnabled = Boolean(contexto?.parametros?.migracion_manual_habilitada);
+
+  const filteredClientes = useMemo(() => {
+    let result = [...clientes];
+    if (selectedBranch !== "all") {
+      result = result.filter((c) => c.id_sucursal === selectedBranch);
+    }
+    if (soloPremioDisponible) {
+      result = result.filter((c) => Boolean(c.premio_disponible));
+    }
+    const q = normalizeText(search).toLowerCase();
+    if (q) {
+      result = result.filter((c) => 
+        normalizeText(c.nombre_completo).toLowerCase().includes(q) ||
+        normalizeText(c.telefono_principal).includes(q)
+      );
+    }
+    return result;
+  }, [clientes, search, selectedBranch, soloPremioDisponible]);
+
   const legacyCandidatesFiltered = useMemo(() => {
     const query = normalizeText(legacyClientQuery).toLowerCase();
     if (!query) return legacyCandidates;
@@ -501,8 +523,11 @@ export default function AdminMasterPuntosPage() {
       ) : null}
 
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
-        <DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Filtros de Masterpuntos</DialogTitle>
-          <DialogDescription className="sr-only">Filtros de Masterpuntos</DialogDescription><DialogDescription>Filtra clientes por sucursal o estado del premio.</DialogDescription></DialogHeader>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Filtros de Masterpuntos</DialogTitle>
+            <DialogDescription>Filtra clientes por sucursal o estado del premio.</DialogDescription>
+          </DialogHeader>
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" className={soloPremioDisponible ? "rounded-full border-[var(--mf-accent)] bg-[var(--mf-accent)] text-[var(--mf-accent-text)]" : "rounded-full"} onClick={() => setSoloPremioDisponible((prev) => !prev)}>Solo premio disponible</Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => { setSelectedBranch("all"); setSoloPremioDisponible(false); }}>Limpiar</Button>
@@ -513,8 +538,10 @@ export default function AdminMasterPuntosPage() {
 
       <Dialog open={ruleOpen} onOpenChange={setRuleOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
-          <DialogHeader><DialogTitle>Configuracion de reglas</DialogTitle>
-          <DialogDescription className="sr-only">Configuracion de reglas</DialogDescription><DialogDescription>Define el umbral, puntos para premio y servicios redimibles.</DialogDescription></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Configuracion de reglas</DialogTitle>
+            <DialogDescription>Define el umbral, puntos para premio y servicios redimibles.</DialogDescription>
+          </DialogHeader>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div><Label className="mf-label">Alcance</Label><select className="mf-select mt-1" value={ruleForm.scope} onChange={(e) => setRuleForm(toRuleForm(contexto, e.target.value, ruleForm.id_sucursal || contexto.sucursales?.[0]?.id_sucursal || ""))}><option value="global">Global</option><option value="sucursal">Por sucursal</option></select></div>
             <div><Label className="mf-label">Sucursal</Label><select disabled={ruleForm.scope !== "sucursal"} className="mf-select mt-1" value={ruleForm.id_sucursal} onChange={(e) => setRuleForm(toRuleForm(contexto, "sucursal", e.target.value))}><option value="">Selecciona sucursal</option>{(contexto.sucursales || []).map((s) => <option key={s.id_sucursal} value={s.id_sucursal}>{s.nombre_sucursal}</option>)}</select></div>
@@ -536,8 +563,11 @@ export default function AdminMasterPuntosPage() {
       </Dialog>
 
       <Dialog open={canjeOpen} onOpenChange={setCanjeOpen}>
-        <DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Canje manual</DialogTitle>
-          <DialogDescription className="sr-only">Canje manual</DialogDescription><DialogDescription>Aplica un canje de puntos al servicio seleccionado para este cliente.</DialogDescription></DialogHeader>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Canje manual</DialogTitle>
+            <DialogDescription>Aplica un canje de puntos al servicio seleccionado para este cliente.</DialogDescription>
+          </DialogHeader>
           <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-sm"><p className="font-semibold">{canjeTarget?.nombre_completo || "Cliente"}</p><p className="text-xs text-[var(--mf-text-2)]">Balance: {canjeTarget?.balance_puntos || 0} puntos</p></div>
           <div><Label className="mf-label">Servicio</Label><select className="mf-select mt-1" value={canjeForm.id_servicio} onChange={(e) => setCanjeForm((p) => ({ ...p, id_servicio: e.target.value }))}><option value="">Selecciona servicio</option>{canjeServices.map((s) => <option key={s.id_servicio} value={s.id_servicio}>{s.nombre_servicio}</option>)}</select></div>
           <div><Label className="mf-label">Motivo</Label><Input className="mf-input mt-1" maxLength={280} value={canjeForm.motivo} onChange={(e) => setCanjeForm((p) => ({ ...p, motivo: e.target.value }))} placeholder="Opcional" /></div>
@@ -550,7 +580,6 @@ export default function AdminMasterPuntosPage() {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Migración manual de puntos</DialogTitle>
-          <DialogDescription className="sr-only">Migración manual de puntos</DialogDescription>
             <DialogDescription>Esta acción solo se puede realizar una vez por cliente.</DialogDescription>
           </DialogHeader>
 
@@ -633,8 +662,11 @@ export default function AdminMasterPuntosPage() {
       </Dialog>
 
       <Dialog open={movOpen} onOpenChange={setMovOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl"><DialogHeader><DialogTitle>Movimientos de puntos</DialogTitle>
-          <DialogDescription className="sr-only">Movimientos de puntos</DialogDescription><DialogDescription>Historial de acumulaciones y canjes del cliente.</DialogDescription></DialogHeader>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Movimientos de puntos</DialogTitle>
+            <DialogDescription>Historial de acumulaciones y canjes del cliente.</DialogDescription>
+          </DialogHeader>
           {movCliente ? <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-sm"><p className="font-semibold">{movCliente.nombre_completo}</p><p className="text-xs text-[var(--mf-text-2)]">Balance: {movCliente.balance_puntos || 0} | Vence: {formatDate(movCliente.vence_at)}</p></div> : null}
           {movError ? <ErrorBanner message={movError} onRetry={() => openMovimientos(movCliente)} /> : null}
           {movLoading ? <LoadingSpinner /> : null}
