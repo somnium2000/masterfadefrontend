@@ -24,7 +24,6 @@ import {
 } from '../lib/adminConfiguracionApi.js';
 
 const FORM_DEFAULTS = {
-  tipo_campania: 'informativa',
   nombre_interno: '',
   asunto: '',
   contenido_texto: '',
@@ -33,7 +32,11 @@ const FORM_DEFAULTS = {
 const CAMPAIGNS_PAGE_SIZE = 100;
 
 function extractMessage(error) {
-  return error?.data?.error?.message || error?.message || 'Error desconocido.';
+  const raw = error?.data?.error?.message || error?.message || 'Error desconocido.';
+  if (/sql|postgres|stack|trace|syntax|jwt|token|supabase|smtp|provider/i.test(String(raw))) {
+    return 'No se pudo completar la operación en este momento.';
+  }
+  return raw;
 }
 
 function normalizeRequiredText(value) {
@@ -68,7 +71,6 @@ function toDatetimeLocalValue(value) {
 
 function mapCampaignToForm(campaign) {
   return {
-    tipo_campania: campaign?.tipo_campania || 'informativa',
     nombre_interno: campaign?.nombre_interno || '',
     asunto: campaign?.asunto || '',
     contenido_texto: campaign?.contenido_texto || '',
@@ -78,7 +80,7 @@ function mapCampaignToForm(campaign) {
 
 function buildPayload(values) {
   return {
-    tipo_campania: normalizeRequiredText(values.tipo_campania),
+    tipo_campania: 'informativa',
     nombre_interno: normalizeRequiredText(values.nombre_interno),
     asunto: normalizeRequiredText(values.asunto),
     contenido_texto: normalizeRequiredText(values.contenido_texto),
@@ -87,9 +89,6 @@ function buildPayload(values) {
 }
 
 function validateForm(values) {
-  if (!['informativa', 'promocional'].includes(String(values.tipo_campania || '').trim().toLowerCase())) {
-    return 'tipo_campania debe ser informativa o promocional.';
-  }
   if (!normalizeRequiredText(values.nombre_interno)) return 'nombre_interno es requerido.';
   if (!normalizeRequiredText(values.asunto)) return 'asunto es requerido.';
   if (!normalizeRequiredText(values.contenido_texto)) return 'contenido_texto es requerido.';
@@ -148,14 +147,12 @@ function formatOperationalStateLabel(state) {
 function formatCampaignTypeLabel(type) {
   const normalized = String(type || '').trim().toLowerCase();
   if (normalized === 'informativa') return 'Informativa';
-  if (normalized === 'promocional') return 'Promocional';
-  return normalized || 'Sin tipo';
+  return 'Informativa';
 }
 
 function CampaignTypeBadge({ tipo }) {
   const normalized = String(tipo || '').trim().toLowerCase();
-  const toneClass = normalized === 'promocional' ? 'mf-badge-gold' : normalized === 'informativa' ? 'mf-badge-green' : 'mf-badge-muted';
-  return <span className={`mf-badge ${toneClass}`}>{formatCampaignTypeLabel(normalized)}</span>;
+  return <span className="mf-badge mf-badge-green">{formatCampaignTypeLabel(normalized)}</span>;
 }
 
 function formatShipmentStateLabel(state) {
@@ -185,7 +182,6 @@ export default function AdminConfiguracionComunicacionPage() {
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState('');
   const [filterOperationalState, setFilterOperationalState] = useState('');
   const [showCancelledCampaigns, setShowCancelledCampaigns] = useState(false);
   const [sortKey, setSortKey] = useState('updated_desc');
@@ -255,11 +251,10 @@ export default function AdminConfiguracionComunicacionPage() {
   const activeFiltersCount = useMemo(() => {
     let count = 0;
     if (normalizeRequiredText(searchQuery)) count += 1;
-    if (filterType) count += 1;
     if (filterOperationalState) count += 1;
     if (showCancelledCampaigns) count += 1;
     return count;
-  }, [searchQuery, filterType, filterOperationalState, showCancelledCampaigns]);
+  }, [searchQuery, filterOperationalState, showCancelledCampaigns]);
   const eligibleRecipientIds = useMemo(
     () => eligibleRecipients.map((row) => String(row.id_cliente)),
     [eligibleRecipients]
@@ -309,7 +304,6 @@ export default function AdminConfiguracionComunicacionPage() {
     try {
       const response = await listAdminConfigComunicacionCampanias({
         q: searchQuery || undefined,
-        tipo_campania: filterType || undefined,
         estado_operativo: filterOperationalState || undefined,
         incluir_canceladas: showCancelledCampaigns,
         sort: sortKey,
@@ -328,7 +322,7 @@ export default function AdminConfiguracionComunicacionPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [notifications, searchQuery, filterType, filterOperationalState, showCancelledCampaigns, sortKey, campaignsOffset]);
+  }, [notifications, searchQuery, filterOperationalState, showCancelledCampaigns, sortKey, campaignsOffset]);
 
   const fetchEligibilityPreview = useCallback(async (idCampaign) => {
     const id = String(idCampaign || '').trim();
@@ -731,7 +725,7 @@ export default function AdminConfiguracionComunicacionPage() {
         <div className="space-y-1">
           <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Configuracion - Correos informativos</p>
           <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Correos informativos</h1>
-          <p className="text-sm text-[var(--mf-text-2)]">Gestion operativa de campañas por correo para super administrador.</p>
+          <p className="text-sm text-[var(--mf-text-2)]">Gestion operativa de correos informativos por correo.</p>
         </div>
       </header>
 
@@ -769,18 +763,6 @@ export default function AdminConfiguracionComunicacionPage() {
             {showFilters ? (
               <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-2.5 space-y-2">
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <select
-                    className="mf-select"
-                    value={filterType}
-                    onChange={(event) => {
-                      setFilterType(event.target.value);
-                      setCampaignsOffset(0);
-                    }}
-                  >
-                    <option value="">Tipo: todos</option>
-                    <option value="informativa">Informativa</option>
-                    <option value="promocional">Promocional</option>
-                  </select>
                   <select
                     className="mf-select"
                     value={filterOperationalState}
@@ -821,7 +803,6 @@ export default function AdminConfiguracionComunicacionPage() {
                     variant="outline"
                     onClick={() => {
                       setSearchQuery('');
-                      setFilterType('');
                       setFilterOperationalState('');
                       setShowCancelledCampaigns(false);
                       setSortKey('updated_desc');
@@ -953,16 +934,8 @@ export default function AdminConfiguracionComunicacionPage() {
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label className="mf-label">Tipo de campaña *</Label>
-                  <select
-                    className="mf-select"
-                    value={formValues.tipo_campania}
-                    onChange={(event) => handleFormChange('tipo_campania', event.target.value)}
-                    disabled={saving}
-                  >
-                    <option value="informativa">informativa</option>
-                    <option value="promocional">promocional</option>
-                  </select>
+                  <Label className="mf-label">Tipo de campaña</Label>
+                  <Input value="informativa" disabled />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="mf-label">Canal</Label>
@@ -1269,7 +1242,7 @@ export default function AdminConfiguracionComunicacionPage() {
                                         onChange={() => handleToggleEligibleSelection(row.id_cliente)}
                                       />
                                       <div className="min-w-0 flex-1">
-                                        <p className="truncate text-sm text-[var(--mf-text)]">{row.nombre_cliente || row.id_cliente}</p>
+                                        <p className="truncate text-sm text-[var(--mf-text)]">{row.nombre_cliente || 'Cliente'}</p>
                                         <p className="truncate text-xs text-[var(--mf-text-2)]">{row.correo_destino || '-'}</p>
                                         {isManuallyExcluded ? (
                                           <p className="text-xs text-amber-300">Excluido manualmente</p>
@@ -1302,7 +1275,7 @@ export default function AdminConfiguracionComunicacionPage() {
                                 <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Muestra de excluidos</p>
                                 {excludedRecipients.slice(0, 8).map((row) => (
                                   <div key={`${row.id_cliente}:${row.motivo_exclusion || 'sin-motivo'}`} className="rounded-md border border-[var(--mf-nav-border)] px-2.5 py-2">
-                                    <p className="text-sm text-[var(--mf-text)]">{row.nombre_cliente || row.id_cliente}</p>
+                                    <p className="text-sm text-[var(--mf-text)]">{row.nombre_cliente || 'Cliente'}</p>
                                     <p className="text-xs text-[var(--mf-text-2)]">{formatReasonLabel(row.motivo_exclusion)}</p>
                                   </div>
                                 ))}
@@ -1317,7 +1290,7 @@ export default function AdminConfiguracionComunicacionPage() {
                                   .map((row) => (
                                     <div key={`manual-${row.id_cliente}`} className="flex items-center justify-between rounded-md border border-[var(--mf-nav-border)] px-2.5 py-2">
                                       <div>
-                                        <p className="text-sm text-[var(--mf-text)]">{row.nombre_cliente || row.id_cliente}</p>
+                                        <p className="text-sm text-[var(--mf-text)]">{row.nombre_cliente || 'Cliente'}</p>
                                         <p className="text-xs text-[var(--mf-text-2)]">{row.correo_destino || '-'}</p>
                                       </div>
                                       <Button
@@ -1347,8 +1320,8 @@ export default function AdminConfiguracionComunicacionPage() {
                                 ))}
                                 <div className="space-y-1.5">
                                   {persistedExclusionsSnapshot.rows.slice(0, 8).map((row, index) => (
-                                    <div key={`persisted-row-${row.id_cliente || 'sin-id'}-${index}`} className="rounded-md border border-[var(--mf-nav-border)] px-2.5 py-2">
-                                      <p className="text-sm text-[var(--mf-text)]">{row.nombre_cliente || row.id_cliente || 'Cliente sin nombre'}</p>
+                                    <div key={`persisted-row-${index}`} className="rounded-md border border-[var(--mf-nav-border)] px-2.5 py-2">
+                                      <p className="text-sm text-[var(--mf-text)]">{row.nombre_cliente || 'Cliente sin nombre'}</p>
                                       <p className="text-xs text-[var(--mf-text-2)]">{row.correo_destino || '-'}</p>
                                       <p className="text-xs text-[var(--mf-text-2)]">{formatReasonLabel(row.motivo_exclusion)}</p>
                                     </div>
@@ -1398,16 +1371,13 @@ export default function AdminConfiguracionComunicacionPage() {
                             {shipments.map((row) => (
                               <div key={row.id_envio} className="rounded-md border border-[var(--mf-nav-border)] px-2.5 py-2">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <p className="text-sm text-[var(--mf-text)]">{row.nombre_cliente || row.id_cliente}</p>
+                                  <p className="text-sm text-[var(--mf-text)]">{row.nombre_cliente || 'Cliente'}</p>
                                   <span className="mf-badge mf-badge-muted">{formatShipmentStateLabel(row.estado_envio)}</span>
                                 </div>
                                 <p className="text-xs text-[var(--mf-text-2)]">{row.correo_destino || '-'}</p>
                                 <p className="text-xs text-[var(--mf-text-2)]">Intentos: {Number(row.intentos || 0)}</p>
                                 <p className="text-xs text-[var(--mf-text-2)]">Enviar en: {formatDateTime(row.enviar_en)}</p>
                                 <p className="text-xs text-[var(--mf-text-2)]">Enviado en: {formatDateTime(row.enviado_at)}</p>
-                                {row.provider_message_id ? (
-                                  <p className="text-xs text-[var(--mf-text-2)]">ID proveedor: {row.provider_message_id}</p>
-                                ) : null}
                                 {row.ultimo_error ? <p className="text-xs text-amber-300">Error: {row.ultimo_error}</p> : null}
                                 <p className="text-xs text-[var(--mf-text-2)]">Creado: {formatDateTime(row.created_at)}</p>
                               </div>

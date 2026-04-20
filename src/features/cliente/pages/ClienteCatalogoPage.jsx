@@ -1,7 +1,7 @@
 ﻿import { motion } from 'framer-motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Package, Scissors, Search, Sparkles, Tag } from 'lucide-react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Package, Scissors, Search, Sparkles, Tag } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
   getPublicCatalog,
@@ -35,28 +35,6 @@ function formatRangeLabel(start, end) {
   if (fromLabel && !toLabel) return `Desde ${fromLabel}`;
   if (!fromLabel && toLabel) return `Hasta ${toLabel}`;
   return 'Vigencia abierta';
-}
-
-function resolveInternalHref(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  if (raw.startsWith('/')) return raw;
-  if (raw.startsWith('http://') || raw.startsWith('https://')) {
-    try {
-      const parsed = new URL(raw);
-      return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
-    } catch {
-      return '';
-    }
-  }
-  return `/${raw.replace(/^\/+/, '')}`;
-}
-
-function resolveExternalHref(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
-  return `https://${raw.replace(/^\/+/, '')}`;
 }
 
 function SectionTitle({ icon: Icon, title, subtitle }) {
@@ -293,13 +271,36 @@ function CatalogItemCard({ title, subtitle, description, price, footer, isRail =
   );
 }
 
-function PromotionPublicCard({ promotion, onAction }) {
+function PromotionHeroImage({ promotion }) {
+  const [failed, setFailed] = useState(false);
+  const desktopSrc = String(promotion?.imagen_principal_url || '').trim();
+  const mobileSrc = String(promotion?.imagen_mobile_url || '').trim();
+  const src = !failed ? (desktopSrc || mobileSrc) : '';
+
+  if (!src) {
+    return (
+      <div className="flex h-full w-full items-center justify-center text-[var(--mf-text-2)]">
+        <Sparkles size={28} strokeWidth={1.8} />
+      </div>
+    );
+  }
+
+  return (
+    <picture>
+      {!failed && mobileSrc ? <source media="(max-width: 640px)" srcSet={mobileSrc} /> : null}
+      <img
+        src={src}
+        alt={promotion?.imagen_alt || promotion?.titulo || 'Promoción MasterFade'}
+        className="h-full w-full object-cover"
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    </picture>
+  );
+}
+
+function PromotionPublicCard({ promotion }) {
   const paragraphs = Array.isArray(promotion?.parrafos) ? promotion.parrafos.filter(Boolean) : [];
-  const hasImage = Boolean(promotion?.imagen_principal_url || promotion?.imagen_mobile_url);
-  const internalHref = promotion?.cta_tipo === 'interno' ? resolveInternalHref(promotion?.cta_url) : '';
-  const externalHref = promotion?.cta_tipo === 'externo' ? resolveExternalHref(promotion?.cta_url) : '';
-  const hasAction = Boolean(internalHref || externalHref);
-  const ctaLabel = String(promotion?.cta_texto || '').trim() || 'Ver más';
   const dateRangeLabel = formatRangeLabel(promotion?.vigencia_desde, promotion?.vigencia_hasta);
 
   return (
@@ -311,21 +312,7 @@ function PromotionPublicCard({ promotion, onAction }) {
       className="mf-glass-surface flex w-[85vw] shrink-0 snap-start flex-col overflow-hidden rounded-[28px] sm:w-[68vw] lg:w-[calc((100%-2rem)/3)]"
     >
       <div className="relative h-44 w-full bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_82%,black_18%)]">
-        {hasImage ? (
-          <picture>
-            {promotion?.imagen_mobile_url ? <source media="(max-width: 640px)" srcSet={promotion.imagen_mobile_url} /> : null}
-            <img
-              src={promotion?.imagen_principal_url || promotion?.imagen_mobile_url}
-              alt={promotion?.imagen_alt || promotion?.titulo || 'Promoción MasterFade'}
-              className="h-full w-full object-cover"
-              loading="lazy"
-            />
-          </picture>
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-[var(--mf-text-2)]">
-            <Sparkles size={28} strokeWidth={1.8} />
-          </div>
-        )}
+        <PromotionHeroImage promotion={promotion} />
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[color:color-mix(in_srgb,var(--mf-bg)_85%,transparent)] via-transparent to-transparent" />
 
         <div className="absolute left-4 top-4 flex flex-wrap items-center gap-2">
@@ -359,23 +346,12 @@ function PromotionPublicCard({ promotion, onAction }) {
           </span>
         </div>
 
-        {hasAction ? (
-          <button
-            type="button"
-            onClick={() => onAction(promotion, { internalHref, externalHref })}
-            className="mf-accent-gradient mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold shadow-[var(--mf-shadow-accent)]"
-          >
-            <span>{ctaLabel}</span>
-            {promotion?.cta_tipo === 'externo' ? <ExternalLink size={14} strokeWidth={2} /> : null}
-          </button>
-        ) : null}
       </div>
     </motion.article>
   );
 }
 
 export default function ClienteCatalogoPage() {
-  const navigate = useNavigate();
   const location = useLocation();
   const { error: notifyError } = useNotifications();
 
@@ -490,21 +466,6 @@ export default function ClienteCatalogoPage() {
 
   const showPromotionCarouselControls = sortedPromotions.length > 3;
 
-  function handlePromotionAction(promotion, resolved = {}) {
-    if (!promotion) return;
-
-    if (promotion.cta_tipo === 'interno') {
-      const target = String(resolved.internalHref || resolveInternalHref(promotion.cta_url)).trim();
-      if (target) navigate(target);
-      return;
-    }
-
-    if (promotion.cta_tipo === 'externo') {
-      const target = String(resolved.externalHref || resolveExternalHref(promotion.cta_url)).trim();
-      if (target) window.open(target, '_blank', 'noopener,noreferrer');
-    }
-  }
-
   function handlePromotionScroll(direction) {
     const track = promotionsCarouselRef.current;
     if (!track) return;
@@ -527,14 +488,6 @@ export default function ClienteCatalogoPage() {
             <h1 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)] sm:text-3xl">Servicios, paquetes y promociones</h1>
             <p className="mt-1 text-sm text-[var(--mf-text-2)]">Explora tu oferta disponible de forma informativa y clara.</p>
           </div>
-          <button
-            type="button"
-            onClick={() => navigate('/agendar')}
-            className="mf-accent-gradient inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold"
-          >
-            <CalendarDays size={15} />
-            Nueva cita
-          </button>
         </div>
 
         <div className="mt-4 w-full max-w-sm">
@@ -675,7 +628,6 @@ export default function ClienteCatalogoPage() {
                         <PromotionPublicCard
                           key={`${promotion.id_promocion}:${promotion.id_sucursal || 'public'}`}
                           promotion={promotion}
-                          onAction={handlePromotionAction}
                         />
                       ))}
                     </div>

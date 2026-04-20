@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, Loader2, Phone, Trash2, UserRound } from 'lucide-react';
 import {
   Dialog,
@@ -97,7 +97,6 @@ function normalizeInitialForm(profile) {
     genero_codigo: normalizeGeneroCode(profile?.genero_codigo),
     direccion_texto: extractSafeText(profile?.direccion_texto),
     preferencias_corte: extractSafeText(profile?.preferencias_corte),
-    observaciones: extractSafeText(profile?.observaciones),
   };
 }
 
@@ -120,6 +119,7 @@ export default function ClienteProfileEditModal({
   const [previewUrl, setPreviewUrl] = useState(profile?.foto_perfil_signed_url || '');
   const [uploadedAssetId, setUploadedAssetId] = useState(profile?.foto_perfil_asset_id || null);
   const [photoChanged, setPhotoChanged] = useState(false);
+  const [photoLoadError, setPhotoLoadError] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -128,6 +128,7 @@ export default function ClienteProfileEditModal({
     setPreviewUrl(profile?.foto_perfil_signed_url || '');
     setUploadedAssetId(profile?.foto_perfil_asset_id || null);
     setPhotoChanged(false);
+    setPhotoLoadError(false);
   }, [open, profile]);
 
   const fullName = useMemo(() => {
@@ -153,6 +154,7 @@ export default function ClienteProfileEditModal({
 
       setUploadedAssetId(prepared.asset_id);
       setPreviewUrl(read?.url || prepared?.signed_read_url || '');
+      setPhotoLoadError(false);
       setPhotoChanged(true);
       notifications.success('Imagen de perfil cargada. Guarda para confirmar cambios.');
     } catch (error) {
@@ -166,6 +168,7 @@ export default function ClienteProfileEditModal({
   function handleRemovePhoto() {
     setUploadedAssetId(null);
     setPreviewUrl('');
+    setPhotoLoadError(false);
     setPhotoChanged(true);
   }
 
@@ -180,7 +183,6 @@ export default function ClienteProfileEditModal({
         genero_codigo: normalizeGeneroCode(form.genero_codigo) || null,
         direccion_texto: extractSafeText(form.direccion_texto) || null,
         preferencias_corte: extractSafeText(form.preferencias_corte) || null,
-        observaciones: extractSafeText(form.observaciones) || null,
       };
 
       if (photoChanged) {
@@ -212,9 +214,15 @@ export default function ClienteProfileEditModal({
           <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Foto de perfil</p>
             <div className="mt-3 flex flex-wrap items-center gap-3">
-              <div className="h-24 w-24 overflow-hidden rounded-2xl border border-[var(--mf-btn-border)] bg-[var(--mf-card)]">
-                {previewUrl ? (
-                  <img src={previewUrl} alt="Foto de perfil" className="h-full w-full object-cover object-center" loading="lazy" />
+              <div className="h-28 w-28 overflow-hidden rounded-full border-2 border-[var(--mf-btn-border)] bg-[var(--mf-card)] shadow-[var(--mf-shadow)]">
+                {previewUrl && !photoLoadError ? (
+                  <img
+                    src={previewUrl}
+                    alt="Foto de perfil"
+                    className="h-full w-full object-cover object-center"
+                    loading="lazy"
+                    onError={() => setPhotoLoadError(true)}
+                  />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-[var(--mf-text-2)]">
                     <Camera size={20} />
@@ -254,10 +262,10 @@ export default function ClienteProfileEditModal({
               onChange={(event) => void handleUploadPhoto(event)}
             />
             <p className="mt-2 text-xs leading-5 text-[var(--mf-text-2)]">
-              Formatos permitidos: {formatAllowedMimeTypes()}. Peso máximo: {(MAX_PROFILE_IMAGE_BYTES / (1024 * 1024)).toFixed(0)}MB.
+              Formatos permitidos: {formatAllowedMimeTypes()}. Peso mÃ¡ximo: {(MAX_PROFILE_IMAGE_BYTES / (1024 * 1024)).toFixed(0)}MB.
             </p>
             <p className="mt-1 text-xs leading-5 text-[var(--mf-text-2)]">
-              Esta imagen es privada y se usa para facilitar tu identificación en recepción y por el barbero.
+              Esta imagen es privada y se usa para facilitar tu identificaciÃ³n en recepciÃ³n y por el barbero.
             </p>
           </section>
 
@@ -265,7 +273,7 @@ export default function ClienteProfileEditModal({
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Identidad y contacto</p>
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className="mf-label">Teléfono principal</label>
+                <label className="mf-label">TelÃ©fono principal</label>
                 <div className="relative">
                   <Phone size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
                   <input
@@ -287,20 +295,20 @@ export default function ClienteProfileEditModal({
                 />
               </div>
               <div>
-                <label className="mf-label">Género (opcional)</label>
+                <label className="mf-label">GÃ©nero (opcional)</label>
                 <select
                   className="mf-select"
                   value={form.genero_codigo}
                   onChange={(event) => setField('genero_codigo', event.target.value)}
                 >
-                  <option value="">Selecciona género</option>
+                  <option value="">Selecciona gÃ©nero</option>
                   {GENERO_OPTIONS.map((option) => (
                     <option key={option.code} value={option.code}>{option.label}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="mf-label">Dirección (opcional)</label>
+                <label className="mf-label">DirecciÃ³n (opcional)</label>
                 <input
                   className="mf-input"
                   value={form.direccion_texto}
@@ -313,7 +321,7 @@ export default function ClienteProfileEditModal({
           </section>
 
           <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Preferencias y notas</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Preferencias</p>
             <div className="mt-3 space-y-3">
               <div>
                 <label className="mf-label">Preferencias para tu barbero</label>
@@ -325,16 +333,6 @@ export default function ClienteProfileEditModal({
                   placeholder="Describe estilo, cuidados o detalles importantes para tu corte."
                 />
               </div>
-              <div>
-                <label className="mf-label">Notas adicionales (opcional)</label>
-                <textarea
-                  className="mf-input min-h-[88px] resize-y px-3 py-2"
-                  value={form.observaciones}
-                  onChange={(event) => setField('observaciones', event.target.value)}
-                  maxLength={1000}
-                  placeholder="Información adicional que quieras registrar."
-                />
-              </div>
             </div>
           </section>
 
@@ -344,7 +342,7 @@ export default function ClienteProfileEditModal({
               Privacidad
             </p>
             <p className="mt-2 text-xs leading-5 text-[var(--mf-text-2)]">
-              Solo se enviarán al sistema los campos que este formulario soporta actualmente. Los datos no incluidos aquí permanecen sin cambios.
+              Solo se enviarÃ¡n al sistema los campos que este formulario soporta actualmente. Los datos no incluidos aquÃ­ permanecen sin cambios.
             </p>
           </section>
 
@@ -361,3 +359,4 @@ export default function ClienteProfileEditModal({
     </Dialog>
   );
 }
+

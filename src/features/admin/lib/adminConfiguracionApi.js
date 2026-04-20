@@ -8,35 +8,8 @@ function normalizeBranchId(value) {
   return UUID_REGEX.test(raw) ? raw : '';
 }
 
-export async function getAdminConfigPerfil() {
-  return http.get(`${BASE}/perfil`);
-}
-
-export async function updateAdminConfigPerfil(payload) {
-  return http.patch(`${BASE}/perfil`, payload);
-}
-
-export async function getAdminConfigNotificaciones({ limit } = {}) {
-  const query = Number.isFinite(Number(limit)) ? `?limit=${Math.max(1, Math.min(100, Number(limit)))}` : '';
-  return http.get(`${BASE}/notificaciones${query}`);
-}
-
-export async function updateAdminConfigNotificaciones(payload) {
-  return http.patch(`${BASE}/notificaciones`, payload);
-}
-
-export async function getAdminConfigComunicacion({ idSucursal } = {}) {
-  const query = idSucursal ? `?id_sucursal=${encodeURIComponent(idSucursal)}` : '';
-  return http.get(`${BASE}/comunicacion${query}`);
-}
-
-export async function updateAdminConfigComunicacion(payload) {
-  return http.patch(`${BASE}/comunicacion`, payload);
-}
-
 export async function listAdminConfigComunicacionCampanias({
   q,
-  tipo_campania,
   estado,
   estado_operativo,
   incluir_canceladas,
@@ -46,7 +19,6 @@ export async function listAdminConfigComunicacionCampanias({
 } = {}) {
   const params = new URLSearchParams();
   if (q) params.set('q', String(q).trim());
-  if (tipo_campania) params.set('tipo_campania', String(tipo_campania));
   if (estado) params.set('estado', String(estado));
   if (estado_operativo) params.set('estado_operativo', String(estado_operativo));
   if (incluir_canceladas !== undefined) params.set('incluir_canceladas', incluir_canceladas ? 'true' : 'false');
@@ -109,15 +81,6 @@ export async function retryFailedAdminConfigComunicacionCampania(idCampania) {
 
 export async function cancelAdminConfigComunicacionCampania(idCampania) {
   return http.post(`${BASE}/comunicacion/campanias/${idCampania}/cancelar`, {});
-}
-
-export async function getAdminConfigParametros({ idSucursal } = {}) {
-  const query = idSucursal ? `?id_sucursal=${encodeURIComponent(idSucursal)}` : '';
-  return http.get(`${BASE}/parametros${query}`);
-}
-
-export async function updateAdminConfigParametros(payload) {
-  return http.patch(`${BASE}/parametros`, payload);
 }
 
 export async function listAdminConfigPromociones({ id_sucursal } = {}) {

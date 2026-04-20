@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Building2,
@@ -23,7 +23,7 @@ import {
   setStoredClienteCatalogBranchId,
 } from "../lib/clienteCatalogBranch.js";
 import { getPlanCategoryTheme, normalizePlanCategory } from "../../plans/lib/planCategoryTheme.js";
-import { acquireClientePlan, cancelClientePlan, getClientePlanEstado } from "../lib/clienteApi.js";
+import { cancelClientePlan, getClientePlanEstado } from "../lib/clienteApi.js";
 
 const CATEGORY_ICONS = {
   1: Shield,
@@ -37,13 +37,6 @@ function formatPrice(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return "L 0.00";
   return `L ${amount.toFixed(2)}`;
-}
-
-function formatUpgradeBlockedMessage(details = {}) {
-  const dias = Number(details?.tiempo_restante?.dias || 0);
-  const horas = Number(details?.tiempo_restante?.horas || 0);
-  const servicios = Number(details?.remanentes?.servicios || 0);
-  return `Aún no puedes actualizar. Restan ${dias} día(s), ${horas} hora(s) y ${servicios} servicio(s).`;
 }
 
 function formatConsumptionDate(value) {
@@ -60,9 +53,11 @@ function formatConsumptionDate(value) {
   });
 }
 
+const PLAN_PURCHASE_PENDING_MESSAGE = "Adquisición y actualización de planes pendientes de integración con pasarela de pago.";
+
 const MEMBERSHIP_STATUS_LABELS = {
   activa: "Activa",
-  pendiente_renovacion: "Pendiente de renovación",
+  pendiente_renovacion: "Pendiente de renovaciÃ³n",
   agotada: "Agotada",
   vencida: "Vencida",
   cancelada: "Cancelada",
@@ -81,10 +76,7 @@ function PlanCard({
   plan,
   index,
   recommendedKey,
-  ctaLabel = "Adquirir plan",
-  onAcquire,
-  loading = false,
-  disabled = false,
+  ctaLabel = "Próximamente",
 }) {
   const benefits = Array.isArray(plan?.beneficios) ? plan.beneficios : [];
   const categoryLevel = normalizePlanCategory(plan?.categoria_nivel, 1);
@@ -107,7 +99,7 @@ function PlanCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: categoryTheme.accentColor }}>
-            Nivel {categoryLevel} · {categoryTheme.label}
+            Nivel {categoryLevel} Â· {categoryTheme.label}
           </p>
           <h2 className="mf-font-display mt-2 text-2xl leading-tight text-[var(--mf-text)]">
             {plan.nombre_plan}
@@ -178,10 +170,10 @@ function PlanCard({
       <Button
         type="button"
         className="mt-5 w-full rounded-xl"
-        onClick={() => onAcquire?.(plan)}
-        disabled={disabled || loading}
+        disabled
+        title={PLAN_PURCHASE_PENDING_MESSAGE}
       >
-        {loading ? "Procesando..." : ctaLabel}
+        {ctaLabel}
       </Button>
     </motion.article>
   );
@@ -189,7 +181,7 @@ function PlanCard({
 
 export default function ClientePlanesPage() {
   const notifications = useNotifications();
-  const { error: notifyError, success: notifySuccess, warning: notifyWarning } = notifications;
+  const { error: notifyError, success: notifySuccess } = notifications;
   const lastErrorMessageRef = useRef("");
 
   const [loading, setLoading] = useState(true);
@@ -198,7 +190,6 @@ export default function ClientePlanesPage() {
   const [plans, setPlans] = useState([]);
   const [membershipState, setMembershipState] = useState(null);
   const [membershipLoading, setMembershipLoading] = useState(true);
-  const [acquiringPlanId, setAcquiringPlanId] = useState("");
   const [cancelLoading, setCancelLoading] = useState(false);
 
   const fetchPlans = useCallback(async (selectedBranchId) => {
@@ -211,11 +202,11 @@ export default function ClientePlanesPage() {
     try {
       const payload = await getClientePlanEstado();
       setMembershipState(payload);
-      // AM: Limpia deduplicación al recuperar estado correctamente.
+      // AM: Limpia deduplicaciÃ³n al recuperar estado correctamente.
       lastErrorMessageRef.current = "";
     } catch (error) {
       // AM: Evita spam de toasts repetidos con el mismo mensaje.
-      const message = error?.data?.error?.message || error?.message || "No se pudo cargar tu estado de membresía.";
+      const message = error?.data?.error?.message || error?.message || "No se pudo cargar tu estado de membresÃ­a.";
       if (lastErrorMessageRef.current !== message) {
         lastErrorMessageRef.current = message;
         notifyError(message);
@@ -242,7 +233,7 @@ export default function ClientePlanesPage() {
         fetchMembershipState(),
       ]);
     } catch (error) {
-      notifyError(error?.data?.error?.message || error?.message || "No se pudo cargar el catálogo de planes.");
+      notifyError(error?.data?.error?.message || error?.message || "No se pudo cargar el catÃ¡logo de planes.");
     } finally {
       setLoading(false);
     }
@@ -267,51 +258,17 @@ export default function ClientePlanesPage() {
     }
   }
 
-  async function handleAcquire(plan) {
-    const idPlan = String(plan?.id_plan || "").trim();
-    const idSucursal = String(branchId || plan?.id_sucursal || "").trim();
-    if (!idPlan || !idSucursal) {
-      notifyWarning("No se pudo determinar la sucursal para adquirir este plan.");
-      return;
-    }
-
-    setAcquiringPlanId(idPlan);
-    try {
-      const acquisition = await acquireClientePlan({
-        id_plan: idPlan,
-        id_sucursal: idSucursal,
-      });
-      const transitionType = String(acquisition?.adquisicion?.transicion?.tipo || "").toLowerCase();
-      if (transitionType === "renovacion") {
-        notifySuccess("Membresía renovada correctamente.");
-      } else if (transitionType === "cambio_plan") {
-        notifySuccess("Plan actualizado correctamente.");
-      } else {
-        notifySuccess("Plan adquirido correctamente. Ya puedes usar tus beneficios.");
-      }
-      await fetchMembershipState();
-    } catch (error) {
-      if (Number(error?.status) === 409) {
-        notifyWarning(formatUpgradeBlockedMessage(error?.data?.error?.details || {}));
-      } else {
-        notifyError(error?.data?.error?.message || error?.message || "No se pudo procesar la solicitud del plan.");
-      }
-    } finally {
-      setAcquiringPlanId("");
-    }
-  }
-
   async function handleCancelMembership() {
     if (!activePlan?.id_suscripcion) return;
-    if (!window.confirm("¿Deseas cancelar tu membresía actual? Perderás el saldo pendiente.")) return;
+    if (!window.confirm("Â¿Deseas cancelar tu membresÃ­a actual? PerderÃ¡s el saldo pendiente.")) return;
 
     setCancelLoading(true);
     try {
       await cancelClientePlan({ motivo_fin_codigo: "cancelacion" });
-      notifySuccess("Membresía cancelada correctamente.");
+      notifySuccess("MembresÃ­a cancelada correctamente.");
       await fetchMembershipState();
     } catch (error) {
-      notifyError(error?.data?.error?.message || error?.message || "No se pudo cancelar la membresía.");
+      notifyError(error?.data?.error?.message || error?.message || "No se pudo cancelar la membresÃ­a.");
     } finally {
       setCancelLoading(false);
     }
@@ -324,7 +281,6 @@ export default function ClientePlanesPage() {
     if (!topPlan) return "";
     return `${topPlan.id_plan || ""}:${topPlan.id_sucursal || "public"}`;
   }, [plans]);
-  const ctaLabel = membershipState?.cta_recomendada === "actualizar" ? "Actualizar plan" : "Adquirir plan";
   const activePlan = membershipState?.plan_activo || null;
   const operationalHistory = useMemo(
     () => (Array.isArray(membershipState?.historial_consumos) ? membershipState.historial_consumos : []).filter(isOperationalMembershipConsumption),
@@ -336,7 +292,7 @@ export default function ClientePlanesPage() {
       <section className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Estado de membresía</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Estado de membresÃ­a</p>
             <h2 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)]">
               {membershipLoading
                 ? "Consultando plan..."
@@ -347,7 +303,7 @@ export default function ClientePlanesPage() {
                 ? "Estamos validando tu estado actual."
                 : activePlan
                   ? `Vigente hasta ${new Date(activePlan.fin_at).toLocaleDateString("es-HN", { timeZone: "America/Tegucigalpa" })}.`
-                  : "Adquiere un plan para desbloquear coberturas automáticas en tu agendamiento."}
+                  : "Adquiere un plan para desbloquear coberturas automÃ¡ticas en tu agendamiento."}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -373,7 +329,7 @@ export default function ClientePlanesPage() {
                 Estado actual: {MEMBERSHIP_STATUS_LABELS[activePlan?.estado_visible] || activePlan?.estado_visible || "Activa"}
               </span>
               <Button type="button" variant="outline" className="gap-2" disabled={cancelLoading} onClick={() => void handleCancelMembership()}>
-                <Ban size={14} /> {cancelLoading ? "Cancelando..." : "Cancelar membresía"}
+                <Ban size={14} /> {cancelLoading ? "Cancelando..." : "Cancelar membresÃ­a"}
               </Button>
             </div>
 
@@ -496,7 +452,7 @@ export default function ClientePlanesPage() {
         {!membershipLoading && Array.isArray(membershipState?.historial_membresias) && membershipState.historial_membresias.length > 0 ? (
           <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
-              Historial de membresías
+              Historial de membresÃ­as
             </p>
             <ul className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)]">
               {membershipState.historial_membresias.slice(0, 6).map((item) => (
@@ -520,10 +476,13 @@ export default function ClientePlanesPage() {
       </section>
 
       <section className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-5">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Colección de membresías</p>
-        <h1 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)] sm:text-3xl">Planes con jerarquía premium</h1>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">ColecciÃ³n de membresÃ­as</p>
+        <h1 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)] sm:text-3xl">Planes con jerarquÃ­a premium</h1>
         <p className="mt-1 text-sm text-[var(--mf-text-2)]">
-          Compara por categoría, beneficios y valor mensual para elegir el plan que mejor se adapta a tu estilo.
+          Compara por categorÃ­a, beneficios y valor mensual para elegir el plan que mejor se adapta a tu estilo.
+        </p>
+        <p className="mt-3 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-xs text-[var(--mf-text-2)]">
+          {PLAN_PURCHASE_PENDING_MESSAGE}
         </p>
 
         <div className="mt-4 w-full max-w-sm">
@@ -562,10 +521,6 @@ export default function ClientePlanesPage() {
                 plan={plan}
                 index={(pageIndex * 3) + index}
                 recommendedKey={recommendedPlanKey}
-                ctaLabel={ctaLabel}
-                onAcquire={handleAcquire}
-                loading={acquiringPlanId === plan.id_plan}
-                disabled={Boolean(acquiringPlanId && acquiringPlanId !== plan.id_plan)}
               />
             )}
           />
@@ -578,4 +533,5 @@ export default function ClientePlanesPage() {
     </div>
   );
 }
+
 
