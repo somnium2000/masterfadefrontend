@@ -101,7 +101,8 @@ export default function AuthCallbackPage() {
     if (exchangeStartedRef.current) {
       return undefined;
     }
-    exchangeStartedRef.current = true;
+
+    let runStarted = false;
 
     async function runExchange() {
       const query = new URLSearchParams(window.location.search);
@@ -197,20 +198,25 @@ export default function AuthCallbackPage() {
       if (!oauthCode && !hashAccessToken) {
         // Sin payload OAuth (F5 o boton atras sobre /auth/callback).
         // Intentamos hidratar por cookie existente antes de mostrar error.
-        const hydrated = await completeExchangeLogin().catch(() => ({ ok: false }));
-        if (hydrated.ok) {
-          navigate(callbackNextPath || '/home', { replace: true });
-          return;
+        try {
+          const hydrated = await completeExchangeLogin();
+          if (hydrated.ok) {
+            navigate(callbackNextPath || '/home', { replace: true });
+            return;
+          }
+        } catch {
+          // ignore
         }
-        if (!supabase) {
-          const message = 'No se pudo completar el ingreso con Google.';
-          setShowInvalidUserAuthBox(false);
-          setError(message);
-          notifications.error(message, { dedupeKey: 'auth-callback-supabase-missing' });
-          return;
-        }
-        // Con supabase pero sin payload, resolveOAuthSessionToken fallara limpiamente.
+
+        // Si no hay sesion y no hay payload, redirigimos a login de forma controlada
+        const message = 'La sesión social ya no está disponible. Inicia nuevamente con Google.';
+        notifications.error(message, { dedupeKey: 'auth-callback-no-payload-redirect' });
+        navigate('/login', { replace: true });
+        return;
       }
+
+      exchangeStartedRef.current = true;
+      runStarted = true;
 
       try {
         setStepMessage('Validando sesion social...');
@@ -275,14 +281,20 @@ export default function AuthCallbackPage() {
     // AM: En React StrictMode (dev), evita doble llamada real al exchange en el primer render.
     timeoutId = window.setTimeout(() => {
       if (!cancelled) {
-        void runExchange();
+        void runExchange().catch((err) => {
+          console.error('[AuthCallback] Error critico en exchange:', err);
+          const message = 'Error inesperado al conectar con Google.';
+          setError(message);
+          notifications.error(message, { dedupeKey: 'auth-callback-uncaught-catch' });
+        });
       }
     }, 0);
 
     return () => {
       cancelled = true;
-      // AM: El guard exchangeStartedRef NO se resetea en cleanup para garantizar
-      // idempotencia real: el exchange se ejecuta exactamente una vez.
+      if (!runStarted) {
+        exchangeStartedRef.current = false;
+      }
       if (timeoutId) {
         window.clearTimeout(timeoutId);
       }

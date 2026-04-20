@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -54,8 +54,8 @@ const STATE_LABELS = {
   en_espera: 'En espera',
   pendiente_pago: 'Pendiente de pago',
   confirmada: 'Confirmada',
-  en_salon: 'En salón',
-  en_atencion: 'En atención',
+  en_salon: 'En salÃ³n',
+  en_atencion: 'En atenciÃ³n',
   completada: 'Completada',
   cancelada: 'Cancelada',
   expirada: 'Expirada',
@@ -64,10 +64,10 @@ const STATE_LABELS = {
 };
 
 const CONTAINER_META = {
-  confirmada: { title: 'Confirmadas', subtitle: 'Pendientes de llegada al salón', accent: 'text-sky-300', border: 'border-sky-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(56,189,248,0.08))]' },
-  en_salon: { title: 'En salón', subtitle: 'Cliente llegó, pendiente de iniciar atención', accent: 'text-amber-300', border: 'border-amber-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(245,158,11,0.08))]' },
-  en_atencion: { title: 'En atención', subtitle: 'Servicio iniciado por el barbero', accent: 'text-indigo-300', border: 'border-indigo-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(99,102,241,0.11))]' },
-  completada_hoy: { title: 'Completadas hoy', subtitle: 'Se reinicia visualmente cada día', accent: 'text-emerald-300', border: 'border-emerald-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(16,185,129,0.08))]' },
+  confirmada: { title: 'Confirmadas', subtitle: 'Pendientes de llegada al salÃ³n', accent: 'text-sky-300', border: 'border-sky-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(56,189,248,0.08))]' },
+  en_salon: { title: 'En salÃ³n', subtitle: 'Cliente llegÃ³, pendiente de iniciar atenciÃ³n', accent: 'text-amber-300', border: 'border-amber-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(245,158,11,0.08))]' },
+  en_atencion: { title: 'En atenciÃ³n', subtitle: 'Servicio iniciado por el barbero', accent: 'text-indigo-300', border: 'border-indigo-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(99,102,241,0.11))]' },
+  completada_hoy: { title: 'Completadas hoy', subtitle: 'Se reinicia visualmente cada dÃ­a', accent: 'text-emerald-300', border: 'border-emerald-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(16,185,129,0.08))]' },
 };
 
 function extractMessage(err) {
@@ -77,22 +77,22 @@ function extractMessage(err) {
 function extractSafeEstadoMessage(err) {
   const code = String(err?.data?.error?.code || '').trim();
   if (code === 'ADMIN_CITAS_STATUS_WINDOW_NOT_OPEN') {
-    return 'La cita aún no está disponible para marcarse en este estado.';
+    return 'La cita aÃºn no estÃ¡ disponible para marcarse en este estado.';
   }
   if (code === 'ADMIN_CITAS_STATUS_TRANSITION_INVALID') {
-    return 'El cambio de estado solicitado no está disponible para esta cita.';
+    return 'El cambio de estado solicitado no estÃ¡ disponible para esta cita.';
   }
   if (code === 'ADMIN_CITAS_STATUS_START_INVALID') {
     return 'La cita no se puede actualizar en este momento.';
   }
   if (code === 'ADMIN_CITAS_ARRIVAL_STATE_INVALID') {
-    return 'La cita no está en estado confirmada para registrar llegada.';
+    return 'La cita no estÃ¡ en estado confirmada para registrar llegada.';
   }
   if (code === 'ADMIN_CITAS_START_ATTENTION_STATE_INVALID') {
-    return 'La cita debe estar en salón para iniciar atención.';
+    return 'La cita debe estar en salÃ³n para iniciar atenciÃ³n.';
   }
   if (code === 'ADMIN_CITAS_FINISH_ATTENTION_STATE_INVALID') {
-    return 'La cita debe estar en atención para finalizar.';
+    return 'La cita debe estar en atenciÃ³n para finalizar.';
   }
   return extractMessage(err);
 }
@@ -154,8 +154,8 @@ function getStateBadgeClass(state) {
 function getOperationLabel(operationCode) {
   const normalized = String(operationCode || '').trim().toLowerCase();
   if (normalized === 'registrar_llegada') return 'Registrar llegada';
-  if (normalized === 'iniciar_atencion') return 'Iniciar atención';
-  if (normalized === 'finalizar_atencion') return 'Finalizar atención';
+  if (normalized === 'iniciar_atencion') return 'Iniciar atenciÃ³n';
+  if (normalized === 'finalizar_atencion') return 'Finalizar atenciÃ³n';
   return operationCode || '';
 }
 
@@ -216,7 +216,7 @@ function compareCompletedByRecent(a, b) {
 export default function AdminAgendamientoCitasPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
-  const { roles } = useAuth();
+  const { roles, isAuthenticated } = useAuth();
 
   const [contextLoading, setContextLoading] = useState(false);
   const [contextError, setContextError] = useState('');
@@ -311,8 +311,8 @@ export default function AdminAgendamientoCitasPage() {
   const mobileTabs = useMemo(
     () => ([
       { key: 'confirmada', label: 'Confirmadas', accent: 'text-sky-300', count: citasConfirmadas.length },
-      { key: 'en_salon', label: 'En salón', accent: 'text-amber-300', count: citasEnSalon.length },
-      { key: 'en_atencion', label: 'En atención', accent: 'text-indigo-300', count: citasEnAtencion.length },
+      { key: 'en_salon', label: 'En salÃ³n', accent: 'text-amber-300', count: citasEnSalon.length },
+      { key: 'en_atencion', label: 'En atenciÃ³n', accent: 'text-indigo-300', count: citasEnAtencion.length },
       { key: 'completada_hoy', label: 'Completadas', accent: 'text-emerald-300', count: citasCompletadasHoy.length },
     ]),
     [citasCompletadasHoy.length, citasConfirmadas.length, citasEnAtencion.length, citasEnSalon.length]
@@ -433,7 +433,7 @@ export default function AdminAgendamientoCitasPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_reagendaciones' }, () => { scheduleLiveRefresh(); })
       .subscribe((status) => {
         realtimeStatusRef.current = status;
-        // Se omite el refresh en SUBSCRIBED para evitar ráfaga doble de red en el montaje, 
+        // Se omite el refresh en SUBSCRIBED para evitar rÃ¡faga doble de red en el montaje, 
         // ya que el useEffect superior ya dispara fetchCitas.
       });
     return () => {
@@ -464,12 +464,13 @@ export default function AdminAgendamientoCitasPage() {
   }, [scheduleLiveRefresh]);
   useEffect(() => {
     const intervalId = window.setInterval(() => {
+      if (!isAuthenticated) return;
       if (typeof document !== 'undefined' && document.hidden) return;
       const channelHealthy = realtimeStatusRef.current === 'SUBSCRIBED';
       scheduleLiveRefresh({ immediate: !channelHealthy });
     }, LIVE_REFRESH_POLL_MS);
     return () => window.clearInterval(intervalId);
-  }, [scheduleLiveRefresh]);
+  }, [isAuthenticated, scheduleLiveRefresh]);
 
   function clearAllFilters() {
     setSearch('');
@@ -512,7 +513,7 @@ export default function AdminAgendamientoCitasPage() {
 
   function openSingleReschedule(cita) {
     setSingleTarget(cita);
-    setSingleForm({ fecha_inicio_nueva: toInputDateTime(cita?.inicio_at), id_empleado_barbero_nuevo: '', motivo: 'Reagendación por emergencia operativa.' });
+    setSingleForm({ fecha_inicio_nueva: toInputDateTime(cita?.inicio_at), id_empleado_barbero_nuevo: '', motivo: 'ReagendaciÃ³n por emergencia operativa.' });
     setSinglePickerDate(toDateKey(cita?.inicio_at));
     setSinglePickerSlots([]);
     setSinglePickerOpen(false);
@@ -551,7 +552,7 @@ export default function AdminAgendamientoCitasPage() {
     if (!singleTarget?.id_cita) return;
     const fechaInicio = toIsoDateTime(singleForm.fecha_inicio_nueva);
     if (!fechaInicio) {
-      notifications.warning('Debes indicar una fecha y hora válida.', { dedupeKey: 'agendamiento-citas-single-date' });
+      notifications.warning('Debes indicar una fecha y hora vÃ¡lida.', { dedupeKey: 'agendamiento-citas-single-date' });
       return;
     }
     setSingleSaving(true);
@@ -670,7 +671,7 @@ export default function AdminAgendamientoCitasPage() {
     }
     const hasInvalid = selectedItems.some((item) => !toIsoDateTime(item.fecha_inicio_nueva));
     if (hasInvalid) {
-      notifications.warning('Todas las filas seleccionadas deben tener fecha y hora nueva válida.', {
+      notifications.warning('Todas las filas seleccionadas deben tener fecha y hora nueva vÃ¡lida.', {
         dedupeKey: 'agendamiento-citas-batch-invalid',
       });
       return;
@@ -688,7 +689,7 @@ export default function AdminAgendamientoCitasPage() {
           motivo: item.motivo || null,
         })),
       });
-      notifications.success('Reagendación masiva completada sin cobro adicional.', { dedupeKey: 'agendamiento-citas-batch-ok' });
+      notifications.success('ReagendaciÃ³n masiva completada sin cobro adicional.', { dedupeKey: 'agendamiento-citas-batch-ok' });
       setBatchItems((prev) => prev.filter((item) => !item.selected));
       void fetchCitas();
     } catch (err) {
@@ -715,13 +716,13 @@ export default function AdminAgendamientoCitasPage() {
         {state === 'en_salon' ? (
           <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita} onClick={() => openStatusDialog(cita, 'iniciar_atencion')}>
             <CalendarCheck2 size={14} />
-            Iniciar atención
+            Iniciar atenciÃ³n
           </Button>
         ) : null}
         {state === 'en_atencion' ? (
           <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita} onClick={() => openStatusDialog(cita, 'finalizar_atencion')}>
             <CalendarCheck2 size={14} />
-            Finalizar atención
+            Finalizar atenciÃ³n
           </Button>
         ) : null}
         {canManageEmergency ? (
@@ -758,7 +759,7 @@ export default function AdminAgendamientoCitasPage() {
               </span>
               <span className="inline-flex items-center gap-1">
                 <Phone size={12} />
-                {cita.telefono_cliente || 'Sin teléfono'}
+                {cita.telefono_cliente || 'Sin telÃ©fono'}
               </span>
             </div>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
@@ -780,12 +781,12 @@ function renderCardsList(items, emptyText) {
               animationDelay={index * 0.04}
               avatar={<CalendarDays size={16} />}
               title={cita.nombre_cliente || 'Cliente'}
-              subtitle={`${cita.nombre_barbero || '-'} · ${formatDateTime(cita.inicio_at)}`}
+              subtitle={`${cita.nombre_barbero || '-'} Â· ${formatDateTime(cita.inicio_at)}`}
               badge={<span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>}
               fields={[
                 { label: 'Sucursal', value: cita.nombre_sucursal || '-' },
                 { label: 'Integrante', value: cita.alias_integrante || 'Titular' },
-                { label: 'Teléfono', value: cita.telefono_cliente || '-' },
+                { label: 'TelÃ©fono', value: cita.telefono_cliente || '-' },
                 { label: 'Inicio', value: formatDateTime(cita.inicio_at) },
                 { label: 'Monto', value: formatCurrencyHnl(cita.total_pagar_hnl) },
               ]}
@@ -852,7 +853,7 @@ function renderCardsList(items, emptyText) {
       <section className="space-y-4 px-2 pt-1 md:hidden">
         <div className="space-y-3">
           <div className="space-y-1">
-            <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
+            <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento Â· OperaciÃ³n</p>
             <h1 className="mf-font-display text-3xl text-[var(--mf-text)]">Citas</h1>
           </div>
 
@@ -881,7 +882,7 @@ function renderCardsList(items, emptyText) {
             {canManageEmergency ? (
               <Button type="button" variant="outline" className="h-auto min-h-11 min-w-0 gap-2 whitespace-normal rounded-2xl px-3 py-2 text-center text-sm font-semibold leading-tight min-[390px]:text-base" onClick={() => setBatchDialogOpen(true)}>
                 <AlertTriangle size={14} />
-                Reagendación masiva
+                ReagendaciÃ³n masiva
               </Button>
             ) : null}
           </div>
@@ -919,9 +920,9 @@ function renderCardsList(items, emptyText) {
       <header className="hidden rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5 md:block">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div className="space-y-1">
-            <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
+            <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento Â· OperaciÃ³n</p>
             <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Citas</h1>
-            <p className="text-sm text-[var(--mf-text-2)]">Gestiona confirmadas, en salón, en atención y completadas del día sin salir de la operación.</p>
+            <p className="text-sm text-[var(--mf-text-2)]">Gestiona confirmadas, en salÃ³n, en atenciÃ³n y completadas del dÃ­a sin salir de la operaciÃ³n.</p>
           </div>
           <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[640px]">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -949,7 +950,7 @@ function renderCardsList(items, emptyText) {
               {canManageEmergency ? (
                 <Button type="button" variant="outline" className="gap-2" onClick={() => setBatchDialogOpen(true)}>
                   <AlertTriangle size={14} />
-                  Reagendación masiva
+                  ReagendaciÃ³n masiva
                 </Button>
               ) : null}
             </div>
@@ -975,9 +976,9 @@ function renderCardsList(items, emptyText) {
               activeMobileContainer === 'confirmada'
                 ? 'No hay citas confirmadas pendientes.'
                 : activeMobileContainer === 'en_salon'
-                  ? 'No hay citas en salón en este momento.'
+                  ? 'No hay citas en salÃ³n en este momento.'
                   : activeMobileContainer === 'en_atencion'
-                    ? 'No hay citas en atención en este momento.'
+                    ? 'No hay citas en atenciÃ³n en este momento.'
                     : 'No hay citas completadas hoy.'
           )}
 
@@ -985,19 +986,19 @@ function renderCardsList(items, emptyText) {
             <div className="rounded-2xl border border-amber-400/30 bg-[color:color-mix(in_srgb,var(--mf-card)_90%,rgba(245,158,11,0.08))] p-3">
               <p className="inline-flex items-center gap-2 text-sm font-semibold text-amber-300">
                 <Armchair size={16} />
-                En salón
+                En salÃ³n
               </p>
               <p className="mt-2 text-xs text-[var(--mf-text-2)]">
-                {citasEnSalon.length > 0 ? `${citasEnSalon.length} cita(s) esperando inicio.` : 'No hay citas en salón hoy.'}
+                {citasEnSalon.length > 0 ? `${citasEnSalon.length} cita(s) esperando inicio.` : 'No hay citas en salÃ³n hoy.'}
               </p>
             </div>
             <div className="rounded-2xl border border-indigo-400/30 bg-[color:color-mix(in_srgb,var(--mf-card)_90%,rgba(99,102,241,0.12))] p-3">
               <p className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-300">
                 <CalendarClock size={16} />
-                En atención
+                En atenciÃ³n
               </p>
               <p className="mt-2 text-xs text-[var(--mf-text-2)]">
-                {citasEnAtencion.length > 0 ? `${citasEnAtencion.length} cita(s) en servicio.` : 'No hay citas en atención hoy.'}
+                {citasEnAtencion.length > 0 ? `${citasEnAtencion.length} cita(s) en servicio.` : 'No hay citas en atenciÃ³n hoy.'}
               </p>
             </div>
             <div className="rounded-2xl border border-emerald-400/30 bg-[color:color-mix(in_srgb,var(--mf-card)_90%,rgba(16,185,129,0.08))] p-3">
@@ -1016,8 +1017,8 @@ function renderCardsList(items, emptyText) {
       {!loading && !listError ? (
         <div className="hidden grid-cols-1 gap-4 xl:grid-cols-4 md:grid">
           {renderContainer('confirmada', citasConfirmadas, 'No hay citas confirmadas pendientes.')}
-          {renderContainer('en_salon', citasEnSalon, 'No hay citas en salón en este momento.')}
-          {renderContainer('en_atencion', citasEnAtencion, 'No hay citas en atención en este momento.')}
+          {renderContainer('en_salon', citasEnSalon, 'No hay citas en salÃ³n en este momento.')}
+          {renderContainer('en_atencion', citasEnAtencion, 'No hay citas en atenciÃ³n en este momento.')}
           {renderContainer('completada_hoy', citasCompletadasHoy, 'No hay citas completadas hoy.')}
         </div>
       ) : null}
@@ -1060,7 +1061,7 @@ function renderCardsList(items, emptyText) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>Confirmar cambio de estado</DialogTitle></DialogHeader>
           <p className="text-sm text-[var(--mf-text-2)]">
-            ¿Deseas ejecutar <strong>{getOperationLabel(stateDialog.estadoDestino)}</strong> para la cita de <strong>{stateDialog.cita?.nombre_cliente || 'Cliente'}</strong>?
+            Â¿Deseas ejecutar <strong>{getOperationLabel(stateDialog.estadoDestino)}</strong> para la cita de <strong>{stateDialog.cita?.nombre_cliente || 'Cliente'}</strong>?
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setStateDialog({ open: false, cita: null, estadoDestino: '' })} disabled={Boolean(stateActionLoadingId)}>Cancelar</Button>
@@ -1071,13 +1072,13 @@ function renderCardsList(items, emptyText) {
 
       <Dialog open={singleDialogOpen} onOpenChange={setSingleDialogOpen}>
         <DialogContent className="sm:max-w-xl">
-          <DialogHeader><DialogTitle>Reagendación de emergencia</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>ReagendaciÃ³n de emergencia</DialogTitle></DialogHeader>
           <div className="grid grid-cols-1 gap-3">
             <p className="text-sm text-[var(--mf-text-2)]">
               {singleTarget?.nombre_cliente || '-'} - {singleTarget?.nombre_barbero || '-'} ({formatDateTime(singleTarget?.inicio_at)})
             </p>
             {singleTarget?.telefono_cliente ? (
-              <p className="text-sm text-[var(--mf-text-2)]">Teléfono cliente: {singleTarget.telefono_cliente}</p>
+              <p className="text-sm text-[var(--mf-text-2)]">TelÃ©fono cliente: {singleTarget.telefono_cliente}</p>
             ) : null}
             <div>
               <Label className="mf-label">Nueva fecha y hora *</Label>
@@ -1092,7 +1093,7 @@ function renderCardsList(items, emptyText) {
                   void loadSingleSlots(singlePickerDate, value);
                 }
               }}>
-                <option value="">Asignación aleatoria</option>
+                <option value="">AsignaciÃ³n aleatoria</option>
                 {barberos.map((barbero) => <option key={barbero.id_empleado} value={barbero.id_empleado}>{barbero.nombre_completo}</option>)}
               </select>
             </div>
@@ -1161,7 +1162,7 @@ function renderCardsList(items, emptyText) {
       {canManageEmergency ? (
         <Dialog open={batchDialogOpen} onOpenChange={setBatchDialogOpen}>
           <DialogContent className="w-[calc(100vw-1rem)] max-h-[90vh] overflow-y-auto sm:max-w-5xl">
-            <DialogHeader><DialogTitle>Reagendación masiva de emergencia</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>ReagendaciÃ³n masiva de emergencia</DialogTitle></DialogHeader>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <Label className="mf-label">Barbero origen *</Label>
@@ -1269,7 +1270,7 @@ function renderCardsList(items, emptyText) {
                               void loadBatchRowSlots({ ...item, id_empleado_barbero_nuevo: value }, item.picker_date, value);
                             }
                           }}>
-                            <option value="">Asignación aleatoria</option>
+                            <option value="">AsignaciÃ³n aleatoria</option>
                             {barberos.map((barbero) => <option key={barbero.id_empleado} value={barbero.id_empleado}>{barbero.nombre_completo}</option>)}
                           </select>
                         </TableCell>
@@ -1278,7 +1279,7 @@ function renderCardsList(items, emptyText) {
                   </TableBody>
                 </Table>
               </div>
-            ) : !batchLoading ? <p className="text-sm text-[var(--mf-text-2)]">Busca las citas afectadas para preparar el lote de reagendación.</p> : null}
+            ) : !batchLoading ? <p className="text-sm text-[var(--mf-text-2)]">Busca las citas afectadas para preparar el lote de reagendaciÃ³n.</p> : null}
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setBatchDialogOpen(false)} disabled={batchSaving}>Cerrar</Button>

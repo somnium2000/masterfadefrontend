@@ -375,14 +375,16 @@ export default function BarberoHomePage() {
     // AM: Polling cada 30s es intencional — dashboard operativo en vivo.
     // El guard de in-flight en fetchDashboard evita ráfagas si la red es lenta.
     const refreshId = window.setInterval(() => {
-      void fetchDashboard({ silent: true });
+      if (user) {
+        void fetchDashboard({ silent: true });
+      }
     }, 30000);
 
     return () => {
       window.clearInterval(clockId);
       window.clearInterval(refreshId);
     };
-  }, [fetchDashboard]);
+  }, [fetchDashboard, user]);
 
   return (
     <div className="space-y-4 px-2 pb-4 sm:px-4 sm:pb-6">
