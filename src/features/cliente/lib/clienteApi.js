@@ -10,7 +10,6 @@ const PROFILE_PATCH_FIELDS = new Set([
   'fecha_nacimiento',
   'genero_codigo',
   'direccion_texto',
-  'observaciones',
   'preferencias_corte',
   'foto_perfil_asset_id',
 ]);

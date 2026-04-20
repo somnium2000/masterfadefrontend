@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
   House,
   LogIn,
   Plus,
@@ -39,36 +38,9 @@ function formatRangeLabel(start, end) {
   return 'Vigencia abierta';
 }
 
-function resolveInternalHref(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  if (raw.startsWith('/')) return raw;
-  if (raw.startsWith('http://') || raw.startsWith('https://')) {
-    try {
-      const parsed = new URL(raw);
-      return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
-    } catch {
-      return '';
-    }
-  }
-  return `/${raw.replace(/^\/+/, '')}`;
-}
-
-function resolveExternalHref(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
-  return `https://${raw.replace(/^\/+/, '')}`;
-}
-
-function PromotionCard({ promotion, onAction }) {
+function PromotionCard({ promotion }) {
   const paragraphs = Array.isArray(promotion?.parrafos) ? promotion.parrafos.filter(Boolean) : [];
   const hasImage = Boolean(promotion?.imagen_principal_url || promotion?.imagen_mobile_url);
-  const internalHref = promotion?.cta_tipo === 'interno' ? resolveInternalHref(promotion?.cta_url) : '';
-  const externalHref = promotion?.cta_tipo === 'externo' ? resolveExternalHref(promotion?.cta_url) : '';
-  // AM: Evita CTA visibles sin destino valido en datos legacy o inconsistentes.
-  const hasAction = Boolean(internalHref || externalHref);
-  const ctaLabel = String(promotion?.cta_texto || '').trim() || 'Ver mas';
   const dateRangeLabel = formatRangeLabel(promotion?.vigencia_desde, promotion?.vigencia_hasta);
 
   return (
@@ -134,16 +106,6 @@ function PromotionCard({ promotion, onAction }) {
           </span>
         </div>
 
-        {hasAction ? (
-          <button
-            type="button"
-            onClick={() => onAction(promotion)}
-            className="mf-accent-gradient mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold shadow-[var(--mf-shadow-accent)]"
-          >
-            <span>{ctaLabel}</span>
-            {promotion?.cta_tipo === 'externo' ? <ExternalLink size={14} strokeWidth={2} /> : null}
-          </button>
-        ) : null}
       </div>
     </motion.article>
   );
@@ -238,23 +200,6 @@ export default function PromotionsPage() {
     const cardWidth = firstCard ? firstCard.getBoundingClientRect().width : track.clientWidth;
     const step = (cardWidth + gap) * cardsPerStep;
     track.scrollBy({ left: direction === 'left' ? -step : step, behavior: 'smooth' });
-  }
-
-  function handlePromotionAction(promotion) {
-    if (!promotion) return;
-
-    if (promotion.cta_tipo === 'interno') {
-      const target = resolveInternalHref(promotion.cta_url);
-      if (target) navigate(target);
-      return;
-    }
-
-    if (promotion.cta_tipo === 'externo') {
-      const target = resolveExternalHref(promotion.cta_url);
-      if (target) {
-        window.open(target, '_blank', 'noopener,noreferrer');
-      }
-    }
   }
 
   const sortedPromotions = useMemo(() => {
@@ -437,7 +382,7 @@ export default function PromotionsPage() {
                     className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-6 pt-2 [-ms-overflow-style:none] [scrollbar-width:none] scroll-smooth [&::-webkit-scrollbar]:hidden"
                   >
                     {sortedPromotions.map((promotion) => (
-                      <PromotionCard key={`${promotion.id_promocion}:${promotion.id_sucursal || 'public'}`} promotion={promotion} onAction={handlePromotionAction} />
+                      <PromotionCard key={`${promotion.id_promocion}:${promotion.id_sucursal || 'public'}`} promotion={promotion} />
                     ))}
                   </div>
                 </div>
