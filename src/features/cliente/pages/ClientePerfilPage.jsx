@@ -64,6 +64,7 @@ export default function ClientePerfilPage() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [profilePhotoError, setProfilePhotoError] = useState(false);
 
   const canLoadProfile = Boolean(isAuthenticated && isHydrated && !isHydrating  );
 
@@ -73,6 +74,7 @@ export default function ClientePerfilPage() {
     try {
       const payload = await getClienteMe();
       setData(payload);
+      setProfilePhotoError(false);
       if (refreshClienteProfile) {
         void refreshClienteProfile({ silent: true });
       }
@@ -118,9 +120,15 @@ export default function ClientePerfilPage() {
       <section className="mf-glass-surface rounded-[26px] border border-[var(--mf-nav-border)] p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="h-24 w-24 overflow-hidden rounded-2xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)]">
-              {profile?.foto_perfil_signed_url ? (
-                <img src={profile.foto_perfil_signed_url} alt="Foto de perfil" className="h-full w-full object-cover object-center" loading="lazy" />
+            <div className="h-28 w-28 overflow-hidden rounded-full border-2 border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] shadow-[var(--mf-shadow)]">
+              {profile?.foto_perfil_signed_url && !profilePhotoError ? (
+                <img
+                  src={profile.foto_perfil_signed_url}
+                  alt="Foto de perfil"
+                  className="h-full w-full object-cover object-center"
+                  loading="lazy"
+                  onError={() => setProfilePhotoError(true)}
+                />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-[var(--mf-text-2)]">
                   <Camera size={20} />

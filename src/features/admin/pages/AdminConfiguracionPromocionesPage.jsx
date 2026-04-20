@@ -26,15 +26,12 @@ const FORM_DEFAULTS = {
   imagen_mobile_url: '',
   imagen_principal_asset_id: null,
   imagen_mobile_asset_id: null,
-  cta_tipo: 'none',
-  cta_texto: '',
-  cta_url: '',
   visible_publico: false, destacada: false,
   orden_visual: '100',
   vigencia_desde: '', vigencia_hasta: '', estado: 'borrador',
 };
 
-const FILTER_DEFAULTS = { estado: 'all', visibilidad: 'all', destacada: 'all', ctaTipo: 'all', idSucursal: 'all' };
+const FILTER_DEFAULTS = { estado: 'all', visibilidad: 'all', destacada: 'all', idSucursal: 'all' };
 
 function extractMessage(error) {
   return error?.data?.error?.message || error?.message || 'Error desconocido.';
@@ -88,8 +85,6 @@ function upsertPromo(list, item) {
 
 function stateLabel(v) { return v === 'publicada' ? 'Publicada' : v === 'archivada' ? 'Archivada' : 'Borrador'; }
 function stateClass(v) { return v === 'publicada' ? 'mf-badge-green' : v === 'archivada' ? 'mf-badge-red' : 'mf-badge-muted'; }
-function ctaLabel(v) { return v === 'interno' ? 'Interno' : v === 'externo' ? 'Externo' : 'Sin CTA'; }
-
 function PromotionStateBadge({ estado }) { return <span className={`mf-badge ${stateClass(estado)}`}>{stateLabel(estado)}</span>; }
 function PromotionVisibilityBadge({ visible }) { return <span className={`mf-badge ${visible ? 'mf-badge-green' : 'mf-badge-muted'}`}>{visible ? 'Visible' : 'Oculta'}</span>; }
 function PromotionFeaturedBadge({ destacada }) { return <span className={`mf-badge ${destacada ? 'mf-badge-gold' : 'mf-badge-muted'}`}>{destacada ? 'Destacada' : 'Normal'}</span>; }
@@ -118,16 +113,6 @@ function validate(values) {
   if (parrafos.some((line) => line.length > 420)) return 'Cada parrafo admite maximo 420 caracteres.';
   const ordenVisual = Number(values.orden_visual);
   if (!Number.isInteger(ordenVisual) || ordenVisual < 0) return 'orden_visual debe ser un entero mayor o igual a 0.';
-  const ctaTipo = String(values.cta_tipo || 'none').trim().toLowerCase();
-  const ctaTexto = String(values.cta_texto || '').trim();
-  const ctaUrl = String(values.cta_url || '').trim();
-  if (!['none', 'interno', 'externo'].includes(ctaTipo)) return 'cta_tipo invalido.';
-  if (ctaTipo === 'none') {
-    if (ctaTexto || ctaUrl) return 'Si cta_tipo es none, cta_texto y cta_url deben ir vacios.';
-  } else {
-    if (!ctaTexto) return 'cta_texto es requerido cuando cta_tipo es interno o externo.';
-    if (!ctaUrl) return 'cta_url es requerido cuando cta_tipo es interno o externo.';
-  }
   if (vigenciaDesde && vigenciaHasta && vigenciaHasta < vigenciaDesde) return 'vigencia_hasta no puede ser menor que vigencia_desde.';
   if (estado === 'archivada' && visiblePublico) return 'Una promocion archivada no puede estar visible_publico=true.';
   if (estado === 'publicada') {
@@ -156,9 +141,6 @@ function toPayload(values) {
     imagen_principal_url: String(values.imagen_principal_url || '').trim() || null,
     imagen_mobile_url: String(values.imagen_mobile_url || '').trim() || null,
     imagen_alt: titulo || null,
-    cta_tipo: String(values.cta_tipo || 'none').trim().toLowerCase(),
-    cta_texto: String(values.cta_texto || '').trim() || null,
-    cta_url: String(values.cta_url || '').trim() || null,
     visible_publico: normalizeBoolean(values.visible_publico),
     destacada: normalizeBoolean(values.destacada),
     orden_visual: Number(values.orden_visual),
@@ -177,9 +159,6 @@ function mapToForm(promo, branch = '') {
     imagen_mobile_url: promo?.imagen_mobile_url || '',
     imagen_principal_asset_id: promo?.imagen_principal_asset_id || null,
     imagen_mobile_asset_id: promo?.imagen_mobile_asset_id || null,
-    cta_tipo: promo?.cta_tipo || 'none',
-    cta_texto: promo?.cta_texto || '',
-    cta_url: promo?.cta_url || '',
     visible_publico: normalizeBoolean(promo?.visible_publico), destacada: normalizeBoolean(promo?.destacada),
     orden_visual: String(Number(promo?.orden_visual ?? 100)),
     vigencia_desde: toDateInputValue(promo?.vigencia_desde), vigencia_hasta: toDateInputValue(promo?.vigencia_hasta),
@@ -288,15 +267,7 @@ function PromotionForm({ values, onChange, branchLabel, promotionId }) {
         <div className="space-y-1.5"><Label>Vigencia desde</Label><Input type="date" value={values.vigencia_desde} onChange={(e) => onChange('vigencia_desde', e.target.value)} /></div>
         <div className="space-y-1.5"><Label>Vigencia hasta</Label><Input type="date" value={values.vigencia_hasta} onChange={(e) => onChange('vigencia_hasta', e.target.value)} /></div>
         <div className="space-y-1.5"><Label>Orden visual *</Label><Input type="number" min="0" step="1" value={values.orden_visual} onChange={(e) => onChange('orden_visual', e.target.value)} /></div>
-        <div className="space-y-1.5"><Label>CTA</Label><select className="mf-select" value={values.cta_tipo} onChange={(e) => onChange('cta_tipo', e.target.value)}><option value="none">Sin CTA</option><option value="interno">Interno</option><option value="externo">Externo</option></select></div>
       </div>
-
-      {values.cta_tipo !== 'none' ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5"><Label>Texto CTA *</Label><Input value={values.cta_texto} onChange={(e) => onChange('cta_texto', e.target.value)} placeholder="Ej. Ver detalle" /></div>
-          <div className="space-y-1.5"><Label>URL CTA *</Label><Input value={values.cta_url} onChange={(e) => onChange('cta_url', e.target.value)} placeholder={values.cta_tipo === 'interno' ? '/promociones/oferta' : 'https://example.com'} /></div>
-        </div>
-      ) : null}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex items-center justify-between rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2.5 text-sm"><span className="text-[var(--mf-text)]">Visible en landing publica</span><input type="checkbox" checked={Boolean(values.visible_publico)} onChange={(e) => onChange('visible_publico', e.target.checked)} className="h-4 w-4 accent-[var(--mf-accent)]" /></label>
@@ -352,7 +323,6 @@ export default function AdminConfiguracionPromocionesPage() {
       if (filters.estado !== 'all' && String(promo?.estado || '') !== filters.estado) return false;
       if (filters.visibilidad !== 'all' && Boolean(promo?.visible_publico) !== (filters.visibilidad === 'visible')) return false;
       if (filters.destacada !== 'all' && Boolean(promo?.destacada) !== (filters.destacada === 'si')) return false;
-      if (filters.ctaTipo !== 'all' && String(promo?.cta_tipo || 'none') !== filters.ctaTipo) return false;
       if (!sucursal && filters.idSucursal !== 'all' && String(promo?.id_sucursal || '') !== filters.idSucursal) return false;
       return true;
     });
@@ -364,7 +334,6 @@ export default function AdminConfiguracionPromocionesPage() {
     if (filters.estado !== 'all') out.push({ key: 'estado', label: `Estado: ${stateLabel(filters.estado)}` });
     if (filters.visibilidad !== 'all') out.push({ key: 'visibilidad', label: `Publico: ${filters.visibilidad === 'visible' ? 'Visible' : 'Oculto'}` });
     if (filters.destacada !== 'all') out.push({ key: 'destacada', label: `Destacada: ${filters.destacada === 'si' ? 'Si' : 'No'}` });
-    if (filters.ctaTipo !== 'all') out.push({ key: 'ctaTipo', label: `CTA: ${ctaLabel(filters.ctaTipo)}` });
     if (!sucursal && filters.idSucursal !== 'all') out.push({ key: 'idSucursal', label: `Sucursal: ${branchNameById[filters.idSucursal] || 'Seleccionada'}` });
     return out;
   }, [branchNameById, filters, search, sucursal]);
@@ -415,11 +384,6 @@ export default function AdminConfiguracionPromocionesPage() {
       const next = { ...prev, [field]: value };
       if (field === 'estado' && value === 'archivada') { next.visible_publico = false; next.destacada = false; }
       if (field === 'visible_publico' && !value) next.destacada = false;
-      if (field === 'cta_tipo' && value === 'none') {
-        // AM: Evita enviar CTA parcial cuando el tipo es none.
-        next.cta_texto = '';
-        next.cta_url = '';
-      }
       return next;
     });
     setFormError('');
@@ -564,6 +528,14 @@ export default function AdminConfiguracionPromocionesPage() {
               badge={<PromotionStateBadge estado={promo.estado} />}
               fields={[
                 ...(!sucursal ? [{ label: 'Sucursal', value: branchNameById[promo.id_sucursal] || 'Sin sucursal' }] : []),
+                {
+                  label: 'Imagen',
+                  value: promo.imagen_principal_url ? (
+                    <div className="h-12 w-20 overflow-hidden rounded-lg border border-[var(--mf-nav-border)]">
+                      <img src={promo.imagen_principal_url} alt={promo.titulo || 'Promocion'} className="h-full w-full object-cover" loading="lazy" />
+                    </div>
+                  ) : 'Sin imagen',
+                },
                 { label: 'Publico', value: <PromotionVisibilityBadge visible={Boolean(promo.visible_publico)} /> },
                 { label: 'Destacada', value: <PromotionFeaturedBadge destacada={Boolean(promo.destacada)} /> },
                 { label: 'Vigencia', value: <PromotionVigenciaBadge vigenciaHasta={promo.vigencia_hasta} /> },
@@ -578,14 +550,14 @@ export default function AdminConfiguracionPromocionesPage() {
         <div className="mf-table-wrap">
           <Table>
             <TableHeader><TableRow className="border-[var(--mf-nav-border)]">{!sucursal ? <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursal</TableHead> : null}<TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Titulo</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden lg:table-cell">Slug</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Estado</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Publico</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Destacada</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Vigencia</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden lg:table-cell">Fechas</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead></TableRow></TableHeader>
-            <TableBody>{filteredPromociones.map((promo) => (<TableRow key={`${promo.id_promocion}:${promo.id_sucursal}`} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">{!sucursal ? <TableCell className="text-[var(--mf-text-2)] text-sm whitespace-nowrap">{branchNameById[promo.id_sucursal] || 'Sin sucursal'}</TableCell> : null}<TableCell className="font-medium text-[var(--mf-text)]"><div>{promo.titulo}</div>{promo.subtitulo ? <div className="text-xs text-[var(--mf-text-2)] mt-0.5">{promo.subtitulo}</div> : null}</TableCell><TableCell className="text-[var(--mf-text-2)] hidden lg:table-cell">{promo.slug || '-'}</TableCell><TableCell className="text-center"><PromotionStateBadge estado={promo.estado} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVisibilityBadge visible={Boolean(promo.visible_publico)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionFeaturedBadge destacada={Boolean(promo.destacada)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVigenciaBadge vigenciaHasta={promo.vigencia_hasta} /></TableCell><TableCell className="text-center text-[var(--mf-text-2)]">{Number(promo.orden_visual ?? 100)}</TableCell><TableCell className="hidden lg:table-cell text-[var(--mf-text-2)] text-xs whitespace-nowrap">{(promo.vigencia_desde || '-')} {' -> '} {(promo.vigencia_hasta || '-')}</TableCell><TableCell className="text-right"><div className="flex items-center justify-end gap-1.5">{renderActions(promo)}</div></TableCell></TableRow>))}</TableBody>
+            <TableBody>{filteredPromociones.map((promo) => (<TableRow key={`${promo.id_promocion}:${promo.id_sucursal}`} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">{!sucursal ? <TableCell className="text-[var(--mf-text-2)] text-sm whitespace-nowrap">{branchNameById[promo.id_sucursal] || 'Sin sucursal'}</TableCell> : null}<TableCell className="font-medium text-[var(--mf-text)]"><div className="flex items-center gap-2"><div className="h-10 w-16 shrink-0 overflow-hidden rounded-md border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)]">{promo.imagen_principal_url ? <img src={promo.imagen_principal_url} alt={promo.titulo || 'Promocion'} className="h-full w-full object-cover" loading="lazy" /> : null}</div><div><div>{promo.titulo}</div>{promo.subtitulo ? <div className="text-xs text-[var(--mf-text-2)] mt-0.5">{promo.subtitulo}</div> : null}</div></div></TableCell><TableCell className="text-[var(--mf-text-2)] hidden lg:table-cell">{promo.slug || '-'}</TableCell><TableCell className="text-center"><PromotionStateBadge estado={promo.estado} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVisibilityBadge visible={Boolean(promo.visible_publico)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionFeaturedBadge destacada={Boolean(promo.destacada)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVigenciaBadge vigenciaHasta={promo.vigencia_hasta} /></TableCell><TableCell className="text-center text-[var(--mf-text-2)]">{Number(promo.orden_visual ?? 100)}</TableCell><TableCell className="hidden lg:table-cell text-[var(--mf-text-2)] text-xs whitespace-nowrap">{(promo.vigencia_desde || '-')} {' -> '} {(promo.vigencia_hasta || '-')}</TableCell><TableCell className="text-right"><div className="flex items-center justify-end gap-1.5">{renderActions(promo)}</div></TableCell></TableRow>))}</TableBody>
           </Table>
         </div>
       ) : null}
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading) setDialogOpen(open); }}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editTarget ? 'Editar promocion' : 'Nueva promocion'}</DialogTitle><DialogDescription className="sr-only">Configura contenido, publicacion, CTA y vigencia de la promocion por sucursal.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{editTarget ? 'Editar promocion' : 'Nueva promocion'}</DialogTitle><DialogDescription className="sr-only">Configura contenido, publicacion y vigencia de la promocion por sucursal.</DialogDescription></DialogHeader>
           <PromotionForm
             values={formValues}
             onChange={handleFormChange}
@@ -610,7 +582,6 @@ export default function AdminConfiguracionPromocionesPage() {
                   { label: 'Visible publico', value: <PromotionVisibilityBadge visible={Boolean(detailTarget.visible_publico)} /> },
                   { label: 'Estado', value: <PromotionStateBadge estado={detailTarget.estado} /> },
                   { label: 'Destacada', value: <PromotionFeaturedBadge destacada={Boolean(detailTarget.destacada)} /> },
-                  { label: 'CTA', value: ctaLabel(detailTarget.cta_tipo) },
                   { label: 'Orden visual', value: Number(detailTarget.orden_visual ?? 100) },
                   { label: 'Vigencia', value: <PromotionVigenciaBadge vigenciaHasta={detailTarget.vigencia_hasta} /> },
                   { label: 'Vigencia desde', value: detailTarget.vigencia_desde || '-' },
@@ -621,8 +592,6 @@ export default function AdminConfiguracionPromocionesPage() {
                   { label: 'Subtitulo', value: detailTarget.subtitulo || '-' },
                   { label: 'Descripcion', value: Array.isArray(detailTarget.parrafos) && detailTarget.parrafos.length ? <div className="space-y-1 text-left">{detailTarget.parrafos.map((line, index) => (<p key={`${index}-${line}`} className="text-sm">{line}</p>))}</div> : 'Sin descripcion', span: 'full' },
                   { label: 'Imagen principal', value: detailTarget.imagen_principal_url || '-', span: 'full' },
-                  { label: 'CTA texto', value: detailTarget.cta_texto || '-', span: 'full' },
-                  { label: 'CTA URL', value: detailTarget.cta_url || '-', span: 'full' },
                 ]},
               ]}
             />
@@ -632,12 +601,11 @@ export default function AdminConfiguracionPromocionesPage() {
 
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
         <DialogContent className="sm:max-w-xl">
-          <DialogHeader><DialogTitle>Filtros de Promociones</DialogTitle><DialogDescription className="sr-only">Filtra promociones por estado, visibilidad, destacada, CTA y sucursal.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Filtros de Promociones</DialogTitle><DialogDescription className="sr-only">Filtra promociones por estado, visibilidad, destacada y sucursal.</DialogDescription></DialogHeader>
           <div className="mt-1 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div><Label className="mf-label">Estado</Label><select className="mf-select mt-1" value={filters.estado} onChange={(event) => setFilters((prev) => ({ ...prev, estado: event.target.value }))}><option value="all">Todos</option><option value="borrador">Borrador</option><option value="publicada">Publicada</option><option value="archivada">Archivada</option></select></div>
             <div><Label className="mf-label">Visibilidad publica</Label><select className="mf-select mt-1" value={filters.visibilidad} onChange={(event) => setFilters((prev) => ({ ...prev, visibilidad: event.target.value }))}><option value="all">Todos</option><option value="visible">Visible</option><option value="oculto">Oculto</option></select></div>
             <div><Label className="mf-label">Destacada</Label><select className="mf-select mt-1" value={filters.destacada} onChange={(event) => setFilters((prev) => ({ ...prev, destacada: event.target.value }))}><option value="all">Todos</option><option value="si">Si</option><option value="no">No</option></select></div>
-            <div><Label className="mf-label">CTA</Label><select className="mf-select mt-1" value={filters.ctaTipo} onChange={(event) => setFilters((prev) => ({ ...prev, ctaTipo: event.target.value }))}><option value="all">Todos</option><option value="none">Sin CTA</option><option value="interno">Interno</option><option value="externo">Externo</option></select></div>
             {!sucursal ? <div className="sm:col-span-2"><Label className="mf-label">Sucursal</Label><select className="mf-select mt-1" value={filters.idSucursal} onChange={(event) => setFilters((prev) => ({ ...prev, idSucursal: event.target.value }))}><option value="all">Todas</option>{availableBranches.map((branch) => <option key={branch.id_sucursal} value={branch.id_sucursal}>{branch.nombre_sucursal}</option>)}</select></div> : <p className="sm:col-span-2 text-xs text-[var(--mf-text-2)]">La sucursal ya esta fijada en el selector superior.</p>}
           </div>
           <DialogFooter><Button variant="outline" onClick={clearAllFilters}>Limpiar filtros</Button><Button onClick={() => setFiltersOpen(false)}>Cerrar</Button></DialogFooter>
