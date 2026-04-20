@@ -124,7 +124,7 @@ function App() {
         <Route path="catalog/planes" element={<AdminPlansCatalogPage />} />
         {/* Sucursales */}
         <Route path="sucursales" element={<AdminSucursalesPage />} />
-        {/* Citas */}
+        {/* Citas y agendamiento */}
         <Route path="citas" element={<RouteErrorBoundary><AdminAgendamientoCitasPage /></RouteErrorBoundary>} />
         <Route path="citas/historial" element={<RouteErrorBoundary><AdminAgendamientoHistorialPage /></RouteErrorBoundary>} />
         <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPreviewPage /></RouteErrorBoundary>} />
