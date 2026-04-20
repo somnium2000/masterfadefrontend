@@ -22,7 +22,7 @@ import PremiumBottomNav from "../../../components/navigation/PremiumBottomNav.js
 import ThemeSwitcher from "../../../components/theme/ThemeSwitcher.jsx";
 import { useAuth } from "../../../context/AuthContext.jsx";
 import { useNotifications } from "../../../context/NotificationsContext.jsx";
-import { listPublicCatalogBranches, listPublicCatalogPlans } from "../lib/catalogApi.js";
+import { listPublicCatalogBranches, listPublicCatalogPlans, searchPublicCatalog } from "../lib/catalogApi.js";
 import { subscribeCatalogSync } from "../../../lib/catalogSync.js";
 import { getPlanCategoryTheme, normalizePlanCategory } from "../../plans/lib/planCategoryTheme.js";
 import { acquireClientePlan, getClientePlanEstado } from "../../cliente/lib/clienteApi.js";
@@ -44,6 +44,8 @@ function formatUpgradeBlockedMessage(details = {}) {
 
 function PlanCard({ plan, onSelect, isSpotlight = false, ctaLabel = "Quiero este plan", disabled = false, loading = false }) {
   const benefits = Array.isArray(plan?.beneficios) ? plan.beneficios : [];
+  const serviceBenefits = benefits.filter((benefit) => String(benefit?.tipo || "").toLowerCase() !== "cortesia");
+  const courtesyBenefits = benefits.filter((benefit) => String(benefit?.tipo || "").toLowerCase() === "cortesia");
   const categoryLevel = normalizePlanCategory(plan?.categoria_nivel, 1);
   const categoryTheme = getPlanCategoryTheme(categoryLevel);
   const CategoryIcon = CATEGORY_ICONS[categoryLevel] || Crown;
@@ -92,22 +94,40 @@ function PlanCard({ plan, onSelect, isSpotlight = false, ctaLabel = "Quiero este
 
       <div className="mt-4 flex-1">
         {plan.descripcion ? <p className="mb-4 text-sm leading-6 text-[var(--mf-text-2)]">{plan.descripcion}</p> : null}
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-text-2)]">Incluye</p>
-        <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--mf-text)]">
-          {benefits.map((benefit, index) => (
-            <li key={`${plan.id_plan}-${index}`} className="flex items-start gap-3">
-              <CheckCircle2 size={14} className="mt-1 shrink-0 text-[var(--mf-accent)]" />
-              <span>
-                {Number(benefit?.cantidad || 0)}x {benefit?.nombre || benefit?.codigo || "Beneficio"}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-text-2)]">Servicios incluidos</p>
+            {serviceBenefits.length ? (
+              <ul className="mt-2 space-y-2 text-sm leading-6 text-[var(--mf-text)]">
+                {serviceBenefits.map((benefit, index) => (
+                  <li key={`${plan.id_plan}-srv-${index}`} className="flex items-start gap-3">
+                    <CheckCircle2 size={14} className="mt-1 shrink-0 text-[var(--mf-accent)]" />
+                    <span>{Number(benefit?.cantidad || 0)}x {benefit?.nombre || "Servicio"}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="mt-2 text-xs text-[var(--mf-text-2)]">No incluye servicios.</p>}
+          </div>
+
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-text-2)]">Cortesias incluidas</p>
+            {courtesyBenefits.length ? (
+              <ul className="mt-2 space-y-2 text-sm leading-6 text-[var(--mf-text)]">
+                {courtesyBenefits.map((benefit, index) => (
+                  <li key={`${plan.id_plan}-cor-${index}`} className="flex items-start gap-3">
+                    <CheckCircle2 size={14} className="mt-1 shrink-0 text-[var(--mf-accent)]" />
+                    <span>{Number(benefit?.cantidad || 0)}x {benefit?.nombre || benefit?.codigo || "Cortesia"}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="mt-2 text-xs text-[var(--mf-text-2)]">No incluye cortesias.</p>}
+          </div>
+        </div>
       </div>
 
       <div className="mt-5">
         <p className="text-3xl font-semibold text-[var(--mf-text)]">
-          {Number.isFinite(Number(plan?.precio_hnl)) ? `L ${Number(plan.precio_hnl).toFixed(2)}` : "Precio por confirmar"}
+          {`L ${Number(plan.precio_hnl).toFixed(2)}`}
         </p>
       </div>
 
@@ -144,20 +164,31 @@ export default function MembershipPlansPage() {
   const [selectedBranchId, setSelectedBranchId] = useState("");
   const [plans, setPlans] = useState([]);
   const [errorMessage, setErrorMessage] = useState("");
+  const [search, setSearch] = useState("");
   const [membershipState, setMembershipState] = useState(null);
   const [membershipLoading, setMembershipLoading] = useState(false);
   const [acquiringPlanId, setAcquiringPlanId] = useState("");
 
   const scrollRef = useRef(null);
 
-  const loadPlans = useCallback(async ({ silent = false, branchId = selectedBranchRef.current } = {}) => {
+  const loadPlans = useCallback(async ({ silent = false, branchId = selectedBranchRef.current, searchTerm = "" } = {}) => {
     if (!silent) setStatus("loading");
     setErrorMessage("");
 
     try {
-      const result = await listPublicCatalogPlans({ id_sucursal: branchId || undefined });
+      const normalizedSearch = String(searchTerm || "").trim();
+      const result = normalizedSearch
+        ? await searchPublicCatalog({ q: normalizedSearch, id_sucursal: branchId || undefined })
+        : await listPublicCatalogPlans({ id_sucursal: branchId || undefined });
       if (!isMountedRef.current) return;
-      setPlans(result.plans);
+      const rawPlans = Array.isArray(result?.plans) ? result.plans : [];
+      const validPlans = rawPlans.filter((plan) => {
+        const price = Number(plan?.precio_hnl);
+        if (!Number.isFinite(price) || price <= 0) return false;
+        const benefits = Array.isArray(plan?.beneficios) ? plan.beneficios : [];
+        return benefits.some((benefit) => String(benefit?.tipo || "").toLowerCase() === "servicio");
+      });
+      setPlans(validPlans);
       setStatus("success");
     } catch (error) {
       if (!isMountedRef.current) return;
@@ -210,7 +241,7 @@ export default function MembershipPlansPage() {
           selectedBranchRef.current = initialBranchId;
           setSelectedBranchId(initialBranchId);
 
-          await loadPlans({ branchId: initialBranchId });
+          await loadPlans({ branchId: initialBranchId, searchTerm: search });
         } catch (error) {
           if (!isMountedRef.current) return;
           setErrorMessage(error?.data?.error?.message || error?.message || "No se pudo cargar membresías.");
@@ -222,14 +253,14 @@ export default function MembershipPlansPage() {
     const unsubscribe = subscribeCatalogSync(() => {
       if (!isMountedRef.current) return;
       // AM: Refresco silencioso para mantener pantalla VIP alineada con cambios del admin.
-      void loadPlans({ silent: true, branchId: selectedBranchRef.current });
+      void loadPlans({ silent: true, branchId: selectedBranchRef.current, searchTerm: search });
     });
 
     return () => {
       isMountedRef.current = false;
       unsubscribe();
     };
-  }, [loadPlans]);
+  }, [loadPlans, search]);
 
   useEffect(() => {
     if (!isClienteSession) {
@@ -240,11 +271,19 @@ export default function MembershipPlansPage() {
     void loadMembershipState({ notifyOnError: true });
   }, [isClienteSession, loadMembershipState]);
 
+  useEffect(() => {
+    if (status === "loading") return;
+    const timerId = window.setTimeout(() => {
+      void loadPlans({ silent: true, branchId: selectedBranchRef.current, searchTerm: search });
+    }, 280);
+    return () => window.clearTimeout(timerId);
+  }, [loadPlans, search, status]);
+
   function handleBranchChange(nextBranchId) {
     if (!nextBranchId || nextBranchId === selectedBranchRef.current) return;
     selectedBranchRef.current = nextBranchId;
     setSelectedBranchId(nextBranchId);
-    void loadPlans({ branchId: nextBranchId, silent: true });
+    void loadPlans({ branchId: nextBranchId, silent: true, searchTerm: search });
   }
 
   function handleScroll(direction) {
