@@ -1,6 +1,6 @@
-﻿import { ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
 import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
 import {
   formatCurrencyHnl,
@@ -256,6 +256,9 @@ export default function PublicBookingConfirmStep() {
           >
             <DialogHeader>
               <DialogTitle>{getConfirmationTitle(holdResult)}</DialogTitle>
+              <DialogDescription>
+                Revisa los detalles de tu reserva antes de finalizar.
+              </DialogDescription>
             </DialogHeader>
             <FinalConfirmationPanel
               holdResult={holdResult}

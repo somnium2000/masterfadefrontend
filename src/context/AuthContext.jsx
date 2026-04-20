@@ -172,6 +172,16 @@ export function AuthProvider({ children }) {
   }, [clearSessionState]);
 
   useEffect(() => {
+    // AM: No hidratar sesion si estamos en /auth/callback — esa pagina maneja
+    // su propio intercambio de tokens. Hidratacion prematura aqui generaria un
+    // 401 en /v1/auth/me antes de que el exchange termine.
+    if (window.location.pathname.startsWith('/auth/callback')) {
+      // La pagina callback llama a completeExchangeLogin() cuando el exchange
+      // termina exitosamente, lo que triggerea hydrateSession() en el momento correcto.
+      setIsHydrating(false);
+      setIsHydrated(true);
+      return;
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void hydrateSession();
   }, [hydrateSession]);

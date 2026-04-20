@@ -2,7 +2,7 @@
 import { useNavigate } from "react-router-dom";
 import { Clock3, Gift, Search, Settings2, SlidersHorizontal, Star, X } from "lucide-react";
 import { Button } from "../../../components/ui/button.jsx";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog.jsx";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog.jsx";
 import { Input } from "../../../components/ui/input.jsx";
 import { Label } from "../../../components/ui/label.jsx";
 import ViewToggle from "../../../components/data/ViewToggle.jsx";
@@ -27,6 +27,9 @@ import {
   listAdminMasterPuntosClientes,
   updateAdminMasterPuntosRegla,
 } from "../lib/adminMasterPuntosApi.js";
+
+const CLIENTES_LIMIT = 20;
+const MOV_LIMIT = 10;
 
 const RULE_DEFAULTS = { scope: "global", id_sucursal: "", umbral_monto_hnl: 250, puntos_para_premio: 10, activo: true, servicios_redimibles: [] };
 function extractMessage(err) {
@@ -106,6 +109,9 @@ export default function AdminMasterPuntosPage() {
     parametros: { migracion_manual_habilitada: false },
   });
   const [clientes, setClientes] = useState([]);
+  const [clientesPage, setClientesPage] = useState(1);
+  const [clientesTotalPages, setClientesTotalPages] = useState(1);
+  const [clientesTotal, setClientesTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState("");
   const [search, setSearch] = useState("");
@@ -130,6 +136,8 @@ export default function AdminMasterPuntosPage() {
   const [movError, setMovError] = useState("");
   const [movCliente, setMovCliente] = useState(null);
   const [movimientos, setMovimientos] = useState([]);
+  const [movPage, setMovPage] = useState(1);
+  const [movTotalPages, setMovTotalPages] = useState(1);
 
   const [legacyOpen, setLegacyOpen] = useState(false);
   const [legacyTarget, setLegacyTarget] = useState(null);
@@ -169,10 +177,7 @@ export default function AdminMasterPuntosPage() {
     return Array.isArray(rule?.servicios_redimibles) ? rule.servicios_redimibles : [];
   }, [contexto]);
 
-  const filteredClientes = useMemo(() => {
-    if (!soloPremioDisponible) return clientes;
-    return clientes.filter((item) => item?.premio_disponible);
-  }, [clientes, soloPremioDisponible]);
+  
 
   const loadContexto = useCallback(async () => {
     try {
@@ -196,9 +201,19 @@ export default function AdminMasterPuntosPage() {
     setLoading(true);
     setListError("");
     try {
-      const response = await listAdminMasterPuntosClientes({ search: search.trim() || undefined, id_sucursal: scopeBranch });
+      const response = await listAdminMasterPuntosClientes({
+        search: search.trim() || undefined,
+        id_sucursal: scopeBranch,
+        solo_premio: soloPremioDisponible,
+        page: clientesPage,
+        limit: 50,
+      });
       const payload = response?.data ?? response;
       setClientes(Array.isArray(payload?.clientes) ? payload.clientes : []);
+      if (payload?.meta) {
+        setClientesTotalPages(payload.meta.totalPages ?? 1);
+        setClientesTotal(payload.meta.total ?? 0);
+      }
       if (payload?.parametros) {
         setContexto((prev) => ({ ...prev, parametros: payload.parametros }));
       }
@@ -209,13 +224,18 @@ export default function AdminMasterPuntosPage() {
     } finally {
       setLoading(false);
     }
-  }, [navigate, scopeBranch, search]);
+  }, [navigate, scopeBranch, search, clientesPage]);
 
+  
+  useEffect(() => {
+    setClientesPage(1);
+  }, [search, selectedBranch, soloPremioDisponible]);
+  
   useEffect(() => { void loadContexto(); }, [loadContexto]);
   useEffect(() => {
     const timer = setTimeout(() => { void loadClientes(); }, 250);
     return () => clearTimeout(timer);
-  }, [loadClientes]);
+  }, [loadClientes, soloPremioDisponible]);
 
   function openRules() {
     setRuleForm(toRuleForm(contexto, "global"));
@@ -249,17 +269,23 @@ export default function AdminMasterPuntosPage() {
     }
   }
 
-  async function openMovimientos(cliente) {
+  async function openMovimientos(cliente, page = 1) {
+    const targetPage = Math.max(1, Number(page) || 1);
     setMovOpen(true);
     setMovCliente(cliente);
     setMovLoading(true);
     setMovError("");
     setMovimientos([]);
+    setMovPage(targetPage);
     try {
-      const response = await getAdminMasterPuntosClienteMovimientos(cliente.id_cliente);
+      const response = await getAdminMasterPuntosClienteMovimientos(cliente.id_cliente, { page: targetPage, limit: 50 });
       const payload = response?.data ?? response;
       setMovCliente(payload?.cliente || cliente);
       setMovimientos(Array.isArray(payload?.movimientos) ? payload.movimientos : []);
+      if (payload?.meta) {
+        setMovPage(payload.meta.page ?? targetPage);
+        setMovTotalPages(payload.meta.totalPages ?? 1);
+      }
     } catch (err) {
       setMovError(extractMessage(err));
     } finally {
@@ -475,7 +501,8 @@ export default function AdminMasterPuntosPage() {
       ) : null}
 
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
-        <DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Filtros de Masterpuntos</DialogTitle></DialogHeader>
+        <DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Filtros de Masterpuntos</DialogTitle>
+          <DialogDescription className="sr-only">Filtros de Masterpuntos</DialogDescription><DialogDescription>Filtra clientes por sucursal o estado del premio.</DialogDescription></DialogHeader>
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" className={soloPremioDisponible ? "rounded-full border-[var(--mf-accent)] bg-[var(--mf-accent)] text-[var(--mf-accent-text)]" : "rounded-full"} onClick={() => setSoloPremioDisponible((prev) => !prev)}>Solo premio disponible</Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => { setSelectedBranch("all"); setSoloPremioDisponible(false); }}>Limpiar</Button>
@@ -486,7 +513,8 @@ export default function AdminMasterPuntosPage() {
 
       <Dialog open={ruleOpen} onOpenChange={setRuleOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
-          <DialogHeader><DialogTitle>ConfiguraciÃ³n de reglas</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Configuracion de reglas</DialogTitle>
+          <DialogDescription className="sr-only">Configuracion de reglas</DialogDescription><DialogDescription>Define el umbral, puntos para premio y servicios redimibles.</DialogDescription></DialogHeader>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div><Label className="mf-label">Alcance</Label><select className="mf-select mt-1" value={ruleForm.scope} onChange={(e) => setRuleForm(toRuleForm(contexto, e.target.value, ruleForm.id_sucursal || contexto.sucursales?.[0]?.id_sucursal || ""))}><option value="global">Global</option><option value="sucursal">Por sucursal</option></select></div>
             <div><Label className="mf-label">Sucursal</Label><select disabled={ruleForm.scope !== "sucursal"} className="mf-select mt-1" value={ruleForm.id_sucursal} onChange={(e) => setRuleForm(toRuleForm(contexto, "sucursal", e.target.value))}><option value="">Selecciona sucursal</option>{(contexto.sucursales || []).map((s) => <option key={s.id_sucursal} value={s.id_sucursal}>{s.nombre_sucursal}</option>)}</select></div>
@@ -508,7 +536,8 @@ export default function AdminMasterPuntosPage() {
       </Dialog>
 
       <Dialog open={canjeOpen} onOpenChange={setCanjeOpen}>
-        <DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Canje manual</DialogTitle></DialogHeader>
+        <DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Canje manual</DialogTitle>
+          <DialogDescription className="sr-only">Canje manual</DialogDescription><DialogDescription>Aplica un canje de puntos al servicio seleccionado para este cliente.</DialogDescription></DialogHeader>
           <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-sm"><p className="font-semibold">{canjeTarget?.nombre_completo || "Cliente"}</p><p className="text-xs text-[var(--mf-text-2)]">Balance: {canjeTarget?.balance_puntos || 0} puntos</p></div>
           <div><Label className="mf-label">Servicio</Label><select className="mf-select mt-1" value={canjeForm.id_servicio} onChange={(e) => setCanjeForm((p) => ({ ...p, id_servicio: e.target.value }))}><option value="">Selecciona servicio</option>{canjeServices.map((s) => <option key={s.id_servicio} value={s.id_servicio}>{s.nombre_servicio}</option>)}</select></div>
           <div><Label className="mf-label">Motivo</Label><Input className="mf-input mt-1" maxLength={280} value={canjeForm.motivo} onChange={(e) => setCanjeForm((p) => ({ ...p, motivo: e.target.value }))} placeholder="Opcional" /></div>
@@ -521,8 +550,9 @@ export default function AdminMasterPuntosPage() {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Migración manual de puntos</DialogTitle>
+          <DialogDescription className="sr-only">Migración manual de puntos</DialogDescription>
+            <DialogDescription>Esta acción solo se puede realizar una vez por cliente.</DialogDescription>
           </DialogHeader>
-          <p className="text-sm text-[var(--mf-text-2)]">Esta acción solo se puede realizar una vez por cliente.</p>
 
           <div>
             <Label className="mf-label">Cliente</Label>
@@ -603,20 +633,29 @@ export default function AdminMasterPuntosPage() {
       </Dialog>
 
       <Dialog open={movOpen} onOpenChange={setMovOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl"><DialogHeader><DialogTitle>Movimientos de puntos</DialogTitle></DialogHeader>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl"><DialogHeader><DialogTitle>Movimientos de puntos</DialogTitle>
+          <DialogDescription className="sr-only">Movimientos de puntos</DialogDescription><DialogDescription>Historial de acumulaciones y canjes del cliente.</DialogDescription></DialogHeader>
           {movCliente ? <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-sm"><p className="font-semibold">{movCliente.nombre_completo}</p><p className="text-xs text-[var(--mf-text-2)]">Balance: {movCliente.balance_puntos || 0} | Vence: {formatDate(movCliente.vence_at)}</p></div> : null}
           {movError ? <ErrorBanner message={movError} onRetry={() => openMovimientos(movCliente)} /> : null}
           {movLoading ? <LoadingSpinner /> : null}
           {!movLoading && !movError && movimientos.length === 0 ? <EmptyState icon={Clock3} title="Sin movimientos" description="No hay movimientos registrados para este cliente." /> : null}
           {!movLoading && !movError && movimientos.length > 0 ? (
+            
             <div className="mf-table-wrap"><Table><TableHeader><TableRow className="border-[var(--mf-nav-border)]"><TableHead>Fecha</TableHead><TableHead>Tipo</TableHead><TableHead>Puntos</TableHead><TableHead className="hidden md:table-cell">Servicio</TableHead><TableHead className="hidden lg:table-cell">Motivo</TableHead></TableRow></TableHeader><TableBody>
-              {movimientos.map((mov) => { const value = Number(mov.puntos_ajustados || 0); return <TableRow key={mov.id_points_tx} className="border-[var(--mf-nav-border)]"><TableCell>{formatDate(mov.created_at)}</TableCell><TableCell>{mov.tipo_descripcion || mov.tipo_puntos_codigo}</TableCell><TableCell><span className={`inline-flex rounded-full px-2 py-0.5 text-xs ${value >= 0 ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300"}`}>{value >= 0 ? "+" : ""}{value}</span></TableCell><TableCell className="hidden md:table-cell">{mov.nombre_servicio_canje || "-"}</TableCell><TableCell className="hidden lg:table-cell">{mov.motivo || "-"}</TableCell></TableRow>; })}
+              {movimientos.map((mov) => { const value = Number(mov.puntos_ajustados || mov.puntos || 0); return <TableRow key={mov.id_ledger || mov.id_points_tx} className="border-[var(--mf-nav-border)]"><TableCell>{formatDate(mov.created_at)}</TableCell><TableCell>{mov.tipo_movimiento || mov.tipo_descripcion || mov.tipo_puntos_codigo}</TableCell><TableCell><span className={`inline-flex rounded-full px-2 py-0.5 text-xs ${value >= 0 ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300"}`}>{value >= 0 ? "+" : ""}{value}</span></TableCell><TableCell className="hidden md:table-cell">{mov.nombre_servicio_canje || "-"}</TableCell><TableCell className="hidden lg:table-cell">{mov.motivo || "-"}</TableCell></TableRow>; })}
             </TableBody></Table></div>
+          ) : null}
+          {!movLoading && !movError && movTotalPages > 1 ? (
+            <div className="flex items-center justify-between border-t border-[var(--mf-nav-border)] pt-4">
+              <span className="text-sm text-[var(--mf-text-2)]">Página {movPage} de {movTotalPages}</span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={movPage <= 1} onClick={() => openMovimientos(movCliente, movPage - 1)}>Anterior</Button>
+                <Button variant="outline" size="sm" disabled={movPage >= movTotalPages} onClick={() => openMovimientos(movCliente, movPage + 1)}>Siguiente</Button>
+              </div>
+            </div>
           ) : null}
         </DialogContent>
       </Dialog>
     </div>
   );
 }
-
-

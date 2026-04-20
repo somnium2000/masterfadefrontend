@@ -194,12 +194,22 @@ export default function AuthCallbackPage() {
         return;
       }
 
-      if (!supabase && !oauthCode && !hashAccessToken) {
-        const message = 'No se pudo completar el ingreso con Google.';
-        setShowInvalidUserAuthBox(false);
-        setError(message);
-        notifications.error(message, { dedupeKey: 'auth-callback-supabase-missing' });
-        return;
+      if (!oauthCode && !hashAccessToken) {
+        // Sin payload OAuth (F5 o boton atras sobre /auth/callback).
+        // Intentamos hidratar por cookie existente antes de mostrar error.
+        const hydrated = await completeExchangeLogin().catch(() => ({ ok: false }));
+        if (hydrated.ok) {
+          navigate(callbackNextPath || '/home', { replace: true });
+          return;
+        }
+        if (!supabase) {
+          const message = 'No se pudo completar el ingreso con Google.';
+          setShowInvalidUserAuthBox(false);
+          setError(message);
+          notifications.error(message, { dedupeKey: 'auth-callback-supabase-missing' });
+          return;
+        }
+        // Con supabase pero sin payload, resolveOAuthSessionToken fallara limpiamente.
       }
 
       try {
@@ -243,11 +253,9 @@ export default function AuthCallbackPage() {
           throw new Error(completed.message || 'No se pudo completar la sesion.');
         }
 
-        if (cancelled) return;
         notifications.success('Sesion iniciada con Google.', { dedupeKey: 'auth-callback-success' });
         navigate(callbackNextPath || '/home', { replace: true });
       } catch (exchangeError) {
-        if (cancelled) return;
 
         if (isInvalidUserForAuth(exchangeError)) {
           setShowInvalidUserAuthBox(true);
@@ -273,9 +281,8 @@ export default function AuthCallbackPage() {
 
     return () => {
       cancelled = true;
-      // AM: En StrictMode dev, React ejecuta cleanup + rerun del efecto.
-      // Si no reseteamos este guard, el segundo ciclo no intenta el exchange.
-      exchangeStartedRef.current = false;
+      // AM: El guard exchangeStartedRef NO se resetea en cleanup para garantizar
+      // idempotencia real: el exchange se ejecuta exactamente una vez.
       if (timeoutId) {
         window.clearTimeout(timeoutId);
       }
