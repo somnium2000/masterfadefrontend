@@ -29,7 +29,6 @@ import {
 } from "../lib/adminMasterPuntosApi.js";
 
 const CLIENTES_LIMIT = 20;
-const MOV_LIMIT = 10;
 
 const RULE_DEFAULTS = { scope: "global", id_sucursal: "", umbral_monto_hnl: 250, puntos_para_premio: 10, activo: true, servicios_redimibles: [] };
 function extractMessage(err) {
@@ -158,24 +157,6 @@ export default function AdminMasterPuntosPage() {
 
   const legacyMigrationEnabled = Boolean(contexto?.parametros?.migracion_manual_habilitada);
 
-  const filteredClientes = useMemo(() => {
-    let result = [...clientes];
-    if (selectedBranch !== "all") {
-      result = result.filter((c) => c.id_sucursal === selectedBranch);
-    }
-    if (soloPremioDisponible) {
-      result = result.filter((c) => Boolean(c.premio_disponible));
-    }
-    const q = normalizeText(search).toLowerCase();
-    if (q) {
-      result = result.filter((c) => 
-        normalizeText(c.nombre_completo).toLowerCase().includes(q) ||
-        normalizeText(c.telefono_principal).includes(q)
-      );
-    }
-    return result;
-  }, [clientes, search, selectedBranch, soloPremioDisponible]);
-
   const legacyCandidatesFiltered = useMemo(() => {
     const query = normalizeText(legacyClientQuery).toLowerCase();
     if (!query) return legacyCandidates;
@@ -228,7 +209,7 @@ export default function AdminMasterPuntosPage() {
         id_sucursal: scopeBranch,
         solo_premio: soloPremioDisponible,
         page: clientesPage,
-        limit: 50,
+        limit: CLIENTES_LIMIT,
       });
       const payload = response?.data ?? response;
       setClientes(Array.isArray(payload?.clientes) ? payload.clientes : []);
@@ -246,7 +227,7 @@ export default function AdminMasterPuntosPage() {
     } finally {
       setLoading(false);
     }
-  }, [navigate, scopeBranch, search, clientesPage]);
+  }, [navigate, scopeBranch, search, clientesPage, soloPremioDisponible]);
 
   
   useEffect(() => {
@@ -257,7 +238,7 @@ export default function AdminMasterPuntosPage() {
   useEffect(() => {
     const timer = setTimeout(() => { void loadClientes(); }, 250);
     return () => clearTimeout(timer);
-  }, [loadClientes, soloPremioDisponible]);
+  }, [loadClientes]);
 
   function openRules() {
     setRuleForm(toRuleForm(contexto, "global"));
@@ -436,7 +417,7 @@ export default function AdminMasterPuntosPage() {
           </div>
           <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[560px]">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-[var(--mf-text-2)]">{loading ? "Cargando..." : `${filteredClientes.length} de ${clientes.length} cliente(s)`}</span>
+              <span className="text-sm text-[var(--mf-text-2)]">{loading ? "Cargando..." : `${clientes.length} de ${clientesTotal} cliente(s)`}</span>
               <ViewToggle defaultView={view} onViewChange={setView} storageKey="masterpuntos" />
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -460,11 +441,11 @@ export default function AdminMasterPuntosPage() {
 
       {listError ? <ErrorBanner message={listError} onRetry={loadClientes} /> : null}
       {loading && !listError ? <LoadingSpinner /> : null}
-      {!loading && !listError && filteredClientes.length === 0 ? <EmptyState icon={Star} title="Sin resultados" description="No hay clientes acumulando puntos para este filtro." /> : null}
+      {!loading && !listError && clientes.length === 0 ? <EmptyState icon={Star} title="Sin resultados" description="No hay clientes acumulando puntos para este filtro." /> : null}
 
-      {!loading && !listError && filteredClientes.length > 0 && view === "cards" ? (
+      {!loading && !listError && clientes.length > 0 && view === "cards" ? (
         <CardsCarousel
-          items={filteredClientes}
+          items={clientes}
           getItemKey={(cliente) => cliente?.id_cliente}
           renderItem={(cliente, index, pageIndex) => (
             <DataCard
@@ -486,12 +467,12 @@ export default function AdminMasterPuntosPage() {
         />
       ) : null}
 
-      {!loading && !listError && filteredClientes.length > 0 && view === "table" ? (
+      {!loading && !listError && clientes.length > 0 && view === "table" ? (
         <div className="mf-table-wrap">
           <Table>
             <TableHeader><TableRow className="border-[var(--mf-nav-border)]"><TableHead>Cliente</TableHead><TableHead className="hidden lg:table-cell">Sucursal</TableHead><TableHead>Puntos</TableHead><TableHead className="hidden md:table-cell">Estrellas</TableHead><TableHead>Premio</TableHead><TableHead className="text-right">Acciones</TableHead></TableRow></TableHeader>
             <TableBody>
-              {filteredClientes.map((cliente) => {
+              {clientes.map((cliente) => {
                 const canRedeem = Boolean(cliente?.premio_disponible) && getRewardServices(cliente).length > 0;
                 const canLegacyMigrate = Boolean(legacyMigrationEnabled && canManageLegacyPoints && cliente?.can_add_legacy_points);
                 return (
@@ -519,6 +500,16 @@ export default function AdminMasterPuntosPage() {
               })}
             </TableBody>
           </Table>
+        </div>
+      ) : null}
+
+      {!loading && !listError && clientesTotalPages > 1 ? (
+        <div className="flex items-center justify-between border-t border-[var(--mf-nav-border)] pt-4">
+          <span className="text-sm text-[var(--mf-text-2)]">Página {clientesPage} de {clientesTotalPages}</span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={clientesPage <= 1} onClick={() => setClientesPage((prev) => Math.max(1, prev - 1))}>Anterior</Button>
+            <Button variant="outline" size="sm" disabled={clientesPage >= clientesTotalPages} onClick={() => setClientesPage((prev) => Math.min(clientesTotalPages, prev + 1))}>Siguiente</Button>
+          </div>
         </div>
       ) : null}
 

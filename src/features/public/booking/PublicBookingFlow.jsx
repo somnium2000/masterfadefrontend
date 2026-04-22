@@ -10,6 +10,14 @@
 import { ArrowLeft, House } from 'lucide-react';
 import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../../../components/ui/button.jsx';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../../components/ui/dialog.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
@@ -18,6 +26,9 @@ import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
   createClienteCitaHold,
   createPublicCitaHold,
+  createPublicPaymentIntent,
+  getPublicPaymentStatus,
+  completePublicMockPayment,
   getClienteMembershipEstado,
   getPublicBookingContext,
   listPublicAgendaBarberos,
@@ -32,6 +43,7 @@ import {
   extractMessage,
   getCurrentTimeKeyInTimeZone,
   getTodayDateKeyInTimeZone,
+  normalizePhone,
   timeKeyToMinutes,
   toDateKey,
   toLocalDateTimeWithOffset,
@@ -85,6 +97,16 @@ function normalizeHourMinute(value) {
 function isValidEmail(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return EMAIL_PATTERN.test(normalized);
+}
+
+function hasLetters(value) {
+  return /[A-Za-z]/.test(String(value || ''));
+}
+
+function isValidPhoneStrict(value) {
+  const raw = String(value || '').trim();
+  if (!raw || hasLetters(raw)) return false;
+  return normalizePhone(raw).length >= 8;
 }
 
 function buildDynamicSlots({
@@ -144,11 +166,20 @@ function normalizeBookingBlock(block, index) {
   const contactName = String(block?.contactName || '').trim();
   const resolvedAlias = contactName || String(block?.alias || '').trim() || fallbackAlias;
 
+  const hasPackage = Boolean(String(block?.packageId || '').trim());
+  const requestedType = String(block?.selectionType || '').trim().toLowerCase();
+  let normalizedSelectionType = 'services';
+  if (requestedType === 'mixed' || (hasPackage && nextServiceIds.length > 0)) {
+    normalizedSelectionType = 'mixed';
+  } else if (requestedType === 'package' || hasPackage) {
+    normalizedSelectionType = 'package';
+  }
+
   return {
     id: String(block?.id || '').trim() || createBlockId(),
     alias: resolvedAlias,
     idBarbero: String(block?.idBarbero || '').trim(),
-    selectionType: String(block?.selectionType || 'services').trim().toLowerCase() === 'package' ? 'package' : 'services',
+    selectionType: normalizedSelectionType,
     packageId: String(block?.packageId || '').trim(),
     serviceIds: nextServiceIds,
     selectedDate: String(block?.selectedDate || '').trim(),
@@ -227,6 +258,7 @@ export default function PublicBookingFlow() {
 
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [barbersLoading, setBarbersLoading] = useState(false);
+  const [barbersRefreshing, setBarbersRefreshing] = useState(false);
   const [barbers, setBarbers] = useState([]);
 
   const [servicesLoading, setServicesLoading] = useState(false);
@@ -236,6 +268,7 @@ export default function PublicBookingFlow() {
 
   const [bookingBlocks, setBookingBlocks] = useState(() => [createBookingBlock({ alias: 'Titular' })]);
   const [activeBlockIndex, setActiveBlockIndex] = useState(0);
+  const [pendingCompanionFocusId, setPendingCompanionFocusId] = useState('');
 
   const [minBookingDateKey] = useState(() => getTodayDateKeyInTimeZone());
   const minBookingMonth = useMemo(
@@ -259,9 +292,13 @@ export default function PublicBookingFlow() {
   const [slotConflict, setSlotConflict] = useState(null);
   const [slotSuggestions, setSlotSuggestions] = useState([]);
   const [slotSuggestionsLoading, setSlotSuggestionsLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [authRequiredModal, setAuthRequiredModal] = useState({ open: false, email: '' });
 
   const [holdSubmitting, setHoldSubmitting] = useState(false);
   const [holdResult, setHoldResult] = useState(null);
+  const [paymentIntent, setPaymentIntent] = useState(null);
+  const [paymentResult, setPaymentResult] = useState(null);
   const [holdCountdownStartedAt, setHoldCountdownStartedAt] = useState(null);
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
 
@@ -274,6 +311,10 @@ export default function PublicBookingFlow() {
   const availabilityCacheRef = useRef(new Map());
   const slotsCacheRef = useRef(new Map());
   const servicesScrollRef = useRef(null);
+  const barbersCountRef = useRef(0);
+  const servicesCountRef = useRef(0);
+  const packagesCountRef = useRef(0);
+  const selectedTimeRef = useRef('');
   // AM: Evita reaplicar propuesta automática del plan varias veces sobre la misma combinación de sucursal/servicios.
   const membershipPrefillKeysRef = useRef(new Set());
   const [servicesCanScroll, setServicesCanScroll] = useState(false);
@@ -295,6 +336,7 @@ export default function PublicBookingFlow() {
   );
   const selectedDate = activeBlock?.selectedDate || '';
   const selectedTime = activeBlock?.selectedTime || '';
+  const titularSelectedDate = bookingBlocks[0]?.selectedDate || '';
 
   const canGoPrevMonth = useMemo(() => {
     const currentMonthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
@@ -342,6 +384,22 @@ export default function PublicBookingFlow() {
     return map;
   }, [barbers]);
 
+  useEffect(() => {
+    barbersCountRef.current = Array.isArray(barbers) ? barbers.length : 0;
+  }, [barbers]);
+
+  useEffect(() => {
+    servicesCountRef.current = Array.isArray(services) ? services.length : 0;
+  }, [services]);
+
+  useEffect(() => {
+    packagesCountRef.current = Array.isArray(packages) ? packages.length : 0;
+  }, [packages]);
+
+  useEffect(() => {
+    selectedTimeRef.current = selectedTime;
+  }, [selectedTime]);
+
   const selectedBarber = useMemo(
     () => barbersById.get(activeBlockBarberId) || null,
     [activeBlockBarberId, barbersById]
@@ -366,26 +424,31 @@ export default function PublicBookingFlow() {
   }, [packages]);
 
   const selectedServices = useMemo(
-    () => (selectionType === 'services' ? serviceIds.map((id) => servicesById.get(id)).filter(Boolean) : []),
-    [selectionType, serviceIds, servicesById]
+    () => serviceIds.map((id) => servicesById.get(id)).filter(Boolean),
+    [serviceIds, servicesById]
   );
   const selectedPackage = useMemo(
-    () => (selectionType === 'package' ? packagesById.get(selectedPackageId) || null : null),
-    [packagesById, selectedPackageId, selectionType]
+    () => packagesById.get(selectedPackageId) || null,
+    [packagesById, selectedPackageId]
   );
+  const effectiveSelectionType = useMemo(() => {
+    if (selectedPackage && selectedServices.length > 0) return 'mixed';
+    if (selectedPackage) return 'package';
+    return 'services';
+  }, [selectedPackage, selectedServices.length]);
   const rawSelectedServicesDurationSum = useMemo(
     () => {
-      if (selectionType === 'package') {
-        const items = Array.isArray(selectedPackage?.items) ? selectedPackage.items : [];
-        return items.reduce((total, item) => {
+      const packageDuration = Array.isArray(selectedPackage?.items)
+        ? selectedPackage.items.reduce((total, item) => {
           const service = servicesById.get(item?.id_servicio);
           const qty = Math.max(1, Number(item?.cantidad || 1));
           return total + (Number(service?.duracion_min || 0) * qty);
-        }, 0);
-      }
-      return selectedServices.reduce((total, service) => total + Number(service?.duracion_min || 0), 0);
+        }, 0)
+        : 0;
+      const servicesDuration = selectedServices.reduce((total, service) => total + Number(service?.duracion_min || 0), 0);
+      return packageDuration + servicesDuration;
     },
-    [selectionType, selectedPackage, servicesById, selectedServices]
+    [selectedPackage, servicesById, selectedServices]
   );
   const selectedServicesDurationSum = useMemo(
     () => (slotMetrics.duracionTotalMin > 0 ? slotMetrics.duracionTotalMin : rawSelectedServicesDurationSum),
@@ -400,37 +463,33 @@ export default function PublicBookingFlow() {
     [barberPrepTime, selectedPackage, selectedServices, selectedServicesDurationSum]
   );
   const selectionCacheKey = useMemo(
-    () => (selectionType === 'package'
-      ? `package:${selectedPackageId}`
-      : `services:${serviceIds.join(',')}`),
-    [selectionType, selectedPackageId, serviceIds]
+    () => `type:${effectiveSelectionType}|package:${selectedPackageId || ''}|services:${serviceIds.join(',')}`,
+    [effectiveSelectionType, selectedPackageId, serviceIds]
   );
 
   const bookingBlocksSummary = useMemo(
     () =>
       bookingBlocks.map((block, index) => {
-        const blockSelectionType = block.selectionType === 'package' ? 'package' : 'services';
-        const blockServices = blockSelectionType === 'services'
-          ? block.serviceIds.map((serviceId) => servicesById.get(serviceId)).filter(Boolean)
-          : [];
-        const blockPackage = blockSelectionType === 'package'
-          ? packagesById.get(block.packageId) || null
-          : null;
-        const blockTotal = blockSelectionType === 'package'
-          ? Number(blockPackage?.precio_hnl || 0)
-          : blockServices.reduce((total, service) => total + Number(service?.precio_hnl || 0), 0);
-        const serviceDurationMin = blockSelectionType === 'package'
-          ? (Array.isArray(blockPackage?.items)
-            ? blockPackage.items.reduce((total, item) => {
-              const service = servicesById.get(item?.id_servicio);
-              const qty = Math.max(1, Number(item?.cantidad || 1));
-              return total + (Number(service?.duracion_min || 0) * qty);
-            }, 0)
-            : 0)
-          : blockServices.reduce((total, service) => total + Number(service?.duracion_min || 0), 0);
-        const blockHasSelection = blockSelectionType === 'package'
-          ? Boolean(blockPackage)
-          : blockServices.length > 0;
+        const blockServices = block.serviceIds.map((serviceId) => servicesById.get(serviceId)).filter(Boolean);
+        const blockPackage = packagesById.get(block.packageId) || null;
+        const blockSelectionType = blockPackage && blockServices.length > 0
+          ? 'mixed'
+          : blockPackage
+            ? 'package'
+            : 'services';
+        const packageTotal = Number(blockPackage?.precio_hnl || 0);
+        const servicesTotal = blockServices.reduce((total, service) => total + Number(service?.precio_hnl || 0), 0);
+        const blockTotal = packageTotal + servicesTotal;
+        const packageDurationMin = Array.isArray(blockPackage?.items)
+          ? blockPackage.items.reduce((total, item) => {
+            const service = servicesById.get(item?.id_servicio);
+            const qty = Math.max(1, Number(item?.cantidad || 1));
+            return total + (Number(service?.duracion_min || 0) * qty);
+          }, 0)
+          : 0;
+        const serviceDurationMin = packageDurationMin
+          + blockServices.reduce((total, service) => total + Number(service?.duracion_min || 0), 0);
+        const blockHasSelection = Boolean(blockPackage) || blockServices.length > 0;
         const blockBufferMin = blockHasSelection ? barberPrepTime : 0;
         return {
           ...block,
@@ -446,7 +505,8 @@ export default function PublicBookingFlow() {
           duracion_bloque_min: serviceDurationMin + blockBufferMin,
           isComplete: Boolean(
             String(block.contactName || '').trim()
-              && (index > 0 || isValidEmail(block.contactEmail))
+              && isValidEmail(block.contactEmail)
+              && (index > 0 || isValidPhoneStrict(block.contactPhone))
               && block.idBarbero
               && blockHasSelection
               && block.selectedDate
@@ -462,9 +522,36 @@ export default function PublicBookingFlow() {
     [bookingBlocksSummary]
   );
 
+  const hasBlockingGroupConflict = useCallback((block) => {
+    if (!block?.idBarbero || !block?.selectedDate || !block?.selectedTime || Number(block?.duracion_bloque_min || 0) <= 0) {
+      return false;
+    }
+    if (
+      block.index > 0
+      && bookingBlocksSummary[0]
+      && bookingBlocksSummary[0].idBarbero === block.idBarbero
+      && bookingBlocksSummary[0].selectedDate === block.selectedDate
+      && bookingBlocksSummary[0].selectedTime === block.selectedTime
+    ) {
+      return true;
+    }
+    return bookingBlocksSummary.some((candidate) =>
+      candidate.id !== block.id
+      && candidate.idBarbero === block.idBarbero
+      && candidate.selectedDate === block.selectedDate
+      && rangesOverlap(
+        block.selectedTime,
+        block.duracion_bloque_min,
+        candidate.selectedTime,
+        candidate.duracion_bloque_min
+      )
+    );
+  }, [bookingBlocksSummary]);
+
   const allBlocksComplete = useMemo(
-    () => bookingBlocksSummary.length > 0 && bookingBlocksSummary.every((block) => block.isComplete),
-    [bookingBlocksSummary]
+    () => bookingBlocksSummary.length > 0
+      && bookingBlocksSummary.every((block) => block.isComplete && !hasBlockingGroupConflict(block)),
+    [bookingBlocksSummary, hasBlockingGroupConflict]
   );
   const holdExpiresAtIso = useMemo(() => {
     if (holdResult?.expires_at) return holdResult.expires_at;
@@ -504,6 +591,16 @@ export default function PublicBookingFlow() {
     setSlotSuggestionsLoading(false);
   }, []);
 
+  const buildFieldErrorKey = useCallback((blockIndex, field) => `${Math.max(Number(blockIndex || 0), 0)}:${String(field || '')}`, []);
+
+  const setFieldError = useCallback((blockIndex, field, message) => {
+    const key = buildFieldErrorKey(blockIndex, field);
+    setFieldErrors((prev) => ({
+      ...prev,
+      [key]: String(message || '').trim() || 'Dato inválido',
+    }));
+  }, [buildFieldErrorKey]);
+
   const resetAvailabilityViewState = useCallback((options = {}) => {
     const { clearError = true } = options;
     setSlots(buildDefaultSlots());
@@ -519,13 +616,17 @@ export default function PublicBookingFlow() {
     availabilityCacheRef.current.clear();
     slotsCacheRef.current.clear();
     setAvailabilityMap({});
+    setFieldErrors({});
     resetAvailabilityViewState();
   }, [resetAvailabilityViewState]);
 
   const resetFlowForBranchChange = useCallback(() => {
     setBookingBlocks([createBookingBlock({ alias: 'Titular' })]);
     setActiveBlockIndex(0);
+    setPendingCompanionFocusId('');
     setHoldResult(null);
+    setPaymentIntent(null);
+    setPaymentResult(null);
     setHoldCountdownStartedAt(null);
     setCurrentMonth(new Date(minBookingMonth.getFullYear(), minBookingMonth.getMonth(), 1));
     clearRequestState();
@@ -587,15 +688,19 @@ export default function PublicBookingFlow() {
       setBarbers([]);
       setServices([]);
       setPackages([]);
+      setBarbersRefreshing(false);
       setPackagesLoading(false);
       return;
     }
 
     const requestSeq = branchDataRequestSeqRef.current + 1;
     branchDataRequestSeqRef.current = requestSeq;
-    setBarbersLoading(true);
-    setServicesLoading(true);
-    setPackagesLoading(true);
+    const hasExistingBarbers = barbersCountRef.current > 0;
+    const hasExistingCatalog = servicesCountRef.current > 0 || packagesCountRef.current > 0;
+    setBarbersLoading(!hasExistingBarbers);
+    setBarbersRefreshing(hasExistingBarbers);
+    setServicesLoading(!hasExistingCatalog);
+    setPackagesLoading(!hasExistingCatalog);
     setAvailabilityError('');
 
     try {
@@ -617,6 +722,7 @@ export default function PublicBookingFlow() {
         }),
         listPublicCatalogPaquetes({
           id_sucursal: selectedBranchId,
+          id_barbero: scopedBarberId || undefined,
         }),
       ]);
       if (requestSeq !== branchDataRequestSeqRef.current) return;
@@ -650,17 +756,15 @@ export default function PublicBookingFlow() {
           const nextBarberId = validBarberIds.has(block.idBarbero)
             ? block.idBarbero
             : fallbackBarberId;
-          const shouldFilterServices = block.id !== activeBlock?.id
-            ? block.idBarbero !== nextBarberId
-            : true;
-          const nextServiceIds = shouldFilterServices
-            ? block.serviceIds.filter((serviceId) => validServiceIds.has(serviceId))
-            : block.serviceIds;
-          const nextSelectionType = block.selectionType === 'package' ? 'package' : 'services';
-          const nextPackageId = validPackageIds.has(block.packageId) ? block.packageId : '';
-          const normalizedSelectionType = nextSelectionType === 'package' && nextPackageId
-            ? 'package'
-            : 'services';
+          const nextServiceIds = block.serviceIds.filter((serviceId) => validServiceIds.has(serviceId));
+          const nextPackageId = validPackageIds.has(block.packageId)
+            ? block.packageId
+            : '';
+          const normalizedSelectionType = nextPackageId && nextServiceIds.length > 0
+            ? 'mixed'
+            : nextPackageId
+              ? 'package'
+              : 'services';
 
           if (
             block.idBarbero === nextBarberId
@@ -676,7 +780,7 @@ export default function PublicBookingFlow() {
             ...block,
             idBarbero: nextBarberId,
             selectionType: normalizedSelectionType,
-            packageId: normalizedSelectionType === 'package' ? nextPackageId : '',
+            packageId: nextPackageId,
             serviceIds: nextServiceIds,
             selectedDate: '',
             selectedTime: '',
@@ -693,14 +797,15 @@ export default function PublicBookingFlow() {
     } finally {
       if (requestSeq === branchDataRequestSeqRef.current) {
         setBarbersLoading(false);
+        setBarbersRefreshing(false);
         setServicesLoading(false);
         setPackagesLoading(false);
       }
     }
-  }, [activeBlock?.id, activeBlockBarberId, notifications, selectedBranchId]);
+  }, [activeBlockBarberId, notifications, selectedBranchId]);
 
   const fetchAvailability = useCallback(async () => {
-    const hasSelection = selectionType === 'package' ? Boolean(selectedPackageId) : Boolean(selectionCacheKey && selectionCacheKey !== 'services:');
+    const hasSelection = Boolean(selectedPackageId) || serviceIds.length > 0;
     if (!selectedBranchId || !hasSelection) {
       setAvailabilityMap({});
       setAvailabilityLoading(false);
@@ -741,9 +846,9 @@ export default function PublicBookingFlow() {
         {
           id_sucursal: selectedBranchId,
           id_barbero: activeBlockBarberId || undefined,
-          selection_type: selectionType,
-          servicios: selectionType === 'services' ? serviceIds.join(',') : undefined,
-          id_paquete: selectionType === 'package' ? selectedPackageId : undefined,
+          selection_type: effectiveSelectionType,
+          servicios: serviceIds.length > 0 ? serviceIds.join(',') : undefined,
+          id_paquete: selectedPackageId || undefined,
           fecha_desde: monthRange.from,
           fecha_hasta: monthRange.to,
         },
@@ -790,14 +895,14 @@ export default function PublicBookingFlow() {
     selectedBranchId,
     selectedDate,
     selectionCacheKey,
-    selectionType,
+    effectiveSelectionType,
     selectedPackageId,
     serviceIds,
     updateBlockAtIndex,
   ]);
 
   const fetchSlots = useCallback(async () => {
-    const hasSelection = selectionType === 'package' ? Boolean(selectedPackageId) : Boolean(selectionCacheKey && selectionCacheKey !== 'services:');
+    const hasSelection = Boolean(selectedPackageId) || serviceIds.length > 0;
     if (!selectedBranchId || !hasSelection || !selectedDate) {
       setSlots(buildDefaultSlots());
       setSlotMetrics({ duracionTotalMin: 0, bufferTotalMin: 0 });
@@ -828,9 +933,9 @@ export default function PublicBookingFlow() {
         {
           id_sucursal: selectedBranchId,
           id_barbero: activeBlockBarberId || undefined,
-          selection_type: selectionType,
-          servicios: selectionType === 'services' ? serviceIds.join(',') : undefined,
-          id_paquete: selectionType === 'package' ? selectedPackageId : undefined,
+          selection_type: effectiveSelectionType,
+          servicios: serviceIds.length > 0 ? serviceIds.join(',') : undefined,
+          id_paquete: selectedPackageId || undefined,
           fecha: selectedDate,
         },
         { signal: controller.signal }
@@ -852,7 +957,8 @@ export default function PublicBookingFlow() {
       setSlots(mapped);
       setSlotMetrics(metrics);
 
-      if (selectedTime && !mapped.some((slot) => slot.hora === selectedTime && slot.disponible)) {
+      const currentSelectedTime = selectedTimeRef.current;
+      if (currentSelectedTime && !mapped.some((slot) => slot.hora === currentSelectedTime && slot.disponible)) {
         updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
           ...currentBlock,
           selectedTime: '',
@@ -873,9 +979,8 @@ export default function PublicBookingFlow() {
     notifications,
     selectedBranchId,
     selectedDate,
-    selectedTime,
     selectionCacheKey,
-    selectionType,
+    effectiveSelectionType,
     selectedPackageId,
     serviceIds,
     updateBlockAtIndex,
@@ -888,16 +993,12 @@ export default function PublicBookingFlow() {
     servicesCsvValue,
     packageIdValue,
   }) => {
-    const hasSelection = selectionTypeValue === 'package'
-      ? Boolean(packageIdValue)
-      : Boolean(servicesCsvValue);
+    const hasSelection = Boolean(packageIdValue) || Boolean(servicesCsvValue);
     if (!selectedBranchId || !barberId || !dateKey || !hasSelection) {
       return buildDefaultSlots();
     }
 
-    const selectionKey = selectionTypeValue === 'package'
-      ? `package:${packageIdValue}`
-      : `services:${servicesCsvValue}`;
+    const selectionKey = `type:${selectionTypeValue}|package:${packageIdValue || ''}|services:${servicesCsvValue || ''}`;
     const cacheKey = [selectedBranchId, barberId, selectionKey, dateKey].join('|');
     const cached = slotsCacheRef.current.get(cacheKey);
     if (cached) return cached.slots;
@@ -906,8 +1007,8 @@ export default function PublicBookingFlow() {
       id_sucursal: selectedBranchId,
       id_barbero: barberId,
       selection_type: selectionTypeValue,
-      servicios: selectionTypeValue === 'services' ? servicesCsvValue : undefined,
-      id_paquete: selectionTypeValue === 'package' ? packageIdValue : undefined,
+      servicios: servicesCsvValue || undefined,
+      id_paquete: packageIdValue || undefined,
       fecha: dateKey,
     });
 
@@ -943,9 +1044,7 @@ export default function PublicBookingFlow() {
     servicesCsvValue,
     packageIdValue,
   }) => {
-    const hasSelection = selectionTypeValue === 'package'
-      ? Boolean(packageIdValue)
-      : Boolean(servicesCsvValue);
+    const hasSelection = Boolean(packageIdValue) || Boolean(servicesCsvValue);
     if (!barberId || !dateKey || !timeKey || !hasSelection) {
       setSlotSuggestions([]);
       setSlotSuggestionsLoading(false);
@@ -1013,7 +1112,7 @@ export default function PublicBookingFlow() {
   usePublicAgendaRealtime({
     barberId: activeBlockBarberId,
     dateKey: selectedDate,
-    enabled: Boolean(selectedBranchId && activeBlockBarberId && selectionCacheKey && selectionCacheKey !== 'services:'),
+    enabled: Boolean(selectedBranchId && activeBlockBarberId && (selectedPackageId || serviceIds.length > 0)),
     onInvalidate: refreshRealtimeAgenda,
   });
 
@@ -1109,18 +1208,12 @@ export default function PublicBookingFlow() {
 
   useEffect(() => {
     if (!selectedBranchId) return;
-    const timer = setTimeout(() => {
-      void fetchAvailability();
-    }, 220);
-    return () => clearTimeout(timer);
+    void fetchAvailability();
   }, [fetchAvailability, selectedBranchId]);
 
   useEffect(() => {
     if (!selectedBranchId) return;
-    const timer = setTimeout(() => {
-      void fetchSlots();
-    }, 160);
-    return () => clearTimeout(timer);
+    void fetchSlots();
   }, [fetchSlots, selectedBranchId]);
 
   useEffect(() => {
@@ -1161,6 +1254,27 @@ export default function PublicBookingFlow() {
   }, [minBookingDateKey]);
 
   useEffect(() => {
+    const nextTitularDate = String(titularSelectedDate || '').trim();
+    setBookingBlocks((prev) => {
+      let changed = false;
+      const next = prev.map((block, index) => {
+        if (index === 0) return block;
+        if (block.selectedDate === nextTitularDate) return block;
+        changed = true;
+        return normalizeBookingBlock(
+          {
+            ...block,
+            selectedDate: nextTitularDate,
+            selectedTime: '',
+          },
+          index
+        );
+      });
+      return changed ? next : prev;
+    });
+  }, [titularSelectedDate]);
+
+  useEffect(() => {
     if (!selectedDate || !selectedTime) return;
     if (!isPastSlotForToday(selectedDate, selectedTime)) return;
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
@@ -1170,6 +1284,30 @@ export default function PublicBookingFlow() {
   }, [
     effectiveActiveBlockIndex,
     isPastSlotForToday,
+    selectedDate,
+    selectedTime,
+    updateBlockAtIndex,
+  ]);
+
+  useEffect(() => {
+    if (effectiveActiveBlockIndex <= 0) return;
+    if (!activeBlockBarberId || !selectedDate || !selectedTime) return;
+    const hasConflict = bookingBlocksSummary.some((block) =>
+      block.index !== effectiveActiveBlockIndex
+      && block.idBarbero === activeBlockBarberId
+      && block.selectedDate === selectedDate
+      && rangesOverlap(selectedTime, selectedBlockTotalMinutes, block.selectedTime, block.duracion_bloque_min)
+    );
+    if (!hasConflict) return;
+    updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
+      ...currentBlock,
+      selectedTime: '',
+    }));
+  }, [
+    activeBlockBarberId,
+    bookingBlocksSummary,
+    effectiveActiveBlockIndex,
+    selectedBlockTotalMinutes,
     selectedDate,
     selectedTime,
     updateBlockAtIndex,
@@ -1187,6 +1325,17 @@ export default function PublicBookingFlow() {
   }, [location.pathname, navigate, selectedBranchId, selectedBarberId, allBlocksComplete]);
 
   useEffect(() => {
+    if (!location.pathname.startsWith('/agendar/pagar')) return;
+    if (!holdResult) {
+      navigate('/agendar/confirmar', { replace: true });
+      return;
+    }
+    if (paymentResult?.booking_confirmed) {
+      navigate('/agendar/exito', { replace: true });
+    }
+  }, [holdResult, location.pathname, navigate, paymentResult?.booking_confirmed]);
+
+  useEffect(() => {
     if (!location.pathname.startsWith('/agendar/agenda')) return;
     if (!selectedBranchId || !selectedBarberId) {
       navigate('/agendar/barberos', { replace: true });
@@ -1194,14 +1343,22 @@ export default function PublicBookingFlow() {
   }, [location.pathname, navigate, selectedBarberId, selectedBranchId]);
 
   useEffect(() => {
-    if (!holdResult) return;
-    if (location.pathname !== '/agendar/confirmar') {
-      navigate('/agendar/confirmar', { replace: true });
+    if (paymentResult?.booking_confirmed && location.pathname !== '/agendar/exito') {
+      navigate('/agendar/exito', { replace: true });
     }
-  }, [holdResult, location.pathname, navigate]);
+  }, [location.pathname, navigate, paymentResult?.booking_confirmed]);
+
+  useEffect(() => {
+    if (!location.pathname.startsWith('/agendar/exito')) return;
+    if (!paymentResult?.booking_confirmed) {
+      navigate('/agendar/barberos', { replace: true });
+    }
+  }, [location.pathname, navigate, paymentResult?.booking_confirmed]);
 
   useEffect(() => {
     setHoldResult(null);
+    setPaymentIntent(null);
+    setPaymentResult(null);
     if (!allBlocksComplete) {
       setHoldCountdownStartedAt(null);
       return;
@@ -1236,11 +1393,11 @@ export default function PublicBookingFlow() {
       ...currentBlock,
       idBarbero: barberId,
       selectionType: 'services',
-      packageId: '',
       selectedDate: '',
       selectedTime: '',
     }));
-  }, [clearRequestState, updateBlockAtIndex]);
+    navigate('/agendar/agenda');
+  }, [clearRequestState, navigate, updateBlockAtIndex]);
 
   const setActiveBlock = useCallback((nextIndex) => {
     const parsed = Number(nextIndex);
@@ -1251,47 +1408,91 @@ export default function PublicBookingFlow() {
   }, [bookingBlocks.length, resetAvailabilityViewState]);
 
   const addCompanionBlock = useCallback(() => {
+    let createdBlockId = '';
     setBookingBlocks((prev) => {
       if (prev.length >= (MAX_COMPANIONS + 1)) return prev;
       const source = prev.length > 0 ? prev : [createBookingBlock({ alias: 'Titular' })];
       const companionNumber = source.length;
       const inheritedBarberId = source[effectiveActiveBlockIndex]?.idBarbero || source[0]?.idBarbero || '';
-      const nextBlock = createBookingBlock({
-        alias: `Acompañante ${companionNumber}`,
-        idBarbero: inheritedBarberId,
-      });
+      const inheritedDate = source[0]?.selectedDate || '';
+      const nextBlock = normalizeBookingBlock(
+        {
+          ...createBookingBlock({
+            alias: `Acompañante ${companionNumber}`,
+            idBarbero: inheritedBarberId,
+          }),
+          selectedDate: inheritedDate,
+          selectedTime: '',
+        },
+        companionNumber
+      );
+      createdBlockId = nextBlock.id;
       const nextBlocks = [...source, nextBlock];
       setActiveBlockIndex(nextBlocks.length - 1);
       return nextBlocks;
     });
+    if (createdBlockId) {
+      setPendingCompanionFocusId(createdBlockId);
+    }
     resetAvailabilityViewState();
   }, [effectiveActiveBlockIndex, resetAvailabilityViewState]);
+
+  const consumePendingCompanionFocus = useCallback((blockId) => {
+    const normalizedId = String(blockId || '').trim();
+    setPendingCompanionFocusId((current) => {
+      if (!current) return '';
+      if (!normalizedId || current === normalizedId) return '';
+      return current;
+    });
+  }, []);
+
+  const removeCompanionBlock = useCallback((blockId) => {
+    const normalizedId = String(blockId || '').trim();
+    if (!normalizedId) return;
+    let removedIndex = -1;
+    setBookingBlocks((prev) => {
+      if (prev.length <= 1) return prev;
+      const targetIndex = prev.findIndex((item, index) => index > 0 && item.id === normalizedId);
+      if (targetIndex < 1) return prev;
+      removedIndex = targetIndex;
+      const nextRaw = prev.filter((item) => item.id !== normalizedId);
+      const nextBlocks = nextRaw.map((item, index) => normalizeBookingBlock({
+        ...item,
+        alias: index === 0 ? 'Titular' : (item.contactName || `Acompañante ${index}`),
+      }, index));
+      setActiveBlockIndex((current) => {
+        if (current > targetIndex) return current - 1;
+        if (current === targetIndex) return Math.max(0, current - 1);
+        return current;
+      });
+      return nextBlocks;
+    });
+    if (removedIndex > 0) {
+      setFieldErrors((prev) => {
+        const next = {};
+        Object.entries(prev).forEach(([key, value]) => {
+          const [rawIndex, field] = key.split(':');
+          const parsedIndex = Number(rawIndex);
+          if (!Number.isFinite(parsedIndex)) return;
+          if (parsedIndex === removedIndex) return;
+          const newIndex = parsedIndex > removedIndex ? parsedIndex - 1 : parsedIndex;
+          next[`${newIndex}:${field}`] = value;
+        });
+        return next;
+      });
+    }
+    clearSlotConflict();
+    resetAvailabilityViewState();
+  }, [clearSlotConflict, resetAvailabilityViewState]);
 
   const goToAgenda = useCallback(() => {
     if (holdResult) return;
     if (!selectedBranchId || !selectedBarberId) return;
-    if (selectionType === 'package' && packages.length === 0) {
-      updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
-        ...normalizeBookingBlock(currentBlock, effectiveActiveBlockIndex),
-        selectionType: 'services',
-        packageId: '',
-        selectedDate: '',
-        selectedTime: '',
-      }));
-      notifications.info('No hay paquetes disponibles por ahora. Puedes continuar reservando por servicios.', {
-        dedupeKey: 'public-booking-packages-empty-fallback',
-      });
-    }
     navigate('/agendar/agenda');
   }, [
     holdResult,
     selectedBranchId,
     selectedBarberId,
-    selectionType,
-    packages.length,
-    effectiveActiveBlockIndex,
-    updateBlockAtIndex,
-    notifications,
     navigate,
   ]);
 
@@ -1308,10 +1509,32 @@ export default function PublicBookingFlow() {
 
   const completeBookingFlow = useCallback(() => {
     setHoldResult(null);
+    setPaymentIntent(null);
+    setPaymentResult(null);
     setHoldCountdownStartedAt(null);
     resetFlowForBranchChange();
     navigate('/', { replace: true });
   }, [navigate, resetFlowForBranchChange]);
+
+  const closeAuthRequiredModal = useCallback(() => {
+    setAuthRequiredModal({ open: false, email: '' });
+  }, []);
+
+  const openAuthRequiredModal = useCallback((email) => {
+    setAuthRequiredModal({
+      open: true,
+      email: String(email || '').trim().toLowerCase(),
+    });
+  }, []);
+
+  const goToLoginForBooking = useCallback(() => {
+    const nextTarget = '/agendar/barberos';
+    const params = new URLSearchParams();
+    params.set('next', nextTarget);
+    params.set('intent', 'agendar');
+    navigate(`/login?${params.toString()}`);
+    closeAuthRequiredModal();
+  }, [closeAuthRequiredModal, navigate]);
 
   const toggleService = useCallback((serviceId) => {
     if (!serviceId) return;
@@ -1336,10 +1559,9 @@ export default function PublicBookingFlow() {
 
       return {
         ...normalizedCurrent,
-        selectionType: 'services',
-        packageId: '',
+        selectionType: normalizedCurrent.packageId ? 'mixed' : 'services',
         serviceIds: nextServiceIds,
-        selectedDate: nextServiceIds.length > 0 ? currentBlock.selectedDate : '',
+        selectedDate: (nextServiceIds.length > 0 || normalizedCurrent.packageId) ? currentBlock.selectedDate : '',
         selectedTime: '',
       };
     });
@@ -1351,14 +1573,15 @@ export default function PublicBookingFlow() {
     const normalizedType = String(nextType || '').trim().toLowerCase() === 'package' ? 'package' : 'services';
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => {
       const normalizedCurrent = normalizeBookingBlock(currentBlock, effectiveActiveBlockIndex);
+      if (normalizedType === 'services' && normalizedCurrent.packageId && normalizedCurrent.serviceIds.length > 0) {
+        return { ...normalizedCurrent, selectionType: 'mixed' };
+      }
       if (normalizedCurrent.selectionType === normalizedType) {
         return normalizedCurrent;
       }
       return {
         ...normalizedCurrent,
         selectionType: normalizedType,
-        serviceIds: normalizedType === 'services' ? normalizedCurrent.serviceIds : [],
-        packageId: normalizedType === 'package' ? normalizedCurrent.packageId : '',
         selectedDate: '',
         selectedTime: '',
       };
@@ -1368,14 +1591,22 @@ export default function PublicBookingFlow() {
 
   const selectPackage = useCallback((packageId) => {
     const normalizedId = String(packageId || '').trim();
-    updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
-      ...normalizeBookingBlock(currentBlock, effectiveActiveBlockIndex),
-      selectionType: 'package',
-      packageId: normalizedId,
-      serviceIds: [],
-      selectedDate: normalizedId ? currentBlock.selectedDate : '',
-      selectedTime: '',
-    }));
+    updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => {
+      const normalizedCurrent = normalizeBookingBlock(currentBlock, effectiveActiveBlockIndex);
+      const nextPackageId = normalizedCurrent.packageId === normalizedId ? '' : normalizedId;
+      const nextType = nextPackageId && normalizedCurrent.serviceIds.length > 0
+        ? 'mixed'
+        : nextPackageId
+          ? 'package'
+          : 'services';
+      return {
+        ...normalizedCurrent,
+        selectionType: nextType,
+        packageId: nextPackageId,
+        selectedDate: (nextPackageId || normalizedCurrent.serviceIds.length > 0) ? currentBlock.selectedDate : '',
+        selectedTime: '',
+      };
+    });
     resetAvailabilityViewState();
   }, [effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
 
@@ -1391,16 +1622,41 @@ export default function PublicBookingFlow() {
   }, [effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
 
   const updateActiveBlockContact = useCallback((patch) => {
+    const normalizedPatch = { ...patch };
+    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactPhone')) {
+      normalizedPatch.contactPhone = String(normalizedPatch.contactPhone || '').replace(/[^\d+\s()-]/g, '').slice(0, 24);
+    }
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => {
       const next = {
         ...currentBlock,
-        ...patch,
+        ...normalizedPatch,
       };
       const normalizedName = String(next.contactName || '').trim();
       next.alias = normalizedName || (effectiveActiveBlockIndex === 0 ? 'Titular' : `Acompañante ${effectiveActiveBlockIndex}`);
       return next;
     });
-  }, [effectiveActiveBlockIndex, updateBlockAtIndex]);
+    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactName')) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[buildFieldErrorKey(effectiveActiveBlockIndex, 'contactName')];
+        return next;
+      });
+    }
+    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactEmail')) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[buildFieldErrorKey(effectiveActiveBlockIndex, 'contactEmail')];
+        return next;
+      });
+    }
+    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactPhone')) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[buildFieldErrorKey(effectiveActiveBlockIndex, 'contactPhone')];
+        return next;
+      });
+    }
+  }, [buildFieldErrorKey, effectiveActiveBlockIndex, updateBlockAtIndex]);
 
   const selectSuggestedBarber = useCallback((barberId) => {
     const nextBarberId = String(barberId || '').trim();
@@ -1433,6 +1689,7 @@ export default function PublicBookingFlow() {
   }, [currentMonth, minBookingMonth]);
 
   const onSelectDay = useCallback((dateKey, enabled) => {
+    if (effectiveActiveBlockIndex > 0) return;
     if (!enabled || dateKey < minBookingDateKey) return;
 
     setBookingBlocks((prev) => {
@@ -1485,9 +1742,9 @@ export default function PublicBookingFlow() {
         barberId: activeBlockBarberId,
         dateKey: selectedDate,
         timeKey: nextTime,
-        selectionTypeValue: selectionType,
-        servicesCsvValue: selectionType === 'services' ? serviceIds.join(',') : '',
-        packageIdValue: selectionType === 'package' ? selectedPackageId : '',
+        selectionTypeValue: effectiveSelectionType,
+        servicesCsvValue: serviceIds.join(','),
+        packageIdValue: selectedPackageId,
       });
       return;
     }
@@ -1507,7 +1764,7 @@ export default function PublicBookingFlow() {
     notifications,
     selectedDate,
     selectedBlockTotalMinutes,
-    selectionType,
+    effectiveSelectionType,
     selectedPackageId,
     serviceIds,
     updateBlockAtIndex,
@@ -1525,7 +1782,7 @@ export default function PublicBookingFlow() {
       });
     }
     const blocksToSubmit = bookingBlocksSummary.filter((block) =>
-      block.selection_type === 'package' ? Boolean(block.selectedPackage) : block.selectedServices.length > 0
+      Boolean(block.selectedPackage) || block.selectedServices.length > 0
     );
     if (blocksToSubmit.length === 0 || !allBlocksComplete) {
       notifications.warning('Completa servicios, fecha y hora en todos los bloques antes de confirmar.', {
@@ -1534,24 +1791,41 @@ export default function PublicBookingFlow() {
       navigate('/agendar/agenda');
       return false;
     }
+    const nextFieldErrors = {};
     const titularBlock = bookingBlocks[0] || null;
     const titularNombre = String(titularBlock?.contactName || '').trim();
     const titularEmail = String(titularBlock?.contactEmail || '').trim().toLowerCase();
     const titularTelefono = String(titularBlock?.contactPhone || '').trim();
     if (!titularNombre) {
+      nextFieldErrors[buildFieldErrorKey(0, 'contactName')] = 'El nombre del titular es obligatorio.';
       notifications.warning('Debes ingresar el nombre del titular antes de confirmar.', {
         dedupeKey: 'public-booking-holder-name-required',
       });
       setActiveBlockIndex(0);
       navigate('/agendar/agenda');
+      setFieldErrors((prev) => ({ ...prev, ...nextFieldErrors }));
       return false;
     }
     if (!isValidEmail(titularEmail)) {
+      nextFieldErrors[buildFieldErrorKey(0, 'contactEmail')] = 'Ingresa un correo válido del titular.';
       notifications.warning('Debes ingresar un correo válido del titular antes de confirmar.', {
         dedupeKey: 'public-booking-holder-email-required',
       });
       setActiveBlockIndex(0);
       navigate('/agendar/agenda');
+      setFieldErrors((prev) => ({ ...prev, ...nextFieldErrors }));
+      return false;
+    }
+    if (hasLetters(titularTelefono) || normalizePhone(titularTelefono).length < 8) {
+      nextFieldErrors[buildFieldErrorKey(0, 'contactPhone')] = hasLetters(titularTelefono)
+        ? 'El teléfono no admite letras.'
+        : 'Ingresa un teléfono válido del titular.';
+      notifications.warning('Debes ingresar un teléfono válido del titular antes de confirmar.', {
+        dedupeKey: 'public-booking-holder-phone-required',
+      });
+      setActiveBlockIndex(0);
+      navigate('/agendar/agenda');
+      setFieldErrors((prev) => ({ ...prev, ...nextFieldErrors }));
       return false;
     }
     for (let index = 1; index < bookingBlocks.length; index += 1) {
@@ -1559,22 +1833,27 @@ export default function PublicBookingFlow() {
       const companionName = String(companion?.contactName || '').trim();
       const companionEmail = String(companion?.contactEmail || '').trim().toLowerCase();
       if (!companionName) {
+        nextFieldErrors[buildFieldErrorKey(index, 'contactName')] = 'El nombre del acompañante es obligatorio.';
         notifications.warning('Cada acompañante debe tener nombre antes de confirmar.', {
           dedupeKey: 'public-booking-companion-name-required-submit',
         });
         setActiveBlockIndex(index);
         navigate('/agendar/agenda');
+        setFieldErrors((prev) => ({ ...prev, ...nextFieldErrors }));
         return false;
       }
-      if (companionEmail && !isValidEmail(companionEmail)) {
-        notifications.warning('Uno de los acompañantes tiene un correo inválido.', {
-          dedupeKey: 'public-booking-companion-email-invalid-submit',
+      if (!isValidEmail(companionEmail)) {
+        nextFieldErrors[buildFieldErrorKey(index, 'contactEmail')] = 'El correo del acompañante es obligatorio y debe ser válido.';
+        notifications.warning('Cada acompañante debe tener un correo válido antes de confirmar.', {
+          dedupeKey: 'public-booking-companion-email-required-submit',
         });
         setActiveBlockIndex(index);
         navigate('/agendar/agenda');
+        setFieldErrors((prev) => ({ ...prev, ...nextFieldErrors }));
         return false;
       }
     }
+    setFieldErrors({});
     const selectedSlotMap = new Map();
     const resolvedBarberByBlockId = new Map();
     let autoAssignedCompanion = false;
@@ -1619,8 +1898,8 @@ export default function PublicBookingFlow() {
             dateKey: block.selectedDate,
             timeKey: block.selectedTime,
             selectionTypeValue: block.selection_type,
-            servicesCsvValue: block.selection_type === 'services' ? block.serviceIds.join(',') : '',
-            packageIdValue: block.selection_type === 'package' ? (block.selectedPackage?.id_paquete || '') : '',
+            servicesCsvValue: Array.isArray(block.serviceIds) ? block.serviceIds.join(',') : '',
+            packageIdValue: block.selectedPackage?.id_paquete || '',
             });
           return false;
         }
@@ -1653,15 +1932,15 @@ export default function PublicBookingFlow() {
           id_barbero: resolvedBarberByBlockId.has(block.id)
             ? resolvedBarberByBlockId.get(block.id)
             : (block.idBarbero || null),
-          selection_type: block.selection_type === 'package' ? 'package' : 'services',
-          id_paquete: block.selection_type === 'package' ? (block.selectedPackage?.id_paquete || null) : null,
+          selection_type: block.selection_type,
+          id_paquete: ['package', 'mixed'].includes(block.selection_type) ? (block.selectedPackage?.id_paquete || null) : null,
           contacto: {
             nombre: String(block.contactName || block.alias || '').trim(),
             email: String(block.contactEmail || '').trim().toLowerCase() || null,
             telefono: String(block.contactPhone || '').trim() || null,
           },
           fecha_inicio: fechaInicio,
-          servicios: block.selection_type === 'services' ? block.selectedServices.map((service) => ({
+          servicios: ['services', 'mixed'].includes(block.selection_type) ? block.selectedServices.map((service) => ({
             id_servicio: service.id_servicio,
           })) : [],
         });
@@ -1673,7 +1952,7 @@ export default function PublicBookingFlow() {
         titular: {
           nombre: titularNombre,
           email: titularEmail,
-          telefono: titularTelefono || null,
+          telefono: normalizePhone(titularTelefono),
         },
         integrantes,
       };
@@ -1684,18 +1963,64 @@ export default function PublicBookingFlow() {
       setHoldResult(payload);
       return true;
     } catch (err) {
-      if (err?.status === 409) {
+      const apiError = err?.data?.error || err?.error || {};
+      const detailField = String(apiError?.details?.field || '').trim();
+      const detailIndexRaw = apiError?.details?.blockIndex;
+      const detailIndex = Number.isFinite(Number(detailIndexRaw)) ? Number(detailIndexRaw) : null;
+      const conflictCode = String(apiError?.code || '').trim().toUpperCase();
+      const conflictReason = String(apiError?.reason || '').trim().toUpperCase();
+      if (detailField) {
+        const mappedIndex = detailField.startsWith('titular.')
+          ? 0
+          : (detailIndex != null ? detailIndex : effectiveActiveBlockIndex);
+        const mappedField = detailField.includes('telefono')
+          ? 'contactPhone'
+          : detailField.includes('email')
+            ? 'contactEmail'
+            : detailField.includes('nombre')
+              ? 'contactName'
+              : null;
+        if (mappedField) {
+          setFieldError(mappedIndex, mappedField, extractMessage(err));
+          setActiveBlockIndex(mappedIndex);
+          navigate('/agendar/agenda');
+        }
+      }
+      if (err?.status === 409 && conflictCode === 'PUBLIC_CITAS_HOLD_CONFLICT') {
+        const shouldClearSelectedTime = conflictReason === 'AGENDA_SLOT_NOT_AVAILABLE'
+          || conflictReason === 'AGENDA_AUTOASSIGN_NOT_AVAILABLE';
         notifications.warning(
           'La hora seleccionada ya no está disponible. Selecciona una hora distinta para continuar.',
           { dedupeKey: 'public-booking-hold-conflict' }
         );
-        updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
-          ...currentBlock,
-          selectedTime: '',
-        }));
+        invalidateAgendaCaches();
+        if (shouldClearSelectedTime) {
+          updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
+            ...currentBlock,
+            selectedTime: '',
+          }));
+        }
         navigate('/agendar/agenda');
         void fetchSlots();
         void fetchAvailability();
+      } else if (conflictCode === 'PUBLIC_CITAS_EMAIL_IN_USE') {
+        const normalizedEmail = String(apiError?.details?.email || titularEmail || '').trim().toLowerCase();
+        setFieldError(
+          0,
+          'contactEmail',
+          'Este correo ya tiene una cuenta activa. Inicia sesión para continuar con la reserva.'
+        );
+        setActiveBlockIndex(0);
+        navigate('/agendar/agenda');
+        notifications.warning(
+          'Este correo ya está registrado. Por seguridad, debes iniciar sesión para poder agendar.',
+          { dedupeKey: 'public-booking-email-registered-login-required' }
+        );
+        openAuthRequiredModal(normalizedEmail);
+      } else if (err?.status === 409) {
+        notifications.warning('No pudimos confirmar esta reserva en este momento. Verifica los datos e inténtalo nuevamente.', {
+          dedupeKey: 'public-booking-hold-conflict-generic',
+        });
       } else {
         notifications.error(extractMessage(err), { dedupeKey: 'public-booking-hold-error' });
       }
@@ -1705,6 +2030,7 @@ export default function PublicBookingFlow() {
     }
   }, [
     allBlocksComplete,
+    buildFieldErrorKey,
     bookingBlocks,
     bookingBlocksSummary,
     effectiveActiveBlockIndex,
@@ -1712,14 +2038,115 @@ export default function PublicBookingFlow() {
     fetchSlots,
     holdExpired,
     isPastSlotForToday,
+    invalidateAgendaCaches,
     canUseClienteHold,
     loadSlotSuggestions,
     navigate,
     notifications,
+    openAuthRequiredModal,
     selectedBarberId,
     selectedBranchId,
+    setFieldError,
     updateBlockAtIndex,
   ]);
+
+  const goToPayment = useCallback(() => {
+    if (!holdResult) return;
+    if (paymentResult?.booking_confirmed) return;
+    navigate('/agendar/pagar');
+  }, [holdResult, navigate, paymentResult?.booking_confirmed]);
+
+  const createPaymentIntentForHold = useCallback(async () => {
+    const groupId = String(holdResult?.id_grupo_cita || '').trim();
+    const titularEmail = String(bookingBlocks[0]?.contactEmail || '').trim().toLowerCase();
+    if (!groupId || !isValidEmail(titularEmail)) {
+      notifications.error('No se pudo iniciar el pago porque faltan datos del titular.', {
+        dedupeKey: 'public-booking-payment-context-missing',
+      });
+      return null;
+    }
+    try {
+      const response = await createPublicPaymentIntent({
+        id_grupo_cita: groupId,
+        titular_email: titularEmail,
+        nombre_apellido: String(bookingBlocks[0]?.contactName || '').trim() || null,
+        telefono: normalizePhone(bookingBlocks[0]?.contactPhone || '') || null,
+      });
+      const payload = response?.data ?? response;
+      setPaymentIntent(payload);
+      return payload;
+    } catch (err) {
+      notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-intent-error' });
+      return null;
+    }
+  }, [bookingBlocks, holdResult?.id_grupo_cita, notifications]);
+
+  const refreshPaymentStatus = useCallback(async () => {
+    const groupId = String(holdResult?.id_grupo_cita || '').trim();
+    const intentId = String(paymentIntent?.id_intent || '').trim();
+    const titularEmail = String(bookingBlocks[0]?.contactEmail || '').trim().toLowerCase();
+    if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
+    try {
+      const response = await getPublicPaymentStatus({
+        id_grupo_cita: groupId,
+        id_intent: intentId,
+        titular_email: titularEmail,
+      });
+      const payload = response?.data ?? response;
+      setPaymentResult(payload);
+      return payload;
+    } catch (err) {
+      notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-status-error' });
+      return null;
+    }
+  }, [bookingBlocks, holdResult?.id_grupo_cita, notifications, paymentIntent?.id_intent]);
+
+  const completeMockPayment = useCallback(async () => {
+    const intentId = String(paymentIntent?.id_intent || '').trim();
+    const titularEmail = String(bookingBlocks[0]?.contactEmail || '').trim().toLowerCase();
+    if (!intentId || !isValidEmail(titularEmail)) return false;
+    try {
+      await completePublicMockPayment({
+        id_intent: intentId,
+        titular_email: titularEmail,
+        status: 'paid',
+      });
+      const status = await refreshPaymentStatus();
+      return Boolean(status?.booking_confirmed);
+    } catch (err) {
+      notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-complete-error' });
+      return false;
+    }
+  }, [bookingBlocks, notifications, paymentIntent?.id_intent, refreshPaymentStatus]);
+
+  const startCheckout = useCallback(async () => {
+    if (paymentResult?.booking_confirmed) return true;
+    let resolvedHold = holdResult;
+    if (!resolvedHold) {
+      const ok = await submitHold();
+      if (!ok) return false;
+      resolvedHold = true;
+    }
+    if (!resolvedHold) return false;
+    navigate('/agendar/pagar');
+    return true;
+  }, [holdResult, navigate, paymentResult?.booking_confirmed, submitHold]);
+
+  useEffect(() => {
+    if (!location.pathname.startsWith('/agendar/pagar')) return;
+    if (!holdResult || paymentIntent?.id_intent) return;
+    void createPaymentIntentForHold();
+  }, [createPaymentIntentForHold, holdResult, location.pathname, paymentIntent?.id_intent]);
+
+  useEffect(() => {
+    if (!location.pathname.startsWith('/agendar/pagar')) return undefined;
+    if (!paymentIntent?.id_intent) return undefined;
+    void refreshPaymentStatus();
+    const intervalId = setInterval(() => {
+      void refreshPaymentStatus();
+    }, 4000);
+    return () => clearInterval(intervalId);
+  }, [location.pathname, paymentIntent?.id_intent, refreshPaymentStatus]);
 
   const contextValue = useMemo(
     () => ({
@@ -1727,6 +2154,7 @@ export default function PublicBookingFlow() {
       activeBlock,
       activeBlockIndex: effectiveActiveBlockIndex,
       addCompanionBlock,
+      consumePendingCompanionFocus,
       allBlocksComplete,
       allowCompanions,
       availabilityError,
@@ -1734,6 +2162,7 @@ export default function PublicBookingFlow() {
       availabilityMap,
       barbers,
       barbersLoading,
+      barbersRefreshing,
       barberPrepTime,
       bookingBlocks,
       bookingBlocksSummary,
@@ -1745,16 +2174,25 @@ export default function PublicBookingFlow() {
       goToAgenda,
       goToBarberos,
       goToConfirm,
+      goToPayment,
       completeBookingFlow,
+      createPaymentIntentForHold,
+      refreshPaymentStatus,
+      completeMockPayment,
+      startCheckout,
       holdDurationMin,
       holdExpiresAtIso,
       holdRemainingMs,
       holdExpired,
       holdResult,
+      paymentIntent,
+      paymentResult,
+      pendingCompanionFocusId,
       holdSubmitting,
       isPastSlotForToday,
       maxCompanions: MAX_COMPANIONS,
       minBookingDateKey,
+      titularSelectedDate,
       monthRange,
       onSelectDay,
       onSelectTime,
@@ -1776,6 +2214,7 @@ export default function PublicBookingFlow() {
       services,
       packages,
       packagesLoading,
+      removeCompanionBlock,
       servicesAtEnd,
       servicesCanScroll,
       servicesLoading,
@@ -1800,11 +2239,13 @@ export default function PublicBookingFlow() {
       selectBarber,
       selectBranch,
       fetchAvailability,
+      fieldErrors,
     }),
     [
       activeBlock,
       effectiveActiveBlockIndex,
       addCompanionBlock,
+      consumePendingCompanionFocus,
       allBlocksComplete,
       allowCompanions,
       availabilityError,
@@ -1812,6 +2253,7 @@ export default function PublicBookingFlow() {
       availabilityMap,
       barbers,
       barbersLoading,
+      barbersRefreshing,
       barberPrepTime,
       bookingBlocks,
       bookingBlocksSummary,
@@ -1823,15 +2265,24 @@ export default function PublicBookingFlow() {
       goToAgenda,
       goToBarberos,
       goToConfirm,
+      goToPayment,
       completeBookingFlow,
+      createPaymentIntentForHold,
+      refreshPaymentStatus,
+      completeMockPayment,
+      startCheckout,
       holdDurationMin,
       holdExpiresAtIso,
       holdRemainingMs,
       holdExpired,
       holdResult,
+      paymentIntent,
+      paymentResult,
+      pendingCompanionFocusId,
       holdSubmitting,
       isPastSlotForToday,
       minBookingDateKey,
+      titularSelectedDate,
       monthRange,
       onSelectDay,
       onSelectTime,
@@ -1853,6 +2304,7 @@ export default function PublicBookingFlow() {
       services,
       packages,
       packagesLoading,
+      removeCompanionBlock,
       servicesAtEnd,
       servicesCanScroll,
       servicesLoading,
@@ -1875,6 +2327,7 @@ export default function PublicBookingFlow() {
       selectBarber,
       selectBranch,
       fetchAvailability,
+      fieldErrors,
     ]
   );
 
@@ -1930,9 +2383,41 @@ export default function PublicBookingFlow() {
             </PublicBookingProvider>
           </main>
         ) : null}
+
+        <Dialog
+          open={authRequiredModal.open}
+          onOpenChange={(open) => {
+            if (!open) closeAuthRequiredModal();
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Correo registrado: inicia sesión para agendar</DialogTitle>
+              <DialogDescription>
+                {authRequiredModal.email
+                  ? `El correo ${authRequiredModal.email} ya pertenece a una cuenta activa en MasterFade.`
+                  : 'Este correo ya pertenece a una cuenta activa en MasterFade.'}{' '}
+                Para proteger la identidad del titular y evitar suplantación, debes iniciar sesión antes de continuar.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="citas-selected-date">
+              Qué hacer ahora:
+              <br />
+              1. Inicia sesión con ese correo.
+              <br />
+              2. Regresa al flujo de agendamiento.
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeAuthRequiredModal}>
+                Revisar datos
+              </Button>
+              <Button type="button" onClick={goToLoginForBooking}>
+                Ir a iniciar sesión
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
 }
-
-

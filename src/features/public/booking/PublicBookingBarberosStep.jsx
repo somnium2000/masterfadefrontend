@@ -1,5 +1,4 @@
-import { ArrowRight, Scissors } from 'lucide-react';
-import { Button } from '../../../components/ui/button.jsx';
+import { Scissors } from 'lucide-react';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import { BarberCard } from './PublicBookingBlocks.jsx';
@@ -9,9 +8,9 @@ export default function PublicBookingBarberosStep() {
   const {
     barbers,
     barbersLoading,
+    barbersRefreshing,
     branchList,
     mode = 'public',
-    goToAgenda,
     selectedBarberId,
     selectedBranchId,
     selectBarber,
@@ -48,7 +47,7 @@ export default function PublicBookingBarberosStep() {
         </div>
       </section>
 
-      {barbersLoading ? (
+      {barbersLoading && barbers.length === 0 ? (
         <div className="citas-surface p-6">
           <LoadingSpinner />
         </div>
@@ -62,8 +61,11 @@ export default function PublicBookingBarberosStep() {
         />
       ) : null}
 
-      {!barbersLoading && barbers.length > 0 ? (
+      {barbers.length > 0 ? (
         <section className="citas-surface p-5">
+          {barbersRefreshing ? (
+            <p className="citas-selected-date mb-3">Actualizando barberos para esta sucursal...</p>
+          ) : null}
           <div className="citas-barber-grid">
             {barbers.map((barber) => (
               <BarberCard
@@ -76,17 +78,6 @@ export default function PublicBookingBarberosStep() {
           </div>
         </section>
       ) : null}
-
-      <div className="public-booking-actions">
-        <Button
-          className="gap-2"
-          disabled={!selectedBranchId || !selectedBarberId}
-          onClick={goToAgenda}
-        >
-          Continuar a servicio y horario
-          <ArrowRight size={15} />
-        </Button>
-      </div>
     </>
   );
 }

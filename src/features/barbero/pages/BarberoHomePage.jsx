@@ -5,6 +5,7 @@ import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import { Button } from '../../../components/ui/button.jsx';
 import { getUserDisplayName, useAuth } from '../../../context/AuthContext.jsx';
+import { isAbortError } from '../../../services/httpClient.js';
 import {
   getAdminCitasOperativasContexto,
   getAdminCitasOperativasCompletadasHoy,
@@ -234,7 +235,7 @@ function UpcomingAppointmentCard({ appointment, nowMs }) {
 
 export default function BarberoHomePage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAuthenticated, invalidateSession } = useAuth();
   const displayName = getUserDisplayName(user);
 
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -311,7 +312,7 @@ export default function BarberoHomePage() {
 
   const handleAuthError = useCallback((err) => {
     if (err?.status === 401) {
-      navigate('/login');
+      invalidateSession('barbero_home_401');
       return true;
     }
     if (err?.status === 403) {
@@ -319,9 +320,10 @@ export default function BarberoHomePage() {
       return true;
     }
     return false;
-  }, [navigate]);
+  }, [invalidateSession, navigate]);
 
   const fetchDashboard = useCallback(async ({ silent = false } = {}) => {
+    if (!isAuthenticated) return;
     if (!silent) {
       setContextLoading(true);
       setLoading(true);
@@ -351,6 +353,7 @@ export default function BarberoHomePage() {
         fetchedAt: new Date().toISOString(),
       });
     } catch (err) {
+      if (isAbortError(err)) return;
       if (handleAuthError(err)) return;
       const message = extractMessage(err);
       setContextError(message);
@@ -361,11 +364,12 @@ export default function BarberoHomePage() {
         setLoading(false);
       }
     }
-  }, [handleAuthError, todayHn]);
+  }, [handleAuthError, isAuthenticated, todayHn]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     void fetchDashboard();
-  }, [fetchDashboard]);
+  }, [fetchDashboard, isAuthenticated]);
 
   useEffect(() => {
     const clockId = window.setInterval(() => {
@@ -375,7 +379,7 @@ export default function BarberoHomePage() {
     // AM: Polling cada 30s es intencional — dashboard operativo en vivo.
     // El guard de in-flight en fetchDashboard evita ráfagas si la red es lenta.
     const refreshId = window.setInterval(() => {
-      if (user) {
+      if (isAuthenticated && user) {
         void fetchDashboard({ silent: true });
       }
     }, 30000);
@@ -384,7 +388,7 @@ export default function BarberoHomePage() {
       window.clearInterval(clockId);
       window.clearInterval(refreshId);
     };
-  }, [fetchDashboard, user]);
+  }, [fetchDashboard, isAuthenticated, user]);
 
   return (
     <div className="space-y-4 px-2 pb-4 sm:px-4 sm:pb-6">

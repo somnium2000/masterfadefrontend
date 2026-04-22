@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ChevronDown, Clock3, Plus, Scissors, UserRound, Package } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ChevronDown, Clock3, Plus, Scissors, UserRound, Package, X } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
@@ -35,6 +35,24 @@ function getSlotPeriodKey(timeKey) {
   if (totalMinutes >= 6 * 60 && totalMinutes < 12 * 60) return 'manana';
   if (totalMinutes >= 12 * 60 && totalMinutes < 18 * 60) return 'tarde';
   return 'noche';
+}
+
+function toMinutes(timeKey) {
+  const match = String(timeKey || '').trim().match(/^(\d{2}):(\d{2})/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  return (hours * 60) + minutes;
+}
+
+function overlapByMinutes(leftStart, leftDuration, rightStart, rightDuration) {
+  const leftMinutes = toMinutes(leftStart);
+  const rightMinutes = toMinutes(rightStart);
+  const leftDur = Number(leftDuration || 0);
+  const rightDur = Number(rightDuration || 0);
+  if (leftMinutes == null || rightMinutes == null || leftDur <= 0 || rightDur <= 0) return false;
+  return leftMinutes < (rightMinutes + rightDur) && rightMinutes < (leftMinutes + leftDur);
 }
 
 function BookingBlocksSummary({ bookingBlocksSummary, totalToPay }) {
@@ -82,6 +100,7 @@ export default function PublicBookingAgendaStep() {
     activeBlock,
     activeBlockIndex,
     addCompanionBlock,
+    consumePendingCompanionFocus,
     allBlocksComplete,
     allowCompanions,
     availabilityError,
@@ -90,9 +109,11 @@ export default function PublicBookingAgendaStep() {
     barbers,
     bookingBlocks,
     bookingBlocksSummary,
+    removeCompanionBlock,
     canAddCompanionBlock,
     canGoPrevMonth,
     fetchAvailability,
+    fieldErrors,
     goToConfirm,
     isPastSlotForToday,
     minBookingDateKey,
@@ -100,18 +121,19 @@ export default function PublicBookingAgendaStep() {
     onSelectTime,
     selectSuggestedBarber,
     selectedDate,
-    selectionType,
-    selectSelectionType,
     selectedPackage,
     selectedPackageId,
     selectPackage,
     selectedServicesDurationSum,
+    selectedBlockTotalMinutes,
     selectedServices,
+    titularSelectedDate,
     selectedTime,
     serviceIds,
     services,
     packages,
     packagesLoading,
+    pendingCompanionFocusId,
     servicesAtEnd,
     servicesCanScroll,
     servicesLoading,
@@ -134,18 +156,23 @@ export default function PublicBookingAgendaStep() {
 
   const calendarCells = useMemo(() => buildCalendarCells(currentMonth), [currentMonth]);
   const canGoToConfirm = Boolean(allBlocksComplete);
-  const selectedServicesCount = selectionType === 'package'
-    ? (selectedPackage ? 1 : 0)
-    : selectedServices.length;
+  const selectedServicesCount = selectedServices.length + (selectedPackage ? 1 : 0);
   const hasSelectedDate = Boolean(selectedDate);
   const slotsSectionRef = useRef(null);
+  const contactCardRef = useRef(null);
+  const contactNameInputRef = useRef(null);
   const activeContactName = String(activeBlock?.contactName || '');
   const activeContactEmail = String(activeBlock?.contactEmail || '');
   const activeContactPhone = String(activeBlock?.contactPhone || '');
+  const fieldErrorKey = (blockIndex, field) => `${blockIndex}:${field}`;
+  const activeNameError = fieldErrors?.[fieldErrorKey(activeBlockIndex, 'contactName')] || '';
+  const activeEmailError = fieldErrors?.[fieldErrorKey(activeBlockIndex, 'contactEmail')] || '';
+  const activePhoneError = fieldErrors?.[fieldErrorKey(activeBlockIndex, 'contactPhone')] || '';
   const contactNameRequiredMessage = activeBlockIndex === 0
     ? 'Ingresa el nombre del titular para continuar con la selección de servicios.'
     : 'Ingresa el nombre del acompañante antes de elegir servicios.';
   const canSelectServices = Boolean(activeContactName.trim());
+  const [catalogTab, setCatalogTab] = useState('services');
   const [preferredSlotPeriod, setPreferredSlotPeriod] = useState('manana');
   const availableSlotsByPeriod = useMemo(() => {
     const grouped = {
@@ -171,6 +198,40 @@ export default function PublicBookingAgendaStep() {
     return firstWithAvailable ? firstWithAvailable.key : 'manana';
   }, [availableSlotsByPeriod, preferredSlotPeriod]);
   const currentPeriodSlots = availableSlotsByPeriod[activeSlotPeriod] || [];
+  const titularBlock = bookingBlocksSummary[0] || null;
+  const getSlotRestriction = useMemo(() => {
+    return (slot) => {
+      if (!slot?.hora) return { disabled: true, variant: 'muted', reason: 'Horario inválido' };
+      if (activeBlockIndex <= 0) return { disabled: false, variant: 'default', reason: '' };
+      if (!selectedDate || !activeBlock?.idBarbero) {
+        return { disabled: true, variant: 'muted', reason: 'Selecciona barbero y fecha heredada' };
+      }
+
+      if (
+        titularBlock
+        && titularBlock.selectedDate === selectedDate
+        && titularBlock.idBarbero === activeBlock.idBarbero
+        && titularBlock.selectedTime === slot.hora
+      ) {
+        return { disabled: true, variant: 'danger', reason: 'Hora del titular (mismo barbero)' };
+      }
+
+      const conflictingBlock = bookingBlocksSummary.find((block) =>
+        block.index !== activeBlockIndex
+        && block.idBarbero === activeBlock.idBarbero
+        && block.selectedDate === selectedDate
+        && overlapByMinutes(slot.hora, selectedBlockTotalMinutes, block.selectedTime, block.duracion_bloque_min)
+      );
+      if (conflictingBlock) {
+        return {
+          disabled: true,
+          variant: 'muted',
+          reason: `Solapa con ${conflictingBlock.alias || `integrante ${conflictingBlock.index + 1}`}`,
+        };
+      }
+      return { disabled: false, variant: 'default', reason: '' };
+    };
+  }, [activeBlock, activeBlockIndex, bookingBlocksSummary, selectedBlockTotalMinutes, selectedDate, titularBlock]);
 
   useEffect(() => {
     syncServicesScrollState();
@@ -190,7 +251,31 @@ export default function PublicBookingAgendaStep() {
     slotsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [selectedDate]);
 
-  if (servicesLoading || packagesLoading) {
+  useEffect(() => {
+    if (!pendingCompanionFocusId) return;
+    if (activeBlockIndex <= 0) return;
+    if (!activeBlock?.id || activeBlock.id !== pendingCompanionFocusId) return;
+
+    let cancelled = false;
+    const rafId = requestAnimationFrame(() => {
+      if (cancelled) return;
+      contactCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      contactNameInputRef.current?.focus({ preventScroll: true });
+      consumePendingCompanionFocus(pendingCompanionFocusId);
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+    };
+  }, [
+    activeBlock?.id,
+    activeBlockIndex,
+    consumePendingCompanionFocus,
+    pendingCompanionFocusId,
+  ]);
+
+  if ((servicesLoading || packagesLoading) && services.length === 0 && packages.length === 0) {
     return (
       <div className="citas-surface p-6">
         <LoadingSpinner />
@@ -198,14 +283,14 @@ export default function PublicBookingAgendaStep() {
     );
   }
 
-  if (selectionType === 'services' && services.length === 0) {
+  if (services.length === 0 && packages.length === 0) {
     return (
       <EmptyState
         icon={Scissors}
-        title="Sin servicios disponibles"
+        title="Sin servicios ni paquetes disponibles"
         description={selectedBarber
-          ? `No hay servicios ofrecidos configurados para ${selectedBarber.nombre_completo}.`
-          : 'No hay servicios activos para esta sucursal.'}
+          ? `No hay opciones agendables configuradas para ${selectedBarber.nombre_completo}.`
+          : 'No hay opciones agendables activas para esta sucursal.'}
       />
     );
   }
@@ -233,14 +318,25 @@ export default function PublicBookingAgendaStep() {
           <div className="public-booking-block-stepper mt-2">
             <div className="citas-stepper">
               {bookingBlocks.map((block, index) => (
-                <button
-                  key={block.id}
-                  type="button"
-                  className={`citas-step-btn ${index === activeBlockIndex ? 'is-active' : ''}`.trim()}
-                  onClick={() => setActiveBlock(index)}
-                >
-                  {block.alias}
-                </button>
+                <div key={block.id} className={`public-booking-step-chip ${index === activeBlockIndex ? 'is-active' : ''}`.trim()}>
+                  <button
+                    type="button"
+                    className={`citas-step-btn ${index === activeBlockIndex ? 'is-active' : ''}`.trim()}
+                    onClick={() => setActiveBlock(index)}
+                  >
+                    {block.alias}
+                  </button>
+                  {index > 0 ? (
+                    <button
+                      type="button"
+                      className="public-booking-step-remove"
+                      aria-label={`Eliminar ${block.alias}`}
+                      onClick={() => removeCompanionBlock(block.id)}
+                    >
+                      <X size={13} />
+                    </button>
+                  ) : null}
+                </div>
               ))}
             </div>
           </div>
@@ -266,7 +362,7 @@ export default function PublicBookingAgendaStep() {
             </select>
           </div>
 
-          <div className="public-booking-contact-card">
+          <div className="public-booking-contact-card" ref={contactCardRef}>
             <div className="public-booking-form-grid">
               <div className="public-booking-form-row">
                 <label className="mf-label" htmlFor="booking-contact-name">
@@ -274,12 +370,14 @@ export default function PublicBookingAgendaStep() {
                 </label>
                 <input
                   id="booking-contact-name"
+                  ref={contactNameInputRef}
                   type="text"
-                  className="mf-input"
+                  className={`mf-input ${activeNameError ? 'is-invalid' : ''}`.trim()}
                   value={activeContactName}
                   onChange={(event) => updateActiveBlockContact({ contactName: event.target.value })}
                   placeholder={activeBlockIndex === 0 ? 'Ej. Carlos Ramírez' : 'Ej. José López'}
                 />
+                {activeNameError ? <p className="public-booking-field-error">{activeNameError}</p> : null}
                 {activeBlockIndex > 0 ? (
                   <p className="citas-selected-date">
                     Este nombre se usa para llamarle correctamente en la barbería y evitar confusiones.
@@ -288,19 +386,25 @@ export default function PublicBookingAgendaStep() {
               </div>
               <div className="public-booking-form-row">
                 <label className="mf-label" htmlFor="booking-contact-email">
-                  {activeBlockIndex === 0 ? 'Correo del titular *' : 'Correo del acompañante (opcional)'}
+                  {activeBlockIndex === 0 ? 'Correo del titular *' : 'Correo del acompañante *'}
                 </label>
                 <input
                   id="booking-contact-email"
                   type="email"
-                  className="mf-input"
+                  className={`mf-input ${activeEmailError ? 'is-invalid' : ''}`.trim()}
                   value={activeContactEmail}
                   onChange={(event) => updateActiveBlockContact({ contactEmail: event.target.value })}
                   placeholder={activeBlockIndex === 0 ? 'titular@correo.com' : 'acompanante@correo.com'}
                 />
+                {activeEmailError ? <p className="public-booking-field-error">{activeEmailError}</p> : null}
+                {activeBlockIndex === 0 && !activeEmailError ? (
+                  <p className="citas-selected-date">
+                    Si este correo ya está registrado, el sistema te pedirá iniciar sesión para continuar.
+                  </p>
+                ) : null}
                 {activeBlockIndex > 0 ? (
                   <p className="citas-selected-date">
-                    Si lo indicas, enviaremos la información de la cita a este correo.
+                    Enviaremos la confirmación y detalles de cita a este correo.
                   </p>
                 ) : null}
               </div>
@@ -308,18 +412,19 @@ export default function PublicBookingAgendaStep() {
             {activeBlockIndex === 0 ? (
               <div className="public-booking-form-row mt-2">
                 <label className="mf-label" htmlFor="booking-contact-phone">
-                  Teléfono del titular (opcional)
+                  Teléfono del titular *
                 </label>
                 <input
                   id="booking-contact-phone"
                   type="tel"
-                  className="mf-input"
+                  className={`mf-input ${activePhoneError ? 'is-invalid' : ''}`.trim()}
                   value={activeContactPhone}
                   onChange={(event) => updateActiveBlockContact({ contactPhone: event.target.value })}
                   placeholder="Ej. +504 9999-9999"
                 />
+                {activePhoneError ? <p className="public-booking-field-error">{activePhoneError}</p> : null}
                 <p className="citas-selected-date">
-                  Lo usaremos para avisarte si hay cambios extraordinarios en fecha u hora.
+                  Lo usaremos para validación y avisos importantes de la reserva.
                 </p>
               </div>
             ) : null}
@@ -332,65 +437,60 @@ export default function PublicBookingAgendaStep() {
           <div className="public-booking-selection-tabs">
             <Button
               type="button"
-              variant={selectionType === 'services' ? 'default' : 'outline'}
+              variant={catalogTab === 'services' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => selectSelectionType('services')}
+              onClick={() => setCatalogTab('services')}
             >
               Servicios
             </Button>
             <Button
               type="button"
-              variant={selectionType === 'package' ? 'default' : 'outline'}
+              variant={catalogTab === 'packages' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => selectSelectionType('package')}
+              onClick={() => setCatalogTab('packages')}
             >
               Paquetes
             </Button>
           </div>
 
           <div className="citas-services-scroll scrollbar-hide" ref={servicesScrollRef}>
-            <div className="citas-services-grid">
-              {selectionType === 'services' ? services.map((service) => (
-                <ServiceCard
-                  key={service.id_servicio}
-                  service={service}
-                  isSelected={serviceIds.includes(service.id_servicio)}
-                  disabled={!canSelectServices}
-                  onToggle={() => toggleService(service.id_servicio)}
-                />
-              )) : packages.map((pkg) => (
-                <button
-                  key={pkg.id_paquete}
-                  type="button"
-                  className={`citas-service-card ${selectedPackageId === pkg.id_paquete ? 'is-selected' : ''}`}
-                  disabled={!canSelectServices}
-                  onClick={() => selectPackage(pkg.id_paquete)}
-                >
-                  <div className="citas-service-name">{pkg.nombre_paquete || 'Paquete'}</div>
-                  <div className="citas-service-meta">
-                    <Package size={14} />
-                    <span>{Array.isArray(pkg.items) ? `${pkg.items.length} servicios` : 'Paquete'}</span>
-                  </div>
-                  <div className="citas-service-meta">
-                    <span>{formatCurrencyHnl(pkg?.precio_hnl || 0)}</span>
-                  </div>
-                </button>
-              ))}
-              {selectionType === 'package' && packages.length === 0 ? (
-                <div className="public-booking-packages-empty">
-                  <EmptyState
-                    icon={Package}
-                    title="No hay paquetes disponibles por ahora"
-                    description="Puedes continuar reservando por servicios."
+            {catalogTab === 'services' ? (
+              <div className="citas-services-grid">
+                {services.map((service) => (
+                  <ServiceCard
+                    key={service.id_servicio}
+                    service={service}
+                    isSelected={serviceIds.includes(service.id_servicio)}
+                    disabled={!canSelectServices}
+                    onToggle={() => toggleService(service.id_servicio)}
                   />
-                  <div className="mt-3 flex justify-center">
-                    <Button type="button" variant="outline" size="sm" onClick={() => selectSelectionType('services')}>
-                      Volver a servicios
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="citas-services-grid">
+                {packages.map((pkg) => (
+                  <button
+                    key={pkg.id_paquete}
+                    type="button"
+                    className={`citas-service-card ${selectedPackageId === pkg.id_paquete ? 'is-selected' : ''}`}
+                    disabled={!canSelectServices}
+                    onClick={() => selectPackage(pkg.id_paquete)}
+                  >
+                    <div className="citas-service-name">{pkg.nombre_paquete || 'Paquete'}</div>
+                    <div className="citas-service-meta">
+                      <Package size={14} />
+                      <span>{Array.isArray(pkg.items) ? `${pkg.items.length} servicios` : 'Paquete'}</span>
+                    </div>
+                    <div className="citas-service-meta">
+                      <span>{formatCurrencyHnl(pkg?.precio_hnl || 0)}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {catalogTab === 'packages' && packages.length === 0 ? (
+              <p className="citas-selected-date mt-2">No hay paquetes disponibles para esta sucursal.</p>
+            ) : null}
           </div>
 
           {servicesCanScroll && !servicesAtEnd ? (
@@ -428,46 +528,54 @@ export default function PublicBookingAgendaStep() {
             ) : null}
           </div>
 
-          <>
-            <div className="citas-calendar-head" style={{ paddingTop: '0' }}>
-              <button
-                type="button"
-                className="citas-nav-round"
-                onClick={() => setMonth(-1)}
-                aria-label="Mes anterior"
-                disabled={!canGoPrevMonth}
-              >
-                <ArrowLeft size={16} />
-              </button>
-              <div className="citas-calendar-month">{formatMonth(currentMonth)}</div>
-              <button type="button" className="citas-nav-round" onClick={() => setMonth(1)} aria-label="Mes siguiente">
-                <ArrowRight size={16} />
-              </button>
-            </div>
-
-            <div className="citas-calendar-grid">
-              <div className="citas-weekdays">
-                {WEEK_DAYS.map((day) => (
-                  <div key={day} className="citas-weekday">
-                    {day}
-                  </div>
-                ))}
+          {activeBlockIndex === 0 ? (
+            <>
+              <div className="citas-calendar-head" style={{ paddingTop: '0' }}>
+                <button
+                  type="button"
+                  className="citas-nav-round"
+                  onClick={() => setMonth(-1)}
+                  aria-label="Mes anterior"
+                  disabled={!canGoPrevMonth}
+                >
+                  <ArrowLeft size={16} />
+                </button>
+                <div className="citas-calendar-month">{formatMonth(currentMonth)}</div>
+                <button type="button" className="citas-nav-round" onClick={() => setMonth(1)} aria-label="Mes siguiente">
+                  <ArrowRight size={16} />
+                </button>
               </div>
 
-              <div className="citas-days">
-                {calendarCells.map((cell) => (
-                  <DayButton
-                    key={cell.key}
-                    cell={cell}
-                    dayInfo={availabilityMap[cell.key]}
-                    minDateKey={minBookingDateKey}
-                    selectedDate={selectedDate}
-                    onSelect={onSelectDay}
-                  />
-                ))}
+              <div className="citas-calendar-grid">
+                <div className="citas-weekdays">
+                  {WEEK_DAYS.map((day) => (
+                    <div key={day} className="citas-weekday">
+                      {day}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="citas-days">
+                  {calendarCells.map((cell) => (
+                    <DayButton
+                      key={cell.key}
+                      cell={cell}
+                      dayInfo={availabilityMap[cell.key]}
+                      minDateKey={minBookingDateKey}
+                      selectedDate={selectedDate}
+                      onSelect={(dateKey, enabled) => onSelectDay(dateKey, enabled)}
+                    />
+                  ))}
+                </div>
               </div>
+            </>
+          ) : (
+            <div className="public-booking-inherited-date-banner">
+              {titularSelectedDate
+                ? `Este acompañante usará la fecha del titular: ${formatFriendlyDate(titularSelectedDate)}.`
+                : 'Selecciona primero la fecha del titular para habilitar los horarios del acompañante.'}
             </div>
-          </>
+          )}
         </motion.div>
 
         <AnimatePresence initial={false}>
@@ -490,7 +598,7 @@ export default function PublicBookingAgendaStep() {
                   <span>Duración estimada de la cita: {formatDurationHuman(selectedServicesDurationSum)}</span>
                   <span>Selecciona una hora disponible para continuar con tu reserva.</span>
                 </div>
-                {selectionType === 'package' && selectedPackage ? (
+                {selectedPackage ? (
                   <p className="citas-selected-date">
                     Paquete seleccionado: {selectedPackage.nombre_paquete}
                   </p>
@@ -555,14 +663,20 @@ export default function PublicBookingAgendaStep() {
                       ) : (
                         <div className="public-booking-time-block-list">
                           {currentPeriodSlots.length > 0 ? (
-                            currentPeriodSlots.map((slot) => (
-                              <SlotButton
-                                key={slot.hora}
-                                slot={slot}
-                                selectedTime={selectedTime}
-                                onSelect={onSelectTime}
-                              />
-                            ))
+                            currentPeriodSlots.map((slot) => {
+                              const restriction = getSlotRestriction(slot);
+                              return (
+                                <SlotButton
+                                  key={slot.hora}
+                                  slot={slot}
+                                  selectedTime={selectedTime}
+                                  onSelect={onSelectTime}
+                                  disabled={restriction.disabled}
+                                  variant={restriction.variant}
+                                  helperText={restriction.reason}
+                                />
+                              );
+                            })
                           ) : (
                             <div className="public-booking-period-empty">
                               <p className="text-sm font-semibold text-[var(--mf-text)]">
@@ -595,7 +709,7 @@ export default function PublicBookingAgendaStep() {
           transition={{ duration: 0.4, delay: 0.12, ease: LANDING_EASE }}
         >
           <Button className="gap-2" onClick={goToConfirm} disabled={!canGoToConfirm}>
-            Continuar a confirmar
+            Continuar a resumen
             <ArrowRight size={15} />
           </Button>
         </motion.div>
@@ -616,8 +730,8 @@ export default function PublicBookingAgendaStep() {
             {!allowCompanions
               ? 'Acompañantes no habilitados'
               : canAddCompanionBlock
-                ? 'Agregar integrante'
-                : 'Limite de integrantes alcanzado'}
+                ? 'Añadir acompañante'
+                : 'Límite de 4 acompañantes alcanzado'}
           </Button>
         </motion.div>
       </div>
