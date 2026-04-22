@@ -16,7 +16,7 @@ import {
 import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table.jsx';
 import ViewToggle from '../../../components/data/ViewToggle.jsx';
 import DataCard from '../../../components/data/DataCard.jsx';
@@ -39,6 +39,7 @@ import {
 } from '../lib/adminCitasApi.js';
 import { buildTimeSlots } from '../../public/booking/bookingUtils.js';
 import { supabase } from '../../../config/supabaseClient.js';
+import { isAbortError } from '../../../services/httpClient.js';
 
 const FILTER_DEFAULTS = {
   idSucursal: 'all',
@@ -216,7 +217,7 @@ function compareCompletedByRecent(a, b) {
 export default function AdminAgendamientoCitasPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
-  const { roles, isAuthenticated } = useAuth();
+  const { roles, isAuthenticated, invalidateSession } = useAuth();
 
   const [contextLoading, setContextLoading] = useState(false);
   const [contextError, setContextError] = useState('');
@@ -340,7 +341,7 @@ export default function AdminAgendamientoCitasPage() {
 
   const handleAuthError = useCallback((err) => {
     if (err?.status === 401) {
-      navigate('/login');
+      invalidateSession('admin_agendamiento_401');
       return true;
     }
     if (err?.status === 403) {
@@ -348,9 +349,10 @@ export default function AdminAgendamientoCitasPage() {
       return true;
     }
     return false;
-  }, [navigate]);
+  }, [invalidateSession, navigate]);
 
   const fetchContext = useCallback(async () => {
+    if (!isAuthenticated) return;
     setContextLoading(true);
     setContextError('');
     try {
@@ -365,14 +367,16 @@ export default function AdminAgendamientoCitasPage() {
         setBatchForm((prev) => ({ ...prev, id_empleado_barbero: barberosPayload[0].id_empleado }));
       }
     } catch (err) {
+      if (isAbortError(err)) return;
       if (handleAuthError(err)) return;
       setContextError(extractMessage(err));
     } finally {
       setContextLoading(false);
     }
-  }, [handleAuthError]);
+  }, [handleAuthError, isAuthenticated]);
 
   const fetchCitas = useCallback(async ({ silent = false } = {}) => {
+    if (!isAuthenticated) return;
     if (fetchInFlightRef.current) return;
     fetchInFlightRef.current = true;
     if (!silent) setLoading(true);
@@ -391,14 +395,16 @@ export default function AdminAgendamientoCitasPage() {
       });
       setCitas(Array.from(byId.values()).sort((a, b) => new Date(a?.inicio_at || '').getTime() - new Date(b?.inicio_at || '').getTime()));
     } catch (err) {
+      if (isAbortError(err)) return;
       if (handleAuthError(err)) return;
       setListError(extractMessage(err));
     } finally {
       fetchInFlightRef.current = false;
       if (!silent) setLoading(false);
     }
-  }, [filters, handleAuthError, search]);
+  }, [filters, handleAuthError, isAuthenticated, search]);
   const scheduleLiveRefresh = useCallback((options = {}) => {
+    if (!isAuthenticated) return;
     const { immediate = false } = options;
     if (liveRefreshTimeoutRef.current) {
       window.clearTimeout(liveRefreshTimeoutRef.current);
@@ -413,17 +419,20 @@ export default function AdminAgendamientoCitasPage() {
       return;
     }
     liveRefreshTimeoutRef.current = window.setTimeout(runRefresh, LIVE_REFRESH_DEBOUNCE_MS);
-  }, [fetchCitas]);
+  }, [fetchCitas, isAuthenticated]);
   useEffect(() => {
+    if (!isAuthenticated) return;
     void fetchContext();
-  }, [fetchContext]);
+  }, [fetchContext, isAuthenticated]);
   useEffect(() => {
+    if (!isAuthenticated) return undefined;
     const timer = setTimeout(() => {
       void fetchCitas();
     }, 260);
     return () => clearTimeout(timer);
-  }, [fetchCitas]);
+  }, [fetchCitas, isAuthenticated]);
   useEffect(() => {
+    if (!isAuthenticated) return undefined;
     if (!supabase) return undefined;
     const channel = supabase
       .channel('admin-agendamiento-realtime')
@@ -447,8 +456,9 @@ export default function AdminAgendamientoCitasPage() {
         // ignore teardown errors
       }
     };
-  }, [scheduleLiveRefresh]);
+  }, [isAuthenticated, scheduleLiveRefresh]);
   useEffect(() => {
+    if (!isAuthenticated) return undefined;
     const handleFocus = () => {
       scheduleLiveRefresh({ immediate: true });
     };
@@ -461,7 +471,7 @@ export default function AdminAgendamientoCitasPage() {
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [scheduleLiveRefresh]);
+  }, [isAuthenticated, scheduleLiveRefresh]);
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       if (!isAuthenticated) return;
@@ -1025,7 +1035,10 @@ function renderCardsList(items, emptyText) {
 
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
         <DialogContent className="sm:max-w-xl">
-          <DialogHeader><DialogTitle>Filtros de Citas</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Filtros de Citas</DialogTitle>
+            <DialogDescription>Filtra la vista operativa por sucursal, barbero y rango de fechas.</DialogDescription>
+          </DialogHeader>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label className="mf-label">Sucursal</Label>
@@ -1059,7 +1072,10 @@ function renderCardsList(items, emptyText) {
 
       <Dialog open={stateDialog.open} onOpenChange={(open) => setStateDialog((prev) => ({ ...prev, open }))}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Confirmar cambio de estado</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Confirmar cambio de estado</DialogTitle>
+            <DialogDescription>Confirma la transición operativa de esta cita antes de aplicarla.</DialogDescription>
+          </DialogHeader>
           <p className="text-sm text-[var(--mf-text-2)]">
             Â¿Deseas ejecutar <strong>{getOperationLabel(stateDialog.estadoDestino)}</strong> para la cita de <strong>{stateDialog.cita?.nombre_cliente || 'Cliente'}</strong>?
           </p>
@@ -1072,7 +1088,10 @@ function renderCardsList(items, emptyText) {
 
       <Dialog open={singleDialogOpen} onOpenChange={setSingleDialogOpen}>
         <DialogContent className="sm:max-w-xl">
-          <DialogHeader><DialogTitle>ReagendaciÃ³n de emergencia</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Reagendación de emergencia</DialogTitle>
+            <DialogDescription>Reprograma una cita individual sin cobro cuando hay una incidencia operativa.</DialogDescription>
+          </DialogHeader>
           <div className="grid grid-cols-1 gap-3">
             <p className="text-sm text-[var(--mf-text-2)]">
               {singleTarget?.nombre_cliente || '-'} - {singleTarget?.nombre_barbero || '-'} ({formatDateTime(singleTarget?.inicio_at)})
@@ -1162,7 +1181,10 @@ function renderCardsList(items, emptyText) {
       {canManageEmergency ? (
         <Dialog open={batchDialogOpen} onOpenChange={setBatchDialogOpen}>
           <DialogContent className="w-[calc(100vw-1rem)] max-h-[90vh] overflow-y-auto sm:max-w-5xl">
-            <DialogHeader><DialogTitle>ReagendaciÃ³n masiva de emergencia</DialogTitle></DialogHeader>
+            <DialogHeader>
+              <DialogTitle>Reagendación masiva de emergencia</DialogTitle>
+              <DialogDescription>Selecciona y reprocesa en lote las citas afectadas por la emergencia.</DialogDescription>
+            </DialogHeader>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <Label className="mf-label">Barbero origen *</Label>

@@ -97,11 +97,15 @@ export function SlotButton({
   slot,
   selectedTime,
   onSelect,
+  disabled = false,
+  variant = 'default',
+  helperText = '',
 }) {
   const isSelected = selectedTime === slot.hora;
   const classes = [
     'public-booking-time-block',
-    'is-available',
+    variant === 'danger' ? 'is-blocked-danger' : '',
+    variant === 'muted' ? 'is-blocked-muted' : 'is-available',
     isSelected ? 'is-selected' : '',
   ].join(' ');
   const startLabel = formatTime12Hour(slot.hora);
@@ -112,12 +116,14 @@ export function SlotButton({
     <button
       type="button"
       className={classes}
-      onClick={() => onSelect(slot.hora, true)}
+      onClick={() => onSelect(slot.hora, !disabled)}
       aria-pressed={isSelected}
+      disabled={disabled}
+      title={helperText || undefined}
     >
       <span className="public-booking-time-block-copy">
         <span className="public-booking-time-block-range">{startLabel} - {endLabel}</span>
-        <span className="public-booking-time-block-status">{durationLabel}</span>
+        <span className="public-booking-time-block-status">{helperText || durationLabel}</span>
       </span>
       <span className="public-booking-time-block-icon" aria-hidden="true">
         {isSelected ? <Check size={16} /> : <Clock3 size={15} />}

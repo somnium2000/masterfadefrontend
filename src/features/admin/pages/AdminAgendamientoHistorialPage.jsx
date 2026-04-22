@@ -4,7 +4,7 @@ import { CalendarRange, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-r
 import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table.jsx';
 import ViewToggle from '../../../components/data/ViewToggle.jsx';
 import DataCard from '../../../components/data/DataCard.jsx';
@@ -279,7 +279,10 @@ export default function AdminAgendamientoHistorialPage() {
 
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
         <DialogContent className="sm:max-w-xl">
-          <DialogHeader><DialogTitle>Filtros de Historial</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Filtros de Historial</DialogTitle>
+            <DialogDescription>Refina el historial por sucursal, barbero, estado y rango de fechas.</DialogDescription>
+          </DialogHeader>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label className="mf-label">Sucursal</Label>

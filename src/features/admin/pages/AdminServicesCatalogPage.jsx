@@ -559,6 +559,9 @@ export default function AdminServicesCatalogPage() {
     // â”€â”€ Handlers form â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function handleFormChange(field, value) {
         setFormValues((prev) => ({ ...prev, [field]: value }));
+        if (field === 'servicio_informativo' && !value) {
+            setServiceBarberAssignments(SERVICE_BARBER_ASSIGNMENTS_DEFAULTS);
+        }
     }
 
     function handleBarberAssignmentToggle(idEmpleado) {
@@ -615,7 +618,7 @@ export default function AdminServicesCatalogPage() {
     }
 
     useEffect(() => {
-        if (!dialogOpen || !editTarget || !isSuperAdmin) {
+        if (!dialogOpen || !editTarget || !isSuperAdmin || !Boolean(formValues.servicio_informativo)) {
             setServiceBarberAssignments(SERVICE_BARBER_ASSIGNMENTS_DEFAULTS);
             return undefined;
         }
@@ -658,13 +661,13 @@ export default function AdminServicesCatalogPage() {
             });
 
         return () => { cancelled = true; };
-    }, [dialogOpen, editTarget, isSuperAdmin]);
+    }, [dialogOpen, editTarget, formValues.servicio_informativo, isSuperAdmin]);
 
     async function handleGuardar() {
         const validationError = validateForm(formValues);
         if (validationError) { setFormError(validationError); return; }
 
-        if (isSuperAdmin && editTarget) {
+        if (isSuperAdmin && editTarget && Boolean(formValues.servicio_informativo)) {
             if (serviceBarberAssignments.loading) {
                 setFormError('Espera a que termine de cargar la asignacion de barberos.');
                 return;
@@ -717,7 +720,7 @@ export default function AdminServicesCatalogPage() {
                 savedServiceData = response?.data ?? response;
             }
 
-            if (isSuperAdmin && editTarget) {
+            if (isSuperAdmin && editTarget && Boolean(formValues.servicio_informativo)) {
                 const savedServiceId = savedServiceData?.id_servicio || editTarget.id_servicio || editTarget.id;
                 await saveAdminServicioBarberos(savedServiceId, {
                     id_sucursal: mutationBranchId,
@@ -1128,7 +1131,7 @@ export default function AdminServicesCatalogPage() {
                     <div className={`grid gap-5 ${isSuperAdmin && editTarget ? 'lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]' : 'grid-cols-1'}`}>
                         <ServicioForm values={formValues} onChange={handleFormChange} />
 
-                        {isSuperAdmin ? (
+                        {isSuperAdmin && Boolean(formValues.servicio_informativo) ? (
                             <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_38%,transparent)] p-4">
                                 <div className="space-y-1">
                                     <p className="text-xs uppercase tracking-[0.22em] text-[var(--mf-accent)]">Barberos que ofrecen este servicio</p>
@@ -1222,7 +1225,7 @@ export default function AdminServicesCatalogPage() {
                         </Button>
                         <Button
                             onClick={handleGuardar}
-                            disabled={formLoading || (isSuperAdmin && editTarget && serviceBarberAssignments.loading)}
+                            disabled={formLoading || (isSuperAdmin && editTarget && Boolean(formValues.servicio_informativo) && serviceBarberAssignments.loading)}
                             className="gap-2 min-w-[120px]"
                         >
                             {formLoading ? 'Guardando...' : editTarget ? 'Guardar cambios' : 'Crear servicio'}

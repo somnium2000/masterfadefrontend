@@ -16,6 +16,8 @@ import PublicBookingFlow from './features/public/booking/PublicBookingFlow.jsx';
 import PublicBookingBarberosStep from './features/public/booking/PublicBookingBarberosStep.jsx';
 import PublicBookingAgendaStep from './features/public/booking/PublicBookingAgendaStep.jsx';
 import PublicBookingConfirmStep from './features/public/booking/PublicBookingConfirmStep.jsx';
+import PublicBookingPaymentStep from './features/public/booking/PublicBookingPaymentStep.jsx';
+import PublicBookingSuccessStep from './features/public/booking/PublicBookingSuccessStep.jsx';
 import UnauthorizedPage from './features/unauthorized/pages/UnauthorizedPage.jsx';
 import ProtectedRoute from './routes/ProtectedRoute.jsx';
 import AdminServicesCatalogPage from './features/admin/pages/AdminServicesCatalogPage.jsx';
@@ -80,6 +82,8 @@ function App() {
         <Route path="barberos" element={<PublicBookingBarberosStep />} />
         <Route path="agenda" element={<PublicBookingAgendaStep />} />
         <Route path="confirmar" element={<PublicBookingConfirmStep />} />
+        <Route path="pagar" element={<PublicBookingPaymentStep />} />
+        <Route path="exito" element={<PublicBookingSuccessStep />} />
       </Route>
       <Route path="/membresias-vip" element={<MembershipPlansPage />} />
       <Route

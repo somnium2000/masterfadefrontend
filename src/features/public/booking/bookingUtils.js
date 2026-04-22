@@ -212,6 +212,19 @@ export function formatTime12Hour(rawTime) {
   return `${hour12}:${minute} ${period}`;
 }
 
+export function buildBookingShortCode(value, length = 5) {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (!normalized) return 'N/A';
+  const safeLength = Math.max(3, Math.min(5, Number(length) || 5));
+  const maxValue = 36 ** safeLength;
+  const hashed = hashString(normalized) % maxValue;
+  return hashed
+    .toString(36)
+    .toUpperCase()
+    .padStart(safeLength, '0')
+    .slice(-safeLength);
+}
+
 export function formatDurationHuman(totalMinutes) {
   const safeMinutes = Math.max(Number(totalMinutes || 0), 0);
   if (!Number.isFinite(safeMinutes)) return '0 min';
