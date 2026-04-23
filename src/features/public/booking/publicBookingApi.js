@@ -42,6 +42,18 @@ export async function createClienteCitaHold(payload) {
   return http.post('/v1/citas/hold', payload);
 }
 
+export async function createPublicPaymentIntent(payload) {
+  return http.post('/v1/public/pagos/crear-intent', payload);
+}
+
+export async function getPublicPaymentStatus(params = {}) {
+  return http.get(`/v1/public/pagos/estado${toQueryString(params)}`);
+}
+
+export async function completePublicMockPayment(payload) {
+  return http.post('/v1/public/pagos/mock-completar', payload);
+}
+
 // AM: Consulta de estado de membresía para propuesta automática de servicios cubiertos en booking autenticado.
 export async function getClienteMembershipEstado() {
   return http.get('/v1/cliente/planes/estado');

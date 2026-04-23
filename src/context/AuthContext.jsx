@@ -1,5 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { http } from '../services/httpClient.js';
+import {
+  abortInFlightRequests,
+  http,
+  registerSessionInvalidationHandler,
+  resetSessionInvalidation,
+} from '../services/httpClient.js';
 import { supabase } from '../config/supabaseClient.js';
 
 const AuthContext = createContext(null);
@@ -79,6 +84,14 @@ export function AuthProvider({ children }) {
     setIsHydrated(true);
   }, [applyUserState]);
 
+  const invalidateSession = useCallback((reason = 'session_invalidated') => {
+    abortInFlightRequests(reason);
+    clearSessionState();
+    if (supabase) {
+      void supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+    }
+  }, [clearSessionState]);
+
   const hydrateSession = useCallback(async () => {
     setIsHydrating(true);
     setIsHydrated(false);
@@ -94,6 +107,7 @@ export function AuthProvider({ children }) {
 
       const enrichedUser = buildEnrichedUser(payload);
       applyUserState(enrichedUser);
+      resetSessionInvalidation();
       setIsHydrating(false);
       setIsHydrated(true);
       return { ok: true };
@@ -159,17 +173,20 @@ export function AuthProvider({ children }) {
   }, [hydrateSession]);
 
   const logout = useCallback(async () => {
+    invalidateSession('logout');
     try {
-      await http.post('/v1/auth/logout', {});
+      await http.post('/v1/auth/logout', {}, { skipAuthInvalidation: true });
     } catch {
       // noop: de todas formas limpiamos estado local.
     }
+  }, [invalidateSession]);
 
-    clearSessionState();
-    if (supabase) {
-      void supabase.auth.signOut({ scope: 'local' }).catch(() => {});
-    }
-  }, [clearSessionState]);
+  useEffect(() => {
+    const unsubscribe = registerSessionInvalidationHandler(() => {
+      invalidateSession('private_endpoint_401');
+    });
+    return unsubscribe;
+  }, [invalidateSession]);
 
   useEffect(() => {
     // AM: No hidratar sesion si estamos en /auth/callback — esa pagina maneja
@@ -202,6 +219,7 @@ export function AuthProvider({ children }) {
       completeExchangeLogin,
       hydrateSession,
       logout,
+      invalidateSession,
     }),
     [
       token,
@@ -217,6 +235,7 @@ export function AuthProvider({ children }) {
       completeExchangeLogin,
       hydrateSession,
       logout,
+      invalidateSession,
     ]
   );
 
