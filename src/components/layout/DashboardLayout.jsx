@@ -30,12 +30,10 @@ function buildNavModules(basePath, role) {
             },
             {
                 id: 'citas',
-                label: 'Agendamiento',
+                label: 'Calendario',
                 icon: CalendarDays,
                 path: `${basePath}/citas`,
-                subItems: [
-                    { id: 'agendamiento-citas', label: 'Citas', path: `${basePath}/citas` },
-                ],
+                subItems: null,
             },
             {
                 id: 'perfil-barbero',
@@ -331,7 +329,7 @@ export default function DashboardLayout({ pageRole }) {
     const mobileItems = currentRole === 'barbero'
         ? [
             { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate(basePath) },
-            { id: 'agendamiento', label: 'Citas', icon: CalendarDays, onClick: () => navigate(`${basePath}/citas`) },
+            { id: 'citas', label: 'Calendario', icon: CalendarDays, onClick: () => navigate(`${basePath}/citas`) },
             { id: 'perfil-barbero', label: 'Perfil', icon: UserRound, onClick: () => navigate(`${basePath}/perfil`) },
             { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
         ]
@@ -342,7 +340,7 @@ export default function DashboardLayout({ pageRole }) {
             { id: 'sucursales', label: 'Sucursales', icon: Building2, onClick: () => navigate(`${basePath}/sucursales`) },
             { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
         ];
-    const mobileSideItems = currentRole === 'barbero' ? mobileItems.slice(0, 3) : mobileItems.slice(0, 4);
+    const mobileSideItems = currentRole === 'barbero' ? mobileItems : mobileItems.slice(0, 4);
 
     return (
         <div className="min-h-screen bg-[var(--mf-bg)] text-[var(--mf-text)]">
@@ -583,7 +581,8 @@ export default function DashboardLayout({ pageRole }) {
                     className="lg:hidden"
                     activeId={activeModule?.id || 'inicio'}
                     sideItems={mobileSideItems}
-                    fabItem={{ id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout }}
+                    fabItem={currentRole === 'barbero' ? undefined : { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout }}
+                    mobilePreset={currentRole === 'barbero' ? 'barber' : 'default'}
                 />
             </div>
         </div>

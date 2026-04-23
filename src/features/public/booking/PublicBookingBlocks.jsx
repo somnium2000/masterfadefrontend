@@ -1,33 +1,51 @@
+import { useState } from 'react';
 import { Check, Clock3 } from 'lucide-react';
 import {
   formatTime12Hour,
   formatCurrencyHnl,
-  getBarberMeta,
   getInitials,
   getServiceDurationLabel,
 } from './bookingUtils.js';
+import { withImageVersion } from '../../../lib/imageCache.js';
 
 export function BarberCard({
   barber,
   isSelected,
   onSelect,
 }) {
-  const meta = getBarberMeta(barber);
+  const displayName = String(barber?.nombre_completo || '').trim() || 'Barbero';
+  const aliasPublico = String(barber?.alias_publico || '').trim();
+  const aliasLabel = aliasPublico || 'Barbero';
+  const [failedPhotoUrl, setFailedPhotoUrl] = useState('');
+  const photoUrl = withImageVersion(
+    String(barber?.foto_perfil_url || '').trim(),
+    barber?.foto_perfil_updated_at
+  );
+  const hasPhoto = Boolean(photoUrl) && failedPhotoUrl !== photoUrl;
 
   return (
     <button
       type="button"
-      className={`citas-barber-card ${isSelected ? 'is-selected' : ''}`}
+      className={`public-booking-barber-card ${isSelected ? 'is-selected' : ''}`}
       onClick={onSelect}
       aria-pressed={isSelected}
     >
-      <div className="citas-barber-media" style={{ background: meta.gradient }}>
-        <span className="citas-barber-avatar">{getInitials(barber?.nombre_completo)}</span>
-        <span className="citas-barber-chip">{meta.specialty}</span>
+      <div className="public-booking-barber-card-media">
+        {hasPhoto ? (
+          <img
+            src={photoUrl}
+            alt={displayName}
+            className="public-booking-barber-card-image"
+            loading="lazy"
+            onError={() => setFailedPhotoUrl(photoUrl)}
+          />
+        ) : (
+          <span className="public-booking-barber-card-avatar">{getInitials(displayName)}</span>
+        )}
       </div>
-      <div className="citas-barber-body">
-        <div className="citas-barber-name">{barber?.nombre_completo || 'Barbero'}</div>
-        <div className="citas-barber-years">{meta.years} anos de experiencia</div>
+      <div className="public-booking-barber-card-body">
+        <p className="public-booking-barber-card-name">{displayName}</p>
+        <p className="public-booking-barber-card-alias">{aliasLabel}</p>
       </div>
     </button>
   );

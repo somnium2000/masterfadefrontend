@@ -12,6 +12,7 @@ import LandingPage from './features/landing/pages/LandingPage.jsx';
 import MembershipPlansPage from './features/public/pages/MembershipPlansPage.jsx';
 import PromotionsPage from './features/public/pages/PromotionsPage.jsx';
 import ServicesPage from './features/public/pages/ServicesPage.jsx';
+import BarbersLandingPage from './features/public/pages/BarbersLandingPage.jsx';
 import PublicBookingFlow from './features/public/booking/PublicBookingFlow.jsx';
 import PublicBookingBarberosStep from './features/public/booking/PublicBookingBarberosStep.jsx';
 import PublicBookingAgendaStep from './features/public/booking/PublicBookingAgendaStep.jsx';
@@ -32,6 +33,7 @@ import ClientePerfilPage from './features/cliente/pages/ClientePerfilPage.jsx';
 import ClientePlanesPage from './features/cliente/pages/ClientePlanesPage.jsx';
 import BarberoHomePage from './features/barbero/pages/BarberoHomePage.jsx';
 import BarberoProfilePage from './features/barbero/pages/BarberoProfilePage.jsx';
+import BarberoCalendarioPage from './features/barbero/pages/BarberoCalendarioPage.jsx';
 import AdminEmpleadosPage from './features/admin/pages/AdminEmpleadosPage.jsx';
 import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx';
 import AdminClientesPage from './features/admin/pages/AdminClientesPage.jsx';
@@ -77,6 +79,7 @@ function App() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/servicios" element={<ServicesPage />} />
       <Route path="/promociones" element={<PromotionsPage />} />
+      <Route path="/barberos" element={<BarbersLandingPage />} />
       <Route path="/agendar" element={<RouteErrorBoundary><PublicBookingFlow /></RouteErrorBoundary>}>
         <Route index element={<Navigate to="barberos" replace />} />
         <Route path="barberos" element={<PublicBookingBarberosStep />} />
@@ -221,7 +224,7 @@ function App() {
         }
       >
         <Route index element={<RouteErrorBoundary><BarberoHomePage /></RouteErrorBoundary>} />
-        <Route path="citas" element={<RouteErrorBoundary><AdminAgendamientoCitasPage /></RouteErrorBoundary>} />
+        <Route path="citas" element={<RouteErrorBoundary><BarberoCalendarioPage /></RouteErrorBoundary>} />
         <Route path="perfil" element={<RouteErrorBoundary><BarberoProfilePage /></RouteErrorBoundary>} />
       </Route>
 

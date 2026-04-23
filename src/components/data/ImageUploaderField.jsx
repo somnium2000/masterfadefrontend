@@ -3,7 +3,12 @@ import { ImagePlus, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '../ui/button.jsx';
 import { Label } from '../ui/label.jsx';
 import { getAdminStorageAssetReadUrl } from '../../features/storage/lib/storageApi.js';
-import { extractStorageErrorMessage, prepareAndUploadAdminImage, validateImageFile } from '../../features/storage/lib/storageUpload.js';
+import {
+  extractStorageErrorMessage,
+  optimizeImageForUpload,
+  prepareAndUploadAdminImage,
+  validateImageFile,
+} from '../../features/storage/lib/storageUpload.js';
 
 const DEFAULT_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
@@ -24,6 +29,8 @@ export default function ImageUploaderField({
   maxBytes = 5 * 1024 * 1024,
   initialPreviewUrl = '',
   valueAssetId = null,
+  optimizeImageBeforeUpload = false,
+  previewAspect = 'wide',
   onChange,
 }) {
   const inputRef = useRef(null);
@@ -33,6 +40,9 @@ export default function ImageUploaderField({
   const [assetId, setAssetId] = useState(valueAssetId || null);
 
   const accept = useMemo(() => allowedMimeTypes.join(','), [allowedMimeTypes]);
+  const previewClasses = previewAspect === 'square'
+    ? 'h-40 w-40 object-cover'
+    : 'h-40 w-full object-cover';
 
   useEffect(() => {
     setPreviewUrl(initialPreviewUrl || '');
@@ -43,18 +53,23 @@ export default function ImageUploaderField({
   }, [valueAssetId]);
 
   async function handleFileSelection(event) {
-    const file = event.target?.files?.[0];
-    if (!file) return;
+    const sourceFile = event.target?.files?.[0];
+    if (!sourceFile) return;
     setErrorMessage('');
     setUploading(true);
     try {
-      validateImageFile(file, { allowedMimeTypes, maxBytes });
+      validateImageFile(sourceFile, { allowedMimeTypes, maxBytes });
+      const optimizedFile = optimizeImageBeforeUpload
+        ? await optimizeImageForUpload(sourceFile, { maxBytes, preferType: 'image/webp' })
+        : sourceFile;
+      validateImageFile(optimizedFile, { allowedMimeTypes, maxBytes });
+
       const prepared = await prepareAndUploadAdminImage({
         scopeKey,
         entityType,
         entityId,
         idSucursal,
-        file,
+        file: optimizedFile,
         label,
       });
 
@@ -132,8 +147,8 @@ export default function ImageUploaderField({
       />
 
       {previewUrl ? (
-        <div className="overflow-hidden rounded-lg border border-[var(--mf-nav-border)]">
-          <img src={previewUrl} alt={`${label} preview`} className="h-40 w-full object-cover" loading="lazy" />
+        <div className={`overflow-hidden rounded-lg border border-[var(--mf-nav-border)] ${previewAspect === 'square' ? 'w-40' : ''}`}>
+          <img src={previewUrl} alt={`${label} preview`} className={previewClasses} loading="lazy" />
         </div>
       ) : (
         <div className="rounded-lg border border-dashed border-[var(--mf-nav-border)] px-3 py-4 text-center text-xs text-[var(--mf-text-2)]">

@@ -27,6 +27,7 @@ import HoverActionButton from '../../../components/data/HoverActionButton.jsx';
 import DetailInfoModalContent from '../../../components/data/DetailInfoModalContent.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
+import ImageUploaderField from '../../../components/data/ImageUploaderField.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import {
   Table,
@@ -42,6 +43,9 @@ import { replaceItemById } from '../../../lib/collectionState.js';
 
 const DNI_PATTERN = /^\d{13}$/;
 const ACTIVE_ROLE_CODES = ['super_admin', 'admin', 'barbero'];
+const BARBER_PUBLIC_ALIAS_MAX = 80;
+const BARBER_PUBLIC_SUMMARY_MAX = 500;
+const BARBER_PUBLIC_CERT_MAX = 120;
 const DEFAULT_ROLE_LABELS = {
   super_admin: 'Super Admin',
   admin: 'Administrador',
@@ -70,6 +74,12 @@ const FORM_DEFAULTS = {
   fecha_ingreso: '',
   salario_base: '',
   roles: ['admin'],
+  foto_perfil_asset_id: null,
+  foto_perfil_url: '',
+  alias_publico: '',
+  resumen_publico: '',
+  certificaciones_titulos: [''],
+  visible_en_landing: false,
 };
 
 const EMPLEADO_FILTER_DEFAULTS = {
@@ -112,6 +122,21 @@ function normalizeUnicodeText(value) {
   return String(value || '').normalize('NFC').trim();
 }
 
+function normalizePublicCertifications(values) {
+  if (!Array.isArray(values)) return [];
+  const dedupe = new Set();
+  const normalized = [];
+  values.forEach((value) => {
+    const next = normalizeUnicodeText(value);
+    if (!next) return;
+    const key = next.toLowerCase();
+    if (dedupe.has(key)) return;
+    dedupe.add(key);
+    normalized.push(next);
+  });
+  return normalized;
+}
+
 function normalizeRoleCodes(values) {
   if (!Array.isArray(values)) return [];
   return [...new Set(values.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean))];
@@ -135,6 +160,10 @@ function toggleRoleSelection(currentRoles, roleCode, enabled) {
 }
 
 function mapEmpleadoToForm(empleado) {
+  const rawCertificaciones = Array.isArray(empleado?.certificaciones_titulos) ? empleado.certificaciones_titulos : [];
+  const certs = rawCertificaciones
+    .map((item) => normalizeUnicodeText(item))
+    .filter(Boolean);
   return {
     nombres: empleado?.nombres || '',
     apellidos: empleado?.apellidos || '',
@@ -150,6 +179,12 @@ function mapEmpleadoToForm(empleado) {
     fecha_ingreso: empleado?.fecha_ingreso ? String(empleado.fecha_ingreso).slice(0, 10) : '',
     salario_base: empleado?.salario_base ?? '',
     roles: normalizeRoleCodes(empleado?.roles),
+    foto_perfil_asset_id: empleado?.foto_perfil_asset_id || null,
+    foto_perfil_url: empleado?.foto_perfil_url || '',
+    alias_publico: empleado?.alias_publico || '',
+    resumen_publico: empleado?.resumen_publico || '',
+    certificaciones_titulos: certs.length ? certs : [''],
+    visible_en_landing: Boolean(empleado?.visible_en_landing),
   };
 }
 
@@ -175,12 +210,27 @@ function validateForm(values) {
   const salary = values.salario_base === '' ? null : Number(values.salario_base);
   if (salary !== null && (!Number.isFinite(salary) || salary < 0)) return 'Salario base debe ser >= 0.';
 
+  const isBarber = normalizeRoleCodes(values.roles).includes('barbero');
+  if (isBarber) {
+    const alias = normalizeUnicodeText(values.alias_publico);
+    if (alias.length > BARBER_PUBLIC_ALIAS_MAX) return `Alias publico no debe superar ${BARBER_PUBLIC_ALIAS_MAX} caracteres.`;
+
+    const resumen = normalizeUnicodeText(values.resumen_publico);
+    if (resumen.length > BARBER_PUBLIC_SUMMARY_MAX) return `Resumen publico no debe superar ${BARBER_PUBLIC_SUMMARY_MAX} caracteres.`;
+
+    const certs = normalizePublicCertifications(values.certificaciones_titulos);
+    if (certs.some((item) => item.length > BARBER_PUBLIC_CERT_MAX)) {
+      return `Cada certificacion debe tener maximo ${BARBER_PUBLIC_CERT_MAX} caracteres.`;
+    }
+  }
+
   return null;
 }
 
 function buildPayload(values) {
   const roles = normalizeRoleCodes(values.roles);
   const esBarbero = roles.includes('barbero');
+  const certificaciones = normalizePublicCertifications(values.certificaciones_titulos);
   return {
     persona: {
       nombres: normalizeUnicodeText(values.nombres),
@@ -202,7 +252,18 @@ function buildPayload(values) {
       fecha_ingreso: toDateTimeIso(values.fecha_ingreso),
       salario_base: values.salario_base === '' ? null : Number(values.salario_base),
       es_barbero: esBarbero,
+      foto_perfil_asset_id: esBarbero ? (values.foto_perfil_asset_id || null) : null,
     },
+    ...(esBarbero
+      ? {
+        perfil_publico: {
+          alias_publico: normalizeUnicodeText(values.alias_publico) || null,
+          resumen_publico: normalizeUnicodeText(values.resumen_publico) || null,
+          certificaciones_titulos: certificaciones,
+          visible_en_landing: Boolean(values.visible_en_landing),
+        },
+      }
+      : {}),
   };
 }
 
@@ -268,6 +329,7 @@ export default function AdminEmpleadosPage() {
     });
     return map;
   }, [roleOptions]);
+  const isBarberForm = hasRole(formValues.roles, 'barbero');
 
   // AM: Filtro compuesto por submodulo para busqueda y segmentacion sin recargar backend.
   const filteredEmpleados = useMemo(() => {
@@ -809,6 +871,132 @@ export default function AdminEmpleadosPage() {
               <Label className="mf-label">Observaciones</Label>
               <Input className="mf-input mt-1" value={formValues.observaciones} onChange={(e) => setFormValues((p) => ({ ...p, observaciones: e.target.value }))} />
             </div>
+
+            {isBarberForm ? (
+              <section className="sm:col-span-2 mt-2 rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_78%,transparent)] p-4">
+                <div className="mb-3">
+                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--mf-accent)]">Perfil publico del barbero</p>
+                  <p className="mt-1 text-xs text-[var(--mf-text-2)]">Estos datos se usan en perfil y agendamiento publico cuando aplica.</p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <ImageUploaderField
+                      label="Foto de perfil publica"
+                      helperText="Imagen de perfil del barbero (recorte 1:1). Se optimiza antes de subir y el archivo final no supera 5MB."
+                      scopeKey="public_barber_profile"
+                      entityType="barbero"
+                      entityId={editingId || null}
+                      idSucursal={formValues.id_sucursal || null}
+                      allowedMimeTypes={['image/jpeg', 'image/png', 'image/webp']}
+                      maxBytes={5 * 1024 * 1024}
+                      optimizeImageBeforeUpload
+                      previewAspect="square"
+                      valueAssetId={formValues.foto_perfil_asset_id}
+                      initialPreviewUrl={formValues.foto_perfil_url}
+                      onChange={(payload) => {
+                        setFormValues((prev) => ({
+                          ...prev,
+                          foto_perfil_asset_id: payload?.asset_id || null,
+                          foto_perfil_url: payload?.public_url || '',
+                        }));
+                      }}
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <Label className="mf-label">Alias publico</Label>
+                    <Input
+                      className="mf-input mt-1"
+                      maxLength={BARBER_PUBLIC_ALIAS_MAX}
+                      value={formValues.alias_publico}
+                      onChange={(e) => setFormValues((p) => ({ ...p, alias_publico: e.target.value }))}
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="mf-label">Resumen publico</Label>
+                      <span className="text-[11px] text-[var(--mf-text-2)]">
+                        {normalizeUnicodeText(formValues.resumen_publico).length}/{BARBER_PUBLIC_SUMMARY_MAX}
+                      </span>
+                    </div>
+                    <textarea
+                      className="mf-input mt-1 min-h-[110px] w-full resize-y"
+                      maxLength={BARBER_PUBLIC_SUMMARY_MAX}
+                      value={formValues.resumen_publico}
+                      onChange={(e) => setFormValues((p) => ({ ...p, resumen_publico: e.target.value }))}
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <Label className="mf-label">Certificaciones / titulos</Label>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setFormValues((prev) => ({
+                          ...prev,
+                          certificaciones_titulos: [...(Array.isArray(prev.certificaciones_titulos) ? prev.certificaciones_titulos : ['']), ''],
+                        }))}
+                      >
+                        <Plus size={14} className="mr-1" />
+                        Agregar
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {(Array.isArray(formValues.certificaciones_titulos) ? formValues.certificaciones_titulos : ['']).map((item, index) => (
+                        <div key={`cert-${index}`} className="flex items-center gap-2">
+                          <Input
+                            className="mf-input"
+                            maxLength={BARBER_PUBLIC_CERT_MAX}
+                            value={item}
+                            onChange={(e) => setFormValues((prev) => {
+                              const next = Array.isArray(prev.certificaciones_titulos) ? [...prev.certificaciones_titulos] : [''];
+                              next[index] = e.target.value;
+                              return {
+                                ...prev,
+                                certificaciones_titulos: next,
+                              };
+                            })}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            aria-label="Eliminar certificacion"
+                            disabled={(Array.isArray(formValues.certificaciones_titulos) ? formValues.certificaciones_titulos : []).length <= 1}
+                            onClick={() => setFormValues((prev) => {
+                              const next = Array.isArray(prev.certificaciones_titulos) ? [...prev.certificaciones_titulos] : [''];
+                              if (next.length <= 1) return { ...prev, certificaciones_titulos: [''] };
+                              next.splice(index, 1);
+                              return {
+                                ...prev,
+                                certificaciones_titulos: next.length ? next : [''],
+                              };
+                            })}
+                          >
+                            <X size={14} />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="sm:col-span-2 mt-1 inline-flex items-center gap-2 rounded-xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-sm text-[var(--mf-text)]">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-[var(--mf-accent)]"
+                      checked={Boolean(formValues.visible_en_landing)}
+                      onChange={(e) => setFormValues((prev) => ({ ...prev, visible_en_landing: e.target.checked }))}
+                    />
+                    Visible en landing
+                  </label>
+                </div>
+              </section>
+            ) : null}
           </div>
 
           {formError && <p className="mt-3 rounded-[12px] bg-red-500/10 px-3 py-2 text-sm text-red-400">{formError}</p>}
@@ -871,6 +1059,25 @@ export default function AdminEmpleadosPage() {
                     { label: 'Ultimo login', value: selectedEmpleado.ultimo_login_at ? new Date(selectedEmpleado.ultimo_login_at).toLocaleString() : 'Sin registro' },
                   ],
                 },
+                ...(selectedEmpleado.es_barbero
+                  ? [{
+                    id: 'perfil-publico',
+                    title: 'Perfil publico del barbero',
+                    icon: <Users size={14} />,
+                    fields: [
+                      { label: 'Alias publico', value: selectedEmpleado.alias_publico || '-' },
+                      { label: 'Visible en landing', value: selectedEmpleado.visible_en_landing ? 'Si' : 'No' },
+                      { label: 'Resumen publico', value: selectedEmpleado.resumen_publico || '-', span: 'full' },
+                      {
+                        label: 'Certificaciones',
+                        value: Array.isArray(selectedEmpleado.certificaciones_titulos) && selectedEmpleado.certificaciones_titulos.length
+                          ? selectedEmpleado.certificaciones_titulos.join(', ')
+                          : '-',
+                        span: 'full',
+                      },
+                    ],
+                  }]
+                  : []),
               ]}
             />
           )}

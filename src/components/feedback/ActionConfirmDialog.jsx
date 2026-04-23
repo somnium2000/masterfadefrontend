@@ -3,6 +3,7 @@ import { AlertTriangle, Loader2, ShieldAlert } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -52,7 +53,9 @@ export default function ActionConfirmDialog({
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
-        <p className="text-sm leading-6 text-[var(--mf-text-2)]">{description}</p>
+        <DialogDescription className="text-sm leading-6 text-[var(--mf-text-2)]">
+          {description}
+        </DialogDescription>
 
         <DialogFooter className="mt-3">
           <Button variant="outline" disabled={loading} onClick={() => onOpenChange(false)}>
