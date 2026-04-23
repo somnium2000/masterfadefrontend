@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, CheckCircle2, RefreshCw, TimerReset } from 'lucide-react';
+import { CalendarClock, CheckCircle2, TimerReset } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
@@ -33,7 +33,6 @@ const STATUS_META = {
     className: 'border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]',
   },
 };
-const FINISH_ALERT_THRESHOLD_MIN = 7;
 
 function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
@@ -118,40 +117,6 @@ function formatRelativeStart(isoValue, nowMs) {
   const minutes = diffMinutes % 60;
   if (!minutes) return `Comienza en ${hours} h`;
   return `Comienza en ${hours} h ${minutes} min`;
-}
-
-function addMinutes(isoValue, minutes) {
-  const base = new Date(isoValue || '');
-  if (Number.isNaN(base.getTime())) return null;
-  return new Date(base.getTime() + Math.max(0, Number(minutes || 0)) * 60000);
-}
-
-function formatRelativeFinish(isoValue, nowMs) {
-  const finish = toTimestamp(isoValue);
-  if (!finish) return 'Sin estimacion';
-  const diff = Math.round((finish - nowMs) / 60000);
-  if (diff <= 0) return 'Tiempo cumplido';
-  if (diff === 1) return 'Falta 1 minuto';
-  return `Faltan ${diff} minutos`;
-}
-
-function getFinishAlertMeta(isoValue, nowMs) {
-  const finish = toTimestamp(isoValue);
-  if (!finish) return null;
-  const diff = Math.round((finish - nowMs) / 60000);
-  if (diff <= 0) {
-    return {
-      toneClass: 'border-red-500/40 bg-red-500/10 text-red-300',
-      message: 'La cita actual ya debio finalizar. Revisa estado y cierre de atencion.',
-    };
-  }
-  if (diff <= FINISH_ALERT_THRESHOLD_MIN) {
-    return {
-      toneClass: 'border-amber-400/40 bg-amber-500/10 text-amber-200',
-      message: `Alerta operativa: faltan ${diff} minuto${diff === 1 ? '' : 's'} para finalizar la atencion actual.`,
-    };
-  }
-  return null;
 }
 
 function InlineEmptyState({ title, description }) {
@@ -278,37 +243,6 @@ export default function BarberoHomePage() {
       .filter((item) => ['en_salon', 'en_atencion'].includes(String(item?.estado_cita_codigo || '').trim().toLowerCase()))
       .slice(0, 4);
   }, [nowMs, todayAppointments]);
-  const currentAppointment = useMemo(
-    () => {
-      const source = Array.isArray(todayAppointments) ? todayAppointments : [];
-      const inAttention = source.find((item) => String(item?.estado_cita_codigo || '').trim().toLowerCase() === 'en_atencion');
-      if (inAttention) return inAttention;
-      return source.find(
-        (item) =>
-          String(item?.estado_cita_codigo || '').trim().toLowerCase() === 'en_salon'
-          && Boolean(item?.atencion_iniciada_at)
-      ) || null;
-    },
-    [todayAppointments]
-  );
-  const currentEstimatedEnd = useMemo(
-    () => (currentAppointment?.atencion_iniciada_at
-      ? addMinutes(currentAppointment.atencion_iniciada_at, Number(currentAppointment.duracion_total_min || 0))
-      : null),
-    [currentAppointment]
-  );
-  const currentFinishAlert = useMemo(
-    () => (currentEstimatedEnd ? getFinishAlertMeta(currentEstimatedEnd.toISOString(), nowMs) : null),
-    [currentEstimatedEnd, nowMs]
-  );
-  const nextAdjustedAppointment = useMemo(() => {
-    if (!currentAppointment) return upcomingAppointments[0] || null;
-    const currentStart = toTimestamp(currentAppointment?.inicio_at);
-    if (!currentStart) return upcomingAppointments[0] || null;
-    const source = Array.isArray(todayAppointments) ? todayAppointments : [];
-    return source.find((item) => toTimestamp(item?.inicio_at) > currentStart) || null;
-  }, [currentAppointment, todayAppointments, upcomingAppointments]);
-
   const handleAuthError = useCallback((err) => {
     if (err?.status === 401) {
       navigate('/login');
@@ -394,7 +328,7 @@ export default function BarberoHomePage() {
             <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Personas - Barbero</p>
             <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Resumen del dia</h1>
             <p className="text-sm text-[var(--mf-text-2)]">
-              {displayName} - {branchName}. Vista operativa de tus citas registradas en la base de datos.
+              {displayName} - {branchName}.
             </p>
           </div>
 
@@ -402,10 +336,6 @@ export default function BarberoHomePage() {
             <div className="rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1.5 text-xs text-[var(--mf-text-2)]">
               Actualizado {formatUpdatedAt(dashboardData.fetchedAt)}
             </div>
-            <Button type="button" variant="outline" className="gap-2" onClick={() => fetchDashboard()}>
-              <RefreshCw size={15} />
-              Actualizar
-            </Button>
           </div>
         </div>
       </header>
@@ -431,35 +361,6 @@ export default function BarberoHomePage() {
               <StatCard icon={CalendarClock} label="Citas Totales" value={totalToday} />
               <StatCard icon={CheckCircle2} label="Citas Completadas" value={completedCount} />
               <StatCard icon={TimerReset} label="Citas Restantes" value={remainingCount} />
-            </div>
-            <div className="mt-4 rounded-[16px] border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-              <h3 className="text-sm font-semibold text-[var(--mf-text)]">Atencion Actual</h3>
-              {currentAppointment ? (
-                <div className="mt-2 space-y-1 text-sm text-[var(--mf-text-2)]">
-                  <p><strong className="text-[var(--mf-text)]">Cliente:</strong> {currentAppointment.nombre_cliente || 'Cliente'}</p>
-                  <p><strong className="text-[var(--mf-text)]">Hora programada:</strong> {formatHour(currentAppointment.inicio_at)}</p>
-                  <p><strong className="text-[var(--mf-text)]">Inicio real:</strong> {currentAppointment.atencion_iniciada_at ? formatHour(currentAppointment.atencion_iniciada_at) : 'No registrado'}</p>
-                  <p><strong className="text-[var(--mf-text)]">Fin estimado real:</strong> {currentEstimatedEnd ? formatHour(currentEstimatedEnd.toISOString()) : 'N/D'}</p>
-                  <p><strong className="text-[var(--mf-text)]">Retraso acumulado:</strong> {Number(currentAppointment.retraso_inicio_min || 0)} min</p>
-                  {currentEstimatedEnd ? (
-                    <p className="text-amber-300">{formatRelativeFinish(currentEstimatedEnd.toISOString(), nowMs)}</p>
-                  ) : null}
-                  {currentFinishAlert ? (
-                    <div className={`mt-2 rounded-[12px] border px-3 py-2 text-xs font-medium ${currentFinishAlert.toneClass}`}>
-                      {currentFinishAlert.message}
-                    </div>
-                  ) : null}
-                  {nextAdjustedAppointment ? (
-                    <p><strong className="text-[var(--mf-text)]">Proxima cita ajustada:</strong> {nextAdjustedAppointment.nombre_cliente || 'Cliente'} - {formatHour(nextAdjustedAppointment.inicio_at)}</p>
-                  ) : null}
-                </div>
-              ) : (
-                <p className="mt-2 text-sm text-[var(--mf-text-2)]">No hay cita en atención en este momento.</p>
-              )}
-              <div className="mt-3 text-xs text-[var(--mf-text-2)]">
-                Retrasos propagados hoy: {Number(context?.retraso_operativo?.citas_reagendadas_hoy || 0)}.
-                Correos pendientes: {Number(context?.retraso_operativo?.notificaciones_pendientes_hoy || 0)}.
-              </div>
             </div>
           </section>
 
@@ -530,3 +431,4 @@ export default function BarberoHomePage() {
     </div>
   );
 }
+
