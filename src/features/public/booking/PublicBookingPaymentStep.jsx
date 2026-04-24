@@ -8,6 +8,9 @@ export default function PublicBookingPaymentStep() {
   const {
     bookingBlocksSummary,
     createPaymentIntentForHold,
+    holdExpired,
+    holdExpiresAtIso,
+    holdRemainingMs,
     paymentIntent,
     paymentResult,
     refreshPaymentStatus,
@@ -16,6 +19,14 @@ export default function PublicBookingPaymentStep() {
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+
+  const holdCountdownLabel = (() => {
+    if (holdRemainingMs == null) return null;
+    const totalSeconds = Math.max(0, Math.floor(holdRemainingMs / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  })();
 
   const handleCreateIntent = async () => {
     if (loadingIntent) return;
@@ -44,6 +55,17 @@ export default function PublicBookingPaymentStep() {
         <p className="citas-selected-date mt-2">
           Completa los datos y finaliza el pago para confirmar la reserva.
         </p>
+        {holdCountdownLabel ? (
+          <div className={`public-booking-payment-note mt-3 ${holdExpired ? 'is-expired' : ''}`.trim()}>
+            <ShieldCheck size={14} />
+            <span>
+              {holdExpired
+                ? 'La reserva temporal expiró. Regresaremos a agenda para que elijas una nueva hora.'
+                : `Reserva temporal activa: ${holdCountdownLabel} restantes`}
+              {holdExpiresAtIso ? ' (contador real del hold en backend).' : ''}
+            </span>
+          </div>
+        ) : null}
 
         <div className="public-booking-form-grid public-booking-payment-grid mt-4">
           <div className="public-booking-contact-card public-booking-payment-gateway-card">
