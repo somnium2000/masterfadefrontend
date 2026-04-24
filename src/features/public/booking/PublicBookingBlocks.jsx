@@ -56,14 +56,21 @@ export function ServiceCard({
   isSelected,
   onToggle,
   disabled = false,
+  blocked = false,
 }) {
+  const handleClick = () => {
+    if (disabled) return;
+    onToggle?.();
+  };
   return (
     <button
       type="button"
-      className={`citas-service-card ${isSelected ? 'is-selected' : ''}`}
-      onClick={onToggle}
+      className={`citas-service-card ${isSelected ? 'is-selected' : ''} ${blocked ? 'is-blocked' : ''}`}
+      onClick={handleClick}
       aria-pressed={isSelected}
       disabled={disabled}
+      aria-disabled={disabled || blocked}
+      title={blocked ? 'Ese servicio ya lo incluye el paquete seleccionado' : undefined}
     >
       <div className="citas-service-name">{service?.nombre_servicio || 'Servicio'}</div>
       <div className="citas-service-meta">
@@ -74,6 +81,11 @@ export function ServiceCard({
         <span>{formatCurrencyHnl(service?.precio_hnl)}</span>
         {isSelected ? <Check size={14} /> : null}
       </div>
+      {blocked ? (
+        <div className="citas-service-meta">
+          <span>Incluido en paquete</span>
+        </div>
+      ) : null}
     </button>
   );
 }

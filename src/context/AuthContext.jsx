@@ -28,6 +28,7 @@ function buildEnrichedUser(payload) {
     email: baseUser.email ?? null,
     nombres: baseUser.nombres ?? null,
     apellidos: baseUser.apellidos ?? null,
+    telefono_principal: baseUser.telefono_principal ?? null,
     roles,
     branch_ids: branchIds,
     empresa_id: payload?.empresa_id ?? null,
@@ -195,11 +196,11 @@ export function AuthProvider({ children }) {
     if (window.location.pathname.startsWith('/auth/callback')) {
       // La pagina callback llama a completeExchangeLogin() cuando el exchange
       // termina exitosamente, lo que triggerea hydrateSession() en el momento correcto.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsHydrating(false);
       setIsHydrated(true);
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void hydrateSession();
   }, [hydrateSession]);
 

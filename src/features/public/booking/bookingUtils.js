@@ -239,6 +239,139 @@ export function getServiceDurationLabel(service) {
   return `${Number(service?.duracion_min || 0)} min`;
 }
 
+export function buildAppointmentSelectionSummary({
+  selectedPackage = null,
+  selectedServices = [],
+  packages = [],
+  services = [],
+} = {}) {
+  const servicesList = Array.isArray(services) ? services : [];
+  const packagesList = Array.isArray(packages) ? packages : [];
+
+  const servicesById = new Map();
+  servicesList.forEach((service) => {
+    const id = String(service?.id_servicio || '').trim();
+    if (!id) return;
+    servicesById.set(id, service);
+  });
+
+  const packagesById = new Map();
+  packagesList.forEach((pkg) => {
+    const id = String(pkg?.id_paquete || '').trim();
+    if (!id) return;
+    packagesById.set(id, pkg);
+  });
+
+  const conflicts = [];
+  const packageCandidates = Array.isArray(selectedPackage)
+    ? selectedPackage
+    : [selectedPackage];
+  const normalizedPackageCandidates = Array.from(
+    new Set(
+      packageCandidates
+        .map((entry) => {
+          if (!entry) return '';
+          if (typeof entry === 'string') return String(entry).trim();
+          return String(entry?.id_paquete || '').trim();
+        })
+        .filter(Boolean)
+    )
+  );
+
+  if (normalizedPackageCandidates.length > 1) {
+    conflicts.push({
+      code: 'ONLY_ONE_PACKAGE_ALLOWED',
+      message: 'Solo puedes seleccionar un paquete por cita',
+      packageIds: normalizedPackageCandidates,
+    });
+  }
+
+  const selectedPackageId = normalizedPackageCandidates[0] || '';
+  const selectedPackageEntity = selectedPackageId
+    ? packagesById.get(selectedPackageId) || null
+    : null;
+
+  const packageItems = Array.isArray(selectedPackageEntity?.items)
+    ? selectedPackageEntity.items
+    : [];
+  const includedServiceIdsFromPackage = Array.from(
+    new Set(
+      packageItems
+        .map((item) => String(item?.id_servicio || '').trim())
+        .filter(Boolean)
+    )
+  );
+  const blockedServiceIds = includedServiceIdsFromPackage;
+  const blockedServiceSet = new Set(blockedServiceIds);
+
+  const selectedServiceIds = Array.from(
+    new Set(
+      (Array.isArray(selectedServices) ? selectedServices : [])
+        .map((entry) => {
+          if (!entry) return '';
+          if (typeof entry === 'string') return String(entry).trim();
+          return String(entry?.id_servicio || '').trim();
+        })
+        .filter(Boolean)
+    )
+  );
+
+  const selectedServicesResolved = selectedServiceIds
+    .map((serviceId) => servicesById.get(serviceId))
+    .filter(Boolean);
+  const selectedServicesEffective = selectedServicesResolved.filter(
+    (service) => !blockedServiceSet.has(String(service?.id_servicio || '').trim())
+  );
+  const selectedServiceIdsEffective = selectedServicesEffective
+    .map((service) => String(service?.id_servicio || '').trim())
+    .filter(Boolean);
+
+  const includedServiceConflicts = selectedServiceIds.filter((serviceId) => blockedServiceSet.has(serviceId));
+  if (includedServiceConflicts.length > 0) {
+    conflicts.push({
+      code: 'SERVICE_ALREADY_INCLUDED_IN_PACKAGE',
+      message: 'Ese servicio ya lo incluye el paquete seleccionado',
+      serviceIds: includedServiceConflicts,
+    });
+  }
+
+  const packageDurationMin = packageItems.reduce((total, item) => {
+    const serviceId = String(item?.id_servicio || '').trim();
+    const service = servicesById.get(serviceId);
+    const qty = Math.max(1, Number(item?.cantidad || 1));
+    return total + (Number(service?.duracion_min || 0) * qty);
+  }, 0);
+  const packagePriceFallback = packageItems.reduce((total, item) => {
+    const serviceId = String(item?.id_servicio || '').trim();
+    const service = servicesById.get(serviceId);
+    const qty = Math.max(1, Number(item?.cantidad || 1));
+    return total + (Number(service?.precio_hnl || 0) * qty);
+  }, 0);
+  const packagePrice = Number.isFinite(Number(selectedPackageEntity?.precio_hnl))
+    ? Number(selectedPackageEntity?.precio_hnl || 0)
+    : packagePriceFallback;
+
+  const servicesPrice = selectedServicesEffective.reduce(
+    (total, service) => total + Number(service?.precio_hnl || 0),
+    0
+  );
+  const servicesDurationMin = selectedServicesEffective.reduce(
+    (total, service) => total + Number(service?.duracion_min || 0),
+    0
+  );
+
+  return {
+    selectedPackage: selectedPackageEntity,
+    selectedServicesEffective,
+    selectedServiceIdsEffective,
+    blockedServiceIds,
+    totalPrice: packagePrice + servicesPrice,
+    totalDurationMin: packageDurationMin + servicesDurationMin,
+    includedServiceIdsFromPackage,
+    conflicts,
+  };
+}
+
 export function toLocalDateTimeWithOffset(dateValue, timeValue) {
   const date = String(dateValue || '').trim();
   const time = String(timeValue || '').trim();
@@ -265,4 +398,93 @@ export function toLocalDateTimeWithOffset(dateValue, timeValue) {
 
 export function normalizePhone(rawValue) {
   return String(rawValue || '').replace(/[^\d+]/g, '').slice(0, 20);
+}
+
+function collapseWhitespace(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function toTitleCaseToken(token) {
+  return token
+    .split(/([-'])/)
+    .map((part, index) => {
+      if (index % 2 === 1) return part;
+      if (!part) return '';
+      const lower = part.toLocaleLowerCase('es-HN');
+      return `${lower.charAt(0).toLocaleUpperCase('es-HN')}${lower.slice(1)}`;
+    })
+    .join('');
+}
+
+export function normalizePersonName(value) {
+  const normalized = collapseWhitespace(value);
+  if (!normalized) return '';
+  return normalized
+    .split(' ')
+    .map((token) => toTitleCaseToken(token))
+    .join(' ');
+}
+
+export function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+export function buildFullName(firstName, lastName) {
+  return [normalizePersonName(firstName), normalizePersonName(lastName)]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+export function splitFullName(fullName) {
+  const normalized = normalizePersonName(fullName);
+  if (!normalized) {
+    return {
+      firstName: '',
+      lastName: '',
+    };
+  }
+
+  const parts = normalized.split(' ');
+  if (parts.length === 1) {
+    return {
+      firstName: parts[0],
+      lastName: '',
+    };
+  }
+
+  return {
+    firstName: parts.slice(0, -1).join(' '),
+    lastName: parts[parts.length - 1],
+  };
+}
+
+export function getTitularState(user) {
+  const isAuthenticated = Boolean(String(user?.id_usuario || '').trim());
+  const nombres = normalizePersonName(user?.nombres || '');
+  const apellidos = normalizePersonName(user?.apellidos || '');
+  const telefonoPrincipal = normalizePhone(user?.telefono_principal || '');
+
+  const missingFields = [];
+  if (isAuthenticated) {
+    if (!nombres) missingFields.push('nombres');
+    if (!apellidos) missingFields.push('apellidos');
+    if (telefonoPrincipal.length < 8) missingFields.push('telefono_principal');
+  }
+
+  const hasFullProfile = isAuthenticated && missingFields.length === 0;
+
+  return {
+    isAuthenticated,
+    hasFullProfile,
+    missingFields,
+    shouldRenderForm: !isAuthenticated || !hasFullProfile,
+    shouldBlockAdvance: !isAuthenticated || missingFields.length > 0,
+    profile: {
+      nombres,
+      apellidos,
+      email: normalizeEmail(user?.email || ''),
+      telefono_principal: telefonoPrincipal.length >= 8 ? telefonoPrincipal : '',
+    },
+  };
 }
