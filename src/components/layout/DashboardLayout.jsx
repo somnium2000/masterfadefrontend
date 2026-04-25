@@ -18,6 +18,7 @@ import PremiumBottomNav from '../navigation/PremiumBottomNav.jsx';
 function buildNavModules(basePath, role) {
     const isBarbero = role === 'barbero';
     const isCliente = role === 'cliente';
+    const isSecurityRole = role === 'security_admin' || role === 'security_auditor';
 
     if (isBarbero) {
         return [
@@ -41,6 +42,23 @@ function buildNavModules(basePath, role) {
                 icon: UserRound,
                 path: `${basePath}/perfil`,
                 subItems: null,
+            },
+        ];
+    }
+
+    if (isSecurityRole) {
+        return [
+            {
+                id: 'seguridad',
+                label: 'Seguridad',
+                icon: Shield,
+                path: `${basePath}/seguridad/login-logs`,
+                subItems: [
+                    { id: 'seg-login-logs', label: 'Login Logs', path: `${basePath}/seguridad/login-logs` },
+                    { id: 'seg-sesiones', label: 'Sesiones', path: `${basePath}/seguridad/sesiones` },
+                    { id: 'seg-usuarios', label: 'Usuarios', path: `${basePath}/seguridad/usuarios` },
+                    { id: 'seg-alertas', label: 'Alertas', path: `${basePath}/seguridad/alertas` },
+                ],
             },
         ];
     }
@@ -124,9 +142,10 @@ function buildNavModules(basePath, role) {
             icon: Shield,
             path: `${basePath}/seguridad`,
             subItems: [
-                { id: 'seg-logs', label: 'Logs del Sistema', path: `${basePath}/seguridad/logs` },
-                { id: 'seg-sesiones', label: 'Sesiones Activas', path: `${basePath}/seguridad/sesiones` },
-                { id: 'seg-bitacoras', label: 'Bitácoras de Auditoría', path: `${basePath}/seguridad/bitacoras` },
+                { id: 'seg-login-logs', label: 'Login Logs', path: `${basePath}/seguridad/login-logs` },
+                { id: 'seg-sesiones', label: 'Sesiones', path: `${basePath}/seguridad/sesiones` },
+                { id: 'seg-usuarios', label: 'Usuarios', path: `${basePath}/seguridad/usuarios` },
+                { id: 'seg-alertas', label: 'Alertas', path: `${basePath}/seguridad/alertas` },
             ],
         },
         {
@@ -286,12 +305,14 @@ function TopbarSubMenu({ subItems, currentPath }) {
 // ── Main Layout ──────────────────────────────────────────────────────────────────────────────
 export const ROLE_META = {
     super_admin: { kicker: 'Panel global', title: 'Visión total' },
-    admin: { kicker: 'Operación', title: 'Panel Admin' },
+    admin: { kicker: 'Operacion', title: 'Panel Admin' },
+    security_admin: { kicker: 'Seguridad', title: 'Panel Seguridad' },
+    security_auditor: { kicker: 'Auditoria', title: 'Panel Seguridad' },
     barbero: { kicker: 'Agenda', title: 'Panel Barbero' },
     cliente: { kicker: 'Cliente', title: 'Mi Espacio' },
 };
 
-export default function DashboardLayout({ pageRole }) {
+export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
     const navigate = useNavigate();
     const location = useLocation();
     const { user, roles, logout } = useAuth();
@@ -303,7 +324,7 @@ export default function DashboardLayout({ pageRole }) {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-    const basePath = resolvedHomePath;
+    const basePath = String(basePathOverride || '').trim() || resolvedHomePath;
     const modules = buildNavModules(basePath, currentRole);
 
     // Módulo activo: el que cuya path coincide más con la ubicación actual
@@ -324,6 +345,7 @@ export default function DashboardLayout({ pageRole }) {
     }
 
     const sidebarWidth = isCollapsed ? 72 : 260;
+    const isSecurityRole = currentRole === 'security_admin' || currentRole === 'security_auditor';
 
     // Mobile nav items
     const mobileItems = currentRole === 'barbero'
@@ -333,13 +355,21 @@ export default function DashboardLayout({ pageRole }) {
             { id: 'perfil-barbero', label: 'Perfil', icon: UserRound, onClick: () => navigate(`${basePath}/perfil`) },
             { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
         ]
-        : [
-            { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate(basePath) },
-            { id: 'personas', label: 'Personas', icon: Users, onClick: () => navigate(`${basePath}/empleados`) },
-            { id: 'servicios', label: 'Servicios', icon: Scissors, onClick: () => navigate(`${basePath}/catalog/servicios`) },
-            { id: 'sucursales', label: 'Sucursales', icon: Building2, onClick: () => navigate(`${basePath}/sucursales`) },
-            { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
-        ];
+        : isSecurityRole
+            ? [
+                { id: 'seg-login-logs', label: 'Login Logs', icon: Shield, onClick: () => navigate(`${basePath}/seguridad/login-logs`) },
+                { id: 'seg-sesiones', label: 'Sesiones', icon: CalendarDays, onClick: () => navigate(`${basePath}/seguridad/sesiones`) },
+                { id: 'seg-usuarios', label: 'Usuarios', icon: Users, onClick: () => navigate(`${basePath}/seguridad/usuarios`) },
+                { id: 'seg-alertas', label: 'Alertas', icon: BarChart3, onClick: () => navigate(`${basePath}/seguridad/alertas`) },
+                { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
+            ]
+            : [
+                { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate(basePath) },
+                { id: 'personas', label: 'Personas', icon: Users, onClick: () => navigate(`${basePath}/empleados`) },
+                { id: 'servicios', label: 'Servicios', icon: Scissors, onClick: () => navigate(`${basePath}/catalog/servicios`) },
+                { id: 'sucursales', label: 'Sucursales', icon: Building2, onClick: () => navigate(`${basePath}/sucursales`) },
+                { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
+            ];
     const mobileSideItems = currentRole === 'barbero' ? mobileItems : mobileItems.slice(0, 4);
 
     return (
@@ -588,3 +618,4 @@ export default function DashboardLayout({ pageRole }) {
         </div>
     );
 }
+

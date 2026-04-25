@@ -1,9 +1,11 @@
-export const ROLE_PRIORITY = ['super_admin', 'admin', 'barbero', 'cliente'];
-export const ACTIVE_SCREEN_ROLES = ['super_admin', 'admin', 'barbero', 'cliente'];
+export const ROLE_PRIORITY = ['super_admin', 'admin', 'security_admin', 'security_auditor', 'barbero', 'cliente'];
+export const ACTIVE_SCREEN_ROLES = ['super_admin', 'admin', 'security_admin', 'security_auditor', 'barbero', 'cliente'];
 
 export const ROLE_HOME_PATHS = {
   super_admin: '/home/super',
   admin: '/home/admin',
+  security_admin: '/home/security',
+  security_auditor: '/home/security',
   barbero: '/home/barbero',
   cliente: '/home/cliente',
 };
@@ -25,6 +27,7 @@ function getAllowedRolesForPhase(allowedRoles) {
 export const ROLE_ROUTE_ALLOWED_ROLES = {
   super_admin: getAllowedRolesForPhase(['super_admin']),
   admin: getAllowedRolesForPhase(['super_admin', 'admin']),
+  security: getAllowedRolesForPhase(['super_admin', 'security_admin', 'security_auditor']),
   barbero: getAllowedRolesForPhase(['super_admin', 'barbero']),
   cliente: getAllowedRolesForPhase(['super_admin', 'cliente']),
 };
@@ -32,6 +35,8 @@ export const ROLE_ROUTE_ALLOWED_ROLES = {
 export const ROLE_LABELS = {
   super_admin: 'Super Admin',
   admin: 'Administrador',
+  security_admin: 'Administrador de Seguridad',
+  security_auditor: 'Auditor de Seguridad',
   barbero: 'Barbero',
   cliente: 'Cliente',
 };
