@@ -7,6 +7,32 @@ function normalizeBranchId(value) {
   return UUID_REGEX.test(raw) ? raw : '';
 }
 
+function normalizePlanOfferId(record = {}) {
+  const candidates = [
+    record?.id_plan_sucursal,
+    record?.plan_sucursal_id,
+    record?.id_oferta,
+    record?.id_membership_plan_sucursal,
+  ];
+  for (const candidate of candidates) {
+    const normalized = String(candidate ?? '').trim();
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+function normalizePublicPlanRecord(record = {}) {
+  if (!record || typeof record !== 'object') return null;
+  const rawPrice = Number(record?.precio_hnl ?? record?.precio ?? 0);
+  return {
+    ...record,
+    id_plan: String(record?.id_plan ?? record?.plan_id ?? '').trim() || null,
+    id_plan_sucursal: normalizePlanOfferId(record),
+    nombre_plan: String(record?.nombre_plan ?? record?.nombre ?? '').trim() || 'Plan',
+    precio_hnl: Number.isFinite(rawPrice) ? rawPrice : 0,
+  };
+}
+
 export async function listPublicCatalogBranches() {
   const response = await http.get('/v1/public/catalog/sucursales');
   return {
@@ -19,9 +45,18 @@ export async function listPublicCatalogPlans({ id_sucursal } = {}) {
   const branchId = normalizeBranchId(id_sucursal);
   const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
   const response = await http.get(`/v1/public/catalog/planes${query}`);
+  const plans = Array.isArray(response?.data?.planes) ? response.data.planes : [];
   return {
-    plans: response?.data?.planes || [],
+    plans: plans.map(normalizePublicPlanRecord).filter(Boolean),
   };
+}
+
+export async function listPublicPlansByBranch(id_sucursal) {
+  const branchId = normalizeBranchId(id_sucursal);
+  if (!branchId) {
+    return { plans: [] };
+  }
+  return listPublicCatalogPlans({ id_sucursal: branchId });
 }
 
 export async function listPublicCatalogPromotions({ id_sucursal } = {}) {
