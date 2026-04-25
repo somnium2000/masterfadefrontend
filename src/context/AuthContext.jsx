@@ -51,6 +51,7 @@ function buildEnrichedUser(payload) {
     email: baseUser.email ?? null,
     nombres: baseUser.nombres ?? null,
     apellidos: baseUser.apellidos ?? null,
+    telefono_principal: baseUser.telefono_principal ?? null,
     roles,
     branch_ids: branchIds,
     empresa_id: payload?.empresa_id ?? null,

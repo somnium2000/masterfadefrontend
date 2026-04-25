@@ -262,6 +262,68 @@
   width: 100%;
 }
 
+.public-booking-page .citas-service-card.is-blocked {
+  border-color: color-mix(in srgb, #b66b2f 45%, var(--mf-nav-border) 55%);
+  background: color-mix(in srgb, #b66b2f 14%, var(--mf-card) 86%);
+  color: color-mix(in srgb, var(--mf-text) 82%, #5c3b1e 18%);
+  cursor: not-allowed;
+}
+
+.public-booking-page .citas-service-card.is-blocked .citas-service-meta {
+  color: color-mix(in srgb, var(--mf-text-2) 72%, #5c3b1e 28%);
+}
+
+.public-booking-package-card {
+  min-height: 172px;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.public-booking-package-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.public-booking-package-description {
+  margin: 0;
+  color: var(--mf-text-2);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.public-booking-package-items {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.public-booking-package-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--mf-text-2);
+  font-size: 12px;
+}
+
+.public-booking-package-item--more {
+  color: color-mix(in srgb, var(--mf-text-2) 88%, white 12%);
+  font-weight: 600;
+}
+
+.public-booking-package-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: auto;
+}
+
+.public-booking-package-price {
+  color: var(--mf-text);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
 .public-booking-time-period-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -324,6 +386,30 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.public-booking-curated-section {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.public-booking-curated-title {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--mf-text-2);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.public-booking-curated-more {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  margin-top: -2px;
 }
 
 .public-booking-time-block {
@@ -636,6 +722,12 @@
   font-size: 13px;
 }
 
+.public-booking-payment-note.is-expired {
+  border-color: color-mix(in srgb, #b93c52 42%, var(--mf-nav-border) 58%);
+  background: color-mix(in srgb, #b93c52 12%, var(--mf-card) 88%);
+  color: var(--mf-text);
+}
+
 .public-booking-success {
   border-color: color-mix(in srgb, #31a36f 40%, var(--mf-nav-border) 60%);
   background: color-mix(in srgb, #31a36f 8%, var(--mf-card) 92%);
@@ -737,7 +829,15 @@
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
 
+  .public-booking-curated-section {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+
   .public-booking-time-block-range {
     font-size: 16px;
+  }
+
+  .public-booking-package-card {
+    min-height: 160px;
   }
 }
