@@ -145,6 +145,21 @@ export async function acquireClientePlan(payload) {
   return normalizeResponsePayload(response);
 }
 
+export async function createMembershipOrder(id_plan_sucursal) {
+  const response = await http.post(`${BASE}/planes/orden`, { id_plan_sucursal });
+  return normalizeResponsePayload(response);
+}
+
+export async function createMembershipPaymentIntent(id_order) {
+  const response = await http.post(`${BASE}/planes/pago-intent`, { id_order });
+  return normalizeResponsePayload(response);
+}
+
+export async function confirmMembershipPayment(id_payment_intent) {
+  const response = await http.post(`${BASE}/planes/confirmar-pago`, { id_payment_intent });
+  return normalizeResponsePayload(response);
+}
+
 export async function cancelClientePlan(payload = {}) {
   const response = await http.post(`${BASE}/planes/cancelar`, payload);
   return normalizeResponsePayload(response);
