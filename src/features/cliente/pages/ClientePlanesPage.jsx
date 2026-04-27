@@ -2,7 +2,6 @@
 import { motion } from "framer-motion";
 import {
   Building2,
-  Ban,
   Crown,
   Sparkles,
   Shield,
@@ -29,7 +28,7 @@ import { listPublicCatalogBranches, listPublicPlansByBranch } from "../../public
 import { setStoredClienteCatalogBranchId } from "../lib/clienteCatalogBranch.js";
 import { getPlanCategoryTheme, normalizePlanCategory } from "../../plans/lib/planCategoryTheme.js";
 import {
-  cancelClientePlan,
+  cancelClientePlanBySubscription,
   confirmMembershipPayment,
   createMembershipOrder,
   createMembershipPaymentIntent,
@@ -144,6 +143,18 @@ function buildDetailedBenefits(activePlan, type) {
     restante: null,
     hasRemainder: false,
   }));
+}
+
+function resolveActivePlansFromState(state) {
+  const multi = Array.isArray(state?.planes_activos) ? state.planes_activos : [];
+  const source = multi.length ? multi : (state?.plan_activo ? [state.plan_activo] : []);
+  const deduped = new Map();
+  source.forEach((plan) => {
+    const id = String(plan?.id_suscripcion || "").trim();
+    if (!id || deduped.has(id)) return;
+    deduped.set(id, plan);
+  });
+  return Array.from(deduped.values());
 }
 
 function normalizePlan(plan) {
@@ -285,7 +296,7 @@ export default function ClientePlanesPage() {
   const [plans, setPlans] = useState([]);
   const [membershipState, setMembershipState] = useState(null);
   const [membershipLoading, setMembershipLoading] = useState(true);
-  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelingSubscriptionId, setCancelingSubscriptionId] = useState("");
   const [loadingPlanOfferId, setLoadingPlanOfferId] = useState("");
 
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
@@ -298,6 +309,7 @@ export default function ClientePlanesPage() {
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [confirmDialogMode, setConfirmDialogMode] = useState("");
   const [pendingPlanSelection, setPendingPlanSelection] = useState(null);
+  const [pendingCancelPlan, setPendingCancelPlan] = useState(null);
 
   const fetchPlans = useCallback(async (selectedBranchId) => {
     const safeBranchId = String(selectedBranchId || "").trim();
@@ -404,12 +416,10 @@ export default function ClientePlanesPage() {
       return;
     }
 
-    const activeBranchId = String(membershipState?.plan_activo?.id_sucursal_contratada || "").trim();
-    const hasActivePlanInBranch = Boolean(
-      membershipState?.plan_activo?.id_suscripcion
-      && activeBranchId
-      && activeBranchId === branchId
-      && ["activa", "pendiente_renovacion"].includes(String(membershipState?.estado_plan || "").toLowerCase())
+    const activePlans = resolveActivePlansFromState(membershipState);
+    const hasActivePlanInBranch = activePlans.some((entry) =>
+      String(entry?.id_sucursal_contratada || "").trim() === branchId
+      && ["activa", "pendiente_renovacion"].includes(String(entry?.estado_visible || entry?.estado_suscripcion_codigo || "").toLowerCase())
     );
 
     if (hasActivePlanInBranch) {
@@ -466,18 +476,30 @@ export default function ClientePlanesPage() {
     }
   }
 
-  async function handleCancelMembership() {
-    if (!activePlan?.id_suscripcion) return;
+  function handleOpenCancelPlanDialog(plan, planBranchName) {
+    if (!plan?.id_suscripcion) return;
+    setPendingCancelPlan({
+      id_suscripcion: String(plan.id_suscripcion),
+      nombre_plan: plan?.nombre_plan || "Plan",
+      sucursal_nombre: planBranchName || plan?.sucursal_nombre || "Sucursal",
+    });
+    setConfirmDialogMode("cancel_plan");
+    setConfirmDialogOpen(true);
+  }
 
-    setCancelLoading(true);
+  async function handleCancelMembership(plan) {
+    const subscriptionId = String(plan?.id_suscripcion || "").trim();
+    if (!subscriptionId) return;
+
+    setCancelingSubscriptionId(subscriptionId);
     try {
-      await cancelClientePlan({ motivo_fin_codigo: "cancelacion" });
-      notifySuccess("Membresia cancelada correctamente.");
+      await cancelClientePlanBySubscription(subscriptionId);
+      notifySuccess("Plan cancelado correctamente.");
       await fetchMembershipState();
     } catch (error) {
-      notifyError(error?.data?.error?.message || error?.message || "No se pudo cancelar la membresia.");
+      notifyError(error?.data?.error?.message || error?.message || "No se pudo cancelar el plan.");
     } finally {
-      setCancelLoading(false);
+      setCancelingSubscriptionId("");
     }
   }
 
@@ -485,6 +507,9 @@ export default function ClientePlanesPage() {
     if (confirmDialogMode === "replace_plan") {
       const selectedOfferId = String(pendingPlanSelection?.offerId || "").trim();
       setConfirmDialogOpen(false);
+      setConfirmDialogMode("");
+      setPendingPlanSelection(null);
+      setPendingCancelPlan(null);
       if (!selectedOfferId) return;
       await createOrderForPlanOffer(selectedOfferId);
       return;
@@ -492,7 +517,11 @@ export default function ClientePlanesPage() {
 
     if (confirmDialogMode === "cancel_plan") {
       setConfirmDialogOpen(false);
-      await handleCancelMembership();
+      setConfirmDialogMode("");
+      setPendingPlanSelection(null);
+      const planToCancel = pendingCancelPlan;
+      setPendingCancelPlan(null);
+      await handleCancelMembership(planToCancel);
     }
   }
 
@@ -504,24 +533,28 @@ export default function ClientePlanesPage() {
     return `${topPlan.id_plan || ""}:${topPlan.id_sucursal || "public"}`;
   }, [plans]);
 
-  const activePlan = membershipState?.plan_activo || null;
+  const activePlans = useMemo(
+    () => resolveActivePlansFromState(membershipState),
+    [membershipState]
+  );
+  const activePlan = activePlans[0] || null;
   const operationalHistory = useMemo(
     () => (Array.isArray(membershipState?.historial_consumos) ? membershipState.historial_consumos : []).filter(isOperationalMembershipConsumption),
     [membershipState?.historial_consumos]
   );
+  const activePlanByBranch = useMemo(() => {
+    const map = new Map();
+    activePlans.forEach((plan) => {
+      const planBranchId = String(plan?.id_sucursal_contratada || "").trim();
+      if (!planBranchId || map.has(planBranchId)) return;
+      map.set(planBranchId, plan);
+    });
+    return map;
+  }, [activePlans]);
   const hasActivePlanInSelectedBranch = Boolean(
     branchId
-    && activePlan?.id_suscripcion
-    && String(activePlan?.id_sucursal_contratada || "").trim() === branchId
-    && ["activa", "pendiente_renovacion"].includes(String(membershipState?.estado_plan || "").toLowerCase())
+    && activePlanByBranch.has(branchId)
   );
-  const activePlanBranchName = useMemo(() => {
-    if (!activePlan?.id_sucursal_contratada) return activePlan?.sucursal_nombre || "Sucursal";
-    const byCatalog = branches.find((branch) => branch.id_sucursal === activePlan.id_sucursal_contratada)?.nombre_sucursal;
-    return byCatalog || activePlan?.sucursal_nombre || "Sucursal";
-  }, [activePlan?.id_sucursal_contratada, activePlan?.sucursal_nombre, branches]);
-  const detailedServices = useMemo(() => buildDetailedBenefits(activePlan, "servicio"), [activePlan]);
-  const detailedCourtesies = useMemo(() => buildDetailedBenefits(activePlan, "cortesia"), [activePlan]);
 
   return (
     <div className="space-y-5">
@@ -558,113 +591,139 @@ export default function ClientePlanesPage() {
           </div>
         </div>
 
-        {activePlan ? (
+        {activePlans.length ? (
           <>
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
               <span className="inline-flex rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100">
-                Estado actual: {MEMBERSHIP_STATUS_LABELS[activePlan?.estado_visible] || activePlan?.estado_visible || "Activa"}
+                Planes activos: {activePlans.length}
               </span>
-              <Button
-                type="button"
-                variant="outline"
-                className="gap-2"
-                disabled={cancelLoading}
-                onClick={() => {
-                  setConfirmDialogMode("cancel_plan");
-                  setConfirmDialogOpen(true);
-                }}
-              >
-                <Ban size={14} /> {cancelLoading ? "Cancelando..." : "Cancelar membresia"}
-              </Button>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-5">
-              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Servicios restantes</p>
-                <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
-                  {Number(activePlan?.remanentes?.totales?.servicios_restantes || 0)}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Servicios incluidos</p>
-                <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
-                  {Number(activePlan?.remanentes?.totales?.servicios_total || 0)}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Cortesias restantes</p>
-                <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
-                  {Number(activePlan?.remanentes?.totales?.cortesias_restantes || 0)}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Cortesias incluidas</p>
-                <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
-                  {Number(activePlan?.remanentes?.totales?.cortesias_total || 0)}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Tiempo restante</p>
-                <p className="mt-2 text-lg font-semibold text-[var(--mf-text)]">
-                  <Clock3 className="mr-1 inline-block" size={15} />
-                  {Number(activePlan?.tiempo_restante?.dias || 0)} d - {Number(activePlan?.tiempo_restante?.horas || 0)} h
-                </p>
-              </div>
-            </div>
+            <div className="mt-4 space-y-4">
+              {activePlans.map((plan) => {
+                const planBranchId = String(plan?.id_sucursal_contratada || "").trim();
+                const planBranchName = planBranchId
+                  ? (branches.find((branch) => branch.id_sucursal === planBranchId)?.nombre_sucursal || plan?.sucursal_nombre || "Sucursal")
+                  : (plan?.sucursal_nombre || "Sucursal");
+                const detailedServices = buildDetailedBenefits(plan, "servicio");
+                const detailedCourtesies = buildDetailedBenefits(plan, "cortesia");
+                return (
+                  <article key={plan.id_suscripcion} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-base font-semibold text-[var(--mf-text)]">{plan?.nombre_plan || "Plan activo"}</h3>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <span className="inline-flex rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100">
+                          Estado: {MEMBERSHIP_STATUS_LABELS[plan?.estado_visible] || plan?.estado_visible || "Activa"}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="min-h-[34px] px-3 text-xs"
+                          disabled={Boolean(cancelingSubscriptionId && cancelingSubscriptionId !== plan.id_suscripcion)}
+                          onClick={() => {
+                            handleOpenCancelPlanDialog(plan, planBranchName);
+                          }}
+                        >
+                          {cancelingSubscriptionId === plan.id_suscripcion ? "Cancelando..." : "Cancelar plan"}
+                        </Button>
+                      </div>
+                    </div>
 
-            <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">Detalle del plan activo</p>
-              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Sucursal</p>
-                  <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">{activePlanBranchName}</p>
-                </div>
-                <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Vigencia</p>
-                  <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">
-                    {activePlan?.inicio_at ? new Date(activePlan.inicio_at).toLocaleDateString("es-HN", { timeZone: "America/Tegucigalpa" }) : "N/D"}
-                    {" - "}
-                    {activePlan?.fin_at ? new Date(activePlan.fin_at).toLocaleDateString("es-HN", { timeZone: "America/Tegucigalpa" }) : "N/D"}
-                  </p>
-                </div>
-              </div>
+                    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Sucursal</p>
+                        <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">{planBranchName}</p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Vigencia</p>
+                        <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">
+                          {plan?.inicio_at ? new Date(plan.inicio_at).toLocaleDateString("es-HN", { timeZone: "America/Tegucigalpa" }) : "N/D"}
+                          {" - "}
+                          {plan?.fin_at ? new Date(plan.fin_at).toLocaleDateString("es-HN", { timeZone: "America/Tegucigalpa" }) : "N/D"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Tiempo restante</p>
+                        <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">
+                          <Clock3 className="mr-1 inline-block" size={14} />
+                          {Number(plan?.tiempo_restante?.dias || 0)} d - {Number(plan?.tiempo_restante?.horas || 0)} h
+                        </p>
+                      </div>
+                    </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-                <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Servicios incluidos</p>
-                  {detailedServices.length ? (
-                    <ul className="mt-2 space-y-2 text-sm">
-                      {detailedServices.map((item, idx) => (
-                        <li key={`svc-detail-${idx}`} className="flex items-center justify-between gap-2">
-                          <span className="text-[var(--mf-text)]">{item.nombre}</span>
-                          <span className="text-[var(--mf-text-2)]">
-                            {item.hasRemainder ? `${item.restante}/${item.total}` : `${item.total} incluidos`}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : <p className="mt-2 text-sm text-[var(--mf-text-2)]">Sin detalle por servicio disponible.</p>}
-                </div>
+                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Servicios restantes</p>
+                        <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
+                          {Number(plan?.remanentes?.totales?.servicios_restantes || 0)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Servicios incluidos</p>
+                        <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
+                          {Number(plan?.remanentes?.totales?.servicios_total || 0)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesias restantes</p>
+                        <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
+                          {Number(plan?.remanentes?.totales?.cortesias_restantes || 0)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesias incluidas</p>
+                        <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
+                          {Number(plan?.remanentes?.totales?.cortesias_total || 0)}
+                        </p>
+                      </div>
+                    </div>
 
-                <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesias incluidas</p>
-                  {detailedCourtesies.length ? (
-                    <ul className="mt-2 space-y-2 text-sm">
-                      {detailedCourtesies.map((item, idx) => (
-                        <li key={`courtesy-detail-${idx}`} className="flex items-center justify-between gap-2">
-                          <span className="text-[var(--mf-text)]">{item.nombre}</span>
-                          <span className="text-[var(--mf-text-2)]">
-                            {item.hasRemainder ? `${item.restante}/${item.total}` : `${item.total} incluidos`}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : <p className="mt-2 text-sm text-[var(--mf-text-2)]">Sin detalle por cortesia disponible.</p>}
-                </div>
-              </div>
+                    <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Servicios incluidos</p>
+                        {detailedServices.length ? (
+                          <ul className="mt-2 space-y-2 text-sm">
+                            {detailedServices.map((item, idx) => (
+                              <li key={`${plan.id_suscripcion}-svc-${idx}`} className="flex items-center justify-between gap-2">
+                                <span className="text-[var(--mf-text)]">{item.nombre}</span>
+                                <span className="text-[var(--mf-text-2)]">
+                                  {item.hasRemainder ? `${item.restante}/${item.total}` : `${item.total} incluidos`}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : <p className="mt-2 text-sm text-[var(--mf-text-2)]">Sin detalle por servicio disponible.</p>}
+                      </div>
+
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesias incluidas</p>
+                        {detailedCourtesies.length ? (
+                          <ul className="mt-2 space-y-2 text-sm">
+                            {detailedCourtesies.map((item, idx) => (
+                              <li key={`${plan.id_suscripcion}-cort-${idx}`} className="flex items-center justify-between gap-2">
+                                <span className="text-[var(--mf-text)]">{item.nombre}</span>
+                                <span className="text-[var(--mf-text-2)]">
+                                  {item.hasRemainder ? `${item.restante}/${item.total}` : `${item.total} incluidos`}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : <p className="mt-2 text-sm text-[var(--mf-text-2)]">Sin detalle por cortesia disponible.</p>}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </>
-        ) : null}
+        ) : (
+          !membershipLoading ? (
+            <p className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
+              No tienes planes activos en este momento.
+            </p>
+          ) : null
+        )}
 
         {!membershipLoading && operationalHistory.length > 0 ? (
           <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
@@ -787,16 +846,17 @@ export default function ClientePlanesPage() {
           if (!nextOpen) {
             setConfirmDialogMode("");
             setPendingPlanSelection(null);
+            setPendingCancelPlan(null);
           }
         }}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{confirmDialogMode === "replace_plan" ? "Cambiar de plan" : "Cancelar membresia"}</DialogTitle>
+            <DialogTitle>{confirmDialogMode === "replace_plan" ? "Cambiar de plan" : "Cancelar plan"}</DialogTitle>
             <DialogDescription>
               {confirmDialogMode === "replace_plan"
                 ? "Al cambiar de plan perderas los servicios y cortesias restantes del plan actual en esta sucursal."
-                : "Al cancelar tu membresia perderas el saldo pendiente del plan actual."}
+                : `Cancelaras tu plan ${pendingCancelPlan?.nombre_plan || "seleccionado"} en ${pendingCancelPlan?.sucursal_nombre || "esta sucursal"}. Perderas los servicios y cortesias restantes de esta sucursal.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -809,7 +869,7 @@ export default function ClientePlanesPage() {
                 setPendingPlanSelection(null);
               }}
             >
-              Cancelar
+              {confirmDialogMode === "cancel_plan" ? "No cancelar" : "Cancelar"}
             </Button>
             <Button
               type="button"
@@ -817,7 +877,7 @@ export default function ClientePlanesPage() {
                 void handleConfirmDialogContinue();
               }}
             >
-              Continuar
+              {confirmDialogMode === "cancel_plan" ? "Si, cancelar plan" : "Continuar"}
             </Button>
           </DialogFooter>
         </DialogContent>

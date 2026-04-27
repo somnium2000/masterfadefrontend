@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ChevronDown, Clock3, Plus, Scissors, UserRound, Package, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, ChevronDown, Clock3, Loader2, Plus, Scissors, UserRound, Package, X } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
@@ -112,7 +112,17 @@ function BookingBlocksSummary({ bookingBlocksSummary, totalToPay }) {
               <div className="citas-selected-date">
                 {block.selection_type === 'package'
                   ? `Paquete: ${block.selectedPackage?.nombre_paquete || 'Sin paquete'}`
-                  : block.selectedServices.map((service) => service.nombre_servicio).join(', ')}
+                  : Array.from(
+                    new Map(
+                      (Array.isArray(block.selectedServices) ? block.selectedServices : [])
+                        .map((service) => [String(service?.id_servicio || '').trim(), service])
+                        .filter(([serviceId]) => Boolean(serviceId))
+                  ).values()
+                  ).map((service) => {
+                    const baseName = String(service?.nombre_servicio || '').trim() || 'Servicio';
+                    if (service?.coveredByReward) return `${baseName} (Recompensa cortesía)`;
+                    return service?.coveredByPlan ? `${baseName} (Cubierto por tu plan)` : baseName;
+                  }).join(', ')}
               </div>
               <div className="citas-selected-date">
                 {formatFriendlyDate(block.selectedDate)} - {formatTime12Hour(block.selectedTime)}
@@ -145,6 +155,14 @@ export default function PublicBookingAgendaStep() {
     bookingBlocks,
     bookingBlocksSummary,
     blockedServiceIds,
+    membershipLockedServiceIdsForTitular,
+    membershipBranchNotice,
+    rewardModeActive,
+    rewardServiceId,
+    rewardServiceName,
+    rewardBranchName,
+    rewardBranchMismatch,
+    cancelRewardRedemptionUsage,
     removeCompanionBlock,
     canAddCompanionBlock,
     canGoPrevMonth,
@@ -190,15 +208,54 @@ export default function PublicBookingAgendaStep() {
     currentMonth,
     selectedBarber,
     titularState,
+    holdSubmitting,
   } = usePublicBookingFlow();
 
   const calendarCells = useMemo(() => buildCalendarCells(currentMonth), [currentMonth]);
   const canGoToConfirm = Boolean(allBlocksComplete);
-  const selectedServicesCount = selectedServices.length + (selectedPackage ? 1 : 0);
+  const selectedServiceIdsSet = useMemo(
+    () => new Set((Array.isArray(selectedServices) ? selectedServices : []).map((service) => String(service?.id_servicio || '').trim()).filter(Boolean)),
+    [selectedServices]
+  );
+  const selectedServicesCount = useMemo(() => {
+    const totalServiceIds = new Set(selectedServiceIdsSet);
+    if (activeBlockIndex === 0) {
+      (Array.isArray(membershipLockedServiceIdsForTitular) ? membershipLockedServiceIdsForTitular : []).forEach((serviceId) => {
+        const normalizedId = String(serviceId || '').trim();
+        if (normalizedId) totalServiceIds.add(normalizedId);
+      });
+      if (rewardModeActive && activeBlockIndex === 0) {
+        const rewardId = String(rewardServiceId || '').trim();
+        if (rewardId) totalServiceIds.add(rewardId);
+      }
+    }
+    return totalServiceIds.size + (selectedPackage ? 1 : 0);
+  }, [
+    activeBlockIndex,
+    membershipLockedServiceIdsForTitular,
+    rewardModeActive,
+    rewardServiceId,
+    selectedPackage,
+    selectedServiceIdsSet,
+  ]);
+  const hasValidSelectionForCalendar = selectedServicesCount > 0;
   const blockedServiceIdsSet = useMemo(
     () => new Set((Array.isArray(blockedServiceIds) ? blockedServiceIds : []).map((id) => String(id || '').trim()).filter(Boolean)),
     [blockedServiceIds]
   );
+  const membershipLockedServiceIdsSet = useMemo(
+    () => new Set((Array.isArray(membershipLockedServiceIdsForTitular) ? membershipLockedServiceIdsForTitular : []).map((id) => String(id || '').trim()).filter(Boolean)),
+    [membershipLockedServiceIdsForTitular]
+  );
+  const visibleServices = useMemo(() => {
+    const deduped = new Map();
+    (Array.isArray(services) ? services : []).forEach((service) => {
+      const serviceId = String(service?.id_servicio || '').trim();
+      if (!serviceId || deduped.has(serviceId)) return;
+      deduped.set(serviceId, service);
+    });
+    return Array.from(deduped.values());
+  }, [services]);
   const hasSelectedDate = Boolean(selectedDate);
   const slotsSectionRef = useRef(null);
   const contactCardRef = useRef(null);
@@ -230,7 +287,9 @@ export default function PublicBookingAgendaStep() {
       : 'Ingresa al menos el nombre del titular para continuar con la selección de servicios.')
     : 'Ingresa nombre y apellido del acompañante antes de elegir servicios.';
   const canSelectServices = Boolean(activeBlockContactState?.fullName);
+  const rewardForTitularActive = Boolean(rewardModeActive && activeBlockIndex === 0);
   const [catalogTab, setCatalogTab] = useState('services');
+  const effectiveCatalogTab = rewardForTitularActive ? 'services' : catalogTab;
   const [preferredSlotPeriod, setPreferredSlotPeriod] = useState('manana');
   const expansionScopeKey = `${activeBlock?.id || 'block'}|${selectedDate || ''}`;
   const [expandedState, setExpandedState] = useState(() => ({
@@ -451,6 +510,41 @@ export default function PublicBookingAgendaStep() {
   return (
     <>
       {availabilityError ? <ErrorBanner message={availabilityError} onRetry={fetchAvailability} /> : null}
+      {rewardModeActive ? (
+        <div className="citas-surface p-4 border border-emerald-400/35 bg-emerald-500/10">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-200">
+            <Scissors size={15} /> Recompensa cortesía activa
+          </p>
+          <p className="mt-2 text-sm text-emerald-100">
+            Servicio bloqueado para titular: <strong>{rewardServiceName || 'Servicio de recompensa'}</strong>.
+          </p>
+          {rewardBranchMismatch ? (
+            <p className="mt-1 text-sm text-amber-100">
+              Esta recompensa pertenece a {rewardBranchName || 'otra sucursal'}. Cambia a esa sucursal para usarla.
+            </p>
+          ) : null}
+          <div className="mt-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={cancelRewardRedemptionUsage}
+            >
+              <X size={13} />
+              Cancelar uso de recompensa
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {membershipBranchNotice ? (
+        <div className="citas-surface p-4 border border-amber-400/35 bg-amber-500/10">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold text-amber-200">
+            <AlertTriangle size={15} /> Aviso de cobertura de plan
+          </p>
+          <p className="mt-2 text-sm text-amber-100">{membershipBranchNotice}</p>
+        </div>
+      ) : null}
 
       <div className="citas-agenda-layout public-booking-agenda-stack">
         <motion.div
@@ -605,7 +699,7 @@ export default function PublicBookingAgendaStep() {
           <div className="public-booking-selection-tabs">
             <Button
               type="button"
-              variant={catalogTab === 'services' ? 'default' : 'outline'}
+              variant={effectiveCatalogTab === 'services' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCatalogTab('services')}
             >
@@ -613,26 +707,51 @@ export default function PublicBookingAgendaStep() {
             </Button>
             <Button
               type="button"
-              variant={catalogTab === 'packages' ? 'default' : 'outline'}
+              variant={effectiveCatalogTab === 'packages' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCatalogTab('packages')}
+              disabled={rewardForTitularActive}
             >
               Paquetes
             </Button>
           </div>
 
           <div className="citas-services-scroll scrollbar-hide" ref={servicesScrollRef}>
-            {catalogTab === 'services' ? (
+            {effectiveCatalogTab === 'services' ? (
               <div className="citas-services-grid">
-                {services.map((service) => (
-                  <ServiceCard
-                    key={service.id_servicio}
-                    service={service}
-                    isSelected={serviceIds.includes(service.id_servicio)}
-                    blocked={canSelectServices && blockedServiceIdsSet.has(String(service.id_servicio || '').trim())}
-                    disabled={!canSelectServices}
-                    onToggle={() => toggleService(service.id_servicio)}
-                  />
+                {visibleServices.map((service) => (
+                  (() => {
+                    const serviceId = String(service?.id_servicio || '').trim();
+                    const coveredByPlan = activeBlockIndex === 0 && membershipLockedServiceIdsSet.has(serviceId);
+                    const coveredByReward = activeBlockIndex === 0
+                      && rewardForTitularActive
+                      && serviceId === String(rewardServiceId || '').trim();
+                    const blockedByPackage = blockedServiceIdsSet.has(serviceId);
+                    const isBlocked = canSelectServices && (coveredByPlan || blockedByPackage || coveredByReward);
+                    const blockedReason = coveredByReward
+                      ? 'Este servicio está bloqueado por recompensa cortesía.'
+                      : coveredByPlan
+                        ? 'Este servicio está cubierto por tu plan y no se puede quitar.'
+                      : (blockedByPackage ? 'Ese servicio ya lo incluye el paquete seleccionado' : '');
+                    const blockedLabel = coveredByReward
+                      ? 'Recompensa cortesía'
+                      : coveredByPlan
+                        ? 'Cubierto por tu plan'
+                      : (blockedByPackage ? 'Incluido en paquete' : '');
+                    return (
+                      <ServiceCard
+                        key={serviceId}
+                        service={service}
+                        isSelected={serviceIds.includes(service.id_servicio)}
+                        blocked={isBlocked}
+                        blockedReason={blockedReason}
+                        blockedLabel={blockedLabel}
+                        coveredByPlan={coveredByPlan || coveredByReward}
+                        disabled={!canSelectServices}
+                        onToggle={() => toggleService(service.id_servicio)}
+                      />
+                    );
+                  })()
                 ))}
               </div>
             ) : (
@@ -675,7 +794,7 @@ export default function PublicBookingAgendaStep() {
                 ))}
               </div>
             )}
-            {catalogTab === 'packages' && packages.length === 0 ? (
+            {effectiveCatalogTab === 'packages' && packages.length === 0 ? (
               <p className="citas-selected-date mt-2">No hay paquetes disponibles para esta sucursal.</p>
             ) : null}
           </div>
@@ -714,6 +833,11 @@ export default function PublicBookingAgendaStep() {
               </span>
             ) : null}
           </div>
+          {!hasValidSelectionForCalendar ? (
+            <div className="public-booking-inherited-date-banner">
+              Selecciona al menos un servicio para habilitar el calendario.
+            </div>
+          ) : null}
 
           {activeBlockIndex === 0 ? (
             <>
@@ -966,8 +1090,15 @@ export default function PublicBookingAgendaStep() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.12, ease: LANDING_EASE }}
         >
-          <Button className="gap-2" onClick={goToConfirm} disabled={!canGoToConfirm}>
-            Continuar a resumen
+          <Button
+            className="gap-2"
+            onClick={() => {
+              void goToConfirm();
+            }}
+            disabled={!canGoToConfirm || holdSubmitting}
+          >
+            {holdSubmitting ? <Loader2 size={16} className="animate-spin" /> : null}
+            {holdSubmitting ? 'Preparando resumen...' : 'Continuar a resumen'}
             <ArrowRight size={15} />
           </Button>
         </motion.div>

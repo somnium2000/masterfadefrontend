@@ -121,6 +121,16 @@ export async function getClienteMe() {
   return normalizeResponsePayload(response);
 }
 
+export async function getClientePuntosResumen() {
+  const response = await http.get(`${BASE}/puntos/resumen`);
+  return normalizeResponsePayload(response);
+}
+
+export async function redeemClientePuntosReward(payload) {
+  const response = await http.post(`${BASE}/puntos/canjear`, payload);
+  return normalizeResponsePayload(response);
+}
+
 export async function updateClienteMe(payload) {
   const response = await http.patch(`${BASE}/me`, buildClienteProfilePatchPayload(payload));
   return normalizeResponsePayload(response);
@@ -162,6 +172,15 @@ export async function confirmMembershipPayment(id_payment_intent) {
 
 export async function cancelClientePlan(payload = {}) {
   const response = await http.post(`${BASE}/planes/cancelar`, payload);
+  return normalizeResponsePayload(response);
+}
+
+export async function cancelClientePlanBySubscription(id_suscripcion) {
+  const safeSubscriptionId = String(id_suscripcion || "").trim();
+  if (!safeSubscriptionId) {
+    throw new Error("Debes indicar la suscripcion que deseas cancelar.");
+  }
+  const response = await http.patch(`${BASE}/planes/${safeSubscriptionId}/cancelar`);
   return normalizeResponsePayload(response);
 }
 
