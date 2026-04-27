@@ -19,7 +19,7 @@ function isUpcoming(cita) {
 
 function CitaCard({ cita }) {
   return (
-    <article className="mf-glass-surface rounded-[20px] border border-[var(--mf-nav-border)] p-4">
+    <article className="mf-glass-surface rounded-[18px] border border-[var(--mf-nav-border)] p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="space-y-1">
           <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--mf-text)]">
@@ -34,7 +34,7 @@ function CitaCard({ cita }) {
       <dl className="mt-3 grid grid-cols-1 gap-2 text-xs text-[var(--mf-text-2)] sm:grid-cols-2">
         <div className="flex items-center gap-2">
           <Clock3 size={14} className="shrink-0 text-[var(--mf-accent)]" />
-          <span>Duración: {Number(cita.duracion_total_min || 0)} min</span>
+          <span>Duracion: {Number(cita.duracion_total_min || 0)} min</span>
         </div>
         <div className="flex items-center gap-2">
           <Scissors size={14} className="shrink-0 text-[var(--mf-accent)]" />
@@ -63,7 +63,7 @@ export default function ClienteHistorialCitasPage() {
   const [loading, setLoading] = useState(true);
   const [citas, setCitas] = useState([]);
 
-  const canLoad = Boolean(isAuthenticated && isHydrated && !isHydrating  );
+  const canLoad = Boolean(isAuthenticated && isHydrated && !isHydrating);
 
   const loadCitas = useCallback(async () => {
     if (!canLoad) return;
@@ -98,7 +98,7 @@ export default function ClienteHistorialCitasPage() {
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Historial de citas</p>
             <h1 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)]">Tus reservas</h1>
-            <p className="mt-1 text-sm text-[var(--mf-text-2)]">Visualiza próximas citas y tu actividad pasada en un solo lugar.</p>
+            <p className="mt-1 text-sm text-[var(--mf-text-2)]">Visualiza proximas citas y tu actividad pasada en un solo lugar.</p>
           </div>
           <button
             type="button"
@@ -112,7 +112,7 @@ export default function ClienteHistorialCitasPage() {
 
         <div className="mt-4 flex flex-wrap gap-2">
           <span className="inline-flex rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
-            Próximas: <strong className="ml-1 text-[var(--mf-text)]">{upcoming.length}</strong>
+            Proximas: <strong className="ml-1 text-[var(--mf-text)]">{upcoming.length}</strong>
           </span>
           <span className="inline-flex rounded-full border border-[var(--mf-nav-border)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
             Historial: <strong className="ml-1 text-[var(--mf-text)]">{past.length}</strong>
@@ -130,19 +130,27 @@ export default function ClienteHistorialCitasPage() {
       ) : (
         <>
           <section className="space-y-3">
-            <h2 className="mf-font-display text-lg text-[var(--mf-text)]">Próximas ({upcoming.length})</h2>
-            {upcoming.length ? upcoming.map((cita) => <CitaCard key={cita.id_cita} cita={cita} />) : (
+            <h2 className="mf-font-display text-lg text-[var(--mf-text)]">Proximas ({upcoming.length})</h2>
+            {upcoming.length ? (
+              <div className="max-h-[19rem] space-y-2 overflow-y-auto pr-1">
+                {upcoming.map((cita) => <CitaCard key={cita.id_cita} cita={cita} />)}
+              </div>
+            ) : (
               <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
-                No tienes citas próximas.
+                No tienes citas proximas.
               </p>
             )}
           </section>
 
           <section className="space-y-3">
             <h2 className="mf-font-display text-lg text-[var(--mf-text)]">Historial ({past.length})</h2>
-            {past.length ? past.map((cita) => <CitaCard key={cita.id_cita} cita={cita} />) : (
+            {past.length ? (
+              <div className="max-h-[24rem] space-y-2 overflow-y-auto pr-1">
+                {past.map((cita) => <CitaCard key={cita.id_cita} cita={cita} />)}
+              </div>
+            ) : (
               <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
-                Aún no hay citas pasadas en tu historial.
+                Aun no hay citas pasadas en tu historial.
               </p>
             )}
           </section>
@@ -151,4 +159,3 @@ export default function ClienteHistorialCitasPage() {
     </div>
   );
 }
-

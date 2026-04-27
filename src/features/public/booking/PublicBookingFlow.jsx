@@ -25,6 +25,7 @@ import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
   createClienteCitaHold,
+  confirmClienteCitaHoldWithoutPayment,
   createPublicCitaHold,
   createPublicPaymentIntent,
   getPublicPaymentStatus,
@@ -65,6 +66,7 @@ const EMPTY_CONTEXT = {
 };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLOT_GRID_STEP_MINUTES = 5;
+const REWARD_BOOKING_CONTEXT_STORAGE_KEY = 'mf_reward_redeem_context_v1';
 
 const PublicBookingContext = createContext(null);
 
@@ -107,6 +109,43 @@ function isValidEmail(value) {
 
 function hasLetters(value) {
   return /[A-Za-z]/.test(String(value || ''));
+}
+
+function readRewardBookingContext() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const canjeContextToken = String(
+      parsed?.canje_context_token
+      || parsed?.id_points_tx_canje
+      || ''
+    ).trim();
+    const idServicioCanje = String(parsed?.id_servicio_canje || '').trim();
+    const idSucursal = String(parsed?.id_sucursal || '').trim();
+    if (!canjeContextToken || !idServicioCanje || !idSucursal) return null;
+    return {
+      canje_context_token: canjeContextToken,
+      id_points_tx_canje: canjeContextToken,
+      id_servicio_canje: idServicioCanje,
+      servicio_nombre: String(parsed?.servicio_nombre || 'Servicio de recompensa').trim() || 'Servicio de recompensa',
+      id_sucursal: idSucursal,
+      created_at: String(parsed?.created_at || '').trim() || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistRewardBookingContext(context) {
+  if (typeof window === 'undefined') return;
+  if (!context || typeof context !== 'object') {
+    window.sessionStorage.removeItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY);
+    return;
+  }
+  window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, JSON.stringify(context));
 }
 
 function buildDynamicSlots({
@@ -349,6 +388,88 @@ function createBookingBlock({ alias = '', idBarbero = '' } = {}) {
   );
 }
 
+function normalizeMembershipServiceId(value) {
+  return String(value || '').trim();
+}
+
+function getMembershipBenefitItems(planActivo) {
+  if (!planActivo || typeof planActivo !== 'object') return [];
+  const benefitSources = [
+    planActivo?.beneficios_snapshot,
+    planActivo?.plan_snapshot?.beneficios,
+    planActivo?.beneficios,
+  ];
+  for (const source of benefitSources) {
+    if (!source) continue;
+    if (Array.isArray(source)) return source;
+    if (Array.isArray(source?.items)) return source.items;
+    if (Array.isArray(source?.servicios) || Array.isArray(source?.cortesias)) {
+      return [
+        ...(Array.isArray(source?.servicios) ? source.servicios : []),
+        ...(Array.isArray(source?.cortesias) ? source.cortesias : []),
+      ];
+    }
+  }
+  return [];
+}
+
+function extractPlanIncludedServiceIds(planActivo) {
+  const items = getMembershipBenefitItems(planActivo);
+  return Array.from(
+    new Set(
+      items
+        .filter((item) => String(item?.tipo || '').trim().toLowerCase() === 'servicio')
+        .map((item) => normalizeMembershipServiceId(item?.id_servicio))
+        .filter(Boolean)
+    )
+  );
+}
+
+function extractPlanRemainingServiceIds(planActivo) {
+  const remanentes = Array.isArray(planActivo?.remanentes?.servicios)
+    ? planActivo.remanentes.servicios
+    : [];
+  return Array.from(
+    new Set(
+      remanentes
+        .filter((item) => Number(item?.restante || 0) > 0)
+        .map((item) => normalizeMembershipServiceId(item?.id_servicio))
+        .filter(Boolean)
+    )
+  );
+}
+
+function extractConfirmedAppointments(payload) {
+  const safePayload = payload && typeof payload === 'object' ? payload : {};
+  if (Array.isArray(safePayload?.citas_confirmadas)) return safePayload.citas_confirmadas;
+  if (Array.isArray(safePayload?.citas)) return safePayload.citas;
+  if (Array.isArray(safePayload?.data?.citas_confirmadas)) return safePayload.data.citas_confirmadas;
+  if (Array.isArray(safePayload?.data?.citas)) return safePayload.data.citas;
+  if (Array.isArray(safePayload?.confirmation?.citas_confirmadas)) return safePayload.confirmation.citas_confirmadas;
+  if (Array.isArray(safePayload?.confirmation?.citas)) return safePayload.confirmation.citas;
+  return [];
+}
+
+function extractBookingCode(payload) {
+  const safePayload = payload && typeof payload === 'object' ? payload : {};
+  const candidates = [
+    safePayload?.codigo_cita,
+    safePayload?.data?.codigo_cita,
+    safePayload?.confirmation?.codigo_cita,
+    safePayload?.confirmation?.data?.codigo_cita,
+  ];
+  for (const candidate of candidates) {
+    const normalized = String(candidate || '').trim();
+    if (normalized) return normalized;
+  }
+  const citasConfirmadas = extractConfirmedAppointments(safePayload);
+  for (const cita of citasConfirmadas) {
+    const normalized = String(cita?.codigo_cita || '').trim();
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
 export function usePublicBookingFlow() {
   const context = useContext(PublicBookingContext);
   if (!context) {
@@ -361,6 +482,7 @@ export default function PublicBookingFlow() {
   const location = useLocation();
   const navigate = useNavigate();
   const notifications = useNotifications();
+  const notifyError = notifications.error;
   const { isAuthenticated, roles, user } = useAuth();
   const canUseClienteHold = Boolean(isAuthenticated && Array.isArray(roles) && roles.includes('cliente'));
   const titularState = useMemo(
@@ -417,7 +539,11 @@ export default function PublicBookingFlow() {
   const [holdResult, setHoldResult] = useState(null);
   const [paymentIntent, setPaymentIntent] = useState(null);
   const [paymentResult, setPaymentResult] = useState(null);
+  const [bookingSuccessResult, setBookingSuccessResult] = useState(null);
+  const [rewardBookingContext, setRewardBookingContext] = useState(() => readRewardBookingContext());
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
+  const [membershipStateData, setMembershipStateData] = useState(null);
+  const [membershipBranchNotice, setMembershipBranchNotice] = useState('');
 
   const availabilityAbortRef = useRef(null);
   const slotsAbortRef = useRef(null);
@@ -433,8 +559,11 @@ export default function PublicBookingFlow() {
   const servicesCountRef = useRef(0);
   const packagesCountRef = useRef(0);
   const selectedTimeRef = useRef('');
-  // AM: Evita reaplicar propuesta automática del plan varias veces sobre la misma combinación de sucursal/servicios.
-  const membershipPrefillKeysRef = useRef(new Set());
+  // AM: Evita mostrar múltiples toasts por el mismo mensaje de cobertura entre sucursales.
+  const membershipBranchNoticeRef = useRef('');
+  const rewardPreparedShownRef = useRef(false);
+  const rewardUnavailableShownRef = useRef(false);
+  const rewardDiscountInfoShownRef = useRef(false);
   const [servicesCanScroll, setServicesCanScroll] = useState(false);
   const [servicesAtEnd, setServicesAtEnd] = useState(true);
 
@@ -522,6 +651,15 @@ export default function PublicBookingFlow() {
     () => branchList.find((branch) => branch.id_sucursal === selectedBranchId) || null,
     [branchList, selectedBranchId]
   );
+  const branchNameById = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(branchList) ? branchList : []).forEach((branch) => {
+      const branchId = String(branch?.id_sucursal || '').trim();
+      if (!branchId) return;
+      map.set(branchId, String(branch?.nombre_sucursal || '').trim() || 'Sucursal');
+    });
+    return map;
+  }, [branchList]);
 
   const barbersById = useMemo(() => {
     const map = new Map();
@@ -552,7 +690,93 @@ export default function PublicBookingFlow() {
     () => barbersById.get(activeBlockBarberId) || null,
     [activeBlockBarberId, barbersById]
   );
-
+  const membershipActivePlans = useMemo(() => {
+    const fromArray = Array.isArray(membershipStateData?.planes_activos)
+      ? membershipStateData.planes_activos
+      : [];
+    const fallbackPlan = membershipStateData?.plan_activo && typeof membershipStateData.plan_activo === 'object'
+      ? [membershipStateData.plan_activo]
+      : [];
+    const source = fromArray.length > 0 ? fromArray : fallbackPlan;
+    const deduped = new Map();
+    source.forEach((plan) => {
+      if (!plan || typeof plan !== 'object') return;
+      const subscriptionId = String(plan?.id_suscripcion || '').trim();
+      const branchId = String(plan?.id_sucursal_contratada || '').trim();
+      if (!subscriptionId || !branchId || deduped.has(subscriptionId)) return;
+      const statusCode = String(
+        plan?.estado_visible
+        || plan?.estado_suscripcion_codigo
+        || membershipStateData?.estado_plan
+        || ''
+      ).trim().toLowerCase();
+      const isOperational = statusCode === 'activa' || statusCode === 'pendiente_renovacion';
+      if (!isOperational) return;
+      deduped.set(subscriptionId, plan);
+    });
+    return Array.from(deduped.values());
+  }, [membershipStateData]);
+  const activeMembershipPlan = useMemo(
+    () => membershipActivePlans.find((plan) => String(plan?.id_sucursal_contratada || '').trim() === selectedBranchId) || null,
+    [membershipActivePlans, selectedBranchId]
+  );
+  const hasOperationalMembership = membershipActivePlans.length > 0;
+  const activeMembershipPlanInOtherBranch = useMemo(
+    () => membershipActivePlans.find((plan) => String(plan?.id_sucursal_contratada || '').trim() !== selectedBranchId) || null,
+    [membershipActivePlans, selectedBranchId]
+  );
+  const activeMembershipOtherBranchName = useMemo(() => {
+    if (!activeMembershipPlanInOtherBranch) return '';
+    const otherBranchId = String(activeMembershipPlanInOtherBranch?.id_sucursal_contratada || '').trim();
+    if (!otherBranchId) return '';
+    return (
+      branchNameById.get(otherBranchId)
+      || String(activeMembershipPlanInOtherBranch?.sucursal_nombre || '').trim()
+      || 'tu sucursal de plan'
+    );
+  }, [activeMembershipPlanInOtherBranch, branchNameById]);
+  const selectedBranchName = selectedBranch
+    ? (String(selectedBranch?.nombre_sucursal || '').trim() || 'esta sucursal')
+    : 'esta sucursal';
+  const rewardModeActive = Boolean(
+    canUseClienteHold
+    && rewardBookingContext
+    && String(rewardBookingContext?.canje_context_token || rewardBookingContext?.id_points_tx_canje || '').trim()
+    && String(rewardBookingContext?.id_servicio_canje || '').trim()
+  );
+  const rewardServiceId = rewardModeActive
+    ? String(rewardBookingContext?.id_servicio_canje || '').trim()
+    : '';
+  const rewardBranchId = rewardModeActive
+    ? String(rewardBookingContext?.id_sucursal || '').trim()
+    : '';
+  const rewardServiceName = rewardModeActive
+    ? String(rewardBookingContext?.servicio_nombre || 'Servicio de recompensa').trim() || 'Servicio de recompensa'
+    : '';
+  const rewardBranchName = rewardBranchId
+    ? (branchNameById.get(rewardBranchId) || (rewardBranchId === selectedBranchId ? selectedBranchName : 'sucursal de canje'))
+    : '';
+  const rewardBranchMismatch = Boolean(rewardModeActive && rewardBranchId && selectedBranchId && rewardBranchId !== selectedBranchId);
+  const availableServiceIdSet = useMemo(
+    () => new Set((Array.isArray(services) ? services : []).map((service) => String(service?.id_servicio || '').trim()).filter(Boolean)),
+    [services]
+  );
+  const membershipCoveredServiceIds = useMemo(() => {
+    if (!activeMembershipPlan) return [];
+    const remainingIds = extractPlanRemainingServiceIds(activeMembershipPlan);
+    const candidateIds = remainingIds.length > 0
+      ? remainingIds
+      : extractPlanIncludedServiceIds(activeMembershipPlan);
+    return candidateIds.filter((serviceId) => availableServiceIdSet.has(serviceId));
+  }, [activeMembershipPlan, availableServiceIdSet]);
+  const membershipLockedServiceIdsForTitular = useMemo(
+    () => (rewardModeActive ? [] : (selectedBranchId && selectedBarberId ? membershipCoveredServiceIds : [])),
+    [membershipCoveredServiceIds, rewardModeActive, selectedBarberId, selectedBranchId]
+  );
+  const rewardLockedServiceIdsForTitular = useMemo(
+    () => (rewardModeActive && rewardServiceId ? [rewardServiceId] : []),
+    [rewardModeActive, rewardServiceId]
+  );
   const activeSelectionSummary = useMemo(
     () => buildAppointmentSelectionSummary({
       selectedPackage: selectedPackageId,
@@ -565,11 +789,45 @@ export default function PublicBookingFlow() {
   const selectedPackage = activeSelectionSummary.selectedPackage;
   const selectedServices = activeSelectionSummary.selectedServicesEffective;
   const selectedServiceIdsEffective = activeSelectionSummary.selectedServiceIdsEffective;
+  const activeBlockMembershipServiceIdsForAgenda = useMemo(
+    () => (
+      effectiveActiveBlockIndex === 0
+        ? [...membershipLockedServiceIdsForTitular, ...rewardLockedServiceIdsForTitular]
+        : []
+    ),
+    [effectiveActiveBlockIndex, membershipLockedServiceIdsForTitular, rewardLockedServiceIdsForTitular]
+  );
+  const effectiveSelectedServiceIdsForAgenda = useMemo(
+    () => Array.from(new Set([
+      ...selectedServiceIdsEffective,
+      ...activeBlockMembershipServiceIdsForAgenda,
+    ])),
+    [activeBlockMembershipServiceIdsForAgenda, selectedServiceIdsEffective]
+  );
   const blockedServiceIds = activeSelectionSummary.blockedServiceIds;
+  const activeBlockMembershipLockedIds = useMemo(
+    () => (
+      effectiveActiveBlockIndex === 0
+        ? [...membershipLockedServiceIdsForTitular, ...rewardLockedServiceIdsForTitular]
+        : []
+    ),
+    [effectiveActiveBlockIndex, membershipLockedServiceIdsForTitular, rewardLockedServiceIdsForTitular]
+  );
   const includedServiceIdsFromPackage = activeSelectionSummary.includedServiceIdsFromPackage;
   const blockedServiceIdSet = useMemo(
-    () => new Set(blockedServiceIds.map((id) => String(id || '').trim()).filter(Boolean)),
-    [blockedServiceIds]
+    () => new Set([
+      ...blockedServiceIds.map((id) => String(id || '').trim()).filter(Boolean),
+      ...activeBlockMembershipLockedIds,
+    ]),
+    [activeBlockMembershipLockedIds, blockedServiceIds]
+  );
+  const membershipLockedServiceIdSet = useMemo(
+    () => new Set(activeBlockMembershipLockedIds),
+    [activeBlockMembershipLockedIds]
+  );
+  const rewardLockedServiceIdSet = useMemo(
+    () => new Set(effectiveActiveBlockIndex === 0 ? rewardLockedServiceIdsForTitular : []),
+    [effectiveActiveBlockIndex, rewardLockedServiceIdsForTitular]
   );
   const packagesById = useMemo(() => {
     const map = new Map();
@@ -602,8 +860,8 @@ export default function PublicBookingFlow() {
     [barberPrepTime, selectedPackage, selectedServices, selectedServicesDurationSum]
   );
   const selectionCacheKey = useMemo(
-    () => `type:${effectiveSelectionType}|package:${selectedPackageId || ''}|services:${selectedServiceIdsEffective.join(',')}`,
-    [effectiveSelectionType, selectedPackageId, selectedServiceIdsEffective]
+    () => `type:${effectiveSelectionType}|package:${selectedPackageId || ''}|services:${effectiveSelectedServiceIdsForAgenda.join(',')}`,
+    [effectiveSelectionType, selectedPackageId, effectiveSelectedServiceIdsForAgenda]
   );
 
   const isValidOptionalEmail = useCallback((value) => {
@@ -745,7 +1003,56 @@ export default function PublicBookingFlow() {
           packages,
           services,
         });
-        const blockServices = summary.selectedServicesEffective;
+        const membershipCoveredSet = index === 0
+          ? new Set(membershipLockedServiceIdsForTitular)
+          : new Set();
+        const rewardCoveredSet = index === 0
+          ? new Set(rewardLockedServiceIdsForTitular)
+          : new Set();
+        const servicesById = new Map(
+          (Array.isArray(services) ? services : [])
+            .map((service) => [String(service?.id_servicio || '').trim(), service])
+            .filter(([serviceId]) => Boolean(serviceId))
+        );
+        const blockServicesById = new Map();
+        summary.selectedServicesEffective.forEach((service) => {
+          const serviceId = String(service?.id_servicio || '').trim();
+          if (!serviceId || blockServicesById.has(serviceId)) return;
+          const isCoveredByPlan = membershipCoveredSet.has(serviceId);
+          const isCoveredByReward = rewardCoveredSet.has(serviceId);
+          blockServicesById.set(serviceId, {
+            ...service,
+            coveredByPlan: isCoveredByPlan,
+            coveredByReward: isCoveredByReward,
+            lockedByPlan: isCoveredByPlan,
+            lockedByReward: isCoveredByReward,
+            source: isCoveredByReward ? 'reward' : (isCoveredByPlan ? 'membership' : 'extra'),
+          });
+        });
+        if (index === 0 && (membershipCoveredSet.size > 0 || rewardCoveredSet.size > 0)) {
+          const mergedCoveredIds = new Set([
+            ...membershipCoveredSet,
+            ...rewardCoveredSet,
+          ]);
+          mergedCoveredIds.forEach((serviceId) => {
+            if (!serviceId || blockServicesById.has(serviceId)) return;
+            const serviceCatalog = servicesById.get(serviceId);
+            const isCoveredByPlan = membershipCoveredSet.has(serviceId);
+            const isCoveredByReward = rewardCoveredSet.has(serviceId);
+            blockServicesById.set(serviceId, {
+              ...serviceCatalog,
+              id_servicio: serviceId,
+              nombre_servicio: String(serviceCatalog?.nombre_servicio || serviceCatalog?.nombre || 'Servicio').trim() || 'Servicio',
+              precio_hnl: Number(serviceCatalog?.precio_hnl || 0),
+              coveredByPlan: isCoveredByPlan,
+              coveredByReward: isCoveredByReward,
+              lockedByPlan: isCoveredByPlan,
+              lockedByReward: isCoveredByReward,
+              source: isCoveredByReward ? 'reward' : 'membership',
+            });
+          });
+        }
+        const blockServices = Array.from(blockServicesById.values());
         const blockPackage = summary.selectedPackage;
         const blockSelectionType = blockPackage && blockServices.length > 0
           ? 'mixed'
@@ -764,7 +1071,11 @@ export default function PublicBookingFlow() {
           selection_type: blockSelectionType,
           selectedPackage: blockPackage,
           selectedServices: blockServices,
-          selectedServiceIdsEffective: summary.selectedServiceIdsEffective,
+          selectedServiceIdsEffective: Array.from(new Set([
+            ...(Array.isArray(summary.selectedServiceIdsEffective) ? summary.selectedServiceIdsEffective : []),
+            ...(index === 0 ? membershipLockedServiceIdsForTitular : []),
+            ...(index === 0 ? rewardLockedServiceIdsForTitular : []),
+          ])),
           blockedServiceIds: summary.blockedServiceIds,
           includedServiceIdsFromPackage: summary.includedServiceIdsFromPackage,
           selectionConflicts: summary.conflicts,
@@ -782,7 +1093,16 @@ export default function PublicBookingFlow() {
           ),
         };
       }),
-    [barberPrepTime, bookingBlocks, services, barbersById, packages, resolveBlockContactState]
+    [
+      barberPrepTime,
+      bookingBlocks,
+      services,
+      barbersById,
+      membershipLockedServiceIdsForTitular,
+      rewardLockedServiceIdsForTitular,
+      packages,
+      resolveBlockContactState,
+    ]
   );
 
   const activeBlockContactState = useMemo(
@@ -793,6 +1113,53 @@ export default function PublicBookingFlow() {
   const totalToPay = useMemo(
     () => bookingBlocksSummary.reduce((total, block) => total + Number(block.total_hnl || 0), 0),
     [bookingBlocksSummary]
+  );
+  const holdPricing = useMemo(() => {
+    if (!holdResult || typeof holdResult !== 'object') return null;
+
+    const subtotal = Number(holdResult?.subtotal_hnl ?? holdResult?.monto_total_hnl ?? 0);
+    const coveredByPlan = Number(
+      holdResult?.membresia?.cubierto_por_plan_hnl
+      ?? 0
+    );
+    const coveredByReward = Number(
+      holdResult?.recompensa?.cubierto_hnl
+      ?? 0
+    );
+    const coveredTotal = Number(
+      holdResult?.descuento_total_hnl
+      ?? (coveredByPlan + coveredByReward)
+    );
+    const total = Number(holdResult?.total_pagar_hnl ?? holdResult?.monto_pendiente_hnl ?? 0);
+    const extras = Number(
+      holdResult?.recompensa?.extras_a_pagar_hnl
+      ?? holdResult?.membresia?.extras_a_pagar_hnl
+      ?? holdResult?.monto_pendiente_hnl
+      ?? total
+    );
+
+    return {
+      source: 'hold',
+      subtotal_hnl: Number.isFinite(subtotal) ? subtotal : 0,
+      cubierto_por_plan_hnl: Number.isFinite(coveredByPlan) ? coveredByPlan : 0,
+      cubierto_por_recompensa_hnl: Number.isFinite(coveredByReward) ? coveredByReward : 0,
+      cubierto_total_hnl: Number.isFinite(coveredTotal) ? coveredTotal : 0,
+      extras_a_pagar_hnl: Number.isFinite(extras) ? extras : 0,
+      total_pagar_hnl: Number.isFinite(total) ? total : 0,
+      recompensa_aplicada: Boolean(holdResult?.recompensa?.aplicada),
+      recompensa_servicio_nombre: String(holdResult?.recompensa?.servicio_nombre || '').trim(),
+      recompensa_mensaje: String(holdResult?.recompensa?.mensaje || '').trim(),
+    };
+  }, [holdResult]);
+  const holdTotalToPay = useMemo(
+    () => Number(holdPricing?.total_pagar_hnl ?? holdResult?.total_pagar_hnl ?? 0),
+    [holdPricing, holdResult?.total_pagar_hnl]
+  );
+  const canConfirmWithoutPayment = Boolean(
+    canUseClienteHold
+    && holdResult
+    && String(holdResult?.id_grupo_cita || '').trim()
+    && holdTotalToPay === 0
   );
 
   const hasBlockingGroupConflict = useCallback((block) => {
@@ -898,9 +1265,12 @@ export default function PublicBookingFlow() {
     setBookingBlocks([createBookingBlock({ alias: 'Titular' })]);
     setActiveBlockIndex(0);
     setPendingCompanionFocusId('');
+    setMembershipBranchNotice('');
+    membershipBranchNoticeRef.current = '';
     setHoldResult(null);
     setPaymentIntent(null);
     setPaymentResult(null);
+    setBookingSuccessResult(null);
     setCurrentMonth(new Date(minBookingMonth.getFullYear(), minBookingMonth.getMonth(), 1));
     clearRequestState();
   }, [clearRequestState, minBookingMonth]);
@@ -1001,11 +1371,18 @@ export default function PublicBookingFlow() {
       if (requestSeq !== branchDataRequestSeqRef.current) return;
 
       const servicesPayload = servicesResponse?.data ?? servicesResponse;
-      const nextServices = Array.isArray(servicesPayload?.servicios)
+      const rawServices = Array.isArray(servicesPayload?.servicios)
         ? servicesPayload.servicios.filter(
           (service) => service?.activo !== false && service?.agendable && !service?.servicio_informativo
         )
-          : [];
+        : [];
+      const dedupedServicesMap = new Map();
+      rawServices.forEach((service) => {
+        const serviceId = String(service?.id_servicio || '').trim();
+        if (!serviceId || dedupedServicesMap.has(serviceId)) return;
+        dedupedServicesMap.set(serviceId, service);
+      });
+      const nextServices = Array.from(dedupedServicesMap.values());
       const validServiceIds = new Set(nextServices.map((service) => service.id_servicio));
       const packagesPayload = packagesResponse?.data ?? packagesResponse;
       const nextPackages = Array.isArray(packagesPayload?.paquetes)
@@ -1073,9 +1450,13 @@ export default function PublicBookingFlow() {
       });
     } catch (err) {
       if (requestSeq !== branchDataRequestSeqRef.current) return;
-      const message = extractMessage(err);
+      const status = Number(err?.status || 0);
+      const message = status >= 500
+        ? 'No se pudo cargar la agenda de esta sucursal en este momento. Puedes reintentar o cambiar de sucursal.'
+        : extractMessage(err);
+      setBarbers([]);
       setAvailabilityError(message);
-      notifications.error(message, { dedupeKey: 'public-booking-branch-data-error' });
+      notifyError(message, { dedupeKey: 'public-booking-branch-data-error' });
     } finally {
       if (requestSeq === branchDataRequestSeqRef.current) {
         setBarbersLoading(false);
@@ -1084,10 +1465,10 @@ export default function PublicBookingFlow() {
         setPackagesLoading(false);
       }
     }
-  }, [activeBlockBarberId, notifications, selectedBranchId]);
+  }, [activeBlockBarberId, notifyError, selectedBranchId]);
 
   const fetchAvailability = useCallback(async () => {
-    const hasSelection = Boolean(selectedPackageId) || selectedServiceIdsEffective.length > 0;
+    const hasSelection = Boolean(selectedPackageId) || effectiveSelectedServiceIdsForAgenda.length > 0;
     if (!selectedBranchId || !hasSelection) {
       setAvailabilityMap({});
       setAvailabilityLoading(false);
@@ -1129,7 +1510,7 @@ export default function PublicBookingFlow() {
           id_sucursal: selectedBranchId,
           id_barbero: activeBlockBarberId || undefined,
           selection_type: effectiveSelectionType,
-          servicios: selectedServiceIdsEffective.length > 0 ? selectedServiceIdsEffective.join(',') : undefined,
+          servicios: effectiveSelectedServiceIdsForAgenda.length > 0 ? effectiveSelectedServiceIdsForAgenda.join(',') : undefined,
           id_paquete: selectedPackageId || undefined,
           fecha_desde: monthRange.from,
           fecha_hasta: monthRange.to,
@@ -1178,13 +1559,13 @@ export default function PublicBookingFlow() {
     selectedDate,
     selectionCacheKey,
     effectiveSelectionType,
+    effectiveSelectedServiceIdsForAgenda,
     selectedPackageId,
-    selectedServiceIdsEffective,
     updateBlockAtIndex,
   ]);
 
   const fetchSlots = useCallback(async () => {
-    const hasSelection = Boolean(selectedPackageId) || selectedServiceIdsEffective.length > 0;
+    const hasSelection = Boolean(selectedPackageId) || effectiveSelectedServiceIdsForAgenda.length > 0;
     if (!selectedBranchId || !hasSelection || !selectedDate) {
       setSlots(buildDefaultSlots());
       setSlotsCurated(createEmptyCuratedSlots());
@@ -1218,7 +1599,7 @@ export default function PublicBookingFlow() {
           id_sucursal: selectedBranchId,
           id_barbero: activeBlockBarberId || undefined,
           selection_type: effectiveSelectionType,
-          servicios: selectedServiceIdsEffective.length > 0 ? selectedServiceIdsEffective.join(',') : undefined,
+          servicios: effectiveSelectedServiceIdsForAgenda.length > 0 ? effectiveSelectedServiceIdsForAgenda.join(',') : undefined,
           id_paquete: selectedPackageId || undefined,
           fecha: selectedDate,
         },
@@ -1257,7 +1638,7 @@ export default function PublicBookingFlow() {
     } catch (err) {
       if (err?.name === 'AbortError') return;
       if (requestSeq !== slotsRequestSeqRef.current) return;
-      notifications.error(extractMessage(err), { dedupeKey: 'public-booking-slots-error' });
+      notifyError(extractMessage(err), { dedupeKey: 'public-booking-slots-error' });
     } finally {
       if (requestSeq === slotsRequestSeqRef.current) {
         setSlotsLoading(false);
@@ -1266,13 +1647,13 @@ export default function PublicBookingFlow() {
   }, [
     activeBlockBarberId,
     effectiveActiveBlockIndex,
-    notifications,
+    notifyError,
     selectedBranchId,
     selectedDate,
     selectionCacheKey,
     effectiveSelectionType,
+    effectiveSelectedServiceIdsForAgenda,
     selectedPackageId,
-    selectedServiceIdsEffective,
     updateBlockAtIndex,
   ]);
 
@@ -1419,6 +1800,7 @@ export default function PublicBookingFlow() {
     setHoldResult(null);
     setPaymentIntent(null);
     setPaymentResult(null);
+    setBookingSuccessResult(null);
     clearSelectedTimes({ onlyIndex });
     invalidateAgendaCaches();
     notifications.warning(
@@ -1440,7 +1822,7 @@ export default function PublicBookingFlow() {
   usePublicAgendaRealtime({
     barberId: activeBlockBarberId,
     dateKey: selectedDate,
-    enabled: Boolean(selectedBranchId && activeBlockBarberId && (selectedPackageId || selectedServiceIdsEffective.length > 0)),
+    enabled: Boolean(selectedBranchId && activeBlockBarberId && (selectedPackageId || effectiveSelectedServiceIdsForAgenda.length > 0)),
     onInvalidate: refreshRealtimeAgenda,
   });
 
@@ -1464,75 +1846,186 @@ export default function PublicBookingFlow() {
   }, [fetchBranchData]);
 
   useEffect(() => {
-    if (!canUseClienteHold) return;
-    if (!selectedBranchId) return;
-    const titular = bookingBlocks[0];
-    if (titular?.selectionType === 'package') return;
-    if (!titular || Array.isArray(titular.serviceIds) && titular.serviceIds.length > 0) return;
-    const availableServices = Array.isArray(services) ? services : [];
-    if (availableServices.length === 0) return;
-
-    const prefillKey = `${selectedBranchId}:${availableServices.map((service) => service?.id_servicio).filter(Boolean).join(",")}`;
-    if (membershipPrefillKeysRef.current.has(prefillKey)) return;
+    if (!canUseClienteHold) {
+      setMembershipStateData(null);
+      setMembershipBranchNotice('');
+      membershipBranchNoticeRef.current = '';
+      return;
+    }
 
     let cancelled = false;
-    // AM: Propone automáticamente el primer servicio cubierto por plan para el titular sin forzar selección múltiple.
     (async () => {
       try {
         const response = await getClienteMembershipEstado();
         if (cancelled) return;
         const payload = response?.data ?? response;
-        const remanentes = Array.isArray(payload?.plan_activo?.remanentes?.servicios)
-          ? payload.plan_activo.remanentes.servicios
-          : [];
-        const coveredServiceIds = remanentes
-          .filter((item) => Number(item?.restante || 0) > 0)
-          .map((item) => String(item?.id_servicio || "").trim())
-          .filter(Boolean);
-        if (coveredServiceIds.length === 0) {
-          membershipPrefillKeysRef.current.add(prefillKey);
-          return;
-        }
-
-        const availableServiceIds = new Set(availableServices.map((item) => String(item?.id_servicio || "").trim()).filter(Boolean));
-        const suggestedId = coveredServiceIds.find((serviceId) => availableServiceIds.has(serviceId));
-        if (!suggestedId) {
-          membershipPrefillKeysRef.current.add(prefillKey);
-          return;
-        }
-
-        setBookingBlocks((prev) => {
-          const base = Array.isArray(prev) && prev.length > 0 ? prev : [createBookingBlock({ alias: "Titular" })];
-          const currentTitular = normalizeBookingBlock(base[0], 0);
-          if (Array.isArray(currentTitular.serviceIds) && currentTitular.serviceIds.length > 0) return prev;
-          const nextTitular = normalizeBookingBlock(
-            {
-              ...currentTitular,
-              selectionType: "services",
-              packageId: "",
-              serviceIds: [suggestedId],
-              selectedTime: "",
-            },
-            0
-          );
-          const next = [...base];
-          next[0] = nextTitular;
-          return next;
-        });
-
-        membershipPrefillKeysRef.current.add(prefillKey);
-        notifications.info("Seleccionamos automáticamente un servicio cubierto por tu plan para agilizar tu reserva.", {
-          dedupeKey: "public-booking-membership-prefill",
-        });
+        setMembershipStateData(payload && typeof payload === 'object' ? payload : null);
       } catch {
-        // AM: Fallback silencioso; el flujo de booking debe continuar sin depender de membresía.
+        if (cancelled) return;
+        setMembershipStateData(null);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [bookingBlocks, canUseClienteHold, notifications, selectedBranchId, services]);
+  }, [canUseClienteHold]);
+
+  useEffect(() => {
+    if (!rewardModeActive) {
+      persistRewardBookingContext(null);
+      rewardPreparedShownRef.current = false;
+      rewardUnavailableShownRef.current = false;
+      rewardDiscountInfoShownRef.current = false;
+      return;
+    }
+    persistRewardBookingContext(rewardBookingContext);
+  }, [rewardBookingContext, rewardModeActive]);
+
+  useEffect(() => {
+    if (!rewardModeActive) return;
+    rewardPreparedShownRef.current = false;
+    rewardUnavailableShownRef.current = false;
+    rewardDiscountInfoShownRef.current = false;
+  }, [rewardBookingContext?.canje_context_token, rewardModeActive]);
+
+  useEffect(() => {
+    if (!rewardModeActive || !rewardBranchId) return;
+    if (!branchList.some((branch) => branch.id_sucursal === rewardBranchId)) return;
+    if (selectedBranchId === rewardBranchId) return;
+    setSelectedBranchId(rewardBranchId);
+  }, [branchList, rewardBranchId, rewardModeActive, selectedBranchId]);
+
+  useEffect(() => {
+    if (!rewardModeActive || !selectedBranchId || !selectedBarberId || !rewardServiceId) return;
+    if (selectedBranchId !== rewardBranchId) return;
+    setBookingBlocks((prev) => {
+      const source = Array.isArray(prev) && prev.length > 0
+        ? prev
+        : [createBookingBlock({ alias: 'Titular' })];
+      const titular = normalizeBookingBlock(source[0], 0);
+      const mergedServiceIds = Array.from(new Set([
+        rewardServiceId,
+        ...(Array.isArray(titular.serviceIds) ? titular.serviceIds : []),
+      ]));
+      const nextType = titular.packageId && mergedServiceIds.length > 0 ? 'mixed' : 'services';
+      if (areServiceIdsEqual(titular.serviceIds, mergedServiceIds) && titular.selectionType === nextType) {
+        return prev;
+      }
+      const next = [...source];
+      next[0] = normalizeBookingBlock(
+        {
+          ...titular,
+          selectionType: nextType,
+          serviceIds: mergedServiceIds,
+          selectedTime: '',
+        },
+        0
+      );
+      return next;
+    });
+  }, [rewardBranchId, rewardModeActive, rewardServiceId, selectedBarberId, selectedBranchId]);
+
+  useEffect(() => {
+    if (!rewardModeActive) return;
+    if (!rewardServiceId) return;
+    if (!selectedBranchId || selectedBranchId !== rewardBranchId) return;
+    if (servicesLoading) return;
+    if (!Array.isArray(services) || services.length === 0) return;
+    if (availableServiceIdSet.has(rewardServiceId)) return;
+    if (rewardUnavailableShownRef.current) return;
+    rewardUnavailableShownRef.current = true;
+    notifications.warning('El servicio de recompensa no está disponible en esta sucursal. Elige la sucursal de tu canje o cancela el uso de recompensa.', {
+      dedupeKey: 'public-booking-reward-service-unavailable',
+    });
+  }, [
+    availableServiceIdSet,
+    notifications,
+    rewardBranchId,
+    rewardModeActive,
+    rewardServiceId,
+    selectedBranchId,
+    services,
+    servicesLoading,
+  ]);
+
+  useEffect(() => {
+    if (!canUseClienteHold || !selectedBranchId || !selectedBarberId) return;
+    if (rewardModeActive) {
+      if (membershipBranchNotice || membershipBranchNoticeRef.current) {
+        setMembershipBranchNotice('');
+        membershipBranchNoticeRef.current = '';
+      }
+      return;
+    }
+
+    if (!activeMembershipPlan) {
+      if (hasOperationalMembership && activeMembershipOtherBranchName) {
+        const notice = `Tu plan activo pertenece a ${activeMembershipOtherBranchName}. Si agendas en ${selectedBranchName}, esta cita no será cubierta por tu plan y deberás pagar el total.`;
+        setMembershipBranchNotice(notice);
+        if (membershipBranchNoticeRef.current !== notice) {
+          notifications.info(notice, { dedupeKey: 'public-booking-membership-branch-mismatch' });
+          membershipBranchNoticeRef.current = notice;
+        }
+        return;
+      }
+      if (membershipBranchNotice || membershipBranchNoticeRef.current) {
+        setMembershipBranchNotice('');
+        membershipBranchNoticeRef.current = '';
+      }
+      return;
+    }
+
+    if (membershipBranchNotice) {
+      setMembershipBranchNotice('');
+      membershipBranchNoticeRef.current = '';
+    }
+
+    if (membershipLockedServiceIdsForTitular.length === 0) return;
+
+    setBookingBlocks((prev) => {
+      const source = Array.isArray(prev) && prev.length > 0
+        ? prev
+        : [createBookingBlock({ alias: 'Titular' })];
+      const currentTitular = normalizeBookingBlock(source[0], 0);
+      const mergedServiceIds = Array.from(new Set([
+        ...membershipLockedServiceIdsForTitular,
+        ...(Array.isArray(currentTitular.serviceIds) ? currentTitular.serviceIds : []),
+      ]));
+      const nextSelectionType = currentTitular.packageId && mergedServiceIds.length > 0
+        ? 'mixed'
+        : 'services';
+      if (
+        areServiceIdsEqual(currentTitular.serviceIds, mergedServiceIds)
+        && currentTitular.selectionType === nextSelectionType
+      ) {
+        return prev;
+      }
+      const next = [...source];
+      next[0] = normalizeBookingBlock(
+        {
+          ...currentTitular,
+          selectionType: nextSelectionType,
+          serviceIds: mergedServiceIds,
+          selectedTime: '',
+        },
+        0
+      );
+      return next;
+    });
+  }, [
+    activeMembershipPlan,
+    activeMembershipOtherBranchName,
+    canUseClienteHold,
+    hasOperationalMembership,
+    membershipBranchNotice,
+    membershipLockedServiceIdsForTitular,
+    rewardModeActive,
+    notifications,
+    selectedBarberId,
+    selectedBranchId,
+    selectedBranchName,
+  ]);
 
   useEffect(() => {
     if (!selectedBranchId) return;
@@ -1677,13 +2170,6 @@ export default function PublicBookingFlow() {
   }, [location.pathname, navigate, paymentResult?.booking_confirmed]);
 
   useEffect(() => {
-    if (!location.pathname.startsWith('/agendar/exito')) return;
-    if (!paymentResult?.booking_confirmed) {
-      navigate('/agendar/barberos', { replace: true });
-    }
-  }, [location.pathname, navigate, paymentResult?.booking_confirmed]);
-
-  useEffect(() => {
     setHoldResult(null);
     setPaymentIntent(null);
     setPaymentResult(null);
@@ -1701,11 +2187,17 @@ export default function PublicBookingFlow() {
   const selectBranch = useCallback(
     (nextBranchId) => {
       if (!nextBranchId || nextBranchId === selectedBranchId) return;
+      if (rewardModeActive && rewardBranchId && nextBranchId !== rewardBranchId) {
+        notifications.warning('Esta recompensa solo puede usarse en la sucursal donde se preparó el canje.', {
+          dedupeKey: 'public-booking-reward-branch-mismatch',
+        });
+        return;
+      }
       resetFlowForBranchChange();
       setSelectedBranchId(nextBranchId);
       navigate('/agendar/barberos');
     },
-    [navigate, resetFlowForBranchChange, selectedBranchId]
+    [navigate, notifications, resetFlowForBranchChange, rewardBranchId, rewardModeActive, selectedBranchId]
   );
 
   const selectBarber = useCallback((barberId) => {
@@ -1809,11 +2301,9 @@ export default function PublicBookingFlow() {
   }, [clearSlotConflict, resetAvailabilityViewState]);
 
   const goToAgenda = useCallback(() => {
-    if (holdResult) return;
     if (!selectedBranchId || !selectedBarberId) return;
     navigate('/agendar/agenda');
   }, [
-    holdResult,
     selectedBranchId,
     selectedBarberId,
     navigate,
@@ -1824,16 +2314,47 @@ export default function PublicBookingFlow() {
     navigate('/agendar/barberos');
   }, [holdResult, navigate]);
 
-  const goToConfirm = useCallback(() => {
-    if (holdResult) return;
-    if (!allBlocksComplete) return;
-    navigate('/agendar/confirmar');
-  }, [allBlocksComplete, holdResult, navigate]);
-
-  const completeBookingFlow = useCallback(() => {
+  const cancelRewardRedemptionUsage = useCallback(() => {
+    if (!rewardModeActive) return;
+    setRewardBookingContext(null);
+    persistRewardBookingContext(null);
     setHoldResult(null);
     setPaymentIntent(null);
     setPaymentResult(null);
+    setBookingBlocks((prev) => {
+      const source = Array.isArray(prev) && prev.length > 0
+        ? prev
+        : [createBookingBlock({ alias: 'Titular' })];
+      const titular = normalizeBookingBlock(source[0], 0);
+      const nextServiceIds = (Array.isArray(titular.serviceIds) ? titular.serviceIds : [])
+        .filter((serviceId) => String(serviceId || '').trim() !== rewardServiceId);
+      const nextSelectionType = titular.packageId
+        ? (nextServiceIds.length > 0 ? 'mixed' : 'package')
+        : 'services';
+      const next = [...source];
+      next[0] = normalizeBookingBlock(
+        {
+          ...titular,
+          selectionType: nextSelectionType,
+          serviceIds: nextServiceIds,
+          selectedTime: '',
+        },
+        0
+      );
+      return next;
+    });
+    notifications.info('Cancelaste el uso de la recompensa. Puedes agendar normalmente.', {
+      dedupeKey: 'public-booking-reward-cancelled',
+    });
+  }, [notifications, rewardModeActive, rewardServiceId]);
+
+  const completeBookingFlow = useCallback(() => {
+    persistRewardBookingContext(null);
+    setRewardBookingContext(null);
+    setHoldResult(null);
+    setPaymentIntent(null);
+    setPaymentResult(null);
+    setBookingSuccessResult(null);
     resetFlowForBranchChange();
     navigate('/', { replace: true });
   }, [navigate, resetFlowForBranchChange]);
@@ -1893,9 +2414,19 @@ export default function PublicBookingFlow() {
       return;
     }
     if (blockedServiceIdSet.has(normalizedServiceId)) {
-      notifications.info('Ese servicio ya lo incluye el paquete seleccionado', {
-        dedupeKey: `public-booking-service-included-${normalizedServiceId}`,
-      });
+      if (rewardLockedServiceIdSet.has(normalizedServiceId)) {
+        notifications.info('Este servicio está marcado como recompensa cortesía y no se puede quitar.', {
+          dedupeKey: `public-booking-reward-service-locked-${normalizedServiceId}`,
+        });
+      } else if (membershipLockedServiceIdSet.has(normalizedServiceId)) {
+        notifications.info('Este servicio está cubierto por tu plan y no se puede quitar.', {
+          dedupeKey: `public-booking-membership-service-locked-${normalizedServiceId}`,
+        });
+      } else {
+        notifications.info('Ese servicio ya lo incluye el paquete seleccionado', {
+          dedupeKey: `public-booking-service-included-${normalizedServiceId}`,
+        });
+      }
       return;
     }
 
@@ -1920,6 +2451,8 @@ export default function PublicBookingFlow() {
     blockedServiceIdSet,
     bookingBlocks,
     effectiveActiveBlockIndex,
+    membershipLockedServiceIdSet,
+    rewardLockedServiceIdSet,
     notifications,
     resetAvailabilityViewState,
     resolveBlockContactState,
@@ -1929,6 +2462,12 @@ export default function PublicBookingFlow() {
 
   const selectSelectionType = useCallback((nextType) => {
     const normalizedType = String(nextType || '').trim().toLowerCase() === 'package' ? 'package' : 'services';
+    if (rewardModeActive && effectiveActiveBlockIndex === 0 && normalizedType === 'package') {
+      notifications.info('La recompensa cortesía se aplica sobre un servicio individual del titular.', {
+        dedupeKey: 'public-booking-reward-package-disabled',
+      });
+      return;
+    }
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => {
       const normalizedCurrent = normalizeBookingBlock(currentBlock, effectiveActiveBlockIndex);
       if (normalizedType === 'services' && normalizedCurrent.packageId && normalizedCurrent.serviceIds.length > 0) {
@@ -1945,9 +2484,15 @@ export default function PublicBookingFlow() {
       };
     });
     resetAvailabilityViewState();
-  }, [effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
+  }, [effectiveActiveBlockIndex, notifications, resetAvailabilityViewState, rewardModeActive, updateBlockAtIndex]);
 
   const selectPackage = useCallback((packageId) => {
+    if (rewardModeActive && effectiveActiveBlockIndex === 0) {
+      notifications.info('La recompensa cortesía no puede combinarse con paquetes en esta fase.', {
+        dedupeKey: 'public-booking-reward-package-select-disabled',
+      });
+      return;
+    }
     const normalizedId = String(packageId || '').trim();
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => {
       const normalizedCurrent = normalizeBookingBlock(currentBlock, effectiveActiveBlockIndex);
@@ -1976,7 +2521,7 @@ export default function PublicBookingFlow() {
       };
     });
     resetAvailabilityViewState();
-  }, [effectiveActiveBlockIndex, packagesById, resetAvailabilityViewState, updateBlockAtIndex]);
+  }, [effectiveActiveBlockIndex, notifications, packagesById, resetAvailabilityViewState, rewardModeActive, updateBlockAtIndex]);
 
   const updateActiveBlockBarber = useCallback((barberId) => {
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
@@ -2137,7 +2682,7 @@ export default function PublicBookingFlow() {
         dateKey: selectedDate,
         timeKey: nextTime,
         selectionTypeValue: effectiveSelectionType,
-        servicesCsvValue: selectedServiceIdsEffective.join(','),
+        servicesCsvValue: effectiveSelectedServiceIdsForAgenda.join(','),
         packageIdValue: selectedPackageId,
       });
       return;
@@ -2159,8 +2704,8 @@ export default function PublicBookingFlow() {
     selectedDate,
     selectedBlockTotalMinutes,
     effectiveSelectionType,
+    effectiveSelectedServiceIdsForAgenda,
     selectedPackageId,
-    selectedServiceIdsEffective,
     updateBlockAtIndex,
   ]);
 
@@ -2341,6 +2886,9 @@ export default function PublicBookingFlow() {
         id_sucursal: selectedBranchId,
         integrantes,
       };
+      if (rewardModeActive && rewardBookingContext?.canje_context_token) {
+        holdPayload.canje_context_token = rewardBookingContext.canje_context_token;
+      }
       if (canUseClienteHold) {
         holdPayload.titular = {
           nombres: normalizedTitularBlock.contactFirstName || null,
@@ -2363,7 +2911,7 @@ export default function PublicBookingFlow() {
         : await createPublicCitaHold(holdPayload);
       const payload = response?.data ?? response;
       setHoldResult(payload);
-      return true;
+      return payload;
     } catch (err) {
       const apiError = err?.data?.error || err?.error || {};
       const detailField = String(apiError?.details?.field || '').trim();
@@ -2461,12 +3009,30 @@ export default function PublicBookingFlow() {
     requestProfilePersistDecision,
     recoverToAgendaForReselection,
     resolveBlockContactState,
+    rewardBookingContext,
+    rewardModeActive,
     selectedBarberId,
     selectedBranchId,
     setFieldError,
     titularState.isAuthenticated,
     titularState.missingFields,
   ]);
+
+  const goToConfirm = useCallback(async () => {
+    if (holdSubmitting) return false;
+    if (!allBlocksComplete) return false;
+    const holdPayload = await submitHold();
+    if (!holdPayload || typeof holdPayload !== 'object') return false;
+    const groupId = String(holdPayload?.id_grupo_cita || '').trim();
+    if (!groupId) {
+      notifications.error('No se pudo preparar tu reserva. Vuelve a agenda e inténtalo de nuevo.', {
+        dedupeKey: 'public-booking-confirm-hold-missing-group',
+      });
+      return false;
+    }
+    navigate('/agendar/confirmar');
+    return true;
+  }, [allBlocksComplete, holdSubmitting, navigate, notifications, submitHold]);
 
   const goToPayment = useCallback(() => {
     if (!allBlocksComplete) return;
@@ -2490,6 +3056,13 @@ export default function PublicBookingFlow() {
       notifications.warning('Estamos reservando tu horario. Espera un momento e inténtalo nuevamente.', {
         dedupeKey: 'public-booking-hold-creating-for-payment',
       });
+      return null;
+    }
+    if (Number(holdResult?.total_pagar_hnl || 0) <= 0) {
+      notifications.warning('Esta reserva no requiere pago. Confírmala directamente.', {
+        dedupeKey: 'public-booking-payment-not-required',
+      });
+      navigate('/agendar/confirmar');
       return null;
     }
     if (!isValidEmail(titularEmail)) {
@@ -2531,7 +3104,154 @@ export default function PublicBookingFlow() {
     resolveBlockContactState,
     recoverToAgendaForReselection,
     shouldRecoverFromPaymentError,
+    navigate,
+    holdResult?.total_pagar_hnl,
   ]);
+
+  const confirmHoldWithoutPayment = useCallback(async (options = {}) => {
+    const explicitGroupId = String(options?.idGrupoCita || '').trim();
+    const groupId = explicitGroupId || String(holdResult?.id_grupo_cita || '').trim();
+    const allowConfirmedGroupWithBalance = options?.allowConfirmedGroupWithBalance === true;
+    const totalToPay = Number(
+      options?.totalPagarHnl
+      ?? holdResult?.total_pagar_hnl
+      ?? 0
+    );
+    const rewardContextToken = String(
+      rewardBookingContext?.canje_context_token
+      || rewardBookingContext?.id_points_tx_canje
+      || ''
+    ).trim();
+    const requestTimeoutMs = 20000;
+    const requestController = typeof AbortController !== 'undefined'
+      ? new AbortController()
+      : null;
+    let timeoutId = null;
+    if (requestController) {
+      timeoutId = setTimeout(() => {
+        try {
+          requestController.abort('confirm_hold_timeout');
+        } catch {
+          // no-op
+        }
+      }, requestTimeoutMs);
+    }
+    if (!canUseClienteHold) {
+      notifications.warning('Debes iniciar sesión como cliente para confirmar sin pago.', {
+        dedupeKey: 'public-booking-confirm-no-payment-auth-required',
+      });
+      if (timeoutId) clearTimeout(timeoutId);
+      return false;
+    }
+    if (!groupId) {
+      notifications.error('No encontramos una reserva válida para confirmar.', {
+        dedupeKey: 'public-booking-confirm-no-payment-group-missing',
+      });
+      if (timeoutId) clearTimeout(timeoutId);
+      return false;
+    }
+    if (totalToPay > 0 && !allowConfirmedGroupWithBalance) {
+      notifications.warning('Esta reserva tiene saldo pendiente. Debes continuar al pago.', {
+        dedupeKey: 'public-booking-confirm-no-payment-pending-balance',
+      });
+      if (timeoutId) clearTimeout(timeoutId);
+      return false;
+    }
+    try {
+      const confirmPayload = rewardContextToken
+        ? { canje_context_token: rewardContextToken }
+        : {};
+      const response = await confirmClienteCitaHoldWithoutPayment(
+        groupId,
+        confirmPayload,
+        requestController
+          ? { signal: requestController.signal }
+          : {}
+      );
+      const envelope = response && typeof response === 'object' ? response : {};
+      const payloadRaw = envelope?.data && typeof envelope.data === 'object'
+        ? envelope.data
+        : envelope;
+      const payload = payloadRaw && typeof payloadRaw === 'object' ? payloadRaw : {};
+      const confirmedFlag = payload?.confirmado_sin_pago === true
+        || payload?.ya_confirmadas === true;
+      const okFlag = envelope?.ok === true
+        || envelope?.success === true
+        || confirmedFlag;
+      if (!okFlag) {
+        notifications.error('No se pudo confirmar la cita. Intenta nuevamente.', {
+          dedupeKey: 'public-booking-confirm-no-payment-invalid-response',
+        });
+        return false;
+      }
+      const citasConfirmadas = extractConfirmedAppointments(payload);
+      const codigoCita = String(payload?.codigo_cita || '').trim() || extractBookingCode(payload);
+      const rewardApplied = payload?.recompensa_utilizada?.aplicada === true
+        || payload?.recompensa_utilizada?.ya_aplicada === true;
+      const rewardMessage = rewardApplied
+        ? String(payload?.recompensa_utilizada?.mensaje || 'Recompensa utilizada. Se descontaron 10 puntos de tu ruta.').trim()
+        : '';
+      setPaymentResult((current) => ({
+        ...(current && typeof current === 'object' ? current : {}),
+        booking_confirmed: true,
+        confirmation: payload,
+        codigo_cita: codigoCita || current?.codigo_cita,
+        citas_confirmadas: citasConfirmadas.length > 0 ? citasConfirmadas : current?.citas_confirmadas,
+      }));
+      setBookingSuccessResult({
+        source: rewardApplied ? 'reward_no_payment' : 'membership_no_payment',
+        confirmation: payload,
+        codigo_cita: codigoCita,
+        citas_confirmadas: Array.isArray(payload?.citas_confirmadas)
+          ? payload.citas_confirmadas
+          : citasConfirmadas,
+        estado_pago: rewardApplied
+          ? (rewardMessage || 'Recompensa utilizada')
+          : 'cubierto_por_plan',
+        total_pagado_hnl: 0,
+        recompensa_utilizada: payload?.recompensa_utilizada || null,
+        created_at: new Date().toISOString(),
+      });
+      notifications.success('Cita confirmada exitosamente.', {
+        dedupeKey: 'public-booking-confirm-no-payment-success',
+      });
+      if (rewardApplied) {
+        notifications.info(rewardMessage || 'Recompensa utilizada. Se descontaron 10 puntos de tu ruta.', {
+          dedupeKey: 'public-booking-reward-confirmed-success',
+        });
+      }
+      if (!options?.skipNavigate) {
+        navigate('/agendar/exito');
+      }
+      return true;
+    } catch (err) {
+      if (err?.status === 409) {
+        const errorCode = String(err?.data?.error?.code || '').trim().toUpperCase();
+        if (errorCode === 'POINTS_REDEEM_INSUFFICIENT_BALANCE_CONFIRM') {
+          notifications.error('No tienes saldo suficiente para confirmar esta recompensa. Recarga puntos y vuelve a intentarlo.', {
+            dedupeKey: 'public-booking-reward-insufficient-on-confirm',
+          });
+        } else {
+          notifications.warning('Esta reserva tiene saldo pendiente. Debes continuar al pago.', {
+            dedupeKey: 'public-booking-confirm-no-payment-pending-balance-409',
+          });
+        }
+        return false;
+      }
+      if (err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('aborted')) {
+        notifications.error('La confirmación tardó demasiado. Intenta nuevamente.', {
+          dedupeKey: 'public-booking-confirm-no-payment-timeout',
+        });
+        return false;
+      }
+      notifications.error(extractMessage(err), {
+        dedupeKey: 'public-booking-confirm-no-payment-error',
+      });
+      return false;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }, [canUseClienteHold, holdResult, navigate, notifications, rewardBookingContext]);
 
   const refreshPaymentStatus = useCallback(async () => {
     const groupId = String(holdResult?.id_grupo_cita || '').trim();
@@ -2546,7 +3266,70 @@ export default function PublicBookingFlow() {
         titular_email: titularEmail,
       });
       const payload = response?.data ?? response;
+      let rewardFinalization = null;
+      if (payload?.booking_confirmed && rewardModeActive) {
+        const rewardContextToken = String(
+          rewardBookingContext?.canje_context_token
+          || rewardBookingContext?.id_points_tx_canje
+          || ''
+        ).trim();
+        if (rewardContextToken) {
+          try {
+            const confirmResponse = await confirmClienteCitaHoldWithoutPayment(groupId, {
+              canje_context_token: rewardContextToken,
+            });
+            const confirmEnvelope = confirmResponse && typeof confirmResponse === 'object' ? confirmResponse : {};
+            const confirmPayloadRaw = confirmEnvelope?.data && typeof confirmEnvelope.data === 'object'
+              ? confirmEnvelope.data
+              : confirmEnvelope;
+            const confirmPayload = confirmPayloadRaw && typeof confirmPayloadRaw === 'object'
+              ? confirmPayloadRaw
+              : {};
+            rewardFinalization = confirmPayload?.recompensa_utilizada || null;
+            const rewardApplied = rewardFinalization?.aplicada === true || rewardFinalization?.ya_aplicada === true;
+            if (rewardApplied) {
+              notifications.info(
+                String(rewardFinalization?.mensaje || 'Recompensa utilizada. Se descontaron 10 puntos de tu ruta.'),
+                { dedupeKey: 'public-booking-reward-finalized-after-payment' }
+              );
+            }
+          } catch (confirmError) {
+            const errorCode = String(confirmError?.data?.error?.code || '').trim().toUpperCase();
+            if (errorCode === 'POINTS_REDEEM_INSUFFICIENT_BALANCE_CONFIRM') {
+              notifications.error('No tienes saldo suficiente para aplicar la recompensa en la confirmación final.', {
+                dedupeKey: 'public-booking-reward-insufficient-after-payment',
+              });
+            } else {
+              notifications.error(extractMessage(confirmError), {
+                dedupeKey: 'public-booking-reward-finalization-error',
+              });
+            }
+            return null;
+          }
+        }
+      }
       setPaymentResult(payload);
+      if (payload?.booking_confirmed) {
+        const citasConfirmadas = extractConfirmedAppointments(payload);
+        const codigoCita = extractBookingCode(payload);
+        const totalPagado = Number(payload?.monto_hnl ?? payload?.total_pagado_hnl ?? holdResult?.total_pagar_hnl ?? 0);
+        const rewardApplied = rewardFinalization?.aplicada === true || rewardFinalization?.ya_aplicada === true;
+        const rewardMessage = rewardApplied
+          ? String(rewardFinalization?.mensaje || 'Recompensa utilizada. Se descontaron 10 puntos de tu ruta.').trim()
+          : '';
+        setBookingSuccessResult({
+          source: 'payment',
+          paymentResult: payload,
+          codigo_cita: codigoCita,
+          citas_confirmadas: citasConfirmadas,
+          estado_pago: rewardApplied
+            ? (rewardMessage || 'Recompensa utilizada')
+            : (String(payload?.estado_intent_codigo || '').trim() || 'pagado'),
+          total_pagado_hnl: Number.isFinite(totalPagado) ? totalPagado : 0,
+          recompensa_utilizada: rewardFinalization,
+          created_at: new Date().toISOString(),
+        });
+      }
       const intentState = String(payload?.estado_intent_codigo || '').trim().toLowerCase();
       if (!payload?.booking_confirmed && (intentState === 'expirado' || intentState === 'fallido')) {
         recoverToAgendaForReselection(
@@ -2572,8 +3355,11 @@ export default function PublicBookingFlow() {
   }, [
     bookingBlocks,
     holdResult?.id_grupo_cita,
+    holdResult?.total_pagar_hnl,
     notifications,
     paymentIntent?.id_intent,
+    rewardBookingContext,
+    rewardModeActive,
     resolveBlockContactState,
     recoverToAgendaForReselection,
     shouldRecoverFromPaymentError,
@@ -2607,9 +3393,16 @@ export default function PublicBookingFlow() {
       navigate('/agendar/agenda');
       return false;
     }
+    if (holdResult && Number(holdResult?.total_pagar_hnl || 0) === 0) {
+      notifications.warning('Tu reserva no requiere pago. Confirma la cita desde el resumen.', {
+        dedupeKey: 'public-booking-checkout-hold-total-zero',
+      });
+      navigate('/agendar/confirmar');
+      return false;
+    }
     navigate('/agendar/pagar');
     return true;
-  }, [allBlocksComplete, navigate, notifications, paymentResult?.booking_confirmed]);
+  }, [allBlocksComplete, holdResult, navigate, notifications, paymentResult?.booking_confirmed]);
 
   useEffect(() => {
     if (!location.pathname.startsWith('/agendar/pagar')) return;
@@ -2621,6 +3414,10 @@ export default function PublicBookingFlow() {
       if (!holdResult) {
         const ok = await submitHold();
         if (!ok || cancelled) return;
+        return;
+      }
+      if (Number(holdResult?.total_pagar_hnl || 0) <= 0) {
+        navigate('/agendar/confirmar', { replace: true });
         return;
       }
       if (paymentIntent?.id_intent) return;
@@ -2635,7 +3432,9 @@ export default function PublicBookingFlow() {
     allBlocksComplete,
     createPaymentIntentForHold,
     holdResult,
+    holdResult?.total_pagar_hnl,
     location.pathname,
+    navigate,
     paymentIntent?.id_intent,
     paymentResult?.booking_confirmed,
     submitHold,
@@ -2687,6 +3486,15 @@ export default function PublicBookingFlow() {
       bookingBlocks,
       bookingBlocksSummary,
       blockedServiceIds,
+      membershipLockedServiceIdsForTitular,
+      membershipBranchNotice,
+      rewardModeActive,
+      rewardServiceId,
+      rewardServiceName,
+      rewardBranchId,
+      rewardBranchName,
+      rewardBranchMismatch,
+      cancelRewardRedemptionUsage,
       branchList,
       canAddCompanionBlock,
       canGoPrevMonth,
@@ -2698,6 +3506,7 @@ export default function PublicBookingFlow() {
       goToPayment,
       completeBookingFlow,
       createPaymentIntentForHold,
+      confirmHoldWithoutPayment,
       refreshPaymentStatus,
       completeMockPayment,
       startCheckout,
@@ -2706,8 +3515,11 @@ export default function PublicBookingFlow() {
       holdRemainingMs,
       holdExpired,
       holdResult,
+      holdPricing,
+      holdTotalToPay,
       paymentIntent,
       paymentResult,
+      bookingSuccessResult,
       pendingCompanionFocusId,
       holdSubmitting,
       isPastSlotForToday,
@@ -2759,6 +3571,7 @@ export default function PublicBookingFlow() {
       syncServicesScrollState,
       toggleService,
       totalToPay,
+      canConfirmWithoutPayment,
       updateActiveBlockBarber,
       updateActiveBlockContact,
       selectBarber,
@@ -2784,6 +3597,15 @@ export default function PublicBookingFlow() {
       bookingBlocks,
       bookingBlocksSummary,
       blockedServiceIds,
+      membershipLockedServiceIdsForTitular,
+      membershipBranchNotice,
+      rewardModeActive,
+      rewardServiceId,
+      rewardServiceName,
+      rewardBranchId,
+      rewardBranchName,
+      rewardBranchMismatch,
+      cancelRewardRedemptionUsage,
       branchList,
       canAddCompanionBlock,
       canGoPrevMonth,
@@ -2795,6 +3617,7 @@ export default function PublicBookingFlow() {
       goToPayment,
       completeBookingFlow,
       createPaymentIntentForHold,
+      confirmHoldWithoutPayment,
       refreshPaymentStatus,
       completeMockPayment,
       startCheckout,
@@ -2803,8 +3626,11 @@ export default function PublicBookingFlow() {
       holdRemainingMs,
       holdExpired,
       holdResult,
+      holdPricing,
+      holdTotalToPay,
       paymentIntent,
       paymentResult,
+      bookingSuccessResult,
       pendingCompanionFocusId,
       holdSubmitting,
       isPastSlotForToday,
@@ -2853,6 +3679,7 @@ export default function PublicBookingFlow() {
       syncServicesScrollState,
       toggleService,
       totalToPay,
+      canConfirmWithoutPayment,
       updateActiveBlockBarber,
       updateActiveBlockContact,
       selectBarber,
@@ -2870,6 +3697,11 @@ export default function PublicBookingFlow() {
   const isClienteSession = isAuthenticated && Array.isArray(roles) && roles.includes('cliente');
   const homePath = isClienteSession ? '/home/cliente' : '/';
   const homeLabel = 'Inicio MasterFade';
+  const showBranchDataErrorBanner = Boolean(
+    location.pathname.startsWith('/agendar/barberos')
+    && availabilityError
+    && !barbersLoading
+  );
 
   return (
     <div className="public-booking-page mf-page-gradient min-h-screen">
@@ -2909,6 +3741,11 @@ export default function PublicBookingFlow() {
 
         {!contextLoading && !contextError ? (
           <main className="mf-page citas-page public-booking-main">
+            {showBranchDataErrorBanner ? (
+              <div className="public-booking-error">
+                <ErrorBanner message={availabilityError} onRetry={fetchBranchData} />
+              </div>
+            ) : null}
             <PublicBookingProvider value={contextValue}>
               <Outlet />
             </PublicBookingProvider>

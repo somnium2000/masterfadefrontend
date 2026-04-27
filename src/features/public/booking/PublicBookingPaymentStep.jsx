@@ -15,7 +15,8 @@ export default function PublicBookingPaymentStep() {
     paymentResult,
     refreshPaymentStatus,
     completeMockPayment,
-    totalToPay,
+    holdPricing,
+    holdTotalToPay,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
@@ -101,9 +102,8 @@ export default function PublicBookingPaymentStep() {
               </Button>
             ) : (
               <div className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)] public-booking-payment-meta">
-                <p>Intent: {paymentIntent.id_intent}</p>
                 <p>Estado: {paymentResult?.estado_intent_codigo || paymentIntent.estado_intent_codigo || 'pendiente'}</p>
-                <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || totalToPay)}</p>
+                <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || holdTotalToPay)}</p>
                 {paymentIntent.payment_url ? (
                   <a
                     href={paymentIntent.payment_url}
@@ -137,6 +137,22 @@ export default function PublicBookingPaymentStep() {
               <span>{formatCurrencyHnl(block.total_hnl)}</span>
             </div>
           ))}
+          <div className="citas-confirm-row mt-3">
+            <span>Total servicios</span>
+            <span>{formatCurrencyHnl(Number(holdPricing?.subtotal_hnl || 0))}</span>
+          </div>
+          <div className="citas-confirm-row">
+            <span>Cubierto por tu plan</span>
+            <span>-{formatCurrencyHnl(Number(holdPricing?.cubierto_por_plan_hnl || 0))}</span>
+          </div>
+          <div className="citas-confirm-row">
+            <span>Extras a pagar</span>
+            <span>{formatCurrencyHnl(Number(holdPricing?.extras_a_pagar_hnl || holdTotalToPay || 0))}</span>
+          </div>
+          <div className="citas-confirm-row">
+            <span>Total a pagar</span>
+            <span>{formatCurrencyHnl(Number(holdTotalToPay || 0))}</span>
+          </div>
         </div>
       </div>
     </div>

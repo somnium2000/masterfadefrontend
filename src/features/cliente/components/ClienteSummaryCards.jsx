@@ -74,6 +74,7 @@ export default function ClienteSummaryCards({
   completionPercent = 0,
   onNewAppointment,
   onOpenProfile,
+  hideRewardsHero = false,
 }) {
   const reduceMotion = useReducedMotion();
   const safeMasterpuntos = Math.max(0, Number(masterpuntos || 0));
@@ -92,6 +93,31 @@ export default function ClienteSummaryCards({
   useEffect(() => {
     progressValue.set(progressPercent);
   }, [progressPercent, progressValue]);
+
+  if (hideRewardsHero) {
+    return (
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <KpiCard
+          icon={CalendarDays}
+          label="Citas proximas"
+          value={upcomingAppointments}
+          helper={`Total registradas: ${totalAppointments}`}
+          actionLabel="Agendar nueva"
+          onAction={onNewAppointment}
+          tone="accent"
+        />
+        <KpiCard
+          icon={UserRound}
+          label="Perfil"
+          value={profileCompleted ? 'Completo' : `${safeCompletionPercent}%`}
+          helper={profileCompleted ? 'Tu perfil ya esta al dia.' : 'Completa tus datos para mejorar tu experiencia.'}
+          actionLabel={profileCompleted ? 'Ver perfil' : 'Completar perfil'}
+          onAction={onOpenProfile}
+          tone={profileCompleted ? 'success' : 'default'}
+        />
+      </section>
+    );
+  }
 
   return (
     <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
