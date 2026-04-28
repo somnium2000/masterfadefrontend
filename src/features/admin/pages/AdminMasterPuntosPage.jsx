@@ -35,6 +35,10 @@ function toSafeInteger(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function isPositiveIntegerString(value) {
+  return /^\d+$/.test(normalizeText(value));
+}
+
 function formatSignedPoints(value) {
   const points = toSafeInteger(value, 0);
   return `${points >= 0 ? '+' : ''}${points}`;
@@ -60,8 +64,12 @@ function resolveMovementOriginLabel(origin) {
 
 function resolveApiErrorMessage(error, fallbackMessage) {
   const status = Number(error?.status || 0);
+  const errorCode = String(error?.data?.error?.code || '').trim().toUpperCase();
   if (status === 401) return 'Tu sesion expiro. Inicia sesion nuevamente.';
   if (status === 403) return 'No tienes permisos para administrar puntos.';
+  if (status === 422 || errorCode === 'POINTS_INSUFFICIENT_BALANCE') {
+    return 'No hay puntos suficientes para completar la resta solicitada.';
+  }
   if (status === 409) {
     return error?.data?.error?.message || error?.message || 'La operacion fue rechazada porque dejaria el saldo en negativo.';
   }
@@ -150,7 +158,8 @@ export default function AdminMasterPuntosPage() {
   const [summaryError, setSummaryError] = useState('');
   const [historyPage, setHistoryPage] = useState(0);
 
-  const [ajustePoints, setAjustePoints] = useState('');
+  const [ajustePointsAdd, setAjustePointsAdd] = useState('');
+  const [ajustePointsSubtract, setAjustePointsSubtract] = useState('');
   const [ajusteReason, setAjusteReason] = useState('');
   const [savingAdjustment, setSavingAdjustment] = useState(false);
   const [negativeConfirmOpen, setNegativeConfirmOpen] = useState(false);
@@ -160,9 +169,27 @@ export default function AdminMasterPuntosPage() {
     return roleList.includes('admin') || roleList.includes('super_admin');
   }, [roles]);
 
-  const parsedPoints = toSafeInteger(ajustePoints, 0);
+  const addTrimmed = normalizeText(ajustePointsAdd);
+  const subtractTrimmed = normalizeText(ajustePointsSubtract);
+  const hasAddInput = addTrimmed !== '';
+  const hasSubtractInput = subtractTrimmed !== '';
+  const pointsInputConflict = hasAddInput && hasSubtractInput;
+  const addIsValid = !hasAddInput || (isPositiveIntegerString(addTrimmed) && toSafeInteger(addTrimmed, 0) > 0);
+  const subtractIsValid = !hasSubtractInput || (isPositiveIntegerString(subtractTrimmed) && toSafeInteger(subtractTrimmed, 0) > 0);
+  const parsedPointsToAdd = addIsValid && hasAddInput ? toSafeInteger(addTrimmed, 0) : 0;
+  const parsedPointsToSubtract = subtractIsValid && hasSubtractInput ? toSafeInteger(subtractTrimmed, 0) : 0;
+  const canUseAdd = hasAddInput && !hasSubtractInput && addIsValid;
+  const canUseSubtract = hasSubtractInput && !hasAddInput && subtractIsValid;
+  const adjustmentAction = canUseAdd ? 'sumar' : canUseSubtract ? 'restar' : '';
+  const adjustmentPoints = canUseAdd ? parsedPointsToAdd : canUseSubtract ? parsedPointsToSubtract : 0;
+  const parsedPoints = adjustmentAction === 'restar' ? -adjustmentPoints : adjustmentPoints;
   const reasonTrimmed = normalizeText(ajusteReason);
-  const pointsAreValid = Number.isInteger(parsedPoints) && parsedPoints !== 0 && String(ajustePoints).trim() !== '';
+  const pointsAreValid = !pointsInputConflict
+    && (hasAddInput || hasSubtractInput)
+    && addIsValid
+    && subtractIsValid
+    && Boolean(adjustmentAction)
+    && adjustmentPoints > 0;
   const reasonIsValid = reasonTrimmed.length >= MIN_REASON_LENGTH;
   const canSubmitAdjustment = Boolean(
     canManagePoints
@@ -339,11 +366,13 @@ export default function AdminMasterPuntosPage() {
     setSummaryError('');
     try {
       await createAdminClientePuntosAjuste(selectedClienteId, {
-        puntos: parsedPoints,
+        accion: adjustmentAction,
+        puntos: adjustmentPoints,
         motivo: reasonTrimmed,
       });
       notifications.success('Ajuste aplicado correctamente.');
-      setAjustePoints('');
+      setAjustePointsAdd('');
+      setAjustePointsSubtract('');
       setAjusteReason('');
       await loadSummary(selectedClienteId, { keepCurrent: true });
     } catch (error) {
@@ -365,7 +394,7 @@ export default function AdminMasterPuntosPage() {
   function handleSubmitAdjustment(event) {
     event.preventDefault();
     if (!canSubmitAdjustment) return;
-    if (parsedPoints < 0) {
+    if (adjustmentAction === 'restar') {
       setNegativeConfirmOpen(true);
       return;
     }
@@ -490,16 +519,29 @@ export default function AdminMasterPuntosPage() {
 
               <form onSubmit={handleSubmitAdjustment} className="mt-4 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-[var(--mf-accent)]">Ajuste manual</p>
-                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div>
-                    <label className="mf-label">Puntos (+ / -)</label>
+                    <label className="mf-label">Sumar puntos</label>
                     <Input
                       type="number"
                       step="1"
-                      value={ajustePoints}
-                      onChange={(event) => setAjustePoints(event.target.value)}
-                      placeholder="Ej. 3 o -3"
-                      disabled={savingAdjustment}
+                      min="0"
+                      value={ajustePointsAdd}
+                      onChange={(event) => setAjustePointsAdd(event.target.value)}
+                      placeholder="Ej. 10"
+                      disabled={savingAdjustment || hasSubtractInput}
+                    />
+                  </div>
+                  <div>
+                    <label className="mf-label">Restar puntos</label>
+                    <Input
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={ajustePointsSubtract}
+                      onChange={(event) => setAjustePointsSubtract(event.target.value)}
+                      placeholder="Ej. 3"
+                      disabled={savingAdjustment || hasAddInput}
                     />
                   </div>
                   <div>
@@ -514,7 +556,14 @@ export default function AdminMasterPuntosPage() {
                   </div>
                 </div>
                 <p className="mt-2 text-xs text-[var(--mf-text-2)]">
-                  Usa valores enteros distintos de 0.
+                  {pointsInputConflict
+                    ? 'Ingresa solo sumar o restar, no ambos.'
+                    : (hasAddInput || hasSubtractInput
+                        ? (addIsValid && subtractIsValid
+                            ? `Resultado neto: ${formatSignedPoints(parsedPoints)} puntos.`
+                            : 'Ingresa solo enteros positivos en sumar/restar.')
+                        : 'Ingresa enteros positivos en sumar o restar.')
+                }
                 </p>
                 <Button type="submit" className="mt-3" disabled={!canSubmitAdjustment}>
                   {savingAdjustment ? (
