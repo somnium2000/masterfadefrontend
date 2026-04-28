@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ChevronDown, Clock3, Plus, Scissors, UserRound, Package, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ChevronDown, Clock3, Plus, Scissors, UserRound, Package, Tag, X } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
@@ -55,8 +55,86 @@ function overlapByMinutes(leftStart, leftDuration, rightStart, rightDuration) {
   return leftMinutes < (rightMinutes + rightDur) && rightMinutes < (leftMinutes + leftDur);
 }
 
-function BookingBlocksSummary({ bookingBlocksSummary, totalToPay }) {
+function normalizePromotionDateKey(value) {
+  // JK: Lee fechas tipo YYYY-MM-DD o ISO sin depender de conversiones por timezone.
+  const normalized = String(value || '').trim();
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return '';
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+function formatPromotionDate(value) {
+  const dateKey = normalizePromotionDateKey(value);
+  if (!dateKey) return '';
+  const [year, month, day] = dateKey.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function formatPromotionVigencyLabel(promotion) {
+  // JK: Resume vigencia en formato visual legible para cards de promociones en agendamiento.
+  const fromDate = formatPromotionDate(promotion?.vigencia_desde);
+  const toDate = formatPromotionDate(promotion?.vigencia_hasta);
+  const fromHour = formatTime12Hour(promotion?.vigencia_hora_desde || '');
+  const toHour = formatTime12Hour(promotion?.vigencia_hora_hasta || '');
+
+  const dateLabel = fromDate && toDate
+    ? `${fromDate} - ${toDate}`
+    : fromDate
+      ? `Desde ${fromDate}`
+      : toDate
+        ? `Hasta ${toDate}`
+        : '';
+
+  const hourLabel = fromHour && toHour
+    ? `${fromHour} - ${toHour}`
+    : fromHour
+      ? `Desde ${fromHour}`
+      : toHour
+        ? `Hasta ${toHour}`
+        : '';
+
+  if (dateLabel && hourLabel) return `${dateLabel} · ${hourLabel}`;
+  return dateLabel || hourLabel;
+}
+
+function formatPromotionBenefitLabel(promotion) {
+  // JK: Estandariza etiqueta corta de beneficio para distinguir porcentaje, monto fijo y 2x1.
+  const mechanic = String(promotion?.mecanica || '').trim().toLowerCase();
+  const value = Number(promotion?.valor_descuento);
+  if (mechanic === 'porcentaje' && Number.isFinite(value) && value > 0) {
+    const normalized = value % 1 === 0 ? String(value) : value.toFixed(2).replace(/\.?0+$/, '');
+    return `${normalized}% OFF`;
+  }
+  if (mechanic === 'monto_fijo' && Number.isFinite(value) && value > 0) {
+    const normalized = value % 1 === 0 ? String(value) : value.toFixed(2).replace(/\.?0+$/, '');
+    return `L ${normalized} OFF`;
+  }
+  if (mechanic === 'dos_por_uno') {
+    return '2x1';
+  }
+  return 'PROMO';
+}
+
+function resolvePromotionTargetLabel(promotion) {
+  const appliesTo = String(promotion?.aplica_a || '').trim().toLowerCase();
+  if (appliesTo === 'paquete') {
+    return String(promotion?.paquete_objetivo_nombre || 'paquete objetivo').trim();
+  }
+  return String(promotion?.servicio_objetivo_nombre || 'servicio objetivo').trim();
+}
+
+function BookingBlocksSummary({
+  bookingBlocksSummary,
+  totalToPay,
+  totalEstimatedPromotionDiscountHnl,
+  totalEstimatedToPay,
+}) {
   const completedBlocks = bookingBlocksSummary.filter((block) => block.isComplete);
+  const hasAnyPromotionSelected = bookingBlocksSummary.some((block) => Boolean(block.selectedPromotion));
+  const hasAnyPendingTwoByOne = bookingBlocksSummary.some(
+    (block) => Boolean(block.selectedPromotion) && Boolean(block.promocion_requiere_calculo_final)
+  );
+  const safeEstimatedDiscount = Math.max(0, Number(totalEstimatedPromotionDiscountHnl || 0));
 
   return (
     <div className="citas-surface p-4 public-booking-group-summary">
@@ -83,13 +161,47 @@ function BookingBlocksSummary({ bookingBlocksSummary, totalToPay }) {
               <div className="citas-selected-date">
                 {formatFriendlyDate(block.selectedDate)} - {formatTime12Hour(block.selectedTime)}
               </div>
+              {block.selectedPromotion ? (
+                <div className="citas-selected-date">
+                  Promoción seleccionada: {block.selectedPromotion.titulo || 'Promoción seleccionada'}
+                </div>
+              ) : null}
             </article>
           ))}
         </div>
       )}
 
       <div className="citas-services-summary-row mt-3">
-        <span>Total servicios: {formatCurrencyHnl(totalToPay)}</span>
+        {hasAnyPromotionSelected ? (
+          <div className="public-booking-promo-summary">
+            {/* // JK: Presentación de resumen en filas etiqueta/valor para mejorar legibilidad visual. */}
+            <div className="public-booking-promo-summary-row">
+              <span className="public-booking-promo-summary-label">Subtotal servicios:</span>
+              <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalToPay)}</strong>
+            </div>
+            {hasAnyPendingTwoByOne && safeEstimatedDiscount <= 0 ? (
+              <div className="public-booking-promo-summary-row">
+                <span className="public-booking-promo-summary-label">Descuento estimado:</span>
+                <strong className="public-booking-promo-summary-value">Aplicación final pendiente en pago.</strong>
+              </div>
+            ) : (
+              <div className="public-booking-promo-summary-row">
+                <span className="public-booking-promo-summary-label">Descuento estimado:</span>
+                <strong className="public-booking-promo-summary-value">-{formatCurrencyHnl(safeEstimatedDiscount)}</strong>
+              </div>
+            )}
+            <div className="public-booking-promo-summary-row public-booking-promo-summary-row-total">
+              <span className="public-booking-promo-summary-label">Total estimado:</span>
+              <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalEstimatedToPay)}</strong>
+            </div>
+            <small>El descuento será aplicado y confirmado en el pago final.</small>
+            {hasAnyPendingTwoByOne ? (
+              <small>Hay promociones 2x1 pendientes de confirmación final en pago.</small>
+            ) : null}
+          </div>
+        ) : (
+          <span>Total servicios: {formatCurrencyHnl(totalToPay)}</span>
+        )}
       </div>
     </div>
   );
@@ -119,10 +231,17 @@ export default function PublicBookingAgendaStep() {
     minBookingDateKey,
     onSelectDay,
     onSelectTime,
+    promotions,
+    promotionsLoading,
+    clearSelectedPromotion,
     selectSuggestedBarber,
+    selectPromotion,
     selectedDate,
     selectedPackage,
     selectedPackageId,
+    selectedPromotion,
+    selectedPromotionId,
+    selectedBranchId,
     selectPackage,
     selectedServicesDurationSum,
     selectedBlockTotalMinutes,
@@ -147,6 +266,8 @@ export default function PublicBookingAgendaStep() {
     slotsLoading,
     syncServicesScrollState,
     toggleService,
+    totalEstimatedPromotionDiscountHnl,
+    totalEstimatedToPay,
     totalToPay,
     updateActiveBlockBarber,
     updateActiveBlockContact,
@@ -173,6 +294,67 @@ export default function PublicBookingAgendaStep() {
     : 'Ingresa el nombre del acompañante antes de elegir servicios.';
   const canSelectServices = Boolean(activeContactName.trim());
   const [catalogTab, setCatalogTab] = useState('services');
+  const activeBlockSummary = useMemo(
+    () => bookingBlocksSummary.find((block) => block.index === activeBlockIndex) || null,
+    [activeBlockIndex, bookingBlocksSummary]
+  );
+  const selectedServiceIdsSet = useMemo(
+    () => new Set(serviceIds),
+    [serviceIds]
+  );
+  const promotionsForCards = useMemo(() => {
+    // JK: Calcula estado visual/seleccionable de cada promo sin alterar la lógica de guardado del flujo.
+    const list = Array.isArray(promotions) ? promotions : [];
+    return list.map((promotion) => {
+      const promotionId = String(promotion?.id_promocion || '').trim();
+      const appliesTo = String(promotion?.aplica_a || '').trim().toLowerCase();
+      const targetServiceId = String(promotion?.id_servicio_objetivo || '').trim();
+      const targetPackageId = String(promotion?.id_paquete_objetivo || '').trim();
+      const targetLabel = resolvePromotionTargetLabel(promotion);
+      const targetSelected = appliesTo === 'paquete'
+        ? Boolean(targetPackageId && selectedPackageId && selectedPackageId === targetPackageId)
+        : Boolean(targetServiceId && selectedServiceIdsSet.has(targetServiceId));
+      const benefitLabel = formatPromotionBenefitLabel(promotion);
+      const vigencyLabel = formatPromotionVigencyLabel(promotion);
+      const disabledByBranch = !selectedBranchId;
+      const disabledByContact = !canSelectServices;
+      const canSelect = !disabledByBranch && !disabledByContact && targetSelected;
+      let disabledReason = '';
+      if (disabledByBranch) {
+        disabledReason = 'Selecciona una sucursal para ver promociones aplicables.';
+      } else if (disabledByContact) {
+        disabledReason = contactNameRequiredMessage;
+      } else if (!targetSelected) {
+        disabledReason = `Requiere seleccionar ${targetLabel}`;
+      }
+
+      return {
+        ...promotion,
+        promotionId,
+        benefitLabel,
+        targetLabel,
+        vigencyLabel,
+        canSelect,
+        disabledReason,
+        isSelected: selectedPromotionId === promotionId,
+      };
+    });
+  }, [
+    canSelectServices,
+    contactNameRequiredMessage,
+    promotions,
+    selectedBranchId,
+    selectedPackageId,
+    selectedPromotionId,
+    selectedServiceIdsSet,
+  ]);
+  const activeBlockEstimatedDiscount = Math.max(
+    0,
+    Number(activeBlockSummary?.promocion_descuento_estimado_hnl || 0)
+  );
+  const activeBlockNeedsFinalCalculation = Boolean(activeBlockSummary?.promocion_requiere_calculo_final);
+  const safeEstimatedDiscountGlobal = Math.max(0, Number(totalEstimatedPromotionDiscountHnl || 0));
+  const visibleEstimatedDiscount = Math.max(activeBlockEstimatedDiscount, safeEstimatedDiscountGlobal);
   const [preferredSlotPeriod, setPreferredSlotPeriod] = useState('manana');
   const availableSlotsByPeriod = useMemo(() => {
     const grouped = {
@@ -451,6 +633,14 @@ export default function PublicBookingAgendaStep() {
             >
               Paquetes
             </Button>
+            <Button
+              type="button"
+              variant={catalogTab === 'promotions' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setCatalogTab('promotions')}
+            >
+              Promociones
+            </Button>
           </div>
 
           <div className="citas-services-scroll scrollbar-hide" ref={servicesScrollRef}>
@@ -466,7 +656,8 @@ export default function PublicBookingAgendaStep() {
                   />
                 ))}
               </div>
-            ) : (
+            ) : null}
+            {catalogTab === 'packages' ? (
               <div className="citas-services-grid">
                 {packages.map((pkg) => (
                   <button
@@ -487,9 +678,61 @@ export default function PublicBookingAgendaStep() {
                   </button>
                 ))}
               </div>
-            )}
+            ) : null}
+            {catalogTab === 'promotions' ? (
+              promotionsLoading && promotionsForCards.length === 0 ? (
+                <LoadingSpinner />
+              ) : (
+                <div className="citas-services-grid public-booking-promotions-grid">
+                  {promotionsForCards.map((promotion) => (
+                    <button
+                      key={promotion.promotionId}
+                      type="button"
+                      className={`citas-service-card public-booking-promo-card ${promotion.isSelected ? 'is-selected' : ''} ${promotion.canSelect ? '' : 'is-disabled'}`.trim()}
+                      disabled={!promotion.canSelect}
+                      aria-pressed={promotion.isSelected}
+                      title={!promotion.canSelect ? promotion.disabledReason : undefined}
+                      onClick={() => selectPromotion(promotion.promotionId)}
+                    >
+                      <div className="public-booking-promo-head">
+                        <span className="public-booking-promo-badge">
+                          <Tag size={12} />
+                          PROMO
+                        </span>
+                        <span className="public-booking-promo-benefit">{promotion.benefitLabel}</span>
+                      </div>
+                      <div className="citas-service-name">{promotion.titulo || 'Promoción'}</div>
+                      {promotion.subtitulo ? (
+                        <p className="public-booking-promo-subtitle">{promotion.subtitulo}</p>
+                      ) : null}
+                      <p className="public-booking-promo-target">Aplica a: {promotion.targetLabel}</p>
+                      {promotion.vigencyLabel ? (
+                        <p className="public-booking-promo-vigency">Vigencia: {promotion.vigencyLabel}</p>
+                      ) : null}
+                      {!promotion.canSelect ? (
+                        <p className="public-booking-promo-requirement">{promotion.disabledReason}</p>
+                      ) : null}
+                      {promotion.isSelected ? (
+                        <p className="public-booking-promo-selected">Promoción seleccionada</p>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              )
+            ) : null}
             {catalogTab === 'packages' && packages.length === 0 ? (
               <p className="citas-selected-date mt-2">No hay paquetes disponibles para esta sucursal.</p>
+            ) : null}
+            {catalogTab === 'promotions' && !promotionsLoading && promotionsForCards.length === 0 ? (
+              <p className="citas-selected-date mt-2">No hay promociones disponibles para esta sucursal.</p>
+            ) : null}
+            {catalogTab === 'promotions' && selectedPromotion ? (
+              <div className="public-booking-actions is-inline mt-2">
+                <p className="citas-selected-date">Promoción seleccionada: {selectedPromotion.titulo || 'Promoción seleccionada'}</p>
+                <Button type="button" variant="outline" size="sm" onClick={clearSelectedPromotion}>
+                  Quitar promoción
+                </Button>
+              </div>
             ) : null}
           </div>
 
@@ -509,7 +752,37 @@ export default function PublicBookingAgendaStep() {
           ) : null}
 
           <div className="citas-services-summary-row mt-3">
-            <span>Total servicios: {formatCurrencyHnl(totalToPay)}</span>
+            {selectedPromotion ? (
+              <div className="public-booking-promo-summary">
+                {/* // JK: Resumen principal con jerarquía visual consistente para promociones seleccionadas. */}
+                <div className="public-booking-promo-summary-row">
+                  <span className="public-booking-promo-summary-label">Subtotal servicios:</span>
+                  <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalToPay)}</strong>
+                </div>
+                <div className="public-booking-promo-summary-row">
+                  <span className="public-booking-promo-summary-label">Promoción seleccionada:</span>
+                  <strong className="public-booking-promo-summary-value">{selectedPromotion.titulo || 'Promoción'}</strong>
+                </div>
+                {activeBlockNeedsFinalCalculation ? (
+                  <div className="public-booking-promo-summary-row">
+                    <span className="public-booking-promo-summary-label">Descuento estimado:</span>
+                    <strong className="public-booking-promo-summary-value">Aplicación final pendiente en pago.</strong>
+                  </div>
+                ) : (
+                  <div className="public-booking-promo-summary-row">
+                    <span className="public-booking-promo-summary-label">Descuento estimado:</span>
+                    <strong className="public-booking-promo-summary-value">-{formatCurrencyHnl(visibleEstimatedDiscount)}</strong>
+                  </div>
+                )}
+                <div className="public-booking-promo-summary-row public-booking-promo-summary-row-total">
+                  <span className="public-booking-promo-summary-label">Total estimado:</span>
+                  <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalEstimatedToPay)}</strong>
+                </div>
+                <small>El descuento será aplicado y confirmado en el pago final.</small>
+              </div>
+            ) : (
+              <span>Total servicios: {formatCurrencyHnl(totalToPay)}</span>
+            )}
           </div>
         </motion.div>
 
@@ -700,7 +973,12 @@ export default function PublicBookingAgendaStep() {
           ) : null}
         </AnimatePresence>
 
-        <BookingBlocksSummary bookingBlocksSummary={bookingBlocksSummary} totalToPay={totalToPay} />
+        <BookingBlocksSummary
+          bookingBlocksSummary={bookingBlocksSummary}
+          totalToPay={totalToPay}
+          totalEstimatedPromotionDiscountHnl={totalEstimatedPromotionDiscountHnl}
+          totalEstimatedToPay={totalEstimatedToPay}
+        />
 
         <motion.div
           className="public-booking-actions public-booking-agenda-cta"

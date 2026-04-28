@@ -26,6 +26,11 @@ export async function listPublicCatalogPaquetes(params = {}) {
   return http.get(`/v1/public/catalog/paquetes${toQueryString(params)}`);
 }
 
+// JK: Consulta promociones vigentes para el flujo de agendamiento sin afectar pagos/factura.
+export async function listPublicAgendaPromociones(params = {}) {
+  return http.get(`/v1/public/agenda/promociones${toQueryString(params)}`);
+}
+
 export async function listPublicAgendaDisponibilidad(params = {}, options = {}) {
   return http.get(`/v1/public/agenda/disponibilidad${toQueryString(params)}`, options);
 }
