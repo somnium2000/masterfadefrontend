@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RotateCcw, Search, Siren } from 'lucide-react';
+import { Filter, RotateCcw, Search, Siren } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
@@ -15,13 +15,18 @@ import {
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
-import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
+import SecurityActionConfirmModal from '../components/SecurityActionConfirmModal.jsx';
+import SecurityDetailModal from '../components/SecurityDetailModal.jsx';
+import SecurityInfoGrid from '../components/SecurityInfoGrid.jsx';
+import SecurityResponsiveCard from '../components/SecurityResponsiveCard.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
+  getAdminSecurityAlertDetail,
   listAdminSecurityAlerts,
   updateAdminSecurityAlertState,
 } from '../lib/adminSeguridadApi.js';
+import useSecurityRealtime from '../lib/useSecurityRealtime.js';
 
 const ALERT_STATE_OPTIONS = [
   { value: 'all', label: 'Todos' },
@@ -84,6 +89,13 @@ function unwrapCollectionResponse(response) {
   return { items, pagination };
 }
 
+function unwrapSingleResponse(response) {
+  const payload = response?.data && typeof response.data === 'object'
+    ? response.data
+    : (response || {});
+  return payload || {};
+}
+
 function normalizeDisplayText(value, fallback = '-') {
   const normalized = String(value || '').trim();
   return normalized || fallback;
@@ -115,6 +127,16 @@ function formatAlertType(value) {
   return map[String(value || '').trim()] || 'Alerta de seguridad';
 }
 
+function formatImpactLevel(value) {
+  const map = {
+    usuario: 'Usuario',
+    ip: 'IP',
+    sistema: 'Sistema',
+    sesion: 'Sesion',
+  };
+  return map[String(value || '').trim().toLowerCase()] || 'Sistema';
+}
+
 function SeverityBadge({ value }) {
   const normalized = String(value || '').trim().toLowerCase();
   let className = 'mf-badge mf-badge-muted';
@@ -142,13 +164,24 @@ function resolveListErrorMessage(error) {
 function resolveActionMessage(error) {
   const status = Number(error?.status || 0);
   if (status === 404) return 'La alerta seleccionada ya no se encuentra disponible.';
+  if (status === 400) return 'Debes ingresar un comentario para resolver o descartar.';
   return 'No fue posible actualizar el estado de la alerta.';
+}
+
+function safeStringify(value) {
+  if (!value || typeof value !== 'object') return '';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return '';
+  }
 }
 
 export default function AdminSeguridadAlertasPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
   const { roles } = useAuth();
+  const realtimeChannels = useMemo(() => ['security.alerts.changed'], []);
 
   const canWrite = useMemo(
     () => roles.includes('super_admin') || roles.includes('security_admin'),
@@ -162,8 +195,14 @@ export default function AdminSeguridadAlertasPage() {
   const [page, setPage] = useState(1);
   const [draftFilters, setDraftFilters] = useState(DEFAULT_FILTERS);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState(null);
+  const [resolutionComment, setResolutionComment] = useState('');
   const [actionLoadingId, setActionLoadingId] = useState('');
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const [detailData, setDetailData] = useState(null);
 
   const hasActiveFilters = useMemo(() => (
     filters.estado !== DEFAULT_FILTERS.estado
@@ -211,6 +250,16 @@ export default function AdminSeguridadAlertasPage() {
     }
   }, [filters, navigate, page]);
 
+  const realtime = useSecurityRealtime({
+    enabled: true,
+    channels: realtimeChannels,
+    signalDebounceMs: 500,
+    maxReconnectAttempts: 5,
+    onSignal: () => {
+      void fetchRows();
+    },
+  });
+
   useEffect(() => {
     void fetchRows();
   }, [fetchRows]);
@@ -221,6 +270,7 @@ export default function AdminSeguridadAlertasPage() {
       ...draftFilters,
       limit: Number(draftFilters.limit) || DEFAULT_FILTERS.limit,
     });
+    setShowMobileFilters(false);
   }
 
   function resetFilters() {
@@ -229,15 +279,53 @@ export default function AdminSeguridadAlertasPage() {
     setPage(1);
   }
 
+  function openConfirmModal(row, nextState) {
+    setConfirmTarget({
+      id_alerta: row.id_alerta,
+      nextState,
+      actionLabel: nextState === 'descartada' ? 'Descartar' : 'Resolver',
+    });
+    setResolutionComment('');
+  }
+
+  async function openDetail(idAlerta) {
+    if (!idAlerta) return;
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setDetailError('');
+    setDetailData(null);
+    try {
+      const response = await getAdminSecurityAlertDetail(idAlerta);
+      setDetailData(unwrapSingleResponse(response));
+    } catch (requestError) {
+      if (requestError?.status === 401) {
+        navigate('/login', { replace: true });
+        return;
+      }
+      if (requestError?.status === 403) {
+        navigate('/unauthorized', { replace: true });
+        return;
+      }
+      setDetailError('No fue posible cargar el detalle de la alerta.');
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
   async function confirmStateUpdate() {
     if (!confirmTarget?.id_alerta || !confirmTarget?.nextState || actionLoadingId) return;
     setActionLoadingId(confirmTarget.id_alerta);
     try {
-      await updateAdminSecurityAlertState(confirmTarget.id_alerta, confirmTarget.nextState);
+      await updateAdminSecurityAlertState(
+        confirmTarget.id_alerta,
+        confirmTarget.nextState,
+        resolutionComment
+      );
       notifications.success('Estado de alerta actualizado correctamente.', {
         dedupeKey: 'security-alerts-state-updated',
       });
       setConfirmTarget(null);
+      setResolutionComment('');
       await fetchRows();
     } catch (requestError) {
       if (requestError?.status === 401) {
@@ -267,109 +355,129 @@ export default function AdminSeguridadAlertasPage() {
             <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Seguridad</p>
             <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Alertas</h1>
             <p className="text-sm text-[var(--mf-text-2)]">
-              Seguimiento de eventos de riesgo con acciones de resolucion controladas.
+              Vista resumida por riesgo y flujo de resolucion con comentario obligatorio.
+            </p>
+            <p className="text-xs text-[var(--mf-text-2)]">
+              {realtime.freshnessLabel}
+              {' | '}
+              {realtime.isUnavailable ? 'Realtime no disponible' : (realtime.isConnected ? 'En vivo' : 'Reconectando...')}
             </p>
           </div>
           <div className="text-sm text-[var(--mf-text-2)]">
-            {loading ? 'Cargando...' : `${pagination.total || 0} registro(s)`}
+            {loading ? 'Cargando...' : `${pagination.total || 0} registro(s) | ${realtime.signalCount} evento(s)`}
           </div>
         </div>
       </header>
 
       <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-4">
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-6">
-          <div>
-            <Label className="mf-label">Estado</Label>
-            <select
-              className="mf-select mt-1"
-              value={draftFilters.estado}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, estado: event.target.value }))}
-            >
-              {ALERT_STATE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label className="mf-label">Severidad</Label>
-            <select
-              className="mf-select mt-1"
-              value={draftFilters.severidad}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, severidad: event.target.value }))}
-            >
-              {ALERT_SEVERITY_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label className="mf-label">Tipo</Label>
-            <select
-              className="mf-select mt-1"
-              value={draftFilters.tipo}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, tipo: event.target.value }))}
-            >
-              {ALERT_TYPE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label className="mf-label">Ordenar por</Label>
-            <select
-              className="mf-select mt-1"
-              value={draftFilters.sortBy}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, sortBy: event.target.value }))}
-            >
-              {SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label className="mf-label">Desde</Label>
-            <Input
-              type="datetime-local"
-              className="mt-1"
-              value={toDatetimeLocal(draftFilters.fromAt)}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, fromAt: event.target.value }))}
-            />
-          </div>
-          <div>
-            <Label className="mf-label">Hasta</Label>
-            <Input
-              type="datetime-local"
-              className="mt-1"
-              value={toDatetimeLocal(draftFilters.toAt)}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, toAt: event.target.value }))}
-            />
-          </div>
+        <div className="mb-3 flex items-center justify-between gap-2 md:hidden">
+          <Button type="button" variant="outline" className="gap-2" onClick={() => setShowMobileFilters((prev) => !prev)}>
+            <Filter size={14} />
+            Filtros
+          </Button>
+          {hasActiveFilters ? (
+            <Button type="button" variant="ghost" className="gap-2" onClick={resetFilters}>
+              <RotateCcw size={14} />
+              Restablecer
+            </Button>
+          ) : null}
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Label className="mf-label !mb-0">Tamano de pagina</Label>
-            <select
-              className="mf-select min-w-[100px]"
-              value={String(draftFilters.limit)}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, limit: Number(event.target.value) }))}
-            >
-              <option value="20">20</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-            </select>
+        <div className={`${showMobileFilters ? 'block' : 'hidden'} space-y-3 md:block`}>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-6">
+            <div>
+              <Label className="mf-label">Estado</Label>
+              <select
+                className="mf-select mt-1"
+                value={draftFilters.estado}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, estado: event.target.value }))}
+              >
+                {ALERT_STATE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Severidad</Label>
+              <select
+                className="mf-select mt-1"
+                value={draftFilters.severidad}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, severidad: event.target.value }))}
+              >
+                {ALERT_SEVERITY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Tipo</Label>
+              <select
+                className="mf-select mt-1"
+                value={draftFilters.tipo}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, tipo: event.target.value }))}
+              >
+                {ALERT_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Ordenar por</Label>
+              <select
+                className="mf-select mt-1"
+                value={draftFilters.sortBy}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, sortBy: event.target.value }))}
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Desde</Label>
+              <Input
+                type="datetime-local"
+                className="mt-1"
+                value={toDatetimeLocal(draftFilters.fromAt)}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, fromAt: event.target.value }))}
+              />
+            </div>
+            <div>
+              <Label className="mf-label">Hasta</Label>
+              <Input
+                type="datetime-local"
+                className="mt-1"
+                value={toDatetimeLocal(draftFilters.toAt)}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, toAt: event.target.value }))}
+              />
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" className="gap-2" onClick={applyFilters}>
-              <Search size={14} />
-              Aplicar filtros
-            </Button>
-            {hasActiveFilters ? (
-              <Button type="button" variant="ghost" className="gap-2" onClick={resetFilters}>
-                <RotateCcw size={14} />
-                Restablecer
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Label className="mf-label !mb-0">Tamano de pagina</Label>
+              <select
+                className="mf-select min-w-[100px]"
+                value={String(draftFilters.limit)}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, limit: Number(event.target.value) }))}
+              >
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" className="gap-2" onClick={applyFilters}>
+                <Search size={14} />
+                Aplicar filtros
               </Button>
-            ) : null}
+              {hasActiveFilters ? (
+                <Button type="button" variant="ghost" className="hidden gap-2 md:inline-flex" onClick={resetFilters}>
+                  <RotateCcw size={14} />
+                  Restablecer
+                </Button>
+              ) : null}
+            </div>
           </div>
         </div>
       </section>
@@ -386,68 +494,103 @@ export default function AdminSeguridadAlertasPage() {
       ) : null}
 
       {!loading && !error && rows.length > 0 ? (
-        <div className="mf-table-wrap">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-[var(--mf-nav-border)]">
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Tipo</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Severidad</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Estado</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Fecha</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Resumen</TableHead>
-                <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => {
-                const canResolve = canWrite && (row.estado === 'abierta' || row.estado === 'en_revision');
-                return (
-                  <TableRow key={row.id_alerta} className="border-[var(--mf-nav-border)]">
-                    <TableCell>{formatAlertType(row.tipo)}</TableCell>
-                    <TableCell><SeverityBadge value={row.severidad} /></TableCell>
-                    <TableCell><StateBadge value={row.estado} /></TableCell>
-                    <TableCell>{formatDateTime(row.detectada_at)}</TableCell>
-                    <TableCell>{normalizeDisplayText(row.resumen)}</TableCell>
-                    <TableCell className="text-center">
-                      {canResolve ? (
+        <>
+          <div className="mf-table-wrap hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-[var(--mf-nav-border)]">
+                  <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Tipo</TableHead>
+                  <TableHead className="hidden text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] lg:table-cell">Nivel</TableHead>
+                  <TableHead className="hidden text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] lg:table-cell">Severidad</TableHead>
+                  <TableHead className="hidden text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] lg:table-cell">Estado</TableHead>
+                  <TableHead className="hidden text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] xl:table-cell">Fecha</TableHead>
+                  <TableHead className="hidden text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] xl:table-cell">Resumen</TableHead>
+                  <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => {
+                  const canResolve = canWrite && (row.estado === 'abierta' || row.estado === 'en_revision');
+                  return (
+                    <TableRow key={row.id_alerta} className="border-[var(--mf-nav-border)]">
+                      <TableCell>{formatAlertType(row.tipo)}</TableCell>
+                      <TableCell className="hidden lg:table-cell">{formatImpactLevel(row.nivel_afectacion)}</TableCell>
+                      <TableCell className="hidden lg:table-cell"><SeverityBadge value={row.severidad} /></TableCell>
+                      <TableCell className="hidden lg:table-cell"><StateBadge value={row.estado} /></TableCell>
+                      <TableCell className="hidden xl:table-cell">{formatDateTime(row.detectada_at)}</TableCell>
+                      <TableCell className="hidden xl:table-cell">{normalizeDisplayText(row.resumen)}</TableCell>
+                      <TableCell className="text-center">
                         <div className="flex flex-wrap items-center justify-center gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            disabled={actionLoadingId === row.id_alerta}
-                            onClick={() => setConfirmTarget({
-                              id_alerta: row.id_alerta,
-                              nextState: 'resuelta',
-                              actionLabel: 'Resolver',
-                            })}
-                          >
+                          <Button type="button" size="sm" variant="outline" onClick={() => void openDetail(row.id_alerta)}>
+                            Ver detalle
+                          </Button>
+                          {canResolve ? (
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={actionLoadingId === row.id_alerta}
+                                onClick={() => openConfirmModal(row, 'resuelta')}
+                              >
+                                Resolver
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={actionLoadingId === row.id_alerta}
+                                onClick={() => openConfirmModal(row, 'descartada')}
+                              >
+                                Descartar
+                              </Button>
+                            </>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="space-y-3 md:hidden">
+            {rows.map((row) => {
+              const canResolve = canWrite && (row.estado === 'abierta' || row.estado === 'en_revision');
+              return (
+                <SecurityResponsiveCard
+                  key={row.id_alerta}
+                  title={formatAlertType(row.tipo)}
+                  subtitle={formatDateTime(row.detectada_at)}
+                  rows={[
+                    { key: 'nivel', label: 'Nivel', value: formatImpactLevel(row.nivel_afectacion) },
+                    { key: 'severidad', label: 'Severidad', value: normalizeDisplayText(row.severidad) },
+                    { key: 'estado', label: 'Estado', value: normalizeDisplayText(row.estado) },
+                    { key: 'resumen', label: 'Resumen', value: normalizeDisplayText(row.resumen) },
+                  ]}
+                  actions={(
+                    <div className="grid grid-cols-1 gap-2">
+                      <Button type="button" size="sm" variant="outline" onClick={() => void openDetail(row.id_alerta)}>
+                        Ver detalle
+                      </Button>
+                      {canResolve ? (
+                        <>
+                          <Button type="button" size="sm" variant="outline" onClick={() => openConfirmModal(row, 'resuelta')}>
                             Resolver
                           </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            disabled={actionLoadingId === row.id_alerta}
-                            onClick={() => setConfirmTarget({
-                              id_alerta: row.id_alerta,
-                              nextState: 'descartada',
-                              actionLabel: 'Descartar',
-                            })}
-                          >
+                          <Button type="button" size="sm" variant="outline" onClick={() => openConfirmModal(row, 'descartada')}>
                             Descartar
                           </Button>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-[var(--mf-text-2)]">{canWrite ? 'Sin accion' : 'Solo lectura'}</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
+                        </>
+                      ) : null}
+                    </div>
+                  )}
+                />
+              );
+            })}
+          </div>
+        </>
       ) : null}
 
       {!loading && !error && rows.length > 0 ? (
@@ -479,20 +622,81 @@ export default function AdminSeguridadAlertasPage() {
         </div>
       ) : null}
 
-      <ActionConfirmDialog
+      <SecurityDetailModal
+        open={detailOpen}
+        onOpenChange={(open) => {
+          setDetailOpen(open);
+          if (!open) {
+            setDetailData(null);
+            setDetailError('');
+            setDetailLoading(false);
+          }
+        }}
+        title="Detalle de alerta"
+        description="Vista ampliada de la alerta seleccionada."
+      >
+        {detailLoading ? <LoadingSpinner label="Cargando detalle..." /> : null}
+        {!detailLoading && detailError ? <ErrorBanner message={detailError} /> : null}
+        {!detailLoading && !detailError && detailData ? (
+          <div className="space-y-4">
+            <SecurityInfoGrid
+              items={[
+                { key: 'id', label: 'ID alerta', value: normalizeDisplayText(detailData.id_alerta) },
+                { key: 'tipo', label: 'Tipo', value: formatAlertType(detailData.tipo) },
+                { key: 'nivel', label: 'Nivel afectado', value: formatImpactLevel(detailData.nivel_afectacion) },
+                { key: 'estado', label: 'Estado', value: normalizeDisplayText(detailData.estado) },
+                { key: 'severidad', label: 'Severidad', value: normalizeDisplayText(detailData.severidad) },
+                { key: 'fecha', label: 'Detectada', value: formatDateTime(detailData.detectada_at) },
+                { key: 'usuario', label: 'ID usuario', value: normalizeDisplayText(detailData.id_usuario) },
+                { key: 'ip', label: 'IP', value: normalizeDisplayText(detailData.ip) },
+                { key: 'resueltaAt', label: 'Resuelta', value: formatDateTime(detailData.resuelta_at) },
+                { key: 'resueltaPor', label: 'Resuelta por', value: normalizeDisplayText(detailData.resuelta_por) },
+              ]}
+            />
+
+            <article className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+              <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-accent)]">Resumen</p>
+              <p className="mt-1 break-all text-sm text-[var(--mf-text)]">{normalizeDisplayText(detailData.resumen)}</p>
+            </article>
+
+            <article className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+              <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-accent)]">Comentario de resolucion</p>
+              <p className="mt-1 break-all text-sm text-[var(--mf-text)]">{normalizeDisplayText(detailData.comentario_resolucion)}</p>
+            </article>
+
+            {detailData.detalle && typeof detailData.detalle === 'object' ? (
+              <article className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+                <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-accent)]">Detalle tecnico</p>
+                <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all text-xs text-[var(--mf-text)]">
+                  {safeStringify(detailData.detalle)}
+                </pre>
+              </article>
+            ) : null}
+          </div>
+        ) : null}
+      </SecurityDetailModal>
+
+      <SecurityActionConfirmModal
         open={Boolean(confirmTarget)}
         onOpenChange={(open) => {
-          if (!open && !actionLoadingId) setConfirmTarget(null);
+          if (!open && !actionLoadingId) {
+            setConfirmTarget(null);
+            setResolutionComment('');
+          }
         }}
-        tone={confirmTarget?.nextState === 'descartada' ? 'danger' : 'warning'}
         title={confirmTarget?.nextState === 'descartada' ? 'Descartar alerta' : 'Resolver alerta'}
-        description="Se actualizara el estado de la alerta seleccionada."
+        description="Solo se actualizara el estado de la alerta. No se ejecutan acciones automaticas."
         confirmLabel={confirmTarget?.actionLabel || 'Confirmar'}
         cancelLabel="Cancelar"
         loading={Boolean(actionLoadingId)}
+        comment={resolutionComment}
+        onCommentChange={setResolutionComment}
+        requireComment
         onConfirm={confirmStateUpdate}
+        tone={confirmTarget?.nextState === 'descartada' ? 'danger' : 'warning'}
+        commentLabel="Comentario obligatorio"
+        commentPlaceholder="Describe la razon de resolucion o descarte"
       />
     </div>
   );
 }
-

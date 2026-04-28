@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RotateCcw, Search, ShieldAlert } from 'lucide-react';
+import { Filter, RotateCcw, Search, ShieldAlert } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
@@ -16,6 +16,7 @@ import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
+import SecurityResponsiveCard from '../components/SecurityResponsiveCard.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
@@ -126,6 +127,7 @@ export default function AdminSeguridadUsuariosPage() {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState('');
 
@@ -245,6 +247,20 @@ export default function AdminSeguridadUsuariosPage() {
       </header>
 
       <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-4">
+        <div className="mb-3 flex items-center justify-between gap-2 md:hidden">
+          <Button type="button" variant="outline" className="gap-2" onClick={() => setShowMobileFilters((prev) => !prev)}>
+            <Filter size={14} />
+            Filtros
+          </Button>
+          {hasActiveFilters ? (
+            <Button type="button" variant="ghost" className="gap-2" onClick={clearFilters}>
+              <RotateCcw size={14} />
+              Restablecer
+            </Button>
+          ) : null}
+        </div>
+
+        <div className={`${showMobileFilters ? 'block' : 'hidden'} space-y-3 md:block`}>
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
           <div className="lg:col-span-2">
             <Label className="mf-label">Busqueda</Label>
@@ -330,6 +346,7 @@ export default function AdminSeguridadUsuariosPage() {
             </span>
           )}
         </div>
+        </div>
       </section>
 
       {error ? <ErrorBanner message={error} onRetry={() => void fetchRows()} /> : null}
@@ -344,7 +361,8 @@ export default function AdminSeguridadUsuariosPage() {
       ) : null}
 
       {!loading && !error && rows.length > 0 ? (
-        <div className="mf-table-wrap">
+        <>
+        <div className="mf-table-wrap hidden md:block">
           <Table>
             <TableHeader>
               <TableRow className="border-[var(--mf-nav-border)]">
@@ -402,6 +420,47 @@ export default function AdminSeguridadUsuariosPage() {
             </TableBody>
           </Table>
         </div>
+        <div className="space-y-3 md:hidden">
+          {rows.map((row) => {
+            const nextState = resolveTargetState(row.estado_acceso);
+            const isActivating = nextState === 'activo';
+            return (
+              <SecurityResponsiveCard
+                key={row.id_usuario}
+                title={buildUserDisplayName(row)}
+                subtitle={normalizeDisplayText(row.email_masked)}
+                rows={[
+                  { key: 'roles', label: 'Roles', value: formatRolesLabel(row.roles) },
+                  { key: 'estado', label: 'Estado', value: normalizeDisplayText(row.estado_acceso) },
+                  { key: 'locked', label: 'Bloqueado hasta', value: formatDateTime(row.locked_until_at) },
+                  { key: 'failed', label: 'Fallidos', value: Number(row.failed_login_count || 0) },
+                  { key: 'forcePwd', label: 'Forzar cambio', value: row.force_password_change === true ? 'Si' : row.force_password_change === false ? 'No' : 'No disponible' },
+                  { key: 'lastLogin', label: 'Ultimo login', value: formatDateTime(row.last_login_at) },
+                ]}
+                actions={canWrite ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={actionLoadingId === row.id_usuario}
+                    onClick={() => setConfirmTarget({
+                      id_usuario: row.id_usuario,
+                      currentState: row.estado_acceso,
+                      nextState,
+                      label: buildUserDisplayName(row),
+                      actionLabel: isActivating ? 'Activar' : 'Bloquear',
+                    })}
+                  >
+                    {isActivating ? 'Activar' : 'Bloquear'}
+                  </Button>
+                ) : (
+                  <span className="text-xs text-[var(--mf-text-2)]">Solo lectura</span>
+                )}
+              />
+            );
+          })}
+        </div>
+        </>
       ) : null}
 
       {!loading && !error && rows.length > 0 ? (
@@ -453,4 +512,3 @@ export default function AdminSeguridadUsuariosPage() {
     </div>
   );
 }
-

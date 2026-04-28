@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RotateCcw, Search, Shield } from 'lucide-react';
+import { Filter, RotateCcw, Search, Shield } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
@@ -15,7 +15,13 @@ import {
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
-import { listAdminSecurityLoginLogs } from '../lib/adminSeguridadApi.js';
+import SecurityDetailModal from '../components/SecurityDetailModal.jsx';
+import SecurityInfoGrid from '../components/SecurityInfoGrid.jsx';
+import SecurityResponsiveCard from '../components/SecurityResponsiveCard.jsx';
+import {
+  getAdminSecurityLoginLogDetail,
+  listAdminSecurityLoginLogs,
+} from '../lib/adminSeguridadApi.js';
 
 const RESULT_OPTIONS = [
   { value: 'all', label: 'Todos' },
@@ -67,6 +73,13 @@ function unwrapCollectionResponse(response) {
     total_pages: 1,
   };
   return { items, pagination };
+}
+
+function unwrapSingleResponse(response) {
+  const payload = response?.data && typeof response.data === 'object'
+    ? response.data
+    : (response || {});
+  return payload || {};
 }
 
 function toDatetimeLocal(value) {
@@ -125,6 +138,15 @@ function resolveListErrorMessage(error) {
   return 'No fue posible cargar los logs de seguridad en este momento.';
 }
 
+function safeStringify(value) {
+  if (!value || typeof value !== 'object') return '';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return '';
+  }
+}
+
 export default function AdminSeguridadLoginLogsPage() {
   const navigate = useNavigate();
   const [rows, setRows] = useState([]);
@@ -134,6 +156,11 @@ export default function AdminSeguridadLoginLogsPage() {
   const [page, setPage] = useState(1);
   const [draftFilters, setDraftFilters] = useState(DEFAULT_FILTERS);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const [detailData, setDetailData] = useState(null);
 
   const hasActiveFilters = useMemo(() => (
     filters.resultado !== DEFAULT_FILTERS.resultado
@@ -189,12 +216,37 @@ export default function AdminSeguridadLoginLogsPage() {
       ...draftFilters,
       limit: Number(draftFilters.limit) || DEFAULT_FILTERS.limit,
     });
+    setShowMobileFilters(false);
   }
 
   function resetFilters() {
     setDraftFilters(DEFAULT_FILTERS);
     setFilters(DEFAULT_FILTERS);
     setPage(1);
+  }
+
+  async function openDetail(idLoginLog) {
+    if (!idLoginLog) return;
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setDetailError('');
+    setDetailData(null);
+    try {
+      const response = await getAdminSecurityLoginLogDetail(idLoginLog);
+      setDetailData(unwrapSingleResponse(response));
+    } catch (requestError) {
+      if (requestError?.status === 401) {
+        navigate('/login', { replace: true });
+        return;
+      }
+      if (requestError?.status === 403) {
+        navigate('/unauthorized', { replace: true });
+        return;
+      }
+      setDetailError('No fue posible cargar el detalle del intento.');
+    } finally {
+      setDetailLoading(false);
+    }
   }
 
   const safePage = Math.max(1, Number(pagination?.page || page));
@@ -208,7 +260,7 @@ export default function AdminSeguridadLoginLogsPage() {
             <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Seguridad</p>
             <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Login Logs</h1>
             <p className="text-sm text-[var(--mf-text-2)]">
-              Monitoreo de intentos de acceso con datos enmascarados y controlados.
+              Vista resumida en tabla y detalle ampliado en modal seguro.
             </p>
           </div>
           <div className="text-sm text-[var(--mf-text-2)]">
@@ -218,99 +270,114 @@ export default function AdminSeguridadLoginLogsPage() {
       </header>
 
       <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-4">
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-6">
-          <div>
-            <Label className="mf-label">Resultado</Label>
-            <select
-              className="mf-select mt-1"
-              value={draftFilters.resultado}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, resultado: event.target.value }))}
-            >
-              {RESULT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label className="mf-label">Proveedor</Label>
-            <select
-              className="mf-select mt-1"
-              value={draftFilters.provider}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, provider: event.target.value }))}
-            >
-              {PROVIDER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label className="mf-label">Ordenar por</Label>
-            <select
-              className="mf-select mt-1"
-              value={draftFilters.sortBy}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, sortBy: event.target.value }))}
-            >
-              {SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label className="mf-label">Direccion</Label>
-            <select
-              className="mf-select mt-1"
-              value={draftFilters.sortDir}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, sortDir: event.target.value }))}
-            >
-              {DIRECTION_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <Label className="mf-label">Desde</Label>
-            <Input
-              type="datetime-local"
-              className="mt-1"
-              value={toDatetimeLocal(draftFilters.fromAt)}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, fromAt: event.target.value }))}
-            />
-          </div>
-          <div>
-            <Label className="mf-label">Hasta</Label>
-            <Input
-              type="datetime-local"
-              className="mt-1"
-              value={toDatetimeLocal(draftFilters.toAt)}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, toAt: event.target.value }))}
-            />
-          </div>
+        <div className="mb-3 flex items-center justify-between gap-2 md:hidden">
+          <Button type="button" variant="outline" className="gap-2" onClick={() => setShowMobileFilters((prev) => !prev)}>
+            <Filter size={14} />
+            Filtros
+          </Button>
+          {hasActiveFilters ? (
+            <Button type="button" variant="ghost" className="gap-2" onClick={resetFilters}>
+              <RotateCcw size={14} />
+              Restablecer
+            </Button>
+          ) : null}
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Label className="mf-label !mb-0">Tamano de pagina</Label>
-            <select
-              className="mf-select min-w-[100px]"
-              value={String(draftFilters.limit)}
-              onChange={(event) => setDraftFilters((prev) => ({ ...prev, limit: Number(event.target.value) }))}
-            >
-              <option value="20">20</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-            </select>
+        <div className={`${showMobileFilters ? 'block' : 'hidden'} space-y-3 md:block`}>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-6">
+            <div>
+              <Label className="mf-label">Resultado</Label>
+              <select
+                className="mf-select mt-1"
+                value={draftFilters.resultado}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, resultado: event.target.value }))}
+              >
+                {RESULT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Proveedor</Label>
+              <select
+                className="mf-select mt-1"
+                value={draftFilters.provider}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, provider: event.target.value }))}
+              >
+                {PROVIDER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Ordenar por</Label>
+              <select
+                className="mf-select mt-1"
+                value={draftFilters.sortBy}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, sortBy: event.target.value }))}
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Direccion</Label>
+              <select
+                className="mf-select mt-1"
+                value={draftFilters.sortDir}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, sortDir: event.target.value }))}
+              >
+                {DIRECTION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label className="mf-label">Desde</Label>
+              <Input
+                type="datetime-local"
+                className="mt-1"
+                value={toDatetimeLocal(draftFilters.fromAt)}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, fromAt: event.target.value }))}
+              />
+            </div>
+            <div>
+              <Label className="mf-label">Hasta</Label>
+              <Input
+                type="datetime-local"
+                className="mt-1"
+                value={toDatetimeLocal(draftFilters.toAt)}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, toAt: event.target.value }))}
+              />
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" className="gap-2" onClick={applyFilters}>
-              <Search size={14} />
-              Aplicar filtros
-            </Button>
-            {hasActiveFilters ? (
-              <Button type="button" variant="ghost" className="gap-2" onClick={resetFilters}>
-                <RotateCcw size={14} />
-                Restablecer
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Label className="mf-label !mb-0">Tamano de pagina</Label>
+              <select
+                className="mf-select min-w-[100px]"
+                value={String(draftFilters.limit)}
+                onChange={(event) => setDraftFilters((prev) => ({ ...prev, limit: Number(event.target.value) }))}
+              >
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" className="gap-2" onClick={applyFilters}>
+                <Search size={14} />
+                Aplicar filtros
               </Button>
-            ) : null}
+              {hasActiveFilters ? (
+                <Button type="button" variant="ghost" className="hidden gap-2 md:inline-flex" onClick={resetFilters}>
+                  <RotateCcw size={14} />
+                  Restablecer
+                </Button>
+              ) : null}
+            </div>
           </div>
         </div>
       </section>
@@ -327,34 +394,62 @@ export default function AdminSeguridadLoginLogsPage() {
       ) : null}
 
       {!loading && !error && rows.length > 0 ? (
-        <div className="mf-table-wrap">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-[var(--mf-nav-border)]">
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Fecha</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Resultado</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Correo</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">IP</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Proveedor</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Motivo</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Dispositivo</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.id_login_log} className="border-[var(--mf-nav-border)]">
-                  <TableCell>{formatDateTime(row.created_at)}</TableCell>
-                  <TableCell><ResultBadge value={row.resultado} /></TableCell>
-                  <TableCell>{normalizeDisplayText(row.email_masked)}</TableCell>
-                  <TableCell>{normalizeDisplayText(row.ip)}</TableCell>
-                  <TableCell>{formatProvider(row.provider)}</TableCell>
-                  <TableCell>{formatReasonCode(row.motivo_codigo)}</TableCell>
-                  <TableCell>{normalizeDisplayText(row.user_agent_hint)}</TableCell>
+        <>
+          <div className="mf-table-wrap hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-[var(--mf-nav-border)]">
+                  <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Fecha</TableHead>
+                  <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Resultado</TableHead>
+                  <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Correo</TableHead>
+                  <TableHead className="hidden text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] lg:table-cell">IP</TableHead>
+                  <TableHead className="hidden text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] xl:table-cell">Proveedor</TableHead>
+                  <TableHead className="hidden text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] xl:table-cell">Dispositivo</TableHead>
+                  <TableHead className="text-center text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Accion</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow key={row.id_login_log} className="border-[var(--mf-nav-border)]">
+                    <TableCell>{formatDateTime(row.created_at)}</TableCell>
+                    <TableCell><ResultBadge value={row.resultado} /></TableCell>
+                    <TableCell>{normalizeDisplayText(row.email_masked)}</TableCell>
+                    <TableCell className="hidden lg:table-cell">{normalizeDisplayText(row.ip)}</TableCell>
+                    <TableCell className="hidden xl:table-cell">{formatProvider(row.provider)}</TableCell>
+                    <TableCell className="hidden xl:table-cell">{normalizeDisplayText(row.device_summary)}</TableCell>
+                    <TableCell className="text-center">
+                      <Button type="button" size="sm" variant="outline" onClick={() => void openDetail(row.id_login_log)}>
+                        Ver detalle
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="space-y-3 md:hidden">
+            {rows.map((row) => (
+              <SecurityResponsiveCard
+                key={row.id_login_log}
+                title={formatDateTime(row.created_at)}
+                subtitle={formatReasonCode(row.motivo_codigo)}
+                rows={[
+                  { key: 'resultado', label: 'Resultado', value: normalizeDisplayText(row.resultado) },
+                  { key: 'correo', label: 'Correo', value: normalizeDisplayText(row.email_masked) },
+                  { key: 'ip', label: 'IP', value: normalizeDisplayText(row.ip) },
+                  { key: 'provider', label: 'Proveedor', value: formatProvider(row.provider) },
+                  { key: 'device', label: 'Dispositivo', value: normalizeDisplayText(row.device_summary) },
+                ]}
+                actions={(
+                  <Button type="button" size="sm" variant="outline" className="w-full" onClick={() => void openDetail(row.id_login_log)}>
+                    Ver detalle
+                  </Button>
+                )}
+              />
+            ))}
+          </div>
+        </>
       ) : null}
 
       {!loading && !error && rows.length > 0 ? (
@@ -385,7 +480,55 @@ export default function AdminSeguridadLoginLogsPage() {
           </div>
         </div>
       ) : null}
+
+      <SecurityDetailModal
+        open={detailOpen}
+        onOpenChange={(open) => {
+          setDetailOpen(open);
+          if (!open) {
+            setDetailData(null);
+            setDetailError('');
+            setDetailLoading(false);
+          }
+        }}
+        title="Detalle de intento de login"
+        description="Vista ampliada del registro seleccionado."
+      >
+        {detailLoading ? <LoadingSpinner label="Cargando detalle..." /> : null}
+        {!detailLoading && detailError ? <ErrorBanner message={detailError} /> : null}
+        {!detailLoading && !detailError && detailData ? (
+          <div className="space-y-4">
+            <SecurityInfoGrid
+              items={[
+                { key: 'fecha', label: 'Fecha', value: formatDateTime(detailData.created_at) },
+                { key: 'resultado', label: 'Resultado', value: normalizeDisplayText(detailData.resultado) },
+                { key: 'motivo', label: 'Motivo', value: formatReasonCode(detailData.motivo_codigo) },
+                { key: 'provider', label: 'Proveedor', value: formatProvider(detailData.provider) },
+                { key: 'correo', label: 'Correo', value: normalizeDisplayText(detailData.email || detailData.email_masked) },
+                { key: 'idusuario', label: 'ID usuario', value: normalizeDisplayText(detailData.id_usuario) },
+                { key: 'ip', label: 'IP', value: normalizeDisplayText(detailData.ip) },
+                { key: 'device', label: 'Dispositivo', value: normalizeDisplayText(detailData.device_summary) },
+                { key: 'hash', label: 'Identificador hash', value: normalizeDisplayText(detailData.identificador_hash) },
+                { key: 'request', label: 'Request ID', value: normalizeDisplayText(detailData.request_id) },
+              ]}
+            />
+
+            <article className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+              <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-accent)]">User-Agent</p>
+              <p className="mt-1 break-all text-sm text-[var(--mf-text)]">{normalizeDisplayText(detailData.user_agent)}</p>
+            </article>
+
+            {detailData.metadata && typeof detailData.metadata === 'object' ? (
+              <article className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+                <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-accent)]">Metadata</p>
+                <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all text-xs text-[var(--mf-text)]">
+                  {safeStringify(detailData.metadata)}
+                </pre>
+              </article>
+            ) : null}
+          </div>
+        ) : null}
+      </SecurityDetailModal>
     </div>
   );
 }
-

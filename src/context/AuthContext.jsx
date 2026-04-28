@@ -69,6 +69,16 @@ function resolveLoginErrorMessage(rawMessage, errorCode) {
   return String(rawMessage).trim();
 }
 
+function shouldHydrateForPath(pathname) {
+  const path = String(pathname || '').trim();
+  if (!path) return false;
+  if (path.startsWith('/auth/callback')) return false;
+  if (path.startsWith('/home')) return true;
+  if (path.startsWith('/admin')) return true;
+  if (path === '/login' || path === '/register') return true;
+  return false;
+}
+
 export function AuthProvider({ children }) {
   const [token, setToken] = useState('');
   const [user, setUser] = useState(null);
@@ -203,18 +213,20 @@ export function AuthProvider({ children }) {
   }, [invalidateSession]);
 
   useEffect(() => {
-    // AM: No hidratar sesion si estamos en /auth/callback — esa pagina maneja
-    // su propio intercambio de tokens. Hidratacion prematura aqui generaria un
-    // 401 en /v1/auth/me antes de que el exchange termine.
-    if (window.location.pathname.startsWith('/auth/callback')) {
-      // La pagina callback llama a completeExchangeLogin() cuando el exchange
-      // termina exitosamente, lo que triggerea hydrateSession() en el momento correcto.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+    const currentPathname = window.location?.pathname || '';
+
+    if (currentPathname.startsWith('/auth/callback')) {
       setIsHydrating(false);
       setIsHydrated(true);
       return;
     }
-    void hydrateSession();
+    if (shouldHydrateForPath(currentPathname)) {
+      void hydrateSession();
+      return;
+    }
+
+    setIsHydrating(false);
+    setIsHydrated(true);
   }, [hydrateSession]);
 
   const value = useMemo(

@@ -15,6 +15,7 @@ const USER_STATE_SET = new Set(['pendiente_password', 'activo', 'bloqueado', 'in
 const USER_SORT_SET = new Set(['updated_at', 'failed_login_count', 'last_login_at']);
 
 const ALERT_STATE_SET = new Set(['abierta', 'en_revision', 'resuelta', 'descartada']);
+const ALERT_UPDATE_STATE_SET = new Set(['resuelta', 'descartada']);
 const ALERT_SEVERITY_SET = new Set(['baja', 'media', 'alta', 'critica']);
 const ALERT_TYPE_SET = new Set([
   'muchos_fallos_misma_ip',
@@ -139,9 +140,17 @@ export async function listAdminSecurityLoginLogs(params = {}) {
   return http.get(`/v1/admin/seguridad/login-logs${toQueryString(query)}`);
 }
 
+export async function getAdminSecurityLoginLogDetail(idLoginLog) {
+  return http.get(`/v1/admin/seguridad/login-logs/${encodeURIComponent(String(idLoginLog || ''))}`);
+}
+
 export async function listAdminSecuritySessions(params = {}) {
   const query = sanitizeSessionParams(params);
   return http.get(`/v1/admin/seguridad/sesiones${toQueryString(query)}`);
+}
+
+export async function getAdminSecuritySessionDetail(idSesion) {
+  return http.get(`/v1/admin/seguridad/sesiones/${encodeURIComponent(String(idSesion || ''))}`);
 }
 
 export async function revokeAdminSecuritySession(idSesion) {
@@ -165,10 +174,17 @@ export async function listAdminSecurityAlerts(params = {}) {
   return http.get(`/v1/admin/seguridad/alertas${toQueryString(query)}`);
 }
 
-export async function updateAdminSecurityAlertState(idAlerta, estado) {
+export async function getAdminSecurityAlertDetail(idAlerta) {
+  return http.get(`/v1/admin/seguridad/alertas/${encodeURIComponent(String(idAlerta || ''))}`);
+}
+
+export async function updateAdminSecurityAlertState(idAlerta, estado, comentario = '') {
+  if (!ALERT_UPDATE_STATE_SET.has(estado)) {
+    throw new Error('ALERT_STATE_NOT_ALLOWED');
+  }
   const payload = {
-    estado: ALERT_STATE_SET.has(estado) ? estado : 'en_revision',
+    estado,
+    comentario: normalizeText(comentario, 700),
   };
   return http.patch(`/v1/admin/seguridad/alertas/${encodeURIComponent(String(idAlerta || ''))}/estado`, payload);
 }
-

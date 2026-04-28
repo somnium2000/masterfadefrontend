@@ -19,6 +19,7 @@ function buildNavModules(basePath, role) {
     const isBarbero = role === 'barbero';
     const isCliente = role === 'cliente';
     const isSecurityRole = role === 'security_admin' || role === 'security_auditor';
+    const canSeeSecurityModule = role === 'super_admin';
 
     if (isBarbero) {
         return [
@@ -136,18 +137,20 @@ function buildNavModules(basePath, role) {
             path: `${basePath}/citas`,
             subItems: agendamientoSubItems,
         },
-        {
-            id: 'seguridad',
-            label: 'Seguridad',
-            icon: Shield,
-            path: `${basePath}/seguridad`,
-            subItems: [
-                { id: 'seg-login-logs', label: 'Login Logs', path: `${basePath}/seguridad/login-logs` },
-                { id: 'seg-sesiones', label: 'Sesiones', path: `${basePath}/seguridad/sesiones` },
-                { id: 'seg-usuarios', label: 'Usuarios', path: `${basePath}/seguridad/usuarios` },
-                { id: 'seg-alertas', label: 'Alertas', path: `${basePath}/seguridad/alertas` },
-            ],
-        },
+        ...(canSeeSecurityModule
+            ? [{
+                id: 'seguridad',
+                label: 'Seguridad',
+                icon: Shield,
+                path: `${basePath}/seguridad`,
+                subItems: [
+                    { id: 'seg-login-logs', label: 'Login Logs', path: `${basePath}/seguridad/login-logs` },
+                    { id: 'seg-sesiones', label: 'Sesiones', path: `${basePath}/seguridad/sesiones` },
+                    { id: 'seg-usuarios', label: 'Usuarios', path: `${basePath}/seguridad/usuarios` },
+                    { id: 'seg-alertas', label: 'Alertas', path: `${basePath}/seguridad/alertas` },
+                ],
+            }]
+            : []),
         {
             id: 'reportes',
             label: 'Reportes',

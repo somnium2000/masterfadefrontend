@@ -206,13 +206,13 @@ function App() {
         <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPreviewPage /></RouteErrorBoundary>} />
         <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
-        <Route path="seguridad" element={<Navigate to="../seguridad/login-logs" replace />} />
-        <Route path="seguridad/login-logs" element={<RouteErrorBoundary><AdminSeguridadLoginLogsPage /></RouteErrorBoundary>} />
-        <Route path="seguridad/sesiones" element={<RouteErrorBoundary><AdminSeguridadSesionesPage /></RouteErrorBoundary>} />
-        <Route path="seguridad/usuarios" element={<RouteErrorBoundary><AdminSeguridadUsuariosPage /></RouteErrorBoundary>} />
-        <Route path="seguridad/alertas" element={<RouteErrorBoundary><AdminSeguridadAlertasPage /></RouteErrorBoundary>} />
-        <Route path="seguridad/logs" element={<Navigate to="../seguridad/login-logs" replace />} />
-        <Route path="seguridad/bitacoras" element={<Navigate to="../seguridad/alertas" replace />} />
+        <Route path="seguridad" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="seguridad/login-logs" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="seguridad/sesiones" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="seguridad/usuarios" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="seguridad/alertas" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="seguridad/logs" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="seguridad/bitacoras" element={<Navigate to="/unauthorized" replace />} />
         {/* Reportes */}
         {/* JK: Reportes usa tabs como navegacion principal y redirecciona por defecto a Ingresos. */}
         <Route path="reportes" element={<Navigate to="ingresos" replace />} />
