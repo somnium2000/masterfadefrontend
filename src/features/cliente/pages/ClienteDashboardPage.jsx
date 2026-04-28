@@ -8,9 +8,24 @@ import ClienteCourtesyRouteSection from '../components/ClienteCourtesyRouteSecti
 import ClienteSummaryCards from '../components/ClienteSummaryCards.jsx';
 import { getClienteCitaDetalle, getClienteMe, listClienteCitas } from '../lib/clienteApi.js';
 
-function isUpcomingAppointment(cita) {
+function isUpcomingAppointment(cita, nowMs) {
   const date = new Date(cita?.inicio_at || 0);
-  return Number.isFinite(date.getTime()) && date.getTime() >= Date.now();
+  return Number.isFinite(date.getTime()) && date.getTime() >= nowMs;
+}
+
+function getDateInHonduras(isoValue = null) {
+  const date = isoValue ? new Date(isoValue) : new Date();
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Tegucigalpa',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+  return year && month && day ? `${year}-${month}-${day}` : '';
 }
 
 async function resolveFavoriteServices(citas = []) {
@@ -71,8 +86,10 @@ export default function ClienteDashboardPage() {
   const [citas, setCitas] = useState([]);
   const [favoriteServices, setFavoriteServices] = useState([]);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const canLoadDashboard = Boolean(isAuthenticated && isHydrated && !isHydrating  );
+  const todayHn = useMemo(() => getDateInHonduras(new Date(nowMs).toISOString()), [nowMs]);
 
   const loadDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!canLoadDashboard) return;
@@ -85,11 +102,12 @@ export default function ClienteDashboardPage() {
       ]);
 
       const nextCitas = Array.isArray(citasPayload?.citas) ? citasPayload.citas : [];
+      const todayCitas = nextCitas.filter((cita) => getDateInHonduras(cita?.inicio_at) === todayHn);
       setProfileData(mePayload);
-      setCitas(nextCitas);
+      setCitas(todayCitas);
 
       try {
-        const favorites = await resolveFavoriteServices(nextCitas);
+        const favorites = await resolveFavoriteServices(todayCitas);
         setFavoriteServices(favorites);
       } catch {
         setFavoriteServices([]);
@@ -108,19 +126,29 @@ export default function ClienteDashboardPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [canLoadDashboard, logout, navigate, notifyError, refreshClienteProfile]);
+  }, [canLoadDashboard, logout, navigate, notifyError, refreshClienteProfile, todayHn]);
 
   useEffect(() => {
     if (!canLoadDashboard) return;
     void loadDashboard();
   }, [canLoadDashboard, loadDashboard]);
 
+  useEffect(() => {
+    const clockId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 60000);
+
+    return () => {
+      window.clearInterval(clockId);
+    };
+  }, []);
+
   const profile = profileData?.cliente || null;
   const completion = profileData?.profile_completion || null;
 
   const upcomingAppointments = useMemo(
-    () => citas.filter((item) => isUpcomingAppointment(item)),
-    [citas]
+    () => citas.filter((item) => isUpcomingAppointment(item, nowMs)),
+    [citas, nowMs]
   );
 
   const frequentBarbers = useMemo(() => {

@@ -378,8 +378,6 @@ export default function BarberoProfilePage() {
               </div>
             </section>
           ) : null}
-          <InfoSection title="Informacion laboral" items={groupedFields.laboral} />
-          <InfoSection title="Informacion adicional" items={groupedFields.adicional} />
         </>
       ) : null}
 

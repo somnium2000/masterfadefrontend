@@ -1,34 +1,42 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Coins, Loader2, Search, UserRound, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsUpDown, Coins, Loader2, Search, UserRound, Users } from 'lucide-react';
 import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
 import { Button } from '../../../components/ui/button.jsx';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../../../components/ui/dialog.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
-import { listAdminPersonasClientes } from '../lib/adminPersonasApi.js';
 import {
   createAdminClientePuntosAjuste,
   getAdminClientePuntosResumen,
+  searchAdminClientesActivos,
 } from '../lib/adminMasterPuntosApi.js';
 
 const MIN_REASON_LENGTH = 5;
 const DEFAULT_REWARD_TARGET = 10;
+const SEARCH_DEBOUNCE_MS = 320;
+const CLIENT_SEARCH_MIN_LENGTH = 2;
+const CLIENT_SEARCH_LIMIT = 10;
+const HISTORY_PAGE_SIZE = 4;
 
 function normalizeText(value) {
   return String(value || '').trim();
 }
 
-function normalizeSearchText(value) {
-  return normalizeText(value)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
-
 function toSafeInteger(value, fallback = 0) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function isPositiveIntegerString(value) {
+  return /^\d+$/.test(normalizeText(value));
 }
 
 function formatSignedPoints(value) {
@@ -56,12 +64,22 @@ function resolveMovementOriginLabel(origin) {
 
 function resolveApiErrorMessage(error, fallbackMessage) {
   const status = Number(error?.status || 0);
+  const errorCode = String(error?.data?.error?.code || '').trim().toUpperCase();
   if (status === 401) return 'Tu sesion expiro. Inicia sesion nuevamente.';
   if (status === 403) return 'No tienes permisos para administrar puntos.';
+  if (status === 422 || errorCode === 'POINTS_INSUFFICIENT_BALANCE') {
+    return 'No hay puntos suficientes para completar la resta solicitada.';
+  }
   if (status === 409) {
     return error?.data?.error?.message || error?.message || 'La operacion fue rechazada porque dejaria el saldo en negativo.';
   }
   return error?.data?.error?.message || error?.message || fallbackMessage;
+}
+
+function resolveClienteSecondaryLabel(cliente = {}) {
+  if (cliente.telefono_principal) return cliente.telefono_principal;
+  if (cliente.correo_principal) return cliente.correo_principal;
+  return '';
 }
 
 function normalizeClienteRecord(cliente = {}, index = 0) {
@@ -70,7 +88,8 @@ function normalizeClienteRecord(cliente = {}, index = 0) {
   return {
     key: `${idCliente}_${index}`,
     id_cliente: idCliente,
-    nombre_completo: normalizeText(cliente?.nombre_completo || cliente?.nombre || 'Cliente'),
+    id_usuario: normalizeText(cliente?.id_usuario || ''),
+    nombre_completo: normalizeText(cliente?.nombre_completo || cliente?.nombre_cliente || cliente?.nombre || 'Cliente'),
     telefono_principal: normalizeText(cliente?.telefono_principal || cliente?.telefono || ''),
     correo_principal: normalizeText(cliente?.correo_principal || cliente?.correo || ''),
   };
@@ -123,17 +142,24 @@ export default function AdminMasterPuntosPage() {
   const notifications = useNotifications();
   const { roles } = useAuth();
 
-  const [clientes, setClientes] = useState([]);
-  const [clientesLoading, setClientesLoading] = useState(true);
+  const [searchResults, setSearchResults] = useState([]);
   const [clientesError, setClientesError] = useState('');
-  const [search, setSearch] = useState('');
+  const [clientePickerOpen, setClientePickerOpen] = useState(false);
+  const [searchDraft, setSearchDraft] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [searchingClientes, setSearchingClientes] = useState(false);
   const [selectedClienteId, setSelectedClienteId] = useState('');
+  const [selectedClienteData, setSelectedClienteData] = useState(null);
+  const summaryRequestSeqRef = useRef(0);
+  const searchRequestSeqRef = useRef(0);
 
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState('');
+  const [historyPage, setHistoryPage] = useState(0);
 
-  const [ajustePoints, setAjustePoints] = useState('');
+  const [ajustePointsAdd, setAjustePointsAdd] = useState('');
+  const [ajustePointsSubtract, setAjustePointsSubtract] = useState('');
   const [ajusteReason, setAjusteReason] = useState('');
   const [savingAdjustment, setSavingAdjustment] = useState(false);
   const [negativeConfirmOpen, setNegativeConfirmOpen] = useState(false);
@@ -143,20 +169,27 @@ export default function AdminMasterPuntosPage() {
     return roleList.includes('admin') || roleList.includes('super_admin');
   }, [roles]);
 
-  const filteredClientes = useMemo(() => {
-    const query = normalizeSearchText(search);
-    if (!query) return clientes;
-    return clientes.filter((cliente) => {
-      const searchable = normalizeSearchText(
-        `${cliente.nombre_completo} ${cliente.telefono_principal} ${cliente.correo_principal}`
-      );
-      return searchable.includes(query);
-    });
-  }, [clientes, search]);
-
-  const parsedPoints = toSafeInteger(ajustePoints, 0);
+  const addTrimmed = normalizeText(ajustePointsAdd);
+  const subtractTrimmed = normalizeText(ajustePointsSubtract);
+  const hasAddInput = addTrimmed !== '';
+  const hasSubtractInput = subtractTrimmed !== '';
+  const pointsInputConflict = hasAddInput && hasSubtractInput;
+  const addIsValid = !hasAddInput || (isPositiveIntegerString(addTrimmed) && toSafeInteger(addTrimmed, 0) > 0);
+  const subtractIsValid = !hasSubtractInput || (isPositiveIntegerString(subtractTrimmed) && toSafeInteger(subtractTrimmed, 0) > 0);
+  const parsedPointsToAdd = addIsValid && hasAddInput ? toSafeInteger(addTrimmed, 0) : 0;
+  const parsedPointsToSubtract = subtractIsValid && hasSubtractInput ? toSafeInteger(subtractTrimmed, 0) : 0;
+  const canUseAdd = hasAddInput && !hasSubtractInput && addIsValid;
+  const canUseSubtract = hasSubtractInput && !hasAddInput && subtractIsValid;
+  const adjustmentAction = canUseAdd ? 'sumar' : canUseSubtract ? 'restar' : '';
+  const adjustmentPoints = canUseAdd ? parsedPointsToAdd : canUseSubtract ? parsedPointsToSubtract : 0;
+  const parsedPoints = adjustmentAction === 'restar' ? -adjustmentPoints : adjustmentPoints;
   const reasonTrimmed = normalizeText(ajusteReason);
-  const pointsAreValid = Number.isInteger(parsedPoints) && parsedPoints !== 0 && String(ajustePoints).trim() !== '';
+  const pointsAreValid = !pointsInputConflict
+    && (hasAddInput || hasSubtractInput)
+    && addIsValid
+    && subtractIsValid
+    && Boolean(adjustmentAction)
+    && adjustmentPoints > 0;
   const reasonIsValid = reasonTrimmed.length >= MIN_REASON_LENGTH;
   const canSubmitAdjustment = Boolean(
     canManagePoints
@@ -166,48 +199,54 @@ export default function AdminMasterPuntosPage() {
     && !savingAdjustment
   );
 
-  const loadClientes = useCallback(async () => {
-    setClientesLoading(true);
-    setClientesError('');
-    try {
-      const response = await listAdminPersonasClientes();
-      const payload = response?.data || response || {};
-      const nextClientes = Array.isArray(payload?.clientes)
-        ? payload.clientes.map((item, index) => normalizeClienteRecord(item, index)).filter(Boolean)
-        : [];
-      setClientes(nextClientes);
-      if (!selectedClienteId && nextClientes.length) {
-        setSelectedClienteId(nextClientes[0].id_cliente);
-      }
-    } catch (error) {
-      const status = Number(error?.status || 0);
-      if (status === 401) {
-        navigate('/login', { replace: true });
-        return;
-      }
-      if (status === 403) {
-        navigate('/unauthorized', { replace: true });
-        return;
-      }
-      setClientesError(resolveApiErrorMessage(error, 'No se pudo cargar la lista de clientes.'));
-      setClientes([]);
-    } finally {
-      setClientesLoading(false);
-    }
-  }, [navigate, selectedClienteId]);
+  const history = Array.isArray(summary?.history) ? summary.history : [];
+  const totalHistoryPages = Math.max(1, Math.ceil(history.length / HISTORY_PAGE_SIZE));
+  const currentHistoryPage = Math.min(historyPage, totalHistoryPages - 1);
+  const pagedHistory = history.slice(
+    currentHistoryPage * HISTORY_PAGE_SIZE,
+    (currentHistoryPage + 1) * HISTORY_PAGE_SIZE
+  );
+  const hasHistoryPagination = history.length > HISTORY_PAGE_SIZE;
 
-  const loadSummary = useCallback(async (idCliente) => {
+  const loadSummary = useCallback(async (idCliente, options = {}) => {
     const safeId = normalizeText(idCliente);
+    const keepCurrent = Boolean(options?.keepCurrent);
     if (!safeId) {
+      summaryRequestSeqRef.current += 1;
       setSummary(null);
+      setSummaryLoading(false);
+      setSummaryError('');
       return;
     }
+    const requestSeq = summaryRequestSeqRef.current + 1;
+    summaryRequestSeqRef.current = requestSeq;
     setSummaryLoading(true);
     setSummaryError('');
+    if (!keepCurrent) {
+      setSummary(null);
+    }
     try {
       const response = await getAdminClientePuntosResumen(safeId);
-      setSummary(normalizeSummary(response?.data || response));
+      if (summaryRequestSeqRef.current !== requestSeq) return;
+      const nextSummary = normalizeSummary(response?.data || response);
+      setSummary(nextSummary);
+      setSelectedClienteData((current) => {
+        const nextNombre = normalizeText(nextSummary?.cliente?.nombre_completo);
+        const nextTelefono = normalizeText(nextSummary?.cliente?.telefono_principal);
+        const nextCorreo = normalizeText(nextSummary?.cliente?.correo_principal);
+        if (!nextNombre && !nextTelefono && !nextCorreo) {
+          return current;
+        }
+        return {
+          key: `${safeId}_selected`,
+          id_cliente: safeId,
+          nombre_completo: nextNombre || current?.nombre_completo || 'Cliente',
+          telefono_principal: nextTelefono || current?.telefono_principal || '',
+          correo_principal: nextCorreo || current?.correo_principal || '',
+        };
+      });
     } catch (error) {
+      if (summaryRequestSeqRef.current !== requestSeq) return;
       const status = Number(error?.status || 0);
       if (status === 401) {
         navigate('/login', { replace: true });
@@ -220,27 +259,106 @@ export default function AdminMasterPuntosPage() {
       setSummaryError(resolveApiErrorMessage(error, 'No se pudo cargar el resumen de puntos del cliente.'));
       setSummary(null);
     } finally {
-      setSummaryLoading(false);
+      if (summaryRequestSeqRef.current === requestSeq) {
+        setSummaryLoading(false);
+      }
     }
   }, [navigate]);
 
   useEffect(() => {
     if (!canManagePoints) {
       navigate('/unauthorized', { replace: true });
-      return;
+      return undefined;
     }
-    void loadClientes();
-  }, [canManagePoints, loadClientes, navigate]);
+    return undefined;
+  }, [canManagePoints, navigate]);
 
   useEffect(() => {
-    if (!selectedClienteId) return;
+    if (!selectedClienteId) {
+      summaryRequestSeqRef.current += 1;
+      setSummary(null);
+      setSummaryLoading(false);
+      return;
+    }
     void loadSummary(selectedClienteId);
   }, [selectedClienteId, loadSummary]);
 
-  const selectedCliente = useMemo(
-    () => clientes.find((cliente) => cliente.id_cliente === selectedClienteId) || null,
-    [clientes, selectedClienteId]
-  );
+  useEffect(() => {
+    const normalized = normalizeText(searchDraft);
+    if (normalized === debouncedSearch) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(normalized);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [debouncedSearch, searchDraft]);
+
+  useEffect(() => {
+    if (!clientePickerOpen) return;
+
+    const query = normalizeText(debouncedSearch);
+    if (query.length < CLIENT_SEARCH_MIN_LENGTH) {
+      searchRequestSeqRef.current += 1;
+      setSearchResults([]);
+      setClientesError('');
+      setSearchingClientes(false);
+      return;
+    }
+
+    const requestSeq = searchRequestSeqRef.current + 1;
+    searchRequestSeqRef.current = requestSeq;
+    setSearchingClientes(true);
+    setClientesError('');
+
+    void (async () => {
+      try {
+        const response = await searchAdminClientesActivos(query, { limit: CLIENT_SEARCH_LIMIT });
+        if (searchRequestSeqRef.current !== requestSeq) return;
+        const payload = response?.data || response || {};
+        const nextResults = Array.isArray(payload?.clientes)
+          ? payload.clientes.map((item, index) => normalizeClienteRecord(item, index)).filter(Boolean)
+          : [];
+        setSearchResults(nextResults);
+      } catch (error) {
+        if (searchRequestSeqRef.current !== requestSeq) return;
+        const status = Number(error?.status || 0);
+        if (status === 401) {
+          navigate('/login', { replace: true });
+          return;
+        }
+        if (status === 403) {
+          navigate('/unauthorized', { replace: true });
+          return;
+        }
+        setClientesError(resolveApiErrorMessage(error, 'No se pudo buscar clientes activos.'));
+        setSearchResults([]);
+      } finally {
+        if (searchRequestSeqRef.current === requestSeq) {
+          setSearchingClientes(false);
+        }
+      }
+    })();
+  }, [clientePickerOpen, debouncedSearch, navigate]);
+
+  useEffect(() => {
+    setHistoryPage(0);
+  }, [selectedClienteId, history.length]);
+
+  const selectedCliente = useMemo(() => {
+    if (selectedClienteData?.id_cliente && selectedClienteData.id_cliente === selectedClienteId) {
+      return selectedClienteData;
+    }
+    if (!selectedClienteId) return null;
+    if (!summary?.cliente) return null;
+    return {
+      key: `${selectedClienteId}_summary`,
+      id_cliente: selectedClienteId,
+      nombre_completo: normalizeText(summary.cliente.nombre_completo || 'Cliente'),
+      telefono_principal: normalizeText(summary.cliente.telefono_principal || ''),
+      correo_principal: normalizeText(summary.cliente.correo_principal || ''),
+    };
+  }, [selectedClienteData, selectedClienteId, summary]);
 
   async function applyAdjustment() {
     if (!canSubmitAdjustment) return;
@@ -248,13 +366,15 @@ export default function AdminMasterPuntosPage() {
     setSummaryError('');
     try {
       await createAdminClientePuntosAjuste(selectedClienteId, {
-        puntos: parsedPoints,
+        accion: adjustmentAction,
+        puntos: adjustmentPoints,
         motivo: reasonTrimmed,
       });
       notifications.success('Ajuste aplicado correctamente.');
-      setAjustePoints('');
+      setAjustePointsAdd('');
+      setAjustePointsSubtract('');
       setAjusteReason('');
-      await loadSummary(selectedClienteId);
+      await loadSummary(selectedClienteId, { keepCurrent: true });
     } catch (error) {
       const status = Number(error?.status || 0);
       if (status === 401) {
@@ -274,15 +394,28 @@ export default function AdminMasterPuntosPage() {
   function handleSubmitAdjustment(event) {
     event.preventDefault();
     if (!canSubmitAdjustment) return;
-    if (parsedPoints < 0) {
+    if (adjustmentAction === 'restar') {
       setNegativeConfirmOpen(true);
       return;
     }
     void applyAdjustment();
   }
 
+  function handleSelectCliente(cliente) {
+    const safeId = normalizeText(cliente?.id_cliente);
+    if (!safeId) return;
+    setSelectedClienteId(safeId);
+    setSelectedClienteData(normalizeClienteRecord(cliente, 0));
+    setClientePickerOpen(false);
+    setSearchDraft('');
+    setDebouncedSearch('');
+    setSearchResults([]);
+    setClientesError('');
+    setSearchingClientes(false);
+  }
+
   return (
-    <div className="space-y-4 px-2 pb-4 sm:px-4 sm:pb-6">
+    <div className="space-y-4 overflow-x-hidden px-2 pb-4 sm:px-4 sm:pb-6">
       <header className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)] p-4 sm:p-5">
         <p className="text-xs uppercase tracking-[0.22em] text-[var(--mf-accent)]">Superpuntos</p>
         <h1 className="mf-font-display mt-1 text-3xl text-[var(--mf-text)] sm:text-4xl">Ruta a tu Cortesia</h1>
@@ -291,36 +424,20 @@ export default function AdminMasterPuntosPage() {
         </p>
       </header>
 
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[320px,1fr]">
-        <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">Buscar cliente</p>
-          <div className="relative mt-2">
-            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="pl-9"
-              placeholder="Nombre, telefono o correo"
-            />
-          </div>
-
-          <div className="mt-3">
-            <label className="mf-label">Cliente</label>
-            <select
-              className="mf-select mt-1"
-              value={selectedClienteId}
-              onChange={(event) => setSelectedClienteId(event.target.value)}
-              disabled={clientesLoading}
-            >
-              {filteredClientes.length === 0 ? <option value="">Sin clientes</option> : null}
-              {filteredClientes.map((cliente) => (
-                <option key={cliente.key} value={cliente.id_cliente}>
-                  {cliente.nombre_completo}
-                  {cliente.telefono_principal ? ` · ${cliente.telefono_principal}` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
+      <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[320px,1fr]">
+        <article className="min-w-0 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">Cliente activo</p>
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-2 w-full justify-between"
+            onClick={() => setClientePickerOpen(true)}
+          >
+            <span className="min-w-0 truncate text-left">
+              {selectedCliente?.nombre_completo || 'Seleccionar cliente activo'}
+            </span>
+            <ChevronsUpDown size={16} />
+          </Button>
 
           {clientesError ? (
             <p className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
@@ -330,31 +447,26 @@ export default function AdminMasterPuntosPage() {
 
           {selectedCliente ? (
             <div className="mt-3 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-sm text-[var(--mf-text-2)]">
-              <p className="font-semibold text-[var(--mf-text)]">{selectedCliente.nombre_completo || 'Cliente seleccionado'}</p>
-              {selectedCliente.telefono_principal ? <p>{selectedCliente.telefono_principal}</p> : null}
-              {selectedCliente.correo_principal ? <p>{selectedCliente.correo_principal}</p> : null}
+              <p className="truncate font-semibold text-[var(--mf-text)]">{selectedCliente.nombre_completo || 'Cliente seleccionado'}</p>
+              {resolveClienteSecondaryLabel(selectedCliente) ? (
+                <p className="truncate">{resolveClienteSecondaryLabel(selectedCliente)}</p>
+              ) : null}
             </div>
-          ) : null}
+          ) : (
+            <p className="mt-3 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-sm text-[var(--mf-text-2)]">
+              Selecciona un cliente activo para cargar el resumen automaticamente.
+            </p>
+          )}
 
-          <Button
-            type="button"
-            variant="outline"
-            className="mt-3 w-full"
-            onClick={() => void loadSummary(selectedClienteId)}
-            disabled={!selectedClienteId || summaryLoading}
-          >
-            {summaryLoading ? (
-              <span className="inline-flex items-center gap-2">
-                <Loader2 size={14} className="animate-spin" />
-                Actualizando...
-              </span>
-            ) : (
-              'Refrescar resumen'
-            )}
-          </Button>
+          {summaryLoading && selectedClienteId ? (
+            <p className="mt-3 inline-flex items-center gap-2 text-xs text-[var(--mf-text-2)]">
+              <Loader2 size={14} className="animate-spin" />
+              Cargando resumen del cliente...
+            </p>
+          ) : null}
         </article>
 
-        <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
+        <article className="min-w-0 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
           {summaryLoading ? (
             <div className="space-y-3">
               <div className="mf-skeleton h-20 w-full rounded-xl" />
@@ -407,16 +519,29 @@ export default function AdminMasterPuntosPage() {
 
               <form onSubmit={handleSubmitAdjustment} className="mt-4 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-[var(--mf-accent)]">Ajuste manual</p>
-                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div>
-                    <label className="mf-label">Puntos (+ / -)</label>
+                    <label className="mf-label">Sumar puntos</label>
                     <Input
                       type="number"
                       step="1"
-                      value={ajustePoints}
-                      onChange={(event) => setAjustePoints(event.target.value)}
-                      placeholder="Ej. 3 o -3"
-                      disabled={savingAdjustment}
+                      min="0"
+                      value={ajustePointsAdd}
+                      onChange={(event) => setAjustePointsAdd(event.target.value)}
+                      placeholder="Ej. 10"
+                      disabled={savingAdjustment || hasSubtractInput}
+                    />
+                  </div>
+                  <div>
+                    <label className="mf-label">Restar puntos</label>
+                    <Input
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={ajustePointsSubtract}
+                      onChange={(event) => setAjustePointsSubtract(event.target.value)}
+                      placeholder="Ej. 3"
+                      disabled={savingAdjustment || hasAddInput}
                     />
                   </div>
                   <div>
@@ -431,7 +556,14 @@ export default function AdminMasterPuntosPage() {
                   </div>
                 </div>
                 <p className="mt-2 text-xs text-[var(--mf-text-2)]">
-                  Usa valores enteros distintos de 0.
+                  {pointsInputConflict
+                    ? 'Ingresa solo sumar o restar, no ambos.'
+                    : (hasAddInput || hasSubtractInput
+                        ? (addIsValid && subtractIsValid
+                            ? `Resultado neto: ${formatSignedPoints(parsedPoints)} puntos.`
+                            : 'Ingresa solo enteros positivos en sumar/restar.')
+                        : 'Ingresa enteros positivos en sumar o restar.')
+                }
                 </p>
                 <Button type="submit" className="mt-3" disabled={!canSubmitAdjustment}>
                   {savingAdjustment ? (
@@ -447,9 +579,40 @@ export default function AdminMasterPuntosPage() {
 
               <div className="mt-4 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-[var(--mf-accent)]">Historial compacto</p>
-                {summary.history.length ? (
+                {history.length ? (
                   <div className="mt-3 space-y-2">
-                    {summary.history.map((movement) => {
+                    {hasHistoryPagination ? (
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <p className="text-xs text-[var(--mf-text-2)]">
+                          Pagina {currentHistoryPage + 1} de {totalHistoryPages}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setHistoryPage((page) => Math.max(0, page - 1))}
+                            disabled={currentHistoryPage === 0}
+                            aria-label="Pagina anterior"
+                          >
+                            <ChevronLeft size={14} />
+                            Anterior
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setHistoryPage((page) => Math.min(totalHistoryPages - 1, page + 1))}
+                            disabled={currentHistoryPage >= totalHistoryPages - 1}
+                            aria-label="Pagina siguiente"
+                          >
+                            Siguiente
+                            <ChevronRight size={14} />
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {pagedHistory.map((movement) => {
                       const positive = movement.puntos >= 0;
                       return (
                         <article
@@ -459,7 +622,7 @@ export default function AdminMasterPuntosPage() {
                           <div className="min-w-0">
                             <p className="truncate text-sm font-semibold text-[var(--mf-text)]">{movement.motivo}</p>
                             <p className="text-xs text-[var(--mf-text-2)]">
-                              {formatDate(movement.created_at)} · {resolveMovementOriginLabel(movement.origen_punto_codigo)}
+                              {formatDate(movement.created_at)} | {resolveMovementOriginLabel(movement.origen_punto_codigo)}
                             </p>
                           </div>
                           <div className="text-right">
@@ -490,6 +653,95 @@ export default function AdminMasterPuntosPage() {
         </article>
       </section>
 
+      <Dialog
+        open={clientePickerOpen}
+        onOpenChange={(nextOpen) => {
+          setClientePickerOpen(nextOpen);
+          if (!nextOpen) {
+            searchRequestSeqRef.current += 1;
+            setSearchDraft('');
+            setDebouncedSearch('');
+            setSearchResults([]);
+            setClientesError('');
+            setSearchingClientes(false);
+          }
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Seleccionar cliente activo</DialogTitle>
+            <DialogDescription>
+              Busca por nombre, telefono o correo. Al seleccionar, el resumen se actualiza automaticamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="relative">
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
+            <Input
+              autoFocus
+              value={searchDraft}
+              onChange={(event) => setSearchDraft(event.target.value)}
+              className="pl-9"
+              placeholder="Nombre, telefono o correo"
+              aria-label="Buscar cliente activo"
+            />
+          </div>
+
+          <div className="mt-3 max-h-[55vh] overflow-y-auto rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-2">
+            {searchingClientes ? (
+              <div className="flex items-center gap-2 px-2 py-3 text-sm text-[var(--mf-text-2)]">
+                <Loader2 size={14} className="animate-spin" />
+                Buscando clientes activos...
+              </div>
+            ) : null}
+
+            {!searchingClientes && clientesError ? (
+              <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                {clientesError}
+              </p>
+            ) : null}
+
+            {!searchingClientes && !clientesError && normalizeText(debouncedSearch).length < CLIENT_SEARCH_MIN_LENGTH ? (
+              <p className="px-2 py-3 text-sm text-[var(--mf-text-2)]">
+                Escribe al menos {CLIENT_SEARCH_MIN_LENGTH} caracteres para buscar.
+              </p>
+            ) : null}
+
+            {!searchingClientes && !clientesError && normalizeText(debouncedSearch).length >= CLIENT_SEARCH_MIN_LENGTH && searchResults.length === 0 ? (
+              <p className="px-2 py-3 text-sm text-[var(--mf-text-2)]">No se encontraron clientes activos.</p>
+            ) : null}
+
+            {!searchingClientes && !clientesError && searchResults.length > 0 ? (
+              <ul className="space-y-1" role="listbox" aria-label="Resultados de clientes activos">
+                {searchResults.map((cliente) => {
+                  const selected = cliente.id_cliente === selectedClienteId;
+                  const secondary = resolveClienteSecondaryLabel(cliente);
+                  return (
+                    <li key={cliente.key}>
+                      <button
+                        type="button"
+                        className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                          selected
+                            ? 'border-[var(--mf-accent)] bg-[color:color-mix(in_srgb,var(--mf-accent)_12%,transparent)]'
+                            : 'border-[var(--mf-nav-border)] hover:border-[var(--mf-btn-border)] hover:bg-[var(--mf-card)]'
+                        }`}
+                        onClick={() => handleSelectCliente(cliente)}
+                        aria-selected={selected}
+                      >
+                        <p className="truncate text-sm font-semibold text-[var(--mf-text)]">{cliente.nombre_completo}</p>
+                        {secondary ? (
+                          <p className="truncate text-xs text-[var(--mf-text-2)]">{secondary}</p>
+                        ) : null}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <ActionConfirmDialog
         open={negativeConfirmOpen}
         onOpenChange={setNegativeConfirmOpen}
@@ -507,3 +759,5 @@ export default function AdminMasterPuntosPage() {
     </div>
   );
 }
+
+
