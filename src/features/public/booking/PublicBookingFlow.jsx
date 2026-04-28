@@ -1822,7 +1822,12 @@ export default function PublicBookingFlow() {
   usePublicAgendaRealtime({
     barberId: activeBlockBarberId,
     dateKey: selectedDate,
-    enabled: Boolean(selectedBranchId && activeBlockBarberId && (selectedPackageId || effectiveSelectedServiceIdsForAgenda.length > 0)),
+    enabled: Boolean(
+      location.pathname.startsWith('/agendar/agenda')
+      && selectedBranchId
+      && activeBlockBarberId
+      && (selectedPackageId || selectedServiceIdsEffective.length > 0)
+    ),
     onInvalidate: refreshRealtimeAgenda,
   });
 

@@ -51,6 +51,10 @@ import AdminAgendamientoHistorialPage from './features/admin/pages/AdminAgendami
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
 import AdminMasterPuntosPage from './features/admin/pages/AdminMasterPuntosPage.jsx';
 import AdminServiciosCatalogoPublicoPage from './features/admin/pages/AdminServiciosCatalogoPublicoPage.jsx';
+import AdminSeguridadAlertasPage from './features/admin/pages/AdminSeguridadAlertasPage.jsx';
+import AdminSeguridadLoginLogsPage from './features/admin/pages/AdminSeguridadLoginLogsPage.jsx';
+import AdminSeguridadSesionesPage from './features/admin/pages/AdminSeguridadSesionesPage.jsx';
+import AdminSeguridadUsuariosPage from './features/admin/pages/AdminSeguridadUsuariosPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
 
@@ -63,6 +67,14 @@ function AdminCortesiasCanonicalRedirect() {
   }
 
   return <Navigate to={`${homePath}/catalog/cortesias`} replace />;
+}
+
+function SecurityDashboardShell() {
+  const { roles } = useAuth();
+  const pageRole = roles.includes('security_auditor') && !roles.includes('security_admin')
+    ? 'security_auditor'
+    : 'security_admin';
+  return <DashboardLayout pageRole={pageRole} basePathOverride="/home/security" />;
 }
 
 function App() {
@@ -137,9 +149,13 @@ function App() {
         <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPreviewPage /></RouteErrorBoundary>} />
         <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
-        <Route path="seguridad/logs" element={<UnderConstructionPage title="Logs del Sistema" />} />
-        <Route path="seguridad/sesiones" element={<UnderConstructionPage title="Sesiones Activas" />} />
-        <Route path="seguridad/bitacoras" element={<UnderConstructionPage title="Bitácoras de Auditoría" />} />
+        <Route path="seguridad" element={<Navigate to="../seguridad/login-logs" replace />} />
+        <Route path="seguridad/login-logs" element={<RouteErrorBoundary><AdminSeguridadLoginLogsPage /></RouteErrorBoundary>} />
+        <Route path="seguridad/sesiones" element={<RouteErrorBoundary><AdminSeguridadSesionesPage /></RouteErrorBoundary>} />
+        <Route path="seguridad/usuarios" element={<RouteErrorBoundary><AdminSeguridadUsuariosPage /></RouteErrorBoundary>} />
+        <Route path="seguridad/alertas" element={<RouteErrorBoundary><AdminSeguridadAlertasPage /></RouteErrorBoundary>} />
+        <Route path="seguridad/logs" element={<Navigate to="../seguridad/login-logs" replace />} />
+        <Route path="seguridad/bitacoras" element={<Navigate to="../seguridad/alertas" replace />} />
         {/* Reportes */}
         {/* JK: Reportes usa tabs como navegacion principal y redirecciona por defecto a Ingresos. */}
         <Route path="reportes" element={<Navigate to="ingresos" replace />} />
@@ -190,9 +206,13 @@ function App() {
         <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPreviewPage /></RouteErrorBoundary>} />
         <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
-        <Route path="seguridad/logs" element={<UnderConstructionPage title="Logs del Sistema" />} />
-        <Route path="seguridad/sesiones" element={<UnderConstructionPage title="Sesiones Activas" />} />
-        <Route path="seguridad/bitacoras" element={<UnderConstructionPage title="Bitácoras de Auditoría" />} />
+        <Route path="seguridad" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="seguridad/login-logs" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="seguridad/sesiones" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="seguridad/usuarios" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="seguridad/alertas" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="seguridad/logs" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="seguridad/bitacoras" element={<Navigate to="/unauthorized" replace />} />
         {/* Reportes */}
         {/* JK: Reportes usa tabs como navegacion principal y redirecciona por defecto a Ingresos. */}
         <Route path="reportes" element={<Navigate to="ingresos" replace />} />
@@ -212,6 +232,25 @@ function App() {
         <Route path="configuracion/spam" element={<Navigate to="configuracion/promociones" replace />} />
         <Route path="configuracion/comunicacion" element={<RouteErrorBoundary><AdminConfiguracionComunicacionPage /></RouteErrorBoundary>} />
         <Route path="configuracion/promociones" element={<UnderConstructionPage title="Promociones" />} />
+      </Route>
+
+      {/* Seguridad */}
+      <Route
+        path="/home/security"
+        element={
+          <ProtectedRoute allowedRoles={ROLE_ROUTE_ALLOWED_ROLES.security}>
+            <SecurityDashboardShell />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<Navigate to="seguridad/login-logs" replace />} />
+        <Route path="seguridad" element={<Navigate to="../seguridad/login-logs" replace />} />
+        <Route path="seguridad/login-logs" element={<RouteErrorBoundary><AdminSeguridadLoginLogsPage /></RouteErrorBoundary>} />
+        <Route path="seguridad/sesiones" element={<RouteErrorBoundary><AdminSeguridadSesionesPage /></RouteErrorBoundary>} />
+        <Route path="seguridad/usuarios" element={<RouteErrorBoundary><AdminSeguridadUsuariosPage /></RouteErrorBoundary>} />
+        <Route path="seguridad/alertas" element={<RouteErrorBoundary><AdminSeguridadAlertasPage /></RouteErrorBoundary>} />
+        <Route path="seguridad/logs" element={<Navigate to="../seguridad/login-logs" replace />} />
+        <Route path="seguridad/bitacoras" element={<Navigate to="../seguridad/alertas" replace />} />
       </Route>
 
       {/* Barbero */}
@@ -245,6 +284,8 @@ function App() {
       </Route>
 
       <Route path="/home/super_admin/*" element={<Navigate to="/home/super" replace />} />
+      <Route path="/home/security_admin/*" element={<Navigate to="/home/security" replace />} />
+      <Route path="/home/security_auditor/*" element={<Navigate to="/home/security" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

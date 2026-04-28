@@ -20,9 +20,15 @@ function ProtectedRouteLoader() {
 }
 
 export default function ProtectedRoute({ children, allowedRoles }) {
-  const { isAuthenticated, isHydrating, roles, hydrateSession } = useAuth();
+  const { isAuthenticated, isHydrating, isHydrated, roles, hydrateSession } = useAuth();
   const [rehydrationChecked, setRehydrationChecked] = useState(false);
   const rehydrationStartedRef = useRef(false);
+
+  const needsInitialHydration =
+    !isAuthenticated &&
+    !isHydrating &&
+    !isHydrated &&
+    !rehydrationChecked;
 
   const needsRouteRehydration =
     isAuthenticated &&
@@ -33,7 +39,7 @@ export default function ProtectedRoute({ children, allowedRoles }) {
   useEffect(() => {
     let cancelled = false;
 
-    if (!needsRouteRehydration || rehydrationStartedRef.current) {
+    if ((!needsInitialHydration && !needsRouteRehydration) || rehydrationStartedRef.current) {
       return undefined;
     }
 
@@ -49,9 +55,9 @@ export default function ProtectedRoute({ children, allowedRoles }) {
     return () => {
       cancelled = true;
     };
-  }, [hydrateSession, needsRouteRehydration]);
+  }, [hydrateSession, needsInitialHydration, needsRouteRehydration]);
 
-  if (isHydrating || needsRouteRehydration) {
+  if (isHydrating || needsInitialHydration || needsRouteRehydration) {
     return <ProtectedRouteLoader />;
   }
 

@@ -72,13 +72,34 @@ function isLikelyEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
 
-function resolveLoginErrorMessage(rawMessage) {
+function resolveLoginErrorMessage(rawMessage, errorCode) {
   const fallback = 'Correo o contrasena incorrecta, intentalo de nuevo.';
+  const code = String(errorCode || '').trim().toUpperCase();
+  const tooManyAttemptsMessage = 'No fue posible iniciar sesion en este momento. Intenta nuevamente mas tarde.';
+
+  if (code === 'AUTH_INVALID_CREDENTIALS') return fallback;
+  if (code === 'AUTH_LOGIN_RATE_LIMITED') return tooManyAttemptsMessage;
+  if (code === 'AUTH_USER_TEMPORARILY_LOCKED') return tooManyAttemptsMessage;
+
   const normalized = String(rawMessage || '').trim().toLowerCase();
   if (!normalized) return fallback;
   if (normalized.includes('invalid login credentials')) return fallback;
   if (normalized.includes('credenciales invalidas')) return fallback;
+  if (normalized.includes('failed to fetch')) return 'No fue posible iniciar sesion en este momento. Intenta nuevamente.';
+  if (normalized.includes('network')) return 'No fue posible iniciar sesion en este momento. Intenta nuevamente.';
+  if (normalized.includes('timeout')) return 'No fue posible iniciar sesion en este momento. Intenta nuevamente.';
+
   return String(rawMessage).trim();
+}
+
+function shouldHydrateForPath(pathname) {
+  const path = String(pathname || '').trim();
+  if (!path) return false;
+  if (path.startsWith('/auth/callback')) return false;
+  if (path.startsWith('/home')) return true;
+  if (path.startsWith('/admin')) return true;
+  if (path === '/login' || path === '/register') return true;
+  return false;
 }
 
 export function AuthProvider({ children }) {
@@ -151,9 +172,10 @@ export function AuthProvider({ children }) {
     }
   }, [applyUserState, clearSessionState]);
 
-  const login = useCallback(async (identifier, contrasena, remember) => {
+  const login = useCallback(async (identifier, contrasena, remember, options = {}) => {
     const normalizedIdentifier = String(identifier || '').trim().toLowerCase();
     const password = String(contrasena || '');
+    const replaceActiveSession = Boolean(options?.replaceActiveSession);
 
     if (!normalizedIdentifier || !password) {
       return { ok: false, message: 'Correo y contrasena son requeridos.' };
@@ -169,13 +191,14 @@ export function AuthProvider({ children }) {
         email: normalizedIdentifier,
         contrasena: password,
         remember: Boolean(remember),
+        ...(replaceActiveSession ? { replace_active_session: true } : {}),
       });
 
       if (!response?.ok) {
         return {
           ok: false,
           code: response?.error?.code || null,
-          message: resolveLoginErrorMessage(response?.error?.message || response?.message),
+          message: resolveLoginErrorMessage(response?.error?.message || response?.message, response?.error?.code),
         };
       }
 
@@ -190,7 +213,7 @@ export function AuthProvider({ children }) {
       return {
         ok: false,
         code: err?.data?.error?.code || null,
-        message: resolveLoginErrorMessage(err?.data?.error?.message || err?.message),
+        message: resolveLoginErrorMessage(err?.data?.error?.message || err?.message, err?.data?.error?.code),
       };
     }
   }, [clearSessionState, hydrateSession]);
@@ -220,28 +243,21 @@ export function AuthProvider({ children }) {
   }, [invalidateSession]);
 
   useEffect(() => {
-    // AM: No hidratar sesion si estamos en /auth/callback — esa pagina maneja
-    // su propio intercambio de tokens. Hidratacion prematura aqui generaria un
-    // 401 en /v1/auth/me antes de que el exchange termine.
-    if (window.location.pathname.startsWith('/auth/callback')) {
-      // La pagina callback llama a completeExchangeLogin() cuando el exchange
-      // termina exitosamente, lo que triggerea hydrateSession() en el momento correcto.
-      const timer = window.setTimeout(() => {
-        clearSessionState();
-      }, 0);
-      return () => window.clearTimeout(timer);
+    const currentPathname = window.location?.pathname || '';
+
+    if (currentPathname.startsWith('/auth/callback')) {
+      setIsHydrating(false);
+      setIsHydrated(true);
+      return;
     }
-    if (isPublicOptionalAuthRoute(window.location.pathname) && !hasSessionHint()) {
-      const timer = window.setTimeout(() => {
-        clearSessionState();
-      }, 0);
-      return () => window.clearTimeout(timer);
-    }
-    const timer = window.setTimeout(() => {
+    if (shouldHydrateForPath(currentPathname)) {
       void hydrateSession();
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [clearSessionState, hydrateSession]);
+      return;
+    }
+
+    setIsHydrating(false);
+    setIsHydrated(true);
+  }, [hydrateSession]);
 
   const value = useMemo(
     () => ({
