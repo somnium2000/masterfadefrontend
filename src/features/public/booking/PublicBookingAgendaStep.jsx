@@ -1,6 +1,19 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ChevronDown, Clock3, Plus, Scissors, UserRound, Package, Tag, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  ChevronDown,
+  Clock3,
+  Loader2,
+  Plus,
+  Scissors,
+  UserRound,
+  Package,
+  Tag,
+  X,
+} from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
@@ -9,6 +22,7 @@ import { DayButton, ServiceCard, SlotButton } from './PublicBookingBlocks.jsx';
 import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
 import {
   WEEK_DAYS,
+  buildFullName,
   buildCalendarCells,
   formatCurrencyHnl,
   formatDurationHuman,
@@ -23,6 +37,11 @@ const SLOT_TIME_PERIODS = [
   { key: 'tarde', label: 'Tarde' },
   { key: 'noche', label: 'Noche' },
 ];
+const DEFAULT_EXPANDED_PERIODS = {
+  manana: false,
+  tarde: false,
+  noche: false,
+};
 
 function getSlotPeriodKey(timeKey) {
   const normalized = String(timeKey || '').trim();
@@ -56,7 +75,6 @@ function overlapByMinutes(leftStart, leftDuration, rightStart, rightDuration) {
 }
 
 function normalizePromotionDateKey(value) {
-  // JK: Lee fechas tipo YYYY-MM-DD o ISO sin depender de conversiones por timezone.
   const normalized = String(value || '').trim();
   const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!match) return '';
@@ -71,7 +89,6 @@ function formatPromotionDate(value) {
 }
 
 function formatPromotionVigencyLabel(promotion) {
-  // JK: Resume vigencia en formato visual legible para cards de promociones en agendamiento.
   const fromDate = formatPromotionDate(promotion?.vigencia_desde);
   const toDate = formatPromotionDate(promotion?.vigencia_hasta);
   const fromHour = formatTime12Hour(promotion?.vigencia_hora_desde || '');
@@ -98,7 +115,6 @@ function formatPromotionVigencyLabel(promotion) {
 }
 
 function formatPromotionBenefitLabel(promotion) {
-  // JK: Estandariza etiqueta corta de beneficio para distinguir porcentaje, monto fijo y 2x1.
   const mechanic = String(promotion?.mecanica || '').trim().toLowerCase();
   const value = Number(promotion?.valor_descuento);
   if (mechanic === 'porcentaje' && Number.isFinite(value) && value > 0) {
@@ -121,6 +137,34 @@ function resolvePromotionTargetLabel(promotion) {
     return String(promotion?.paquete_objetivo_nombre || 'paquete objetivo').trim();
   }
   return String(promotion?.servicio_objetivo_nombre || 'servicio objetivo').trim();
+}
+
+function sortSlotsByTime(slots = []) {
+  return [...slots].sort((left, right) => {
+    const leftMin = toMinutes(left?.hora);
+    const rightMin = toMinutes(right?.hora);
+    if (leftMin == null && rightMin == null) return 0;
+    if (leftMin == null) return 1;
+    if (rightMin == null) return -1;
+    return leftMin - rightMin;
+  });
+}
+
+function isRenderableSlot(slot, selectedDate, isPastSlotForToday) {
+  if (!slot?.disponible) return false;
+  if (selectedDate && isPastSlotForToday(selectedDate, slot?.hora)) return false;
+  return Boolean(slot?.hora);
+}
+
+function pushUniqueSlots(target, candidates, seen, selectedDate, isPastSlotForToday) {
+  const list = Array.isArray(candidates) ? candidates : [candidates];
+  list.forEach((slot) => {
+    if (!isRenderableSlot(slot, selectedDate, isPastSlotForToday)) return;
+    const key = String(slot?.hora || '').trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    target.push(slot);
+  });
 }
 
 function BookingBlocksSummary({
@@ -156,7 +200,17 @@ function BookingBlocksSummary({
               <div className="citas-selected-date">
                 {block.selection_type === 'package'
                   ? `Paquete: ${block.selectedPackage?.nombre_paquete || 'Sin paquete'}`
-                  : block.selectedServices.map((service) => service.nombre_servicio).join(', ')}
+                  : Array.from(
+                    new Map(
+                      (Array.isArray(block.selectedServices) ? block.selectedServices : [])
+                        .map((service) => [String(service?.id_servicio || '').trim(), service])
+                        .filter(([serviceId]) => Boolean(serviceId))
+                    ).values()
+                  ).map((service) => {
+                    const baseName = String(service?.nombre_servicio || '').trim() || 'Servicio';
+                    if (service?.coveredByReward) return `${baseName} (Recompensa cortesía)`;
+                    return service?.coveredByPlan ? `${baseName} (Cubierto por tu plan)` : baseName;
+                  }).join(', ')}
               </div>
               <div className="citas-selected-date">
                 {formatFriendlyDate(block.selectedDate)} - {formatTime12Hour(block.selectedTime)}
@@ -174,7 +228,6 @@ function BookingBlocksSummary({
       <div className="citas-services-summary-row mt-3">
         {hasAnyPromotionSelected ? (
           <div className="public-booking-promo-summary">
-            {/* // JK: Presentación de resumen en filas etiqueta/valor para mejorar legibilidad visual. */}
             <div className="public-booking-promo-summary-row">
               <span className="public-booking-promo-summary-label">Subtotal servicios:</span>
               <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalToPay)}</strong>
@@ -210,6 +263,7 @@ function BookingBlocksSummary({
 export default function PublicBookingAgendaStep() {
   const {
     activeBlock,
+    activeBlockContactState,
     activeBlockIndex,
     addCompanionBlock,
     consumePendingCompanionFocus,
@@ -221,6 +275,15 @@ export default function PublicBookingAgendaStep() {
     barbers,
     bookingBlocks,
     bookingBlocksSummary,
+    blockedServiceIds,
+    membershipLockedServiceIdsForTitular,
+    membershipBranchNotice,
+    rewardModeActive,
+    rewardServiceId,
+    rewardServiceName,
+    rewardBranchName,
+    rewardBranchMismatch,
+    cancelRewardRedemptionUsage,
     removeCompanionBlock,
     canAddCompanionBlock,
     canGoPrevMonth,
@@ -263,6 +326,7 @@ export default function PublicBookingAgendaStep() {
     slotSuggestions,
     slotSuggestionsLoading,
     slots,
+    slotsCurated,
     slotsLoading,
     syncServicesScrollState,
     toggleService,
@@ -273,37 +337,116 @@ export default function PublicBookingAgendaStep() {
     updateActiveBlockContact,
     currentMonth,
     selectedBarber,
+    titularState,
+    holdSubmitting,
   } = usePublicBookingFlow();
 
   const calendarCells = useMemo(() => buildCalendarCells(currentMonth), [currentMonth]);
   const canGoToConfirm = Boolean(allBlocksComplete);
-  const selectedServicesCount = selectedServices.length + (selectedPackage ? 1 : 0);
+
+  const selectedServiceIdsSet = useMemo(
+    () => new Set((Array.isArray(selectedServices) ? selectedServices : []).map((service) => String(service?.id_servicio || '').trim()).filter(Boolean)),
+    [selectedServices]
+  );
+
+  const selectedServicesCount = useMemo(() => {
+    const totalServiceIds = new Set(selectedServiceIdsSet);
+    if (activeBlockIndex === 0) {
+      (Array.isArray(membershipLockedServiceIdsForTitular) ? membershipLockedServiceIdsForTitular : []).forEach((serviceId) => {
+        const normalizedId = String(serviceId || '').trim();
+        if (normalizedId) totalServiceIds.add(normalizedId);
+      });
+      if (rewardModeActive && activeBlockIndex === 0) {
+        const rewardId = String(rewardServiceId || '').trim();
+        if (rewardId) totalServiceIds.add(rewardId);
+      }
+    }
+    return totalServiceIds.size + (selectedPackage ? 1 : 0);
+  }, [
+    activeBlockIndex,
+    membershipLockedServiceIdsForTitular,
+    rewardModeActive,
+    rewardServiceId,
+    selectedPackage,
+    selectedServiceIdsSet,
+  ]);
+
+  const hasValidSelectionForCalendar = selectedServicesCount > 0;
+
+  const blockedServiceIdsSet = useMemo(
+    () => new Set((Array.isArray(blockedServiceIds) ? blockedServiceIds : []).map((id) => String(id || '').trim()).filter(Boolean)),
+    [blockedServiceIds]
+  );
+
+  const membershipLockedServiceIdsSet = useMemo(
+    () => new Set((Array.isArray(membershipLockedServiceIdsForTitular) ? membershipLockedServiceIdsForTitular : []).map((id) => String(id || '').trim()).filter(Boolean)),
+    [membershipLockedServiceIdsForTitular]
+  );
+
+  const visibleServices = useMemo(() => {
+    const deduped = new Map();
+    (Array.isArray(services) ? services : []).forEach((service) => {
+      const serviceId = String(service?.id_servicio || '').trim();
+      if (!serviceId || deduped.has(serviceId)) return;
+      deduped.set(serviceId, service);
+    });
+    return Array.from(deduped.values());
+  }, [services]);
+
   const hasSelectedDate = Boolean(selectedDate);
   const slotsSectionRef = useRef(null);
   const contactCardRef = useRef(null);
   const contactNameInputRef = useRef(null);
-  const activeContactName = String(activeBlock?.contactName || '');
+
+  const activeContactFirstName = String(activeBlock?.contactFirstName || '');
+  const activeContactLastName = String(activeBlock?.contactLastName || '');
   const activeContactEmail = String(activeBlock?.contactEmail || '');
   const activeContactPhone = String(activeBlock?.contactPhone || '');
+
   const fieldErrorKey = (blockIndex, field) => `${blockIndex}:${field}`;
-  const activeNameError = fieldErrors?.[fieldErrorKey(activeBlockIndex, 'contactName')] || '';
+  const activeFirstNameError = fieldErrors?.[fieldErrorKey(activeBlockIndex, 'contactFirstName')]
+    || fieldErrors?.[fieldErrorKey(activeBlockIndex, 'contactName')]
+    || '';
+  const activeLastNameError = fieldErrors?.[fieldErrorKey(activeBlockIndex, 'contactLastName')] || '';
   const activeEmailError = fieldErrors?.[fieldErrorKey(activeBlockIndex, 'contactEmail')] || '';
   const activePhoneError = fieldErrors?.[fieldErrorKey(activeBlockIndex, 'contactPhone')] || '';
+
+  const isTitularBlock = activeBlockIndex === 0;
+  const titularMissingFields = new Set(Array.isArray(titularState?.missingFields) ? titularState.missingFields : []);
+  const isAuthenticatedTitular = Boolean(isTitularBlock && titularState?.isAuthenticated);
+  const showTitularIdentityOnly = Boolean(isAuthenticatedTitular && titularState?.hasFullProfile);
+
+  const showFirstNameInput = !isTitularBlock || !isAuthenticatedTitular || titularMissingFields.has('nombres');
+  const showLastNameInput = !isTitularBlock || (isAuthenticatedTitular && titularMissingFields.has('apellidos'));
+  const showEmailInput = !isTitularBlock || !isAuthenticatedTitular;
+  const showPhoneInput = !isTitularBlock || !isAuthenticatedTitular || titularMissingFields.has('telefono_principal');
+
+  const titularDisplayName = buildFullName(titularState?.profile?.nombres, titularState?.profile?.apellidos)
+    || String(activeBlockContactState?.fullName || '').trim();
+
   const contactNameRequiredMessage = activeBlockIndex === 0
-    ? 'Ingresa el nombre del titular para continuar con la selección de servicios.'
-    : 'Ingresa el nombre del acompañante antes de elegir servicios.';
-  const canSelectServices = Boolean(activeContactName.trim());
+    ? (isAuthenticatedTitular
+      ? 'Completa los datos faltantes del titular antes de elegir servicios.'
+      : 'Ingresa al menos el nombre del titular para continuar con la selección de servicios.')
+    : 'Ingresa nombre y apellido del acompañante antes de elegir servicios.';
+
+  const canSelectServices = Boolean(activeBlockContactState?.fullName);
+  const rewardForTitularActive = Boolean(rewardModeActive && activeBlockIndex === 0);
+
   const [catalogTab, setCatalogTab] = useState('services');
+  const effectiveCatalogTab = rewardForTitularActive ? 'services' : catalogTab;
+
   const activeBlockSummary = useMemo(
     () => bookingBlocksSummary.find((block) => block.index === activeBlockIndex) || null,
     [activeBlockIndex, bookingBlocksSummary]
   );
-  const selectedServiceIdsSet = useMemo(
+
+  const selectedServiceIdsForPromotionSet = useMemo(
     () => new Set(serviceIds),
     [serviceIds]
   );
+
   const promotionsForCards = useMemo(() => {
-    // JK: Calcula estado visual/seleccionable de cada promo sin alterar la lógica de guardado del flujo.
     const list = Array.isArray(promotions) ? promotions : [];
     return list.map((promotion) => {
       const promotionId = String(promotion?.id_promocion || '').trim();
@@ -313,12 +456,13 @@ export default function PublicBookingAgendaStep() {
       const targetLabel = resolvePromotionTargetLabel(promotion);
       const targetSelected = appliesTo === 'paquete'
         ? Boolean(targetPackageId && selectedPackageId && selectedPackageId === targetPackageId)
-        : Boolean(targetServiceId && selectedServiceIdsSet.has(targetServiceId));
+        : Boolean(targetServiceId && selectedServiceIdsForPromotionSet.has(targetServiceId));
       const benefitLabel = formatPromotionBenefitLabel(promotion);
       const vigencyLabel = formatPromotionVigencyLabel(promotion);
       const disabledByBranch = !selectedBranchId;
       const disabledByContact = !canSelectServices;
       const canSelect = !disabledByBranch && !disabledByContact && targetSelected;
+
       let disabledReason = '';
       if (disabledByBranch) {
         disabledReason = 'Selecciona una sucursal para ver promociones aplicables.';
@@ -346,8 +490,9 @@ export default function PublicBookingAgendaStep() {
     selectedBranchId,
     selectedPackageId,
     selectedPromotionId,
-    selectedServiceIdsSet,
+    selectedServiceIdsForPromotionSet,
   ]);
+
   const activeBlockEstimatedDiscount = Math.max(
     0,
     Number(activeBlockSummary?.promocion_descuento_estimado_hnl || 0)
@@ -355,31 +500,141 @@ export default function PublicBookingAgendaStep() {
   const activeBlockNeedsFinalCalculation = Boolean(activeBlockSummary?.promocion_requiere_calculo_final);
   const safeEstimatedDiscountGlobal = Math.max(0, Number(totalEstimatedPromotionDiscountHnl || 0));
   const visibleEstimatedDiscount = Math.max(activeBlockEstimatedDiscount, safeEstimatedDiscountGlobal);
+
   const [preferredSlotPeriod, setPreferredSlotPeriod] = useState('manana');
-  const availableSlotsByPeriod = useMemo(() => {
-    const grouped = {
+  const expansionScopeKey = `${activeBlock?.id || 'block'}|${selectedDate || ''}`;
+  const [expandedState, setExpandedState] = useState(() => ({
+    scopeKey: '',
+    periods: { ...DEFAULT_EXPANDED_PERIODS },
+  }));
+
+  const expandedPeriods = expandedState.scopeKey === expansionScopeKey
+    ? expandedState.periods
+    : DEFAULT_EXPANDED_PERIODS;
+
+  const periodSlotModels = useMemo(() => {
+    const baseByPeriod = {
       manana: [],
       tarde: [],
       noche: [],
     };
+
     (Array.isArray(slots) ? slots : []).forEach((slot) => {
       if (!slot?.disponible) return;
       if (selectedDate && isPastSlotForToday(selectedDate, slot?.hora)) return;
       const key = getSlotPeriodKey(slot?.hora);
-      grouped[key].push(slot);
+      baseByPeriod[key].push(slot);
     });
-    return grouped;
-  }, [isPastSlotForToday, selectedDate, slots]);
+
+    Object.keys(baseByPeriod).forEach((periodKey) => {
+      baseByPeriod[periodKey] = sortSlotsByTime(baseByPeriod[periodKey]);
+    });
+
+    const models = {};
+    SLOT_TIME_PERIODS.forEach((period) => {
+      const periodKey = period.key;
+      const fallbackSlots = baseByPeriod[periodKey] || [];
+      const curatedPeriod = slotsCurated?.[periodKey] || null;
+      const mergedSlots = [];
+      const seen = new Set();
+
+      const curatedRecommended = [];
+      pushUniqueSlots(curatedRecommended, curatedPeriod?.recommended, seen, selectedDate, isPastSlotForToday);
+
+      const curatedAlternatives = [];
+      pushUniqueSlots(
+        curatedAlternatives,
+        Array.isArray(curatedPeriod?.alternatives) ? curatedPeriod.alternatives : [],
+        seen,
+        selectedDate,
+        isPastSlotForToday
+      );
+
+      const curatedOverflow = [];
+      pushUniqueSlots(
+        curatedOverflow,
+        Array.isArray(curatedPeriod?.overflow) ? curatedPeriod.overflow : [],
+        seen,
+        selectedDate,
+        isPastSlotForToday
+      );
+
+      const fallbackUnique = [];
+      pushUniqueSlots(fallbackUnique, fallbackSlots, seen, selectedDate, isPastSlotForToday);
+      fallbackUnique.sort((left, right) => {
+        const leftMin = toMinutes(left?.hora);
+        const rightMin = toMinutes(right?.hora);
+        if (leftMin == null && rightMin == null) return 0;
+        if (leftMin == null) return 1;
+        if (rightMin == null) return -1;
+        return leftMin - rightMin;
+      });
+
+      const recommended = curatedRecommended[0] || fallbackUnique[0] || null;
+      const alternativesPool = [
+        ...curatedAlternatives,
+        ...(recommended ? fallbackUnique.filter((slot) => slot.hora !== recommended.hora) : fallbackUnique),
+      ];
+      const alternatives = alternativesPool.slice(0, 3);
+
+      const usedHours = new Set(
+        [recommended, ...alternatives]
+          .filter(Boolean)
+          .map((slot) => String(slot.hora || '').trim())
+      );
+
+      const overflow = [
+        ...curatedOverflow,
+        ...fallbackUnique,
+      ].filter((slot) => {
+        const hour = String(slot?.hora || '').trim();
+        if (!hour) return false;
+        if (usedHours.has(hour)) return false;
+        usedHours.add(hour);
+        return true;
+      });
+
+      mergedSlots.push(...[recommended, ...alternatives, ...overflow].filter(Boolean));
+      const isExpanded = Boolean(expandedPeriods?.[periodKey]);
+
+      models[periodKey] = {
+        recommended,
+        alternatives,
+        overflow,
+        hasMore: overflow.length > 0,
+        isExpanded,
+        total: mergedSlots.length,
+        visibleSlots: isExpanded
+          ? [recommended, ...alternatives, ...overflow].filter(Boolean)
+          : [recommended, ...alternatives].filter(Boolean),
+      };
+    });
+
+    return models;
+  }, [expandedPeriods, isPastSlotForToday, selectedDate, slots, slotsCurated]);
+
   const totalAvailableSlots = useMemo(
-    () => SLOT_TIME_PERIODS.reduce((total, period) => total + (availableSlotsByPeriod[period.key] || []).length, 0),
-    [availableSlotsByPeriod]
+    () => SLOT_TIME_PERIODS.reduce((total, period) => total + Number(periodSlotModels?.[period.key]?.total || 0), 0),
+    [periodSlotModels]
   );
+
   const activeSlotPeriod = useMemo(() => {
-    if ((availableSlotsByPeriod[preferredSlotPeriod] || []).length > 0) return preferredSlotPeriod;
-    const firstWithAvailable = SLOT_TIME_PERIODS.find((period) => (availableSlotsByPeriod[period.key] || []).length > 0);
+    if (Number(periodSlotModels?.[preferredSlotPeriod]?.total || 0) > 0) return preferredSlotPeriod;
+    const firstWithAvailable = SLOT_TIME_PERIODS.find((period) => Number(periodSlotModels?.[period.key]?.total || 0) > 0);
     return firstWithAvailable ? firstWithAvailable.key : 'manana';
-  }, [availableSlotsByPeriod, preferredSlotPeriod]);
-  const currentPeriodSlots = availableSlotsByPeriod[activeSlotPeriod] || [];
+  }, [periodSlotModels, preferredSlotPeriod]);
+
+  const activePeriodModel = periodSlotModels?.[activeSlotPeriod] || {
+    recommended: null,
+    alternatives: [],
+    overflow: [],
+    hasMore: false,
+    isExpanded: false,
+    total: 0,
+    visibleSlots: [],
+  };
+  const currentPeriodSlots = activePeriodModel.visibleSlots;
+
   const titularBlock = bookingBlocksSummary[0] || null;
   const getSlotRestriction = useMemo(() => {
     return (slot) => {
@@ -404,6 +659,7 @@ export default function PublicBookingAgendaStep() {
         && block.selectedDate === selectedDate
         && overlapByMinutes(slot.hora, selectedBlockTotalMinutes, block.selectedTime, block.duracion_bloque_min)
       );
+
       if (conflictingBlock) {
         return {
           disabled: true,
@@ -411,6 +667,7 @@ export default function PublicBookingAgendaStep() {
           reason: `Solapa con ${conflictingBlock.alias || `integrante ${conflictingBlock.index + 1}`}`,
         };
       }
+
       return { disabled: false, variant: 'default', reason: '' };
     };
   }, [activeBlock, activeBlockIndex, bookingBlocksSummary, selectedBlockTotalMinutes, selectedDate, titularBlock]);
@@ -419,9 +676,11 @@ export default function PublicBookingAgendaStep() {
     syncServicesScrollState();
     const scroller = servicesScrollRef.current;
     if (!scroller) return undefined;
+
     const onScroll = () => syncServicesScrollState();
     scroller.addEventListener('scroll', onScroll);
     window.addEventListener('resize', syncServicesScrollState);
+
     return () => {
       scroller.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', syncServicesScrollState);
@@ -480,6 +739,43 @@ export default function PublicBookingAgendaStep() {
   return (
     <>
       {availabilityError ? <ErrorBanner message={availabilityError} onRetry={fetchAvailability} /> : null}
+
+      {rewardModeActive ? (
+        <div className="citas-surface p-4 border border-emerald-400/35 bg-emerald-500/10">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-200">
+            <Scissors size={15} /> Recompensa cortesía activa
+          </p>
+          <p className="mt-2 text-sm text-emerald-100">
+            Servicio bloqueado para titular: <strong>{rewardServiceName || 'Servicio de recompensa'}</strong>.
+          </p>
+          {rewardBranchMismatch ? (
+            <p className="mt-1 text-sm text-amber-100">
+              Esta recompensa pertenece a {rewardBranchName || 'otra sucursal'}. Cambia a esa sucursal para usarla.
+            </p>
+          ) : null}
+          <div className="mt-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={cancelRewardRedemptionUsage}
+            >
+              <X size={13} />
+              Cancelar uso de recompensa
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {membershipBranchNotice ? (
+        <div className="citas-surface p-4 border border-amber-400/35 bg-amber-500/10">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold text-amber-200">
+            <AlertTriangle size={15} /> Aviso de cobertura de plan
+          </p>
+          <p className="mt-2 text-sm text-amber-100">{membershipBranchNotice}</p>
+        </div>
+      ) : null}
 
       <div className="citas-agenda-layout public-booking-agenda-stack">
         <motion.div
@@ -545,71 +841,86 @@ export default function PublicBookingAgendaStep() {
           </div>
 
           <div className="public-booking-contact-card" ref={contactCardRef}>
-            <div className="public-booking-form-grid">
-              <div className="public-booking-form-row">
-                <label className="mf-label" htmlFor="booking-contact-name">
-                  {activeBlockIndex === 0 ? 'Nombre del titular *' : 'Nombre del acompañante *'}
-                </label>
-                <input
-                  id="booking-contact-name"
-                  ref={contactNameInputRef}
-                  type="text"
-                  className={`mf-input ${activeNameError ? 'is-invalid' : ''}`.trim()}
-                  value={activeContactName}
-                  onChange={(event) => updateActiveBlockContact({ contactName: event.target.value })}
-                  placeholder={activeBlockIndex === 0 ? 'Ej. Carlos Ramírez' : 'Ej. José López'}
-                />
-                {activeNameError ? <p className="public-booking-field-error">{activeNameError}</p> : null}
+            {showTitularIdentityOnly ? (
+              <p className="citas-selected-date">
+                Agendando como: <strong>{titularDisplayName || 'Titular autenticado'}</strong>
+              </p>
+            ) : (
+              <>
+                <div className="public-booking-form-grid">
+                  {showFirstNameInput ? (
+                    <div className="public-booking-form-row">
+                      <label className="mf-label" htmlFor="booking-contact-first-name">
+                        {activeBlockIndex === 0 ? 'Nombres *' : 'Nombres del acompañante *'}
+                      </label>
+                      <input
+                        id="booking-contact-first-name"
+                        ref={contactNameInputRef}
+                        type="text"
+                        className={`mf-input ${activeFirstNameError ? 'is-invalid' : ''}`.trim()}
+                        value={activeContactFirstName}
+                        onChange={(event) => updateActiveBlockContact({ contactFirstName: event.target.value })}
+                        placeholder={activeBlockIndex === 0 ? 'Ej. Carlos' : 'Ej. José'}
+                      />
+                      {activeFirstNameError ? <p className="public-booking-field-error">{activeFirstNameError}</p> : null}
+                    </div>
+                  ) : null}
+                  {showLastNameInput ? (
+                    <div className="public-booking-form-row">
+                      <label className="mf-label" htmlFor="booking-contact-last-name">
+                        {activeBlockIndex === 0 ? 'Apellidos *' : 'Apellidos del acompañante *'}
+                      </label>
+                      <input
+                        id="booking-contact-last-name"
+                        type="text"
+                        className={`mf-input ${activeLastNameError ? 'is-invalid' : ''}`.trim()}
+                        value={activeContactLastName}
+                        onChange={(event) => updateActiveBlockContact({ contactLastName: event.target.value })}
+                        placeholder={activeBlockIndex === 0 ? 'Ej. Ramírez' : 'Ej. López'}
+                      />
+                      {activeLastNameError ? <p className="public-booking-field-error">{activeLastNameError}</p> : null}
+                    </div>
+                  ) : null}
+                  {showEmailInput ? (
+                    <div className="public-booking-form-row">
+                      <label className="mf-label" htmlFor="booking-contact-email">
+                        {activeBlockIndex === 0 ? 'Correo del titular *' : 'Correo del acompañante (opcional)'}
+                      </label>
+                      <input
+                        id="booking-contact-email"
+                        type="email"
+                        className={`mf-input ${activeEmailError ? 'is-invalid' : ''}`.trim()}
+                        value={activeContactEmail}
+                        onChange={(event) => updateActiveBlockContact({ contactEmail: event.target.value })}
+                        placeholder={activeBlockIndex === 0 ? 'titular@correo.com' : 'acompanante@correo.com'}
+                      />
+                      {activeEmailError ? <p className="public-booking-field-error">{activeEmailError}</p> : null}
+                    </div>
+                  ) : null}
+                  {showPhoneInput ? (
+                    <div className="public-booking-form-row">
+                      <label className="mf-label" htmlFor="booking-contact-phone">
+                        {activeBlockIndex === 0 ? 'Teléfono del titular *' : 'Teléfono del acompañante (opcional)'}
+                      </label>
+                      <input
+                        id="booking-contact-phone"
+                        type="tel"
+                        className={`mf-input ${activePhoneError ? 'is-invalid' : ''}`.trim()}
+                        value={activeContactPhone}
+                        onChange={(event) => updateActiveBlockContact({ contactPhone: event.target.value })}
+                        placeholder="Ej. +504 9999-9999"
+                      />
+                      {activePhoneError ? <p className="public-booking-field-error">{activePhoneError}</p> : null}
+                    </div>
+                  ) : null}
+                </div>
                 {activeBlockIndex > 0 ? (
                   <p className="citas-selected-date">
-                    Este nombre se usa para llamarle correctamente en la barbería y evitar confusiones.
+                    Para acompañantes, nombres y apellidos son obligatorios. Correo y teléfono son opcionales.
                   </p>
                 ) : null}
-              </div>
-              <div className="public-booking-form-row">
-                <label className="mf-label" htmlFor="booking-contact-email">
-                  {activeBlockIndex === 0 ? 'Correo del titular *' : 'Correo del acompañante *'}
-                </label>
-                <input
-                  id="booking-contact-email"
-                  type="email"
-                  className={`mf-input ${activeEmailError ? 'is-invalid' : ''}`.trim()}
-                  value={activeContactEmail}
-                  onChange={(event) => updateActiveBlockContact({ contactEmail: event.target.value })}
-                  placeholder={activeBlockIndex === 0 ? 'titular@correo.com' : 'acompanante@correo.com'}
-                />
-                {activeEmailError ? <p className="public-booking-field-error">{activeEmailError}</p> : null}
-                {activeBlockIndex === 0 && !activeEmailError ? (
-                  <p className="citas-selected-date">
-                    Si este correo ya está registrado, el sistema te pedirá iniciar sesión para continuar.
-                  </p>
-                ) : null}
-                {activeBlockIndex > 0 ? (
-                  <p className="citas-selected-date">
-                    Enviaremos la confirmación y detalles de cita a este correo.
-                  </p>
-                ) : null}
-              </div>
-            </div>
-            {activeBlockIndex === 0 ? (
-              <div className="public-booking-form-row mt-2">
-                <label className="mf-label" htmlFor="booking-contact-phone">
-                  Teléfono del titular *
-                </label>
-                <input
-                  id="booking-contact-phone"
-                  type="tel"
-                  className={`mf-input ${activePhoneError ? 'is-invalid' : ''}`.trim()}
-                  value={activeContactPhone}
-                  onChange={(event) => updateActiveBlockContact({ contactPhone: event.target.value })}
-                  placeholder="Ej. +504 9999-9999"
-                />
-                {activePhoneError ? <p className="public-booking-field-error">{activePhoneError}</p> : null}
-                <p className="citas-selected-date">
-                  Lo usaremos para validación y avisos importantes de la reserva.
-                </p>
-              </div>
-            ) : null}
+              </>
+            )}
           </div>
 
           {!canSelectServices ? (
@@ -619,7 +930,7 @@ export default function PublicBookingAgendaStep() {
           <div className="public-booking-selection-tabs">
             <Button
               type="button"
-              variant={catalogTab === 'services' ? 'default' : 'outline'}
+              variant={effectiveCatalogTab === 'services' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCatalogTab('services')}
             >
@@ -627,9 +938,10 @@ export default function PublicBookingAgendaStep() {
             </Button>
             <Button
               type="button"
-              variant={catalogTab === 'packages' ? 'default' : 'outline'}
+              variant={effectiveCatalogTab === 'packages' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCatalogTab('packages')}
+              disabled={rewardForTitularActive}
             >
               Paquetes
             </Button>
@@ -644,41 +956,87 @@ export default function PublicBookingAgendaStep() {
           </div>
 
           <div className="citas-services-scroll scrollbar-hide" ref={servicesScrollRef}>
-            {catalogTab === 'services' ? (
+            {effectiveCatalogTab === 'services' ? (
               <div className="citas-services-grid">
-                {services.map((service) => (
-                  <ServiceCard
-                    key={service.id_servicio}
-                    service={service}
-                    isSelected={serviceIds.includes(service.id_servicio)}
-                    disabled={!canSelectServices}
-                    onToggle={() => toggleService(service.id_servicio)}
-                  />
+                {visibleServices.map((service) => (
+                  (() => {
+                    const serviceId = String(service?.id_servicio || '').trim();
+                    const coveredByPlan = activeBlockIndex === 0 && membershipLockedServiceIdsSet.has(serviceId);
+                    const coveredByReward = activeBlockIndex === 0
+                      && rewardForTitularActive
+                      && serviceId === String(rewardServiceId || '').trim();
+                    const blockedByPackage = blockedServiceIdsSet.has(serviceId);
+                    const isBlocked = canSelectServices && (coveredByPlan || blockedByPackage || coveredByReward);
+                    const blockedReason = coveredByReward
+                      ? 'Este servicio está bloqueado por recompensa cortesía.'
+                      : coveredByPlan
+                        ? 'Este servicio está cubierto por tu plan y no se puede quitar.'
+                        : (blockedByPackage ? 'Ese servicio ya lo incluye el paquete seleccionado' : '');
+                    const blockedLabel = coveredByReward
+                      ? 'Recompensa cortesía'
+                      : coveredByPlan
+                        ? 'Cubierto por tu plan'
+                        : (blockedByPackage ? 'Incluido en paquete' : '');
+
+                    return (
+                      <ServiceCard
+                        key={serviceId}
+                        service={service}
+                        isSelected={serviceIds.includes(service.id_servicio)}
+                        blocked={isBlocked}
+                        blockedReason={blockedReason}
+                        blockedLabel={blockedLabel}
+                        coveredByPlan={coveredByPlan || coveredByReward}
+                        disabled={!canSelectServices}
+                        onToggle={() => toggleService(service.id_servicio)}
+                      />
+                    );
+                  })()
                 ))}
               </div>
             ) : null}
+
             {catalogTab === 'packages' ? (
               <div className="citas-services-grid">
                 {packages.map((pkg) => (
                   <button
                     key={pkg.id_paquete}
                     type="button"
-                    className={`citas-service-card ${selectedPackageId === pkg.id_paquete ? 'is-selected' : ''}`}
+                    className={`citas-service-card public-booking-package-card ${selectedPackageId === pkg.id_paquete ? 'is-selected' : ''}`}
                     disabled={!canSelectServices}
                     onClick={() => selectPackage(pkg.id_paquete)}
                   >
-                    <div className="citas-service-name">{pkg.nombre_paquete || 'Paquete'}</div>
-                    <div className="citas-service-meta">
-                      <Package size={14} />
-                      <span>{Array.isArray(pkg.items) ? `${pkg.items.length} servicios` : 'Paquete'}</span>
+                    <div className="public-booking-package-head">
+                      <div className="citas-service-name">{pkg.nombre_paquete || 'Paquete'}</div>
+                      <p className="public-booking-package-description">
+                        {String(pkg?.descripcion || '').trim() || 'Incluye una combinación de servicios del catálogo.'}
+                      </p>
                     </div>
-                    <div className="citas-service-meta">
-                      <span>{formatCurrencyHnl(pkg?.precio_hnl || 0)}</span>
+                    <div className="public-booking-package-items">
+                      {(Array.isArray(pkg.items) ? pkg.items : []).slice(0, 6).map((item, index) => {
+                        const itemName = String(item?.nombre_servicio || '').trim() || 'Servicio';
+                        const qty = Math.max(1, Number(item?.cantidad || 1));
+                        return (
+                          <div key={`${pkg.id_paquete}-item-${index}`} className="public-booking-package-item">
+                            <Package size={12} />
+                            <span>{qty > 1 ? `${itemName} x${qty}` : itemName}</span>
+                          </div>
+                        );
+                      })}
+                      {Array.isArray(pkg.items) && pkg.items.length > 6 ? (
+                        <div className="public-booking-package-item public-booking-package-item--more">
+                          + {pkg.items.length - 6} servicios más
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="public-booking-package-footer">
+                      <span className="public-booking-package-price">{formatCurrencyHnl(pkg?.precio_hnl || 0)}</span>
                     </div>
                   </button>
                 ))}
               </div>
             ) : null}
+
             {catalogTab === 'promotions' ? (
               promotionsLoading && promotionsForCards.length === 0 ? (
                 <LoadingSpinner />
@@ -720,15 +1078,20 @@ export default function PublicBookingAgendaStep() {
                 </div>
               )
             ) : null}
-            {catalogTab === 'packages' && packages.length === 0 ? (
+
+            {effectiveCatalogTab === 'packages' && packages.length === 0 ? (
               <p className="citas-selected-date mt-2">No hay paquetes disponibles para esta sucursal.</p>
             ) : null}
+
             {catalogTab === 'promotions' && !promotionsLoading && promotionsForCards.length === 0 ? (
               <p className="citas-selected-date mt-2">No hay promociones disponibles para esta sucursal.</p>
             ) : null}
+
             {catalogTab === 'promotions' && selectedPromotion ? (
               <div className="public-booking-actions is-inline mt-2">
-                <p className="citas-selected-date">Promoción seleccionada: {selectedPromotion.titulo || 'Promoción seleccionada'}</p>
+                <p className="citas-selected-date">
+                  Promoción seleccionada: {selectedPromotion.titulo || 'Promoción seleccionada'}
+                </p>
                 <Button type="button" variant="outline" size="sm" onClick={clearSelectedPromotion}>
                   Quitar promoción
                 </Button>
@@ -754,7 +1117,6 @@ export default function PublicBookingAgendaStep() {
           <div className="citas-services-summary-row mt-3">
             {selectedPromotion ? (
               <div className="public-booking-promo-summary">
-                {/* // JK: Resumen principal con jerarquía visual consistente para promociones seleccionadas. */}
                 <div className="public-booking-promo-summary-row">
                   <span className="public-booking-promo-summary-label">Subtotal servicios:</span>
                   <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalToPay)}</strong>
@@ -800,6 +1162,12 @@ export default function PublicBookingAgendaStep() {
               </span>
             ) : null}
           </div>
+
+          {!hasValidSelectionForCalendar ? (
+            <div className="public-booking-inherited-date-banner">
+              Selecciona al menos un servicio para habilitar el calendario.
+            </div>
+          ) : null}
 
           {activeBlockIndex === 0 ? (
             <>
@@ -871,6 +1239,7 @@ export default function PublicBookingAgendaStep() {
                   <span>Duración estimada de la cita: {formatDurationHuman(selectedServicesDurationSum)}</span>
                   <span>Selecciona una hora disponible para continuar con tu reserva.</span>
                 </div>
+
                 {selectedPackage ? (
                   <p className="citas-selected-date">
                     Paquete seleccionado: {selectedPackage.nombre_paquete}
@@ -920,7 +1289,7 @@ export default function PublicBookingAgendaStep() {
                           onClick={() => setPreferredSlotPeriod(period.key)}
                         >
                           <span>{period.label}</span>
-                          <span className="public-booking-time-period-count">{(availableSlotsByPeriod[period.key] || []).length}</span>
+                          <span className="public-booking-time-period-count">{Number(periodSlotModels?.[period.key]?.total || 0)}</span>
                         </button>
                       ))}
                     </div>
@@ -936,20 +1305,91 @@ export default function PublicBookingAgendaStep() {
                       ) : (
                         <div className="public-booking-time-block-list">
                           {currentPeriodSlots.length > 0 ? (
-                            currentPeriodSlots.map((slot) => {
-                              const restriction = getSlotRestriction(slot);
-                              return (
-                                <SlotButton
-                                  key={slot.hora}
-                                  slot={slot}
-                                  selectedTime={selectedTime}
-                                  onSelect={onSelectTime}
-                                  disabled={restriction.disabled}
-                                  variant={restriction.variant}
-                                  helperText={restriction.reason}
-                                />
-                              );
-                            })
+                            <>
+                              {activePeriodModel.recommended ? (
+                                <section className="public-booking-curated-section">
+                                  <p className="public-booking-curated-title">Recomendado</p>
+                                  {(() => {
+                                    const restriction = getSlotRestriction(activePeriodModel.recommended);
+                                    return (
+                                      <SlotButton
+                                        key={`recommended-${activePeriodModel.recommended.hora}`}
+                                        slot={activePeriodModel.recommended}
+                                        selectedTime={selectedTime}
+                                        onSelect={onSelectTime}
+                                        disabled={restriction.disabled}
+                                        variant={restriction.variant}
+                                        helperText={restriction.reason}
+                                      />
+                                    );
+                                  })()}
+                                </section>
+                              ) : null}
+
+                              {activePeriodModel.alternatives.length > 0 ? (
+                                <section className="public-booking-curated-section">
+                                  <p className="public-booking-curated-title">Alternativas</p>
+                                  {activePeriodModel.alternatives.map((slot) => {
+                                    const restriction = getSlotRestriction(slot);
+                                    return (
+                                      <SlotButton
+                                        key={`alternative-${slot.hora}`}
+                                        slot={slot}
+                                        selectedTime={selectedTime}
+                                        onSelect={onSelectTime}
+                                        disabled={restriction.disabled}
+                                        variant={restriction.variant}
+                                        helperText={restriction.reason}
+                                      />
+                                    );
+                                  })}
+                                </section>
+                              ) : null}
+
+                              {activePeriodModel.hasMore && !activePeriodModel.isExpanded ? (
+                                <div className="public-booking-curated-more">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setExpandedState((prev) => {
+                                      const currentPeriods = prev.scopeKey === expansionScopeKey
+                                        ? prev.periods
+                                        : DEFAULT_EXPANDED_PERIODS;
+                                      return {
+                                        scopeKey: expansionScopeKey,
+                                        periods: {
+                                          ...currentPeriods,
+                                          [activeSlotPeriod]: true,
+                                        },
+                                      };
+                                    })}
+                                  >
+                                    Ver más horarios
+                                  </Button>
+                                </div>
+                              ) : null}
+
+                              {activePeriodModel.isExpanded && activePeriodModel.overflow.length > 0 ? (
+                                <section className="public-booking-curated-section">
+                                  <p className="public-booking-curated-title">Más horarios</p>
+                                  {activePeriodModel.overflow.map((slot) => {
+                                    const restriction = getSlotRestriction(slot);
+                                    return (
+                                      <SlotButton
+                                        key={`overflow-${slot.hora}`}
+                                        slot={slot}
+                                        selectedTime={selectedTime}
+                                        onSelect={onSelectTime}
+                                        disabled={restriction.disabled}
+                                        variant={restriction.variant}
+                                        helperText={restriction.reason}
+                                      />
+                                    );
+                                  })}
+                                </section>
+                              ) : null}
+                            </>
                           ) : (
                             <div className="public-booking-period-empty">
                               <p className="text-sm font-semibold text-[var(--mf-text)]">
@@ -986,8 +1426,15 @@ export default function PublicBookingAgendaStep() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.12, ease: LANDING_EASE }}
         >
-          <Button className="gap-2" onClick={goToConfirm} disabled={!canGoToConfirm}>
-            Continuar a resumen
+          <Button
+            className="gap-2"
+            onClick={() => {
+              void goToConfirm();
+            }}
+            disabled={!canGoToConfirm || holdSubmitting}
+          >
+            {holdSubmitting ? <Loader2 size={16} className="animate-spin" /> : null}
+            {holdSubmitting ? 'Preparando resumen...' : 'Continuar a resumen'}
             <ArrowRight size={15} />
           </Button>
         </motion.div>
@@ -1016,7 +1463,3 @@ export default function PublicBookingAgendaStep() {
     </>
   );
 }
-
-
-
-

@@ -4,6 +4,7 @@ import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import ClienteProfileCompletionBanner from '../components/ClienteProfileCompletionBanner.jsx';
 import ClienteProfileEditModal from '../components/ClienteProfileEditModal.jsx';
+import ClienteCourtesyRouteSection from '../components/ClienteCourtesyRouteSection.jsx';
 import ClienteSummaryCards from '../components/ClienteSummaryCards.jsx';
 import { getClienteCitaDetalle, getClienteMe, listClienteCitas } from '../lib/clienteApi.js';
 
@@ -158,13 +159,15 @@ export default function ClienteDashboardPage() {
 
   return (
     <div className="space-y-5">
+      <ClienteCourtesyRouteSection />
+
       <ClienteSummaryCards
-        masterpuntos={profile?.masterpuntos || 0}
         upcomingAppointments={upcomingAppointments.length}
         totalAppointments={citas.length}
         completionPercent={completion?.completion_percent || 0}
         onNewAppointment={() => navigate('/agendar')}
         onOpenProfile={() => setProfileModalOpen(true)}
+        hideRewardsHero
       />
 
       <ClienteProfileCompletionBanner

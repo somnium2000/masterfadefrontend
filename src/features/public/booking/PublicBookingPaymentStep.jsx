@@ -8,14 +8,26 @@ export default function PublicBookingPaymentStep() {
   const {
     bookingBlocksSummary,
     createPaymentIntentForHold,
+    holdExpired,
+    holdExpiresAtIso,
+    holdRemainingMs,
     paymentIntent,
     paymentResult,
     refreshPaymentStatus,
     completeMockPayment,
-    totalToPay,
+    holdPricing,
+    holdTotalToPay,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+
+  const holdCountdownLabel = (() => {
+    if (holdRemainingMs == null) return null;
+    const totalSeconds = Math.max(0, Math.floor(holdRemainingMs / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  })();
 
   const handleCreateIntent = async () => {
     if (loadingIntent) return;
@@ -44,6 +56,17 @@ export default function PublicBookingPaymentStep() {
         <p className="citas-selected-date mt-2">
           Completa los datos y finaliza el pago para confirmar la reserva.
         </p>
+        {holdCountdownLabel ? (
+          <div className={`public-booking-payment-note mt-3 ${holdExpired ? 'is-expired' : ''}`.trim()}>
+            <ShieldCheck size={14} />
+            <span>
+              {holdExpired
+                ? 'La reserva temporal expiró. Regresaremos a agenda para que elijas una nueva hora.'
+                : `Reserva temporal activa: ${holdCountdownLabel} restantes`}
+              {holdExpiresAtIso ? ' (contador real del hold en backend).' : ''}
+            </span>
+          </div>
+        ) : null}
 
         <div className="public-booking-form-grid public-booking-payment-grid mt-4">
           <div className="public-booking-contact-card public-booking-payment-gateway-card">
@@ -79,9 +102,8 @@ export default function PublicBookingPaymentStep() {
               </Button>
             ) : (
               <div className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)] public-booking-payment-meta">
-                <p>Intent: {paymentIntent.id_intent}</p>
                 <p>Estado: {paymentResult?.estado_intent_codigo || paymentIntent.estado_intent_codigo || 'pendiente'}</p>
-                <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || totalToPay)}</p>
+                <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || holdTotalToPay)}</p>
                 {paymentIntent.payment_url ? (
                   <a
                     href={paymentIntent.payment_url}
@@ -115,6 +137,22 @@ export default function PublicBookingPaymentStep() {
               <span>{formatCurrencyHnl(block.total_hnl)}</span>
             </div>
           ))}
+          <div className="citas-confirm-row mt-3">
+            <span>Total servicios</span>
+            <span>{formatCurrencyHnl(Number(holdPricing?.subtotal_hnl || 0))}</span>
+          </div>
+          <div className="citas-confirm-row">
+            <span>Cubierto por tu plan</span>
+            <span>-{formatCurrencyHnl(Number(holdPricing?.cubierto_por_plan_hnl || 0))}</span>
+          </div>
+          <div className="citas-confirm-row">
+            <span>Extras a pagar</span>
+            <span>{formatCurrencyHnl(Number(holdPricing?.extras_a_pagar_hnl || holdTotalToPay || 0))}</span>
+          </div>
+          <div className="citas-confirm-row">
+            <span>Total a pagar</span>
+            <span>{formatCurrencyHnl(Number(holdTotalToPay || 0))}</span>
+          </div>
         </div>
       </div>
     </div>

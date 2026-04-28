@@ -1,5 +1,7 @@
 import { http } from '../../../services/httpClient.js';
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function toQueryString(params = {}) {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -15,7 +17,19 @@ export async function getPublicBookingContext() {
 }
 
 export async function listPublicAgendaBarberos(params = {}) {
-  return http.get(`/v1/public/agenda/barberos${toQueryString(params)}`);
+  const idSucursal = String(params?.id_sucursal || '').trim();
+  if (!UUID_PATTERN.test(idSucursal)) {
+    const error = new Error('Selecciona una sucursal valida para consultar barberos.');
+    error.status = 400;
+    error.data = {
+      error: {
+        code: 'PUBLIC_BOOKING_BRANCH_INVALID',
+        message: error.message,
+      },
+    };
+    throw error;
+  }
+  return http.get(`/v1/public/agenda/barberos${toQueryString({ ...params, id_sucursal: idSucursal })}`);
 }
 
 export async function listPublicCatalogServicios(params = {}) {
@@ -45,6 +59,10 @@ export async function createPublicCitaHold(payload) {
 
 export async function createClienteCitaHold(payload) {
   return http.post('/v1/citas/hold', payload);
+}
+
+export async function confirmClienteCitaHoldWithoutPayment(idGrupoCita, payload = {}, options = {}) {
+  return http.post(`/v1/citas/hold/${encodeURIComponent(String(idGrupoCita || '').trim())}/confirmar`, payload, options);
 }
 
 export async function createPublicPaymentIntent(payload) {
