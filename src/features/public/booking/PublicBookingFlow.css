@@ -629,6 +629,148 @@
   gap: 8px;
 }
 
+/* // JK: Estilos de cards de promociones en agendamiento con variante seleccionada/deshabilitada. */
+.public-booking-promotions-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.public-booking-promo-card {
+  min-height: 188px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+  text-align: left;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+}
+
+.public-booking-promo-card:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.public-booking-promo-card.is-disabled {
+  opacity: 0.72;
+  filter: saturate(0.72);
+  cursor: not-allowed;
+}
+
+.public-booking-promo-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.public-booking-promo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--mf-accent) 70%, transparent);
+  background: color-mix(in srgb, var(--mf-accent) 22%, transparent);
+  color: var(--mf-accent);
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.public-booking-promo-benefit {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--mf-nav-border) 78%, transparent);
+  background: color-mix(in srgb, var(--mf-btn-bg) 72%, var(--mf-card) 28%);
+  color: var(--mf-text);
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.public-booking-promo-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--mf-text-2);
+  line-height: 1.35;
+}
+
+.public-booking-promo-target,
+.public-booking-promo-vigency,
+.public-booking-promo-requirement,
+.public-booking-promo-selected {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.public-booking-promo-target {
+  color: var(--mf-text);
+}
+
+.public-booking-promo-vigency {
+  color: var(--mf-text-2);
+}
+
+.public-booking-promo-requirement {
+  color: #f3c998;
+}
+
+.public-booking-promo-selected {
+  color: var(--mf-accent);
+  font-weight: 700;
+}
+
+.public-booking-promo-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid color-mix(in srgb, var(--mf-accent) 36%, var(--mf-nav-border) 64%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--mf-accent) 10%, var(--mf-card) 90%);
+  padding: 10px 12px;
+}
+
+.public-booking-promo-summary > span {
+  color: var(--mf-text);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.public-booking-promo-summary > small {
+  color: var(--mf-text-2);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* // JK: Estructura visual etiqueta/valor para presentar subtotal, descuento y total de forma ordenada. */
+.public-booking-promo-summary-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.public-booking-promo-summary-label {
+  color: var(--mf-text-2);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.public-booking-promo-summary-value {
+  color: var(--mf-text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.public-booking-promo-summary-row-total {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--mf-nav-border) 78%, transparent);
+}
+
 .public-booking-group-summary {
   display: flex;
   flex-direction: column;
