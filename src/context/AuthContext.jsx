@@ -8,6 +8,29 @@ import {
 import { supabase } from '../config/supabaseClient.js';
 
 const AuthContext = createContext(null);
+const PUBLIC_OPTIONAL_AUTH_ROUTES = new Set([
+  '/',
+  '/membresias-vip',
+  '/barberos',
+  '/promociones',
+  '/login',
+  '/registro',
+]);
+
+function readClientCookie(name) {
+  if (typeof document === 'undefined') return '';
+  const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = document.cookie.match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
+function isPublicOptionalAuthRoute(pathname) {
+  return PUBLIC_OPTIONAL_AUTH_ROUTES.has(String(pathname || '').trim());
+}
+
+function hasSessionHint() {
+  return Boolean(readClientCookie('mf_csrf'));
+}
 
 function normalizeRoles(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
@@ -135,6 +158,13 @@ export function AuthProvider({ children }) {
       return { ok: true };
     } catch (err) {
       clearSessionState();
+      if (Number(err?.status) === 401) {
+        return {
+          ok: false,
+          expectedUnauthenticated: true,
+          message: '',
+        };
+      }
       return {
         ok: false,
         message: err?.data?.error?.message || err?.message || 'No se pudo hidratar la sesion.',

@@ -921,8 +921,9 @@ export default function AdminPlansCatalogPage() {
       return;
     }
 
+    const normalizedFormBenefits = normalizeBenefits(formValues?.beneficios);
     const validServiceIds = new Set((Array.isArray(services) ? services : []).map((service) => String(service?.id_servicio || "")));
-    const invalidServiceBenefit = normalizeBenefits(formValues?.beneficios).find((item) => {
+    const invalidServiceBenefit = normalizedFormBenefits.find((item) => {
       if (normalizeTipo(item?.tipo) !== "servicio") return false;
       return !validServiceIds.has(String(item?.id_servicio || ""));
     });
@@ -934,7 +935,7 @@ export default function AdminPlansCatalogPage() {
 
     const courtesyById = new Map((Array.isArray(courtesies) ? courtesies : []).map((courtesy) => [String(courtesy?.id_cortesia || ""), courtesy]));
     const existingCourtesySet = new Set((Array.isArray(formOriginalCourtesyIds) ? formOriginalCourtesyIds : []).map((id) => String(id || "")));
-    const invalidCourtesyBenefit = normalizeBenefits(formValues?.beneficios).find((item) => {
+    const invalidCourtesyBenefit = normalizedFormBenefits.find((item) => {
       if (normalizeTipo(item?.tipo) !== "cortesia") return false;
       const courtesyId = String(item?.id_cortesia || "");
       const courtesy = courtesyById.get(courtesyId);
@@ -947,6 +948,54 @@ export default function AdminPlansCatalogPage() {
       return;
     }
 
+    const serviceNameById = new Map((Array.isArray(services) ? services : []).map((service) => [
+      String(service?.id_servicio || ""),
+      String(service?.nombre_servicio || "").trim(),
+    ]));
+    const courtesyNameById = new Map((Array.isArray(courtesies) ? courtesies : []).map((courtesy) => [
+      String(courtesy?.id_cortesia || ""),
+      String(courtesy?.nombre || "").trim(),
+    ]));
+    const canonicalItems = normalizedFormBenefits
+      .map((item) => {
+        const tipo = normalizeTipo(item?.tipo);
+        const cantidad = Number(item?.cantidad);
+        if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > PLAN_BENEFIT_MAX_CANTIDAD) return null;
+        if (tipo === "servicio") {
+          const idServicio = String(item?.id_servicio || "").trim();
+          if (!idServicio) return null;
+          const serviceName = serviceNameById.get(idServicio) || String(item?.nombre || "").trim();
+          return {
+            tipo: "servicio",
+            id_servicio: idServicio,
+            id_cortesia: null,
+            nombre: serviceName || "Servicio del catalogo",
+            cantidad,
+          };
+        }
+        const idCortesia = String(item?.id_cortesia || "").trim();
+        if (!idCortesia) return null;
+        const courtesyName = courtesyNameById.get(idCortesia) || String(item?.nombre || "").trim();
+        return {
+          tipo: "cortesia",
+          id_servicio: null,
+          id_cortesia: idCortesia,
+          nombre: courtesyName || "Cortesia del catalogo",
+          cantidad,
+        };
+      })
+      .filter(Boolean);
+    const beneficiosPayload = {
+      version: 1,
+      items: canonicalItems,
+      servicios: canonicalItems.filter((item) => item.tipo === "servicio"),
+      cortesias: canonicalItems.filter((item) => item.tipo === "cortesia"),
+    };
+    if (!beneficiosPayload.servicios.length) {
+      setFormError("El plan debe incluir al menos un servicio valido.");
+      return;
+    }
+
     setFormLoading(true);
     setFormError("");
 
@@ -956,16 +1005,7 @@ export default function AdminPlansCatalogPage() {
       precio_hnl: Number(formValues.precio_hnl),
       periodo_membresia_codigo: "mensual",
       categoria_nivel: normalizePlanCategory(formValues.categoria_nivel, DEFAULT_PLAN_CATEGORY),
-      beneficios: normalizeBenefits(formValues.beneficios).map((item) => {
-        const tipo = normalizeTipo(item?.tipo);
-        const payloadItem = { tipo, cantidad: Number(item?.cantidad) };
-        if (tipo === "servicio") {
-          payloadItem.id_servicio = String(item?.id_servicio || "").trim();
-        } else {
-          payloadItem.id_cortesia = String(item?.id_cortesia || "").trim();
-        }
-        return payloadItem;
-      }),
+      beneficios: beneficiosPayload,
       id_sucursal: branchId,
       visible_publico: Boolean(formValues.visible_publico),
       orden_visual: Number(formValues.orden_visual),

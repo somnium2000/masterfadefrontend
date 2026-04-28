@@ -57,11 +57,18 @@ export function ServiceCard({
   onToggle,
   disabled = false,
   blocked = false,
+  blockedReason = '',
+  blockedLabel = '',
+  coveredByPlan = false,
 }) {
   const handleClick = () => {
-    if (disabled) return;
+    if (disabled || blocked) return;
     onToggle?.();
   };
+  const helperLabel = blockedLabel || (coveredByPlan ? 'Cubierto por tu plan' : 'Incluido en paquete');
+  const title = blockedReason || (coveredByPlan
+    ? 'Este servicio está cubierto por tu plan y no se puede quitar.'
+    : 'Ese servicio ya lo incluye el paquete seleccionado');
   return (
     <button
       type="button"
@@ -70,7 +77,7 @@ export function ServiceCard({
       aria-pressed={isSelected}
       disabled={disabled}
       aria-disabled={disabled || blocked}
-      title={blocked ? 'Ese servicio ya lo incluye el paquete seleccionado' : undefined}
+      title={blocked ? title : undefined}
     >
       <div className="citas-service-name">{service?.nombre_servicio || 'Servicio'}</div>
       <div className="citas-service-meta">
@@ -83,7 +90,7 @@ export function ServiceCard({
       </div>
       {blocked ? (
         <div className="citas-service-meta">
-          <span>Incluido en paquete</span>
+          <span>{helperLabel}</span>
         </div>
       ) : null}
     </button>

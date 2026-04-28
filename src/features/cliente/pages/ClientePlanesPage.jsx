@@ -2,7 +2,6 @@
 import { motion } from "framer-motion";
 import {
   Building2,
-  Ban,
   Crown,
   Sparkles,
   Shield,
@@ -12,18 +11,30 @@ import {
   Clock3,
   ShieldCheck,
   WalletCards,
+  AlertTriangle,
 } from "lucide-react";
 import { useNotifications } from "../../../context/NotificationsContext.jsx";
 import CardsCarousel from "../../../components/data/CardsCarousel.jsx";
 import { Button } from "../../../components/ui/button.jsx";
-import { listPublicCatalogBranches, listPublicCatalogPlans } from "../../public/lib/catalogApi.js";
 import {
-  getStoredClienteCatalogBranchId,
-  resolveValidClienteBranchId,
-  setStoredClienteCatalogBranchId,
-} from "../lib/clienteCatalogBranch.js";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../../components/ui/dialog.jsx";
+import { listPublicCatalogBranches, listPublicPlansByBranch } from "../../public/lib/catalogApi.js";
+import { setStoredClienteCatalogBranchId } from "../lib/clienteCatalogBranch.js";
 import { getPlanCategoryTheme, normalizePlanCategory } from "../../plans/lib/planCategoryTheme.js";
-import { cancelClientePlan, getClientePlanEstado } from "../lib/clienteApi.js";
+import {
+  cancelClientePlanBySubscription,
+  confirmMembershipPayment,
+  createMembershipOrder,
+  createMembershipPaymentIntent,
+  getClientePlanEstado,
+} from "../lib/clienteApi.js";
+import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
 
 const CATEGORY_ICONS = {
   1: Shield,
@@ -32,6 +43,32 @@ const CATEGORY_ICONS = {
   4: Gem,
   5: Trophy,
 };
+
+const MEMBERSHIP_STATUS_LABELS = {
+  activa: "Activa",
+  pendiente_renovacion: "Pendiente de renovacion",
+  agotada: "Agotada",
+  vencida: "Vencida",
+  cancelada: "Cancelada",
+  sin_plan_activo: "Sin plan activo",
+};
+
+const SAME_BRANCH_REPLACE_WARNING = "Al cambiar de plan perderas los servicios y cortesias restantes del plan actual en esta sucursal.";
+
+function resolvePlanOfferId(plan) {
+  if (!plan || typeof plan !== "object") return null;
+  const candidates = [
+    plan.id_plan_sucursal,
+    plan.plan_sucursal_id,
+    plan.id_oferta,
+    plan.id_membership_plan_sucursal,
+  ];
+  for (const candidate of candidates) {
+    const normalized = String(candidate || "").trim();
+    if (normalized) return normalized;
+  }
+  return null;
+}
 
 function formatPrice(value) {
   const amount = Number(value);
@@ -53,17 +90,6 @@ function formatConsumptionDate(value) {
   });
 }
 
-const PLAN_PURCHASE_PENDING_MESSAGE = "Adquisición y actualización de planes pendientes de integración con pasarela de pago.";
-
-const MEMBERSHIP_STATUS_LABELS = {
-  activa: "Activa",
-  pendiente_renovacion: "Pendiente de renovaciÃ³n",
-  agotada: "Agotada",
-  vencida: "Vencida",
-  cancelada: "Cancelada",
-  sin_plan_activo: "Sin plan activo",
-};
-
 function isOperationalMembershipConsumption(entry) {
   if (!entry || typeof entry !== "object") return false;
   if (entry.invalidado) return false;
@@ -72,17 +98,93 @@ function isOperationalMembershipConsumption(entry) {
   return true;
 }
 
+function toBenefitItems(rawBenefits) {
+  if (Array.isArray(rawBenefits)) return rawBenefits;
+  if (rawBenefits && Array.isArray(rawBenefits.items)) return rawBenefits.items;
+  return [];
+}
+
+function normalizeBenefitName(item = {}, fallback) {
+  return String(item?.nombre || item?.codigo || fallback || "Beneficio").trim();
+}
+
+function resolvePlanBenefitsSnapshot(activePlan) {
+  const candidates = [
+    activePlan?.beneficios_snapshot,
+    activePlan?.plan_snapshot?.beneficios,
+    activePlan?.beneficios,
+  ];
+  for (const candidate of candidates) {
+    const items = toBenefitItems(candidate);
+    if (items.length) return items;
+  }
+  return [];
+}
+
+function buildDetailedBenefits(activePlan, type) {
+  const key = type === "cortesia" ? "cortesias" : "servicios";
+  const fallbackLabel = type === "cortesia" ? "Cortesia" : "Servicio";
+  const remanentes = Array.isArray(activePlan?.remanentes?.[key]) ? activePlan.remanentes[key] : [];
+
+  if (remanentes.length) {
+    return remanentes.map((item) => ({
+      nombre: normalizeBenefitName(item, fallbackLabel),
+      total: Number(item?.total || 0),
+      restante: Number(item?.restante || 0),
+      hasRemainder: true,
+    }));
+  }
+
+  const snapshotBenefits = resolvePlanBenefitsSnapshot(activePlan)
+    .filter((benefit) => String(benefit?.tipo || "").toLowerCase() === type);
+  return snapshotBenefits.map((item) => ({
+    nombre: normalizeBenefitName(item, fallbackLabel),
+    total: Number(item?.cantidad || 0),
+    restante: null,
+    hasRemainder: false,
+  }));
+}
+
+function resolveActivePlansFromState(state) {
+  const multi = Array.isArray(state?.planes_activos) ? state.planes_activos : [];
+  const source = multi.length ? multi : (state?.plan_activo ? [state.plan_activo] : []);
+  const deduped = new Map();
+  source.forEach((plan) => {
+    const id = String(plan?.id_suscripcion || "").trim();
+    if (!id || deduped.has(id)) return;
+    deduped.set(id, plan);
+  });
+  return Array.from(deduped.values());
+}
+
+function normalizePlan(plan) {
+  if (!plan || typeof plan !== "object") return null;
+  const normalizedPrice = Number(plan?.precio_hnl ?? plan?.precio ?? 0);
+  return {
+    ...plan,
+    id_plan: String(plan?.id_plan || plan?.plan_id || "").trim() || null,
+    id_plan_sucursal: resolvePlanOfferId(plan),
+    nombre_plan: String(plan?.nombre_plan || plan?.nombre || "").trim() || "Plan",
+    precio_hnl: Number.isFinite(normalizedPrice) ? normalizedPrice : 0,
+  };
+}
+
 function PlanCard({
   plan,
   index,
   recommendedKey,
-  ctaLabel = "Próximamente",
+  onPurchase,
+  loading = false,
+  disabled = false,
 }) {
   const benefits = Array.isArray(plan?.beneficios) ? plan.beneficios : [];
   const categoryLevel = normalizePlanCategory(plan?.categoria_nivel, 1);
   const categoryTheme = getPlanCategoryTheme(categoryLevel);
   const Icon = CATEGORY_ICONS[categoryLevel] || Crown;
   const isRecommended = `${plan?.id_plan || ""}:${plan?.id_sucursal || "public"}` === recommendedKey;
+  const missingBranchOffer = !plan?.id_plan_sucursal;
+  const hasValidPrice = Number(plan?.precio_hnl) > 0;
+  const canPurchase = !missingBranchOffer && hasValidPrice;
 
   return (
     <motion.article
@@ -99,7 +201,7 @@ function PlanCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: categoryTheme.accentColor }}>
-            Nivel {categoryLevel} Â· {categoryTheme.label}
+            Nivel {categoryLevel} · {categoryTheme.label}
           </p>
           <h2 className="mf-font-display mt-2 text-2xl leading-tight text-[var(--mf-text)]">
             {plan.nombre_plan}
@@ -170,18 +272,22 @@ function PlanCard({
       <Button
         type="button"
         className="mt-5 w-full rounded-xl"
-        disabled
-        title={PLAN_PURCHASE_PENDING_MESSAGE}
+        onClick={() => onPurchase(plan)}
+        disabled={disabled || loading || !canPurchase}
+        title={missingBranchOffer ? "Este plan no tiene oferta valida para esta sucursal" : undefined}
       >
-        {ctaLabel}
+        {loading ? "Procesando..." : (canPurchase ? "Quiero este plan" : "Oferta pendiente")}
       </Button>
+      {missingBranchOffer ? (
+        <p className="mt-2 text-center text-xs text-amber-200">Este plan no tiene oferta valida para esta sucursal.</p>
+      ) : null}
     </motion.article>
   );
 }
 
 export default function ClientePlanesPage() {
   const notifications = useNotifications();
-  const { error: notifyError, success: notifySuccess } = notifications;
+  const { error: notifyError, success: notifySuccess, warning: notifyWarning } = notifications;
   const lastErrorMessageRef = useRef("");
 
   const [loading, setLoading] = useState(true);
@@ -190,11 +296,32 @@ export default function ClientePlanesPage() {
   const [plans, setPlans] = useState([]);
   const [membershipState, setMembershipState] = useState(null);
   const [membershipLoading, setMembershipLoading] = useState(true);
-  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelingSubscriptionId, setCancelingSubscriptionId] = useState("");
+  const [loadingPlanOfferId, setLoadingPlanOfferId] = useState("");
+
+  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  const [purchaseStep, setPurchaseStep] = useState("summary");
+  const [purchaseOrderSummary, setPurchaseOrderSummary] = useState(null);
+  const [membershipPaymentIntent, setMembershipPaymentIntent] = useState(null);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
+  const [purchaseErrorMessage, setPurchaseErrorMessage] = useState("");
+  const [purchaseCompleted, setPurchaseCompleted] = useState(false);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [confirmDialogMode, setConfirmDialogMode] = useState("");
+  const [pendingPlanSelection, setPendingPlanSelection] = useState(null);
+  const [pendingCancelPlan, setPendingCancelPlan] = useState(null);
 
   const fetchPlans = useCallback(async (selectedBranchId) => {
-    const plansPayload = await listPublicCatalogPlans({ id_sucursal: selectedBranchId || undefined });
-    setPlans(Array.isArray(plansPayload?.plans) ? plansPayload.plans : []);
+    const safeBranchId = String(selectedBranchId || "").trim();
+    if (!safeBranchId) {
+      setPlans([]);
+      return;
+    }
+    const plansPayload = await listPublicPlansByBranch(safeBranchId);
+    const mappedPlans = (Array.isArray(plansPayload?.plans) ? plansPayload.plans : [])
+      .map(normalizePlan)
+      .filter(Boolean);
+    setPlans(mappedPlans);
   }, []);
 
   const fetchMembershipState = useCallback(async () => {
@@ -202,11 +329,9 @@ export default function ClientePlanesPage() {
     try {
       const payload = await getClientePlanEstado();
       setMembershipState(payload);
-      // AM: Limpia deduplicaciÃ³n al recuperar estado correctamente.
       lastErrorMessageRef.current = "";
     } catch (error) {
-      // AM: Evita spam de toasts repetidos con el mismo mensaje.
-      const message = error?.data?.error?.message || error?.message || "No se pudo cargar tu estado de membresÃ­a.";
+      const message = error?.data?.error?.message || error?.message || "No se pudo cargar tu estado de membresia.";
       if (lastErrorMessageRef.current !== message) {
         lastErrorMessageRef.current = message;
         notifyError(message);
@@ -222,22 +347,15 @@ export default function ClientePlanesPage() {
       const branchPayload = await listPublicCatalogBranches();
       const nextBranches = Array.isArray(branchPayload?.branches) ? branchPayload.branches : [];
       setBranches(nextBranches);
-
-      const preferredBranchId = getStoredClienteCatalogBranchId();
-      const resolvedBranchId = resolveValidClienteBranchId(preferredBranchId, nextBranches);
-      setBranchId(resolvedBranchId);
-      setStoredClienteCatalogBranchId(resolvedBranchId);
-
-      await Promise.all([
-        fetchPlans(resolvedBranchId),
-        fetchMembershipState(),
-      ]);
+      setBranchId("");
+      setPlans([]);
+      await fetchMembershipState();
     } catch (error) {
-      notifyError(error?.data?.error?.message || error?.message || "No se pudo cargar el catÃ¡logo de planes.");
+      notifyError(error?.data?.error?.message || error?.message || "No se pudo cargar el catalogo de planes.");
     } finally {
       setLoading(false);
     }
-  }, [fetchMembershipState, fetchPlans, notifyError]);
+  }, [fetchMembershipState, notifyError]);
 
   useEffect(() => {
     void loadInitial();
@@ -252,25 +370,158 @@ export default function ClientePlanesPage() {
     try {
       await fetchPlans(nextBranchId);
     } catch (error) {
-      notifyError(error?.data?.error?.message || error?.message || "No se pudo actualizar los planes para la sucursal.");
+      notifyError(error?.data?.error?.message || error?.message || "No se pudieron cargar los planes para la sucursal.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleCancelMembership() {
-    if (!activePlan?.id_suscripcion) return;
-    if (!window.confirm("Â¿Deseas cancelar tu membresÃ­a actual? PerderÃ¡s el saldo pendiente.")) return;
+  function resetPurchaseFlow() {
+    setPurchaseStep("summary");
+    setPurchaseOrderSummary(null);
+    setMembershipPaymentIntent(null);
+    setPurchaseLoading(false);
+    setPurchaseErrorMessage("");
+    setPurchaseCompleted(false);
+    setPurchaseModalOpen(false);
+  }
 
-    setCancelLoading(true);
+  async function createOrderForPlanOffer(offerId) {
+    setLoadingPlanOfferId(offerId);
     try {
-      await cancelClientePlan({ motivo_fin_codigo: "cancelacion" });
-      notifySuccess("MembresÃ­a cancelada correctamente.");
+      const orderResponse = await createMembershipOrder(offerId);
+      const summary = orderResponse?.data || orderResponse;
+      setPurchaseOrderSummary(summary);
+      setMembershipPaymentIntent(null);
+      setPurchaseErrorMessage("");
+      setPurchaseStep("summary");
+      setPurchaseCompleted(false);
+      setPurchaseModalOpen(true);
+    } catch (error) {
+      notifyError(error?.data?.error?.message || error?.message || "No se pudo crear la orden del plan.");
+    } finally {
+      setLoadingPlanOfferId("");
+    }
+  }
+
+  async function handlePurchasePlan(plan) {
+    if (!branchId) {
+      notifyWarning("Selecciona una sucursal antes de comprar un plan.");
+      return;
+    }
+
+    const offerId = resolvePlanOfferId(plan);
+    if (!offerId) {
+      notifyWarning("Este plan no tiene oferta valida para esta sucursal.");
+      return;
+    }
+
+    const activePlans = resolveActivePlansFromState(membershipState);
+    const hasActivePlanInBranch = activePlans.some((entry) =>
+      String(entry?.id_sucursal_contratada || "").trim() === branchId
+      && ["activa", "pendiente_renovacion"].includes(String(entry?.estado_visible || entry?.estado_suscripcion_codigo || "").toLowerCase())
+    );
+
+    if (hasActivePlanInBranch) {
+      setPendingPlanSelection({ plan, offerId });
+      setConfirmDialogMode("replace_plan");
+      setConfirmDialogOpen(true);
+      return;
+    }
+
+    await createOrderForPlanOffer(offerId);
+  }
+
+  async function handleContinueToPayment() {
+    const orderId = String(purchaseOrderSummary?.id_order || "").trim();
+    if (!orderId || purchaseLoading) return;
+
+    setPurchaseLoading(true);
+    setPurchaseErrorMessage("");
+    try {
+      const intentResponse = await createMembershipPaymentIntent(orderId);
+      const intentData = intentResponse?.data || intentResponse;
+      setMembershipPaymentIntent(intentData);
+      setPurchaseStep("payment");
+    } catch (error) {
+      setPurchaseErrorMessage(error?.data?.error?.message || "No se pudo crear el intent de pago.");
+    } finally {
+      setPurchaseLoading(false);
+    }
+  }
+
+  async function handleConfirmPayment() {
+    if (purchaseLoading || purchaseCompleted) return;
+    const paymentIntentId = String(membershipPaymentIntent?.id_payment_intent || "").trim();
+    if (!paymentIntentId) {
+      setPurchaseErrorMessage("No hay intent de pago disponible para confirmar.");
+      return;
+    }
+
+    setPurchaseLoading(true);
+    setPurchaseErrorMessage("");
+    try {
+      await confirmMembershipPayment(paymentIntentId);
+      setPurchaseCompleted(true);
+      setPurchaseStep("success");
+      await Promise.all([
+        fetchMembershipState(),
+        fetchPlans(branchId),
+      ]);
+      notifySuccess("Pago confirmado. Tu suscripcion ya esta activa.");
+    } catch (error) {
+      setPurchaseErrorMessage(error?.data?.error?.message || "No se pudo confirmar el pago.");
+    } finally {
+      setPurchaseLoading(false);
+    }
+  }
+
+  function handleOpenCancelPlanDialog(plan, planBranchName) {
+    if (!plan?.id_suscripcion) return;
+    setPendingCancelPlan({
+      id_suscripcion: String(plan.id_suscripcion),
+      nombre_plan: plan?.nombre_plan || "Plan",
+      sucursal_nombre: planBranchName || plan?.sucursal_nombre || "Sucursal",
+    });
+    setConfirmDialogMode("cancel_plan");
+    setConfirmDialogOpen(true);
+  }
+
+  async function handleCancelMembership(plan) {
+    const subscriptionId = String(plan?.id_suscripcion || "").trim();
+    if (!subscriptionId) return;
+
+    setCancelingSubscriptionId(subscriptionId);
+    try {
+      await cancelClientePlanBySubscription(subscriptionId);
+      notifySuccess("Plan cancelado correctamente.");
       await fetchMembershipState();
     } catch (error) {
-      notifyError(error?.data?.error?.message || error?.message || "No se pudo cancelar la membresÃ­a.");
+      notifyError(error?.data?.error?.message || error?.message || "No se pudo cancelar el plan.");
     } finally {
-      setCancelLoading(false);
+      setCancelingSubscriptionId("");
+    }
+  }
+
+  async function handleConfirmDialogContinue() {
+    if (confirmDialogMode === "replace_plan") {
+      const selectedOfferId = String(pendingPlanSelection?.offerId || "").trim();
+      setConfirmDialogOpen(false);
+      setConfirmDialogMode("");
+      setPendingPlanSelection(null);
+      setPendingCancelPlan(null);
+      if (!selectedOfferId) return;
+      await createOrderForPlanOffer(selectedOfferId);
+      return;
+    }
+
+    if (confirmDialogMode === "cancel_plan") {
+      setConfirmDialogOpen(false);
+      setConfirmDialogMode("");
+      setPendingPlanSelection(null);
+      const planToCancel = pendingCancelPlan;
+      setPendingCancelPlan(null);
+      await handleCancelMembership(planToCancel);
     }
   }
 
@@ -281,10 +532,28 @@ export default function ClientePlanesPage() {
     if (!topPlan) return "";
     return `${topPlan.id_plan || ""}:${topPlan.id_sucursal || "public"}`;
   }, [plans]);
-  const activePlan = membershipState?.plan_activo || null;
+
+  const activePlans = useMemo(
+    () => resolveActivePlansFromState(membershipState),
+    [membershipState]
+  );
+  const activePlan = activePlans[0] || null;
   const operationalHistory = useMemo(
     () => (Array.isArray(membershipState?.historial_consumos) ? membershipState.historial_consumos : []).filter(isOperationalMembershipConsumption),
     [membershipState?.historial_consumos]
+  );
+  const activePlanByBranch = useMemo(() => {
+    const map = new Map();
+    activePlans.forEach((plan) => {
+      const planBranchId = String(plan?.id_sucursal_contratada || "").trim();
+      if (!planBranchId || map.has(planBranchId)) return;
+      map.set(planBranchId, plan);
+    });
+    return map;
+  }, [activePlans]);
+  const hasActivePlanInSelectedBranch = Boolean(
+    branchId
+    && activePlanByBranch.has(branchId)
   );
 
   return (
@@ -292,7 +561,7 @@ export default function ClientePlanesPage() {
       <section className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Estado de membresÃ­a</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Estado de membresia</p>
             <h2 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)]">
               {membershipLoading
                 ? "Consultando plan..."
@@ -303,7 +572,7 @@ export default function ClientePlanesPage() {
                 ? "Estamos validando tu estado actual."
                 : activePlan
                   ? `Vigente hasta ${new Date(activePlan.fin_at).toLocaleDateString("es-HN", { timeZone: "America/Tegucigalpa" })}.`
-                  : "Adquiere un plan para desbloquear coberturas automÃ¡ticas en tu agendamiento."}
+                  : "Adquiere un plan para desbloquear coberturas automaticas en tu agendamiento."}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -322,108 +591,139 @@ export default function ClientePlanesPage() {
           </div>
         </div>
 
-        {activePlan ? (
+        {activePlans.length ? (
           <>
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
               <span className="inline-flex rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100">
-                Estado actual: {MEMBERSHIP_STATUS_LABELS[activePlan?.estado_visible] || activePlan?.estado_visible || "Activa"}
+                Planes activos: {activePlans.length}
               </span>
-              <Button type="button" variant="outline" className="gap-2" disabled={cancelLoading} onClick={() => void handleCancelMembership()}>
-                <Ban size={14} /> {cancelLoading ? "Cancelando..." : "Cancelar membresÃ­a"}
-              </Button>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-5">
-              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Servicios restantes</p>
-                <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
-                  {Number(activePlan?.remanentes?.totales?.servicios_restantes || 0)}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Servicios incluidos</p>
-                <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
-                  {Number(activePlan?.remanentes?.totales?.servicios_total || 0)}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Cortesias restantes</p>
-                <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
-                  {Number(activePlan?.remanentes?.totales?.cortesias_restantes || 0)}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Cortesias incluidas</p>
-                <p className="mt-2 text-2xl font-semibold text-[var(--mf-text)]">
-                  {Number(activePlan?.remanentes?.totales?.cortesias_total || 0)}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Tiempo restante</p>
-                <p className="mt-2 text-lg font-semibold text-[var(--mf-text)]">
-                  <Clock3 className="mr-1 inline-block" size={15} />
-                  {Number(activePlan?.tiempo_restante?.dias || 0)} d - {Number(activePlan?.tiempo_restante?.horas || 0)} h
-                </p>
-              </div>
-            </div>
+            <div className="mt-4 space-y-4">
+              {activePlans.map((plan) => {
+                const planBranchId = String(plan?.id_sucursal_contratada || "").trim();
+                const planBranchName = planBranchId
+                  ? (branches.find((branch) => branch.id_sucursal === planBranchId)?.nombre_sucursal || plan?.sucursal_nombre || "Sucursal")
+                  : (plan?.sucursal_nombre || "Sucursal");
+                const detailedServices = buildDetailedBenefits(plan, "servicio");
+                const detailedCourtesies = buildDetailedBenefits(plan, "cortesia");
+                return (
+                  <article key={plan.id_suscripcion} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-base font-semibold text-[var(--mf-text)]">{plan?.nombre_plan || "Plan activo"}</h3>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <span className="inline-flex rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100">
+                          Estado: {MEMBERSHIP_STATUS_LABELS[plan?.estado_visible] || plan?.estado_visible || "Activa"}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="min-h-[34px] px-3 text-xs"
+                          disabled={Boolean(cancelingSubscriptionId && cancelingSubscriptionId !== plan.id_suscripcion)}
+                          onClick={() => {
+                            handleOpenCancelPlanDialog(plan, planBranchName);
+                          }}
+                        >
+                          {cancelingSubscriptionId === plan.id_suscripcion ? "Cancelando..." : "Cancelar plan"}
+                        </Button>
+                      </div>
+                    </div>
 
-            <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
-                Servicios del plan
-              </p>
-              {Array.isArray(activePlan?.remanentes?.servicios) && activePlan.remanentes.servicios.length > 0 ? (
-                <ul className="mt-3 space-y-2">
-                  {activePlan.remanentes.servicios.map((service) => (
-                    <li
-                      key={service.id_servicio || service.nombre}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2 text-sm"
-                    >
-                      <span className="text-[var(--mf-text)]">{service.nombre}</span>
-                      <span className="text-[var(--mf-text-2)]">
-                        {Number(service.restante || 0)} de {Number(service.total || 0)} disponibles
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-2 text-sm text-[var(--mf-text-2)]">
-                  Tu plan no tiene servicios operativos configurados.
-                </p>
-              )}
-            </div>
+                    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Sucursal</p>
+                        <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">{planBranchName}</p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Vigencia</p>
+                        <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">
+                          {plan?.inicio_at ? new Date(plan.inicio_at).toLocaleDateString("es-HN", { timeZone: "America/Tegucigalpa" }) : "N/D"}
+                          {" - "}
+                          {plan?.fin_at ? new Date(plan.fin_at).toLocaleDateString("es-HN", { timeZone: "America/Tegucigalpa" }) : "N/D"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Tiempo restante</p>
+                        <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">
+                          <Clock3 className="mr-1 inline-block" size={14} />
+                          {Number(plan?.tiempo_restante?.dias || 0)} d - {Number(plan?.tiempo_restante?.horas || 0)} h
+                        </p>
+                      </div>
+                    </div>
 
-            <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
-                Cortesias del plan
-              </p>
-              {Array.isArray(activePlan?.remanentes?.cortesias) && activePlan.remanentes.cortesias.length > 0 ? (
-                <ul className="mt-3 space-y-2">
-                  {activePlan.remanentes.cortesias.map((courtesy) => (
-                    <li
-                      key={courtesy.id_cortesia || courtesy.codigo || courtesy.nombre}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2 text-sm"
-                    >
-                      <span className="text-[var(--mf-text)]">{courtesy.nombre}</span>
-                      <span className="text-[var(--mf-text-2)]">
-                        {Number(courtesy.restante || 0)} de {Number(courtesy.total || 0)} disponibles
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-2 text-sm text-[var(--mf-text-2)]">
-                  Tu plan no tiene cortesias configuradas.
-                </p>
-              )}
-            </div>
+                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Servicios restantes</p>
+                        <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
+                          {Number(plan?.remanentes?.totales?.servicios_restantes || 0)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Servicios incluidos</p>
+                        <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
+                          {Number(plan?.remanentes?.totales?.servicios_total || 0)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesias restantes</p>
+                        <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
+                          {Number(plan?.remanentes?.totales?.cortesias_restantes || 0)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesias incluidas</p>
+                        <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
+                          {Number(plan?.remanentes?.totales?.cortesias_total || 0)}
+                        </p>
+                      </div>
+                    </div>
 
-            {Number(activePlan?.remanentes?.totales?.servicios_restantes || 0) === 1 ? (
-              <div className="mt-4 rounded-2xl border border-amber-300/40 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
-                Te queda 1 servicio disponible en tu membresia.
-              </div>
-            ) : null}
+                    <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Servicios incluidos</p>
+                        {detailedServices.length ? (
+                          <ul className="mt-2 space-y-2 text-sm">
+                            {detailedServices.map((item, idx) => (
+                              <li key={`${plan.id_suscripcion}-svc-${idx}`} className="flex items-center justify-between gap-2">
+                                <span className="text-[var(--mf-text)]">{item.nombre}</span>
+                                <span className="text-[var(--mf-text-2)]">
+                                  {item.hasRemainder ? `${item.restante}/${item.total}` : `${item.total} incluidos`}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : <p className="mt-2 text-sm text-[var(--mf-text-2)]">Sin detalle por servicio disponible.</p>}
+                      </div>
+
+                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesias incluidas</p>
+                        {detailedCourtesies.length ? (
+                          <ul className="mt-2 space-y-2 text-sm">
+                            {detailedCourtesies.map((item, idx) => (
+                              <li key={`${plan.id_suscripcion}-cort-${idx}`} className="flex items-center justify-between gap-2">
+                                <span className="text-[var(--mf-text)]">{item.nombre}</span>
+                                <span className="text-[var(--mf-text-2)]">
+                                  {item.hasRemainder ? `${item.restante}/${item.total}` : `${item.total} incluidos`}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : <p className="mt-2 text-sm text-[var(--mf-text-2)]">Sin detalle por cortesia disponible.</p>}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
           </>
-        ) : null}
+        ) : (
+          !membershipLoading ? (
+            <p className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
+              No tienes planes activos en este momento.
+            </p>
+          ) : null
+        )}
 
         {!membershipLoading && operationalHistory.length > 0 ? (
           <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
@@ -448,41 +748,13 @@ export default function ClientePlanesPage() {
             </ul>
           </div>
         ) : null}
-
-        {!membershipLoading && Array.isArray(membershipState?.historial_membresias) && membershipState.historial_membresias.length > 0 ? (
-          <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
-              Historial de membresÃ­as
-            </p>
-            <ul className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)]">
-              {membershipState.historial_membresias.slice(0, 6).map((item) => (
-                <li key={item.id_suscripcion} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                  <div>
-                    <p className="text-[var(--mf-text)]">{item.nombre_plan}</p>
-                    <p className="text-xs text-[var(--mf-text-2)]">
-                      {MEMBERSHIP_STATUS_LABELS[item.estado_visible] || item.estado_visible || item.estado_suscripcion_codigo}
-                    </p>
-                  </div>
-                  <div className="text-right text-xs text-[var(--mf-text-2)]">
-                    <p>Inicio: {formatConsumptionDate(item.inicio_at)}</p>
-                    <p>Fin: {formatConsumptionDate(item.fin_at)}</p>
-                    {item.motivo_fin_codigo ? <p>Motivo: {item.motivo_fin_codigo}</p> : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
       </section>
 
       <section className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-5">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">ColecciÃ³n de membresÃ­as</p>
-        <h1 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)] sm:text-3xl">Planes con jerarquÃ­a premium</h1>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Coleccion de membresias</p>
+        <h1 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)] sm:text-3xl">Planes por sucursal</h1>
         <p className="mt-1 text-sm text-[var(--mf-text-2)]">
-          Compara por categorÃ­a, beneficios y valor mensual para elegir el plan que mejor se adapta a tu estilo.
-        </p>
-        <p className="mt-3 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-xs text-[var(--mf-text-2)]">
-          {PLAN_PURCHASE_PENDING_MESSAGE}
+          Debes seleccionar una sucursal para ver y comprar planes disponibles.
         </p>
 
         <div className="mt-4 w-full max-w-sm">
@@ -490,16 +762,27 @@ export default function ClientePlanesPage() {
           <div className="relative">
             <Building2 className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" size={14} />
             <select className="mf-select !pl-11 pr-10" value={branchId} onChange={(event) => void handleBranchChange(event)}>
-              <option value="">Todas las sucursales</option>
+              <option value="">Selecciona una sucursal</option>
               {branches.map((branch) => (
                 <option key={branch.id_sucursal} value={branch.id_sucursal}>{branch.nombre_sucursal}</option>
               ))}
             </select>
           </div>
         </div>
+
+        {hasActivePlanInSelectedBranch ? (
+          <div className="mt-4 rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            <p className="inline-flex items-center gap-2 font-semibold"><AlertTriangle size={15} /> Advertencia de cambio de plan</p>
+            <p className="mt-1">{SAME_BRANCH_REPLACE_WARNING}</p>
+          </div>
+        ) : null}
       </section>
 
-      {loading ? (
+      {!branchId ? (
+        <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
+          Selecciona una sucursal para consultar planes.
+        </p>
+      ) : loading ? (
         <div className="flex gap-3 overflow-hidden">
           {Array.from({ length: 3 }).map((_, idx) => <div key={idx} className="mf-skeleton h-64 min-w-[280px] flex-1 rounded-[22px]" />)}
         </div>
@@ -511,18 +794,24 @@ export default function ClientePlanesPage() {
           </div>
           <CardsCarousel
             items={plans}
-            getItemKey={(plan) => `${plan.id_plan}:${plan.id_sucursal || "public"}`}
+            getItemKey={(plan) => `${plan.id_plan}:${plan.id_plan_sucursal || plan.id_sucursal || "public"}`}
             pageSizeByViewport={{ mobile: 1, tablet: 2, desktop: 3 }}
             gridClassName="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
             compactControls
             showHeaderTag={false}
-            renderItem={(plan, index, pageIndex) => (
-              <PlanCard
-                plan={plan}
-                index={(pageIndex * 3) + index}
-                recommendedKey={recommendedPlanKey}
-              />
-            )}
+            renderItem={(plan, index, pageIndex) => {
+              const planOfferId = resolvePlanOfferId(plan) || "";
+              return (
+                <PlanCard
+                  plan={plan}
+                  index={(pageIndex * 3) + index}
+                  recommendedKey={recommendedPlanKey}
+                  onPurchase={handlePurchasePlan}
+                  loading={Boolean(planOfferId) && loadingPlanOfferId === planOfferId}
+                  disabled={Boolean(loadingPlanOfferId && planOfferId && loadingPlanOfferId !== planOfferId)}
+                />
+              );
+            }}
           />
         </section>
       ) : (
@@ -530,8 +819,70 @@ export default function ClientePlanesPage() {
           No hay planes publicados para la sucursal seleccionada.
         </p>
       )}
+
+      <PlanPurchaseFlowDialog
+        open={purchaseModalOpen}
+        onOpenChange={(next) => {
+          if (!next) resetPurchaseFlow();
+          else setPurchaseModalOpen(true);
+        }}
+        step={purchaseStep}
+        orderSummary={purchaseOrderSummary}
+        paymentIntent={membershipPaymentIntent}
+        loading={purchaseLoading}
+        errorMessage={purchaseErrorMessage}
+        disableClose={purchaseLoading}
+        onCancel={resetPurchaseFlow}
+        onBackToSummary={() => setPurchaseStep("summary")}
+        onContinueToPayment={handleContinueToPayment}
+        onConfirmPayment={handleConfirmPayment}
+        onFinish={resetPurchaseFlow}
+      />
+
+      <Dialog
+        open={confirmDialogOpen}
+        onOpenChange={(nextOpen) => {
+          setConfirmDialogOpen(nextOpen);
+          if (!nextOpen) {
+            setConfirmDialogMode("");
+            setPendingPlanSelection(null);
+            setPendingCancelPlan(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{confirmDialogMode === "replace_plan" ? "Cambiar de plan" : "Cancelar plan"}</DialogTitle>
+            <DialogDescription>
+              {confirmDialogMode === "replace_plan"
+                ? "Al cambiar de plan perderas los servicios y cortesias restantes del plan actual en esta sucursal."
+                : `Cancelaras tu plan ${pendingCancelPlan?.nombre_plan || "seleccionado"} en ${pendingCancelPlan?.sucursal_nombre || "esta sucursal"}. Perderas los servicios y cortesias restantes de esta sucursal.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setConfirmDialogOpen(false);
+                setConfirmDialogMode("");
+                setPendingPlanSelection(null);
+              }}
+            >
+              {confirmDialogMode === "cancel_plan" ? "No cancelar" : "Cancelar"}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                void handleConfirmDialogContinue();
+              }}
+            >
+              {confirmDialogMode === "cancel_plan" ? "Si, cancelar plan" : "Continuar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-
 
