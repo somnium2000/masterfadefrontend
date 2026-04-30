@@ -352,6 +352,7 @@ export default function AdminCitasPage() {
     hold_duracion_min: '5',
     no_show_min: '10',
     agenda_buffer_global_min: '0',
+    agenda_min_servicio_vendible_min: '10',
     dias_anticipacion: '30',
     horas_minimas: '2',
     permitir_acompanantes: false,
@@ -533,6 +534,9 @@ export default function AdminCitasPage() {
         no_show_min: String(nextContext.parametros?.no_show_min ?? prev.no_show_min),
         agenda_buffer_global_min: String(
           nextContext.parametros?.agenda_buffer_global_min ?? prev.agenda_buffer_global_min
+        ),
+        agenda_min_servicio_vendible_min: String(
+          nextContext.parametros?.agenda_min_servicio_vendible_min ?? prev.agenda_min_servicio_vendible_min
         ),
         permitir_acompanantes: Boolean(nextContext.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(nextContext.parametros?.pago_total_obligatorio ?? true),
@@ -791,6 +795,9 @@ export default function AdminCitasPage() {
         hold_duracion_min: String(payload?.parametros?.hold_duracion_min ?? prev.hold_duracion_min),
         no_show_min: String(payload?.parametros?.no_show_min ?? prev.no_show_min),
         agenda_buffer_global_min: String(payload?.parametros?.agenda_buffer_global_min ?? prev.agenda_buffer_global_min),
+        agenda_min_servicio_vendible_min: String(
+          payload?.parametros?.agenda_min_servicio_vendible_min ?? prev.agenda_min_servicio_vendible_min
+        ),
         permitir_acompanantes: Boolean(payload?.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(payload?.parametros?.pago_total_obligatorio ?? true),
         simulacion_sin_pago: Boolean(payload?.parametros?.simulacion_sin_pago ?? prev.simulacion_sin_pago),
@@ -1228,14 +1235,19 @@ export default function AdminCitasPage() {
     const hold = Number(paramsForm.hold_duracion_min);
     const noShow = Number(paramsForm.no_show_min);
     const globalBuffer = Number(paramsForm.agenda_buffer_global_min);
+    const minSellable = Number(paramsForm.agenda_min_servicio_vendible_min);
     if (
-      !Number.isFinite(hold) || hold <= 0
-      || !Number.isFinite(noShow) || noShow <= 0
-      || !Number.isFinite(globalBuffer) || globalBuffer < 0
+      !Number.isInteger(hold) || hold < 1 || hold > 120
+      || !Number.isInteger(noShow) || noShow < 1 || noShow > 240
+      || !Number.isInteger(globalBuffer) || globalBuffer < 0 || globalBuffer > 120
+      || !Number.isInteger(minSellable) || minSellable < 1 || minSellable > 240
     ) {
-      notifications.warning('Hold y no-show deben ser positivos, y buffer global debe ser 0 o mayor.', {
+      notifications.warning(
+        'Verifica rangos: hold 1-120, no-show 1-240, buffer 0-120 y mínimo vendible 1-240.',
+        {
         dedupeKey: 'citas-params-invalid',
-      });
+      }
+      );
       return;
     }
     setParamsSaving(true);
@@ -1244,6 +1256,7 @@ export default function AdminCitasPage() {
         hold_duracion_min: hold,
         no_show_min: noShow,
         agenda_buffer_global_min: globalBuffer,
+        agenda_min_servicio_vendible_min: minSellable,
         permitir_acompanantes: Boolean(paramsForm.permitir_acompanantes),
         pago_total_obligatorio: true,
         simulacion_sin_pago: Boolean(paramsForm.simulacion_sin_pago),
@@ -1258,6 +1271,9 @@ export default function AdminCitasPage() {
         no_show_min: String(payload?.parametros?.no_show_min ?? noShow),
         agenda_buffer_global_min: String(
           payload?.parametros?.agenda_buffer_global_min ?? globalBuffer
+        ),
+        agenda_min_servicio_vendible_min: String(
+          payload?.parametros?.agenda_min_servicio_vendible_min ?? minSellable
         ),
         permitir_acompanantes: Boolean(payload?.parametros?.permitir_acompanantes ?? prev.permitir_acompanantes),
         pago_total_obligatorio: Boolean(payload?.parametros?.pago_total_obligatorio ?? true),
@@ -1932,6 +1948,22 @@ export default function AdminCitasPage() {
                 className="citas-inline-input citas-param-value"
                 value={paramsForm.agenda_buffer_global_min}
                 onChange={(event) => setParamsForm((prev) => ({ ...prev, agenda_buffer_global_min: event.target.value }))}
+              />
+            </div>
+
+            <div className="citas-param-row">
+              <div className="citas-param-copy">
+                <h4>Duración mínima vendible (minutos)</h4>
+                <p>Umbral para detectar y descartar huecos huérfanos no comercializables.</p>
+              </div>
+              <Input
+                type="number"
+                min={1}
+                className="citas-inline-input citas-param-value"
+                value={paramsForm.agenda_min_servicio_vendible_min}
+                onChange={(event) => (
+                  setParamsForm((prev) => ({ ...prev, agenda_min_servicio_vendible_min: event.target.value }))
+                )}
               />
             </div>
 

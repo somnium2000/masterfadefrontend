@@ -281,8 +281,7 @@ export default function AuthCallbackPage() {
     // AM: En React StrictMode (dev), evita doble llamada real al exchange en el primer render.
     timeoutId = window.setTimeout(() => {
       if (!cancelled) {
-        void runExchange().catch((err) => {
-          console.error('[AuthCallback] Error critico en exchange:', err);
+        void runExchange().catch(() => {
           const message = 'Error inesperado al conectar con Google.';
           setError(message);
           notifications.error(message, { dedupeKey: 'auth-callback-uncaught-catch' });

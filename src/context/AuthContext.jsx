@@ -8,6 +8,29 @@ import {
 import { supabase } from '../config/supabaseClient.js';
 
 const AuthContext = createContext(null);
+const PUBLIC_OPTIONAL_AUTH_ROUTES = new Set([
+  '/',
+  '/membresias-vip',
+  '/barberos',
+  '/promociones',
+  '/login',
+  '/registro',
+]);
+
+function readClientCookie(name) {
+  if (typeof document === 'undefined') return '';
+  const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = document.cookie.match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
+function isPublicOptionalAuthRoute(pathname) {
+  return PUBLIC_OPTIONAL_AUTH_ROUTES.has(String(pathname || '').trim());
+}
+
+function hasSessionHint() {
+  return Boolean(readClientCookie('mf_csrf'));
+}
 
 function normalizeRoles(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
@@ -28,6 +51,7 @@ function buildEnrichedUser(payload) {
     email: baseUser.email ?? null,
     nombres: baseUser.nombres ?? null,
     apellidos: baseUser.apellidos ?? null,
+    telefono_principal: baseUser.telefono_principal ?? null,
     roles,
     branch_ids: branchIds,
     empresa_id: payload?.empresa_id ?? null,
@@ -48,13 +72,34 @@ function isLikelyEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
 
-function resolveLoginErrorMessage(rawMessage) {
+function resolveLoginErrorMessage(rawMessage, errorCode) {
   const fallback = 'Correo o contrasena incorrecta, intentalo de nuevo.';
+  const code = String(errorCode || '').trim().toUpperCase();
+  const tooManyAttemptsMessage = 'No fue posible iniciar sesion en este momento. Intenta nuevamente mas tarde.';
+
+  if (code === 'AUTH_INVALID_CREDENTIALS') return fallback;
+  if (code === 'AUTH_LOGIN_RATE_LIMITED') return tooManyAttemptsMessage;
+  if (code === 'AUTH_USER_TEMPORARILY_LOCKED') return tooManyAttemptsMessage;
+
   const normalized = String(rawMessage || '').trim().toLowerCase();
   if (!normalized) return fallback;
   if (normalized.includes('invalid login credentials')) return fallback;
   if (normalized.includes('credenciales invalidas')) return fallback;
+  if (normalized.includes('failed to fetch')) return 'No fue posible iniciar sesion en este momento. Intenta nuevamente.';
+  if (normalized.includes('network')) return 'No fue posible iniciar sesion en este momento. Intenta nuevamente.';
+  if (normalized.includes('timeout')) return 'No fue posible iniciar sesion en este momento. Intenta nuevamente.';
+
   return String(rawMessage).trim();
+}
+
+function shouldHydrateForPath(pathname) {
+  const path = String(pathname || '').trim();
+  if (!path) return false;
+  if (path.startsWith('/auth/callback')) return false;
+  if (path.startsWith('/home')) return true;
+  if (path.startsWith('/admin')) return true;
+  if (path === '/login' || path === '/register') return true;
+  return false;
 }
 
 export function AuthProvider({ children }) {
@@ -113,6 +158,13 @@ export function AuthProvider({ children }) {
       return { ok: true };
     } catch (err) {
       clearSessionState();
+      if (Number(err?.status) === 401) {
+        return {
+          ok: false,
+          expectedUnauthenticated: true,
+          message: '',
+        };
+      }
       return {
         ok: false,
         message: err?.data?.error?.message || err?.message || 'No se pudo hidratar la sesion.',
@@ -120,9 +172,10 @@ export function AuthProvider({ children }) {
     }
   }, [applyUserState, clearSessionState]);
 
-  const login = useCallback(async (identifier, contrasena, remember) => {
+  const login = useCallback(async (identifier, contrasena, remember, options = {}) => {
     const normalizedIdentifier = String(identifier || '').trim().toLowerCase();
     const password = String(contrasena || '');
+    const replaceActiveSession = Boolean(options?.replaceActiveSession);
 
     if (!normalizedIdentifier || !password) {
       return { ok: false, message: 'Correo y contrasena son requeridos.' };
@@ -138,13 +191,14 @@ export function AuthProvider({ children }) {
         email: normalizedIdentifier,
         contrasena: password,
         remember: Boolean(remember),
+        ...(replaceActiveSession ? { replace_active_session: true } : {}),
       });
 
       if (!response?.ok) {
         return {
           ok: false,
           code: response?.error?.code || null,
-          message: resolveLoginErrorMessage(response?.error?.message || response?.message),
+          message: resolveLoginErrorMessage(response?.error?.message || response?.message, response?.error?.code),
         };
       }
 
@@ -159,7 +213,7 @@ export function AuthProvider({ children }) {
       return {
         ok: false,
         code: err?.data?.error?.code || null,
-        message: resolveLoginErrorMessage(err?.data?.error?.message || err?.message),
+        message: resolveLoginErrorMessage(err?.data?.error?.message || err?.message, err?.data?.error?.code),
       };
     }
   }, [clearSessionState, hydrateSession]);
@@ -189,18 +243,20 @@ export function AuthProvider({ children }) {
   }, [invalidateSession]);
 
   useEffect(() => {
-    // AM: No hidratar sesion si estamos en /auth/callback — esa pagina maneja
-    // su propio intercambio de tokens. Hidratacion prematura aqui generaria un
-    // 401 en /v1/auth/me antes de que el exchange termine.
-    if (window.location.pathname.startsWith('/auth/callback')) {
-      // La pagina callback llama a completeExchangeLogin() cuando el exchange
-      // termina exitosamente, lo que triggerea hydrateSession() en el momento correcto.
+    const currentPathname = window.location?.pathname || '';
+
+    if (currentPathname.startsWith('/auth/callback')) {
       setIsHydrating(false);
       setIsHydrated(true);
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void hydrateSession();
+    if (shouldHydrateForPath(currentPathname)) {
+      void hydrateSession();
+      return;
+    }
+
+    setIsHydrating(false);
+    setIsHydrated(true);
   }, [hydrateSession]);
 
   const value = useMemo(

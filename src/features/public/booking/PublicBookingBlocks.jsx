@@ -56,14 +56,28 @@ export function ServiceCard({
   isSelected,
   onToggle,
   disabled = false,
+  blocked = false,
+  blockedReason = '',
+  blockedLabel = '',
+  coveredByPlan = false,
 }) {
+  const handleClick = () => {
+    if (disabled || blocked) return;
+    onToggle?.();
+  };
+  const helperLabel = blockedLabel || (coveredByPlan ? 'Cubierto por tu plan' : 'Incluido en paquete');
+  const title = blockedReason || (coveredByPlan
+    ? 'Este servicio está cubierto por tu plan y no se puede quitar.'
+    : 'Ese servicio ya lo incluye el paquete seleccionado');
   return (
     <button
       type="button"
-      className={`citas-service-card ${isSelected ? 'is-selected' : ''}`}
-      onClick={onToggle}
+      className={`citas-service-card ${isSelected ? 'is-selected' : ''} ${blocked ? 'is-blocked' : ''}`}
+      onClick={handleClick}
       aria-pressed={isSelected}
       disabled={disabled}
+      aria-disabled={disabled || blocked}
+      title={blocked ? title : undefined}
     >
       <div className="citas-service-name">{service?.nombre_servicio || 'Servicio'}</div>
       <div className="citas-service-meta">
@@ -74,6 +88,11 @@ export function ServiceCard({
         <span>{formatCurrencyHnl(service?.precio_hnl)}</span>
         {isSelected ? <Check size={14} /> : null}
       </div>
+      {blocked ? (
+        <div className="citas-service-meta">
+          <span>{helperLabel}</span>
+        </div>
+      ) : null}
     </button>
   );
 }
