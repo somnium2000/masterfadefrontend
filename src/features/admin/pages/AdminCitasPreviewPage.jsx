@@ -26,10 +26,12 @@ import {
 import {
   ALL_TIME_SLOTS,
   MAX_COMPANIONS,
+  buildAppointmentSelectionSummary,
   buildTimeSlots,
   extractMessage,
   getCurrentTimeKeyInTimeZone,
   getTodayDateKeyInTimeZone,
+  mapPublicBookingErrorMessage,
   toDateKey,
   toLocalDateTimeWithOffset,
   toMonthStartFromDateKey,
@@ -97,6 +99,20 @@ function areServiceIdsEqual(left, right) {
   return true;
 }
 
+function extractSafeErrorCode(err) {
+  return String(
+    err?.data?.error?.code
+    || err?.error?.code
+    || ''
+  ).trim().toUpperCase();
+}
+
+function getSafeAdminErrorMessage(err, fallbackMessage = '') {
+  const code = extractSafeErrorCode(err);
+  const fallback = String(fallbackMessage || '').trim() || extractMessage(err);
+  return mapPublicBookingErrorMessage(code, fallback);
+}
+
 function normalizeBookingBlock(block, index) {
   const fallbackAlias = index === 0 ? 'Titular' : `Acompañante ${index}`;
   const nextServiceIds = Array.isArray(block?.serviceIds)
@@ -104,12 +120,20 @@ function normalizeBookingBlock(block, index) {
     : [];
   const contactName = String(block?.contactName || '').trim();
   const resolvedAlias = contactName || String(block?.alias || '').trim() || fallbackAlias;
+  const hasPackage = Boolean(String(block?.packageId || '').trim());
+  const requestedType = String(block?.selectionType || '').trim().toLowerCase();
+  let normalizedSelectionType = 'services';
+  if (requestedType === 'mixed' || (hasPackage && nextServiceIds.length > 0)) {
+    normalizedSelectionType = 'mixed';
+  } else if (requestedType === 'package' || hasPackage) {
+    normalizedSelectionType = 'package';
+  }
 
   return {
     id: String(block?.id || '').trim() || createBlockId(),
     alias: resolvedAlias,
     idBarbero: String(block?.idBarbero || '').trim(),
-    selectionType: String(block?.selectionType || 'services').trim().toLowerCase() === 'package' ? 'package' : 'services',
+    selectionType: normalizedSelectionType,
     packageId: String(block?.packageId || '').trim(),
     serviceIds: nextServiceIds,
     selectedDate: String(block?.selectedDate || '').trim(),
@@ -245,6 +269,19 @@ export default function AdminCitasPreviewPage() {
     () => readBooleanParam(contextData?.parametros, 'permitir_acompanantes', false),
     [contextData?.parametros]
   );
+  const maxCompanions = useMemo(
+    () => Math.max(
+      0,
+      Math.trunc(
+        readNumberParam(
+          contextData?.parametros,
+          'agendamiento_max_acompanantes',
+          readNumberParam(contextData?.parametros, 'max_acompanantes', MAX_COMPANIONS)
+        )
+      )
+    ),
+    [contextData?.parametros]
+  );
   const paymentRequired = useMemo(
     () => readBooleanParam(contextData?.parametros, 'pago_total_obligatorio', true),
     [contextData?.parametros]
@@ -292,38 +329,62 @@ export default function AdminCitasPreviewPage() {
     [packagesById, selectedPackageId]
   );
 
-  const servicesById = useMemo(() => {
-    const map = new Map();
-    (Array.isArray(services) ? services : []).forEach((service) => {
-      if (!service?.id_servicio) return;
-      map.set(service.id_servicio, service);
-    });
-    return map;
-  }, [services]);
-
-  const selectedServices = useMemo(
-    () => serviceIds.map((id) => servicesById.get(id)).filter(Boolean),
-    [serviceIds, servicesById]
+  const activeSelectionSummary = useMemo(
+    () => buildAppointmentSelectionSummary({
+      selectedPackage: selectedPackageId ? [selectedPackageId] : [],
+      selectedServices: serviceIds,
+      packages,
+      services,
+    }),
+    [packages, selectedPackageId, serviceIds, services]
   );
 
-  const servicesCsv = useMemo(() => serviceIds.join(','), [serviceIds]);
+  const selectedServices = useMemo(
+    () => activeSelectionSummary.selectedServicesEffective,
+    [activeSelectionSummary]
+  );
+
+  const selectedServiceIdsEffective = useMemo(
+    () => activeSelectionSummary.selectedServiceIdsEffective,
+    [activeSelectionSummary]
+  );
+
+  const blockedServiceIds = useMemo(
+    () => activeSelectionSummary.blockedServiceIds,
+    [activeSelectionSummary]
+  );
+
+  const includedServiceIdsFromPackage = useMemo(
+    () => activeSelectionSummary.includedServiceIdsFromPackage,
+    [activeSelectionSummary]
+  );
+
+  const servicesCsv = useMemo(
+    () => selectedServiceIdsEffective.join(','),
+    [selectedServiceIdsEffective]
+  );
 
   const bookingBlocksSummary = useMemo(
     () =>
       bookingBlocks.map((block, index) => {
-        const blockServices = (Array.isArray(block.serviceIds) ? block.serviceIds : [])
-          .map((serviceId) => servicesById.get(serviceId))
-          .filter(Boolean);
-        const blockTotal = blockServices.reduce((total, service) => total + Number(service?.precio_hnl || 0), 0);
-        const blockPackage = packagesById.get(block.packageId) || null;
-        
-        let finalTotal = blockTotal;
-        if (block.selectionType === 'package' && blockPackage) {
-            finalTotal = blockPackage.precio_hnl != null ? Number(blockPackage.precio_hnl) : blockTotal;
-        }
+        const selectionSummary = buildAppointmentSelectionSummary({
+          selectedPackage: block.packageId ? [block.packageId] : [],
+          selectedServices: block.serviceIds,
+          packages,
+          services,
+        });
+        const blockServices = selectionSummary.selectedServicesEffective;
+        const blockPackage = selectionSummary.selectedPackage;
+        const hasPackage = Boolean(blockPackage);
+        const selectionTypeValue = hasPackage && blockServices.length > 0
+          ? 'mixed'
+          : hasPackage
+            ? 'package'
+            : 'services';
+        const finalTotal = Number(selectionSummary.totalPrice || 0);
 
         const contactName = String(block?.contactName || '').trim();
-        const hasSelection = block.selectionType === 'package' ? Boolean(block.packageId) : blockServices.length > 0;
+        const hasSelection = hasPackage || blockServices.length > 0;
 
         return {
           ...block,
@@ -331,9 +392,14 @@ export default function AdminCitasPreviewPage() {
           alias: block.alias || (index === 0 ? 'Titular' : `Acompañante ${index}`),
           barbero: barbersById.get(block.idBarbero) || null,
           selectedServices: blockServices,
-          selection_type: block.selectionType || 'services',
+          selectedServiceIdsEffective: selectionSummary.selectedServiceIdsEffective,
+          blockedServiceIds: selectionSummary.blockedServiceIds,
+          includedServiceIdsFromPackage: selectionSummary.includedServiceIdsFromPackage,
+          selectionConflicts: selectionSummary.conflicts,
+          selection_type: selectionTypeValue,
           selectedPackage: blockPackage,
           total_hnl: finalTotal,
+          duracion_total_min: Number(selectionSummary.totalDurationMin || 0),
           isComplete: Boolean(
             block.idBarbero
               && hasSelection
@@ -343,7 +409,7 @@ export default function AdminCitasPreviewPage() {
           ),
         };
       }),
-    [bookingBlocks, servicesById, barbersById, packagesById]
+    [bookingBlocks, barbersById, packages, services]
   );
 
   const totalToPay = useMemo(
@@ -357,8 +423,8 @@ export default function AdminCitasPreviewPage() {
   );
 
   const canAddCompanionBlock = useMemo(
-    () => allowCompanions && bookingBlocks.length < (MAX_COMPANIONS + 1),
-    [allowCompanions, bookingBlocks.length]
+    () => allowCompanions && bookingBlocks.length < (maxCompanions + 1),
+    [allowCompanions, bookingBlocks.length, maxCompanions]
   );
 
   const monthRange = useMemo(() => {
@@ -459,7 +525,7 @@ export default function AdminCitasPreviewPage() {
       };
       setContextData(nextContext);
     } catch (err) {
-      setContextError(extractMessage(err));
+      setContextError(getSafeAdminErrorMessage(err));
     } finally {
       setContextLoading(false);
     }
@@ -469,6 +535,8 @@ export default function AdminCitasPreviewPage() {
     if (!selectedBranchId) {
       setBarbers([]);
       setServices([]);
+      setPackages([]);
+      setPackagesLoading(false);
       return;
     }
 
@@ -476,6 +544,7 @@ export default function AdminCitasPreviewPage() {
     branchDataRequestSeqRef.current = requestSeq;
     setBarbersLoading(true);
     setServicesLoading(true);
+    setPackagesLoading(true);
     setAvailabilityError('');
 
     try {
@@ -530,19 +599,24 @@ export default function AdminCitasPreviewPage() {
       });
     } catch (err) {
       if (requestSeq !== branchDataRequestSeqRef.current) return;
-      const message = extractMessage(err);
+      const message = getSafeAdminErrorMessage(err);
       setAvailabilityError(message);
       notifications.error(message, { dedupeKey: 'public-booking-branch-data-error' });
     } finally {
       if (requestSeq === branchDataRequestSeqRef.current) {
         setBarbersLoading(false);
         setServicesLoading(false);
+        setPackagesLoading(false);
       }
     }
   }, [notifications, selectedBranchId]);
 
   const fetchAvailability = useCallback(async () => {
-    const hasSelection = selectionType === 'package' ? Boolean(selectedPackageId) : Boolean(servicesCsv);
+    const hasSelection = selectionType === 'package'
+      ? Boolean(selectedPackageId)
+      : selectionType === 'mixed'
+        ? Boolean(selectedPackageId) || Boolean(servicesCsv)
+        : Boolean(servicesCsv);
     if (!selectedBranchId || !activeBlockBarberId || !hasSelection) {
       setAvailabilityMap({});
       setAvailabilityLoading(false);
@@ -584,8 +658,8 @@ export default function AdminCitasPreviewPage() {
           id_sucursal: selectedBranchId,
           id_barbero: activeBlockBarberId || undefined,
           selection_type: selectionType,
-          servicios: selectionType === 'services' ? servicesCsv : undefined,
-          id_paquete: selectionType === 'package' ? selectedPackageId : undefined,
+          servicios: ['services', 'mixed'].includes(selectionType) ? servicesCsv : undefined,
+          id_paquete: ['package', 'mixed'].includes(selectionType) ? selectedPackageId : undefined,
           fecha_desde: monthRange.from,
           fecha_hasta: monthRange.to,
         },
@@ -616,7 +690,7 @@ export default function AdminCitasPreviewPage() {
     } catch (err) {
       if (err?.name === 'AbortError') return;
       if (requestSeq !== availabilityRequestSeqRef.current) return;
-      const message = extractMessage(err);
+      const message = getSafeAdminErrorMessage(err);
       setAvailabilityError(message);
     } finally {
       if (requestSeq === availabilityRequestSeqRef.current) {
@@ -638,7 +712,11 @@ export default function AdminCitasPreviewPage() {
   ]);
 
   const fetchSlots = useCallback(async () => {
-    const hasSelection = selectionType === 'package' ? Boolean(selectedPackageId) : Boolean(servicesCsv);
+    const hasSelection = selectionType === 'package'
+      ? Boolean(selectedPackageId)
+      : selectionType === 'mixed'
+        ? Boolean(selectedPackageId) || Boolean(servicesCsv)
+        : Boolean(servicesCsv);
     if (!selectedBranchId || !activeBlockBarberId || !hasSelection || !selectedDate) {
       setSlots(buildDefaultSlots());
       setSlotsLoading(false);
@@ -668,8 +746,8 @@ export default function AdminCitasPreviewPage() {
           id_sucursal: selectedBranchId,
           id_barbero: activeBlockBarberId || undefined,
           selection_type: selectionType,
-          servicios: selectionType === 'services' ? servicesCsv : undefined,
-          id_paquete: selectionType === 'package' ? selectedPackageId : undefined,
+          servicios: ['services', 'mixed'].includes(selectionType) ? servicesCsv : undefined,
+          id_paquete: ['package', 'mixed'].includes(selectionType) ? selectedPackageId : undefined,
           fecha: selectedDate,
         },
         { signal: controller.signal }
@@ -698,7 +776,7 @@ export default function AdminCitasPreviewPage() {
     } catch (err) {
       if (err?.name === 'AbortError') return;
       if (requestSeq !== slotsRequestSeqRef.current) return;
-      notifications.error(extractMessage(err), { dedupeKey: 'public-booking-slots-error' });
+      notifications.error(getSafeAdminErrorMessage(err), { dedupeKey: 'public-booking-slots-error' });
     } finally {
       if (requestSeq === slotsRequestSeqRef.current) {
         setSlotsLoading(false);
@@ -718,7 +796,11 @@ export default function AdminCitasPreviewPage() {
   ]);
 
   const fetchSlotsForBarber = useCallback(async ({ barberId, dateKey, servicesCsvValue, selectionTypeValue, packageIdValue }) => {
-    const hasSel = selectionTypeValue === 'package' ? Boolean(packageIdValue) : Boolean(servicesCsvValue);
+    const hasSel = selectionTypeValue === 'package'
+      ? Boolean(packageIdValue)
+      : selectionTypeValue === 'mixed'
+        ? Boolean(packageIdValue) || Boolean(servicesCsvValue)
+        : Boolean(servicesCsvValue);
     if (!selectedBranchId || !barberId || !dateKey || !hasSel) {
       return buildDefaultSlots();
     }
@@ -731,8 +813,8 @@ export default function AdminCitasPreviewPage() {
       id_sucursal: selectedBranchId,
       id_barbero: barberId,
       selection_type: selectionTypeValue,
-      servicios: selectionTypeValue === 'services' ? servicesCsvValue : undefined,
-      id_paquete: selectionTypeValue === 'package' ? packageIdValue : undefined,
+      servicios: ['services', 'mixed'].includes(selectionTypeValue) ? servicesCsvValue : undefined,
+      id_paquete: ['package', 'mixed'].includes(selectionTypeValue) ? packageIdValue : undefined,
       fecha: dateKey,
     });
 
@@ -762,8 +844,15 @@ export default function AdminCitasPreviewPage() {
     dateKey,
     timeKey,
     servicesCsvValue,
+    selectionTypeValue,
+    packageIdValue,
   }) => {
-    if (!barberId || !dateKey || !timeKey || !servicesCsvValue) {
+    const hasSelection = selectionTypeValue === 'package'
+      ? Boolean(packageIdValue)
+      : selectionTypeValue === 'mixed'
+        ? Boolean(packageIdValue) || Boolean(servicesCsvValue)
+        : Boolean(servicesCsvValue);
+    if (!barberId || !dateKey || !timeKey || !hasSelection) {
       setSlotSuggestions([]);
       setSlotSuggestionsLoading(false);
       return;
@@ -790,6 +879,8 @@ export default function AdminCitasPreviewPage() {
               barberId: barber.id_empleado,
               dateKey,
               servicesCsvValue,
+              selectionTypeValue,
+              packageIdValue,
             });
             const isAvailable = barberSlots.some((slot) => slot.hora === timeKey && slot.disponible);
             if (!isAvailable) return null;
@@ -900,6 +991,46 @@ export default function AdminCitasPreviewPage() {
   ]);
 
   useEffect(() => {
+    setBookingBlocks((prev) => {
+      let changed = false;
+      const nextBlocks = prev.map((block, index) => {
+        const normalizedBlock = normalizeBookingBlock(block, index);
+        const selectionSummary = buildAppointmentSelectionSummary({
+          selectedPackage: normalizedBlock.packageId ? [normalizedBlock.packageId] : [],
+          selectedServices: normalizedBlock.serviceIds,
+          packages,
+          services,
+        });
+        const nextServiceIds = selectionSummary.selectedServiceIdsEffective;
+        const hasPackage = Boolean(selectionSummary.selectedPackage);
+        const nextType = hasPackage && nextServiceIds.length > 0
+          ? 'mixed'
+          : hasPackage
+            ? 'package'
+            : 'services';
+        if (
+          areServiceIdsEqual(normalizedBlock.serviceIds, nextServiceIds)
+          && normalizedBlock.selectionType === nextType
+        ) {
+          return normalizedBlock;
+        }
+        changed = true;
+        return normalizeBookingBlock(
+          {
+            ...normalizedBlock,
+            selectionType: nextType,
+            serviceIds: nextServiceIds,
+            selectedDate: (hasPackage || nextServiceIds.length > 0) ? normalizedBlock.selectedDate : '',
+            selectedTime: (hasPackage || nextServiceIds.length > 0) ? normalizedBlock.selectedTime : '',
+          },
+          index
+        );
+      });
+      return changed ? nextBlocks : prev;
+    });
+  }, [packages, services]);
+
+  useEffect(() => {
     if (previewStep !== 'agenda') return;
     if (!selectedBranchId || !selectedBarberId) {
       setPreviewStep('barberos');
@@ -948,7 +1079,7 @@ export default function AdminCitasPreviewPage() {
 
   const addCompanionBlock = useCallback(() => {
     setBookingBlocks((prev) => {
-      if (!allowCompanions || prev.length >= (MAX_COMPANIONS + 1)) return prev;
+      if (!allowCompanions || prev.length >= (maxCompanions + 1)) return prev;
       const source = prev.length > 0 ? prev : [createBookingBlock({ alias: 'Titular' })];
       const companionNumber = source.length;
       const inheritedBarberId = source[effectiveActiveBlockIndex]?.idBarbero || source[0]?.idBarbero || '';
@@ -961,7 +1092,7 @@ export default function AdminCitasPreviewPage() {
       return nextBlocks;
     });
     resetAvailabilityViewState();
-  }, [allowCompanions, effectiveActiveBlockIndex, resetAvailabilityViewState]);
+  }, [allowCompanions, effectiveActiveBlockIndex, maxCompanions, resetAvailabilityViewState]);
 
   const goToAgenda = useCallback(() => {
     if (!selectedBranchId || !selectedBarberId) return;
@@ -979,6 +1110,8 @@ export default function AdminCitasPreviewPage() {
 
   const toggleService = useCallback((serviceId) => {
     if (!serviceId) return;
+    const normalizedServiceId = String(serviceId || '').trim();
+    if (!normalizedServiceId) return;
     const currentBlock = bookingBlocks[effectiveActiveBlockIndex];
     const contactName = String(currentBlock?.contactName || '').trim();
     if (!contactName) {
@@ -990,23 +1123,31 @@ export default function AdminCitasPreviewPage() {
       );
       return;
     }
+    if (blockedServiceIds.includes(normalizedServiceId)) {
+      notifications.info('Ese servicio ya lo incluye el paquete seleccionado.', {
+        dedupeKey: `admin-preview-service-included-${normalizedServiceId}`,
+      });
+      return;
+    }
 
     updateBlockAtIndex(effectiveActiveBlockIndex, (block) => {
-      const exists = (Array.isArray(block.serviceIds) ? block.serviceIds : []).includes(serviceId);
+      const normalizedBlock = normalizeBookingBlock(block, effectiveActiveBlockIndex);
+      const exists = (Array.isArray(normalizedBlock.serviceIds) ? normalizedBlock.serviceIds : []).includes(normalizedServiceId);
       const nextServiceIds = exists
-        ? block.serviceIds.filter((id) => id !== serviceId)
-        : [...(block.serviceIds || []), serviceId];
+        ? normalizedBlock.serviceIds.filter((id) => id !== normalizedServiceId)
+        : [...(normalizedBlock.serviceIds || []), normalizedServiceId];
 
       return {
-        ...block,
+        ...normalizedBlock,
+        selectionType: normalizedBlock.packageId ? 'mixed' : 'services',
         serviceIds: nextServiceIds,
-        selectedDate: nextServiceIds.length > 0 ? block.selectedDate : '',
+        selectedDate: (nextServiceIds.length > 0 || normalizedBlock.packageId) ? normalizedBlock.selectedDate : '',
         selectedTime: '',
       };
     });
 
     resetAvailabilityViewState();
-  }, [bookingBlocks, effectiveActiveBlockIndex, notifications, resetAvailabilityViewState, updateBlockAtIndex]);
+  }, [blockedServiceIds, bookingBlocks, effectiveActiveBlockIndex, notifications, resetAvailabilityViewState, updateBlockAtIndex]);
 
   const updateActiveBlockBarber = useCallback((barberId) => {
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
@@ -1020,24 +1161,53 @@ export default function AdminCitasPreviewPage() {
   }, [effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
 
   const selectSelectionType = useCallback((type) => {
-    updateBlockAtIndex(effectiveActiveBlockIndex, {
-      selectionType: type,
-      packageId: '',
-      serviceIds: [],
-      selectedDate: '',
-      selectedTime: '',
+    const normalizedType = String(type || '').trim().toLowerCase() === 'package' ? 'package' : 'services';
+    updateBlockAtIndex(effectiveActiveBlockIndex, (block) => {
+      const normalizedBlock = normalizeBookingBlock(block, effectiveActiveBlockIndex);
+      if (normalizedType === 'services' && normalizedBlock.packageId && normalizedBlock.serviceIds.length > 0) {
+        return { ...normalizedBlock, selectionType: 'mixed' };
+      }
+      return {
+        ...normalizedBlock,
+        selectionType: normalizedType,
+        selectedDate: '',
+        selectedTime: '',
+      };
     });
-  }, [effectiveActiveBlockIndex, updateBlockAtIndex]);
+    resetAvailabilityViewState();
+  }, [effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
 
   const selectPackage = useCallback((pkgId) => {
-    updateBlockAtIndex(effectiveActiveBlockIndex, {
-      selectionType: 'package',
-      packageId: pkgId,
-      serviceIds: [],
-      selectedDate: '',
-      selectedTime: '',
+    const normalizedPackageId = String(pkgId || '').trim();
+    updateBlockAtIndex(effectiveActiveBlockIndex, (block) => {
+      const normalizedBlock = normalizeBookingBlock(block, effectiveActiveBlockIndex);
+      const nextPackageId = normalizedBlock.packageId === normalizedPackageId ? '' : normalizedPackageId;
+      const selectedPackageEntity = nextPackageId ? packagesById.get(nextPackageId) : null;
+      const includedServiceIds = new Set(
+        (Array.isArray(selectedPackageEntity?.items) ? selectedPackageEntity.items : [])
+          .map((item) => String(item?.id_servicio || '').trim())
+          .filter(Boolean)
+      );
+      const nextServiceIds = nextPackageId
+        ? normalizedBlock.serviceIds.filter((serviceId) => !includedServiceIds.has(serviceId))
+        : normalizedBlock.serviceIds;
+      const nextType = nextPackageId && nextServiceIds.length > 0
+        ? 'mixed'
+        : nextPackageId
+          ? 'package'
+          : 'services';
+
+      return {
+        ...normalizedBlock,
+        selectionType: nextType,
+        packageId: nextPackageId,
+        serviceIds: nextServiceIds,
+        selectedDate: (nextPackageId || nextServiceIds.length > 0) ? normalizedBlock.selectedDate : '',
+        selectedTime: '',
+      };
     });
-  }, [effectiveActiveBlockIndex, updateBlockAtIndex]);
+    resetAvailabilityViewState();
+  }, [effectiveActiveBlockIndex, packagesById, resetAvailabilityViewState, updateBlockAtIndex]);
 
   const selectSuggestedBarber = useCallback((barberId) => {
     const nextBarberId = String(barberId || '').trim();
@@ -1113,6 +1283,8 @@ export default function AdminCitasPreviewPage() {
         dateKey: selectedDate,
         timeKey: nextTime,
         servicesCsvValue: servicesCsv,
+        selectionTypeValue: selectionType,
+        packageIdValue: selectedPackageId,
       });
       return;
     }
@@ -1127,6 +1299,8 @@ export default function AdminCitasPreviewPage() {
     clearSlotConflict,
     effectiveActiveBlockIndex,
     findBlockCollision,
+    selectedPackageId,
+    selectionType,
     isPastSlotForToday,
     loadSlotSuggestions,
     notifications,
@@ -1142,7 +1316,25 @@ export default function AdminCitasPreviewPage() {
       return false;
     }
 
-    const blocksToSubmit = bookingBlocksSummary.filter((block) => block.selectedServices.length > 0);
+    const localSelectionConflict = bookingBlocksSummary.find(
+      (block) => Array.isArray(block?.selectionConflicts) && block.selectionConflicts.length > 0
+    );
+    if (localSelectionConflict) {
+      const firstConflictCode = String(localSelectionConflict.selectionConflicts[0]?.code || '').trim().toUpperCase();
+      notifications.warning(
+        mapPublicBookingErrorMessage(firstConflictCode, 'Revisa la selección de servicios y paquete antes de continuar.'),
+        { dedupeKey: `admin-preview-selection-conflict-${firstConflictCode || 'unknown'}` }
+      );
+      setActiveBlockIndex(Math.max(0, Number(localSelectionConflict.index || 0)));
+      setPreviewStep('agenda');
+      return false;
+    }
+
+    const blocksToSubmit = bookingBlocksSummary.filter((block) => {
+      const hasPackage = Boolean(block?.selectedPackage?.id_paquete);
+      const hasServices = Array.isArray(block?.selectedServiceIdsEffective) && block.selectedServiceIdsEffective.length > 0;
+      return hasPackage || hasServices;
+    });
     if (blocksToSubmit.length === 0 || !allBlocksComplete) {
       notifications.warning('Completa servicios, fecha y hora en todos los bloques antes de simular.', {
         dedupeKey: 'admin-preview-blocks-required',
@@ -1180,7 +1372,9 @@ export default function AdminCitasPreviewPage() {
           barberId: block.idBarbero,
           dateKey: block.selectedDate,
           timeKey: block.selectedTime,
-          servicesCsvValue: block.serviceIds.join(','),
+          servicesCsvValue: Array.isArray(block.selectedServiceIdsEffective) ? block.selectedServiceIdsEffective.join(',') : '',
+          selectionTypeValue: block.selection_type,
+          packageIdValue: block.selectedPackage?.id_paquete || '',
         });
         return false;
       }
@@ -1209,8 +1403,13 @@ export default function AdminCitasPreviewPage() {
         fecha_inicio: fechaInicio,
         estado_cita_codigo: 'simulada',
         monto_total_hnl: block.total_hnl,
-        duracion_total_min: block.selectedServices.reduce((total, item) => total + Number(item?.duracion_min || 0), 0),
-        buffer_total_min: block.selectedServices.reduce((total, item) => total + Number(item?.buffer_min || 0), 0),
+        selection_type: block.selection_type,
+        id_paquete: block.selectedPackage?.id_paquete || null,
+        servicios: Array.isArray(block.selectedServiceIdsEffective)
+          ? block.selectedServiceIdsEffective.map((idServicio) => ({ id_servicio: idServicio }))
+          : [],
+        duracion_total_min: Number(block?.duracion_total_min || 0),
+        buffer_total_min: 0,
       });
     }
 
@@ -1276,7 +1475,7 @@ export default function AdminCitasPreviewPage() {
       holdResult,
       holdSubmitting,
       isPastSlotForToday,
-      maxCompanions: MAX_COMPANIONS,
+      maxCompanions,
       minBookingDateKey,
       monthRange,
       onSelectDay,
@@ -1287,9 +1486,12 @@ export default function AdminCitasPreviewPage() {
       selectedBranch,
       selectedBranchId,
       selectedDate,
+      selectedBlockTotalMinutes: Number(activeSelectionSummary.totalDurationMin || 0),
       selectedServices,
       selectedTime,
-      serviceIds,
+      serviceIds: selectedServiceIdsEffective,
+      blockedServiceIds,
+      includedServiceIdsFromPackage,
       services,
       servicesAtEnd,
       servicesCanScroll,
@@ -1318,10 +1520,7 @@ export default function AdminCitasPreviewPage() {
       selectedPackageId,
       selectPackage,
       selectSelectionType,
-      selectedServicesDurationSum: selectedServices.reduce(
-        (total, service) => total + Number(service?.duracion_min || 0),
-        0
-      ),
+      selectedServicesDurationSum: Number(activeSelectionSummary.totalDurationMin || 0),
       updateActiveBlockContact: (patch) => {
         updateBlockAtIndex(effectiveActiveBlockIndex, (block) => {
           const next = { ...block, ...patch };
@@ -1357,6 +1556,7 @@ export default function AdminCitasPreviewPage() {
       holdResult,
       holdSubmitting,
       isPastSlotForToday,
+      maxCompanions,
       minBookingDateKey,
       monthRange,
       onSelectDay,
@@ -1367,15 +1567,25 @@ export default function AdminCitasPreviewPage() {
       selectedBranch,
       selectedBranchId,
       selectedDate,
+      activeSelectionSummary.totalDurationMin,
+      blockedServiceIds,
+      includedServiceIdsFromPackage,
       selectedServices,
+      selectedServiceIdsEffective,
       selectedTime,
-      serviceIds,
       services,
+      packages,
+      packagesLoading,
       servicesAtEnd,
       servicesCanScroll,
       servicesLoading,
+      selectedPackage,
+      selectedPackageId,
+      selectionType,
       setActiveBlock,
       setMonth,
+      selectPackage,
+      selectSelectionType,
       selectSuggestedBarber,
       slotConflict,
       slotSuggestions,

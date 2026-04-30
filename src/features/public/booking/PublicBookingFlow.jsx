@@ -42,13 +42,16 @@ import {
 import {
   buildFullName,
   MAX_COMPANIONS,
+  MAX_PROMOTIONS_PER_BOOKING,
   addMinutesToTimeKey,
   buildAppointmentSelectionSummary,
   extractMessage,
   getTitularState,
   getCurrentTimeKeyInTimeZone,
+  mapPublicBookingErrorMessage,
   getTodayDateKeyInTimeZone,
   normalizeEmail,
+  normalizePromotionIds,
   normalizePhone,
   normalizePersonName,
   splitFullName,
@@ -376,7 +379,8 @@ function normalizeBookingBlock(block, index) {
   const nextServiceIds = Array.isArray(block?.serviceIds)
     ? Array.from(new Set(block.serviceIds.map((id) => String(id || '').trim()).filter(Boolean)))
     : [];
-  const promotionId = String(block?.promotionId || '').trim();
+  const promotionIds = normalizePromotionIds(block?.promotionIds, block?.promotionId);
+  const promotionId = promotionIds[0] || '';
 
   const splitLegacyName = splitFullName(block?.contactName || '');
   const contactFirstName = normalizePersonName(block?.contactFirstName || splitLegacyName.firstName || '');
@@ -401,8 +405,10 @@ function normalizeBookingBlock(block, index) {
     packageId: String(block?.packageId || '').trim(),
     serviceIds: nextServiceIds,
     promotionId,
+    promotionIds,
     selectedDate: String(block?.selectedDate || '').trim(),
     selectedTime: String(block?.selectedTime || '').trim(),
+    selectedDateTime: String(block?.selectedDateTime || '').trim(),
     contactFirstName,
     contactLastName,
     contactName,
@@ -419,8 +425,10 @@ function areBlocksEqual(left, right) {
     && left.selectionType === right.selectionType
     && left.packageId === right.packageId
     && left.promotionId === right.promotionId
+    && areServiceIdsEqual(left.promotionIds, right.promotionIds)
     && left.selectedDate === right.selectedDate
     && left.selectedTime === right.selectedTime
+    && left.selectedDateTime === right.selectedDateTime
     && left.contactFirstName === right.contactFirstName
     && left.contactLastName === right.contactLastName
     && left.contactName === right.contactName
@@ -452,8 +460,10 @@ function createBookingBlock({ alias = '', idBarbero = '' } = {}) {
       packageId: '',
       serviceIds: [],
       promotionId: '',
+      promotionIds: [],
       selectedDate: '',
       selectedTime: '',
+      selectedDateTime: '',
       contactFirstName: '',
       contactLastName: '',
       contactName: '',
@@ -581,6 +591,7 @@ export default function PublicBookingFlow() {
   const [packages, setPackages] = useState([]);
   const [promotionsLoading, setPromotionsLoading] = useState(false);
   const [promotions, setPromotions] = useState([]);
+  const [promotionsLoadError, setPromotionsLoadError] = useState('');
 
   const [bookingBlocks, setBookingBlocks] = useState(() => [createBookingBlock({ alias: 'Titular' })]);
   const [activeBlockIndex, setActiveBlockIndex] = useState(0);
@@ -699,8 +710,34 @@ export default function PublicBookingFlow() {
     return currentMonthStart.getTime() > minMonthStart.getTime();
   }, [currentMonth, minBookingMonth]);
 
+  const maxCompanions = useMemo(
+    () => Math.max(
+      0,
+      Math.trunc(
+        readNumberParam(
+          contextData?.parametros,
+          'agendamiento_max_acompanantes',
+          readNumberParam(contextData?.parametros, 'max_acompanantes', MAX_COMPANIONS)
+        )
+      )
+    ),
+    [contextData?.parametros]
+  );
   const allowCompanions = useMemo(
-    () => readBooleanParam(contextData?.parametros, 'permitir_acompanantes', false),
+    () => readBooleanParam(contextData?.parametros, 'permitir_acompanantes', maxCompanions > 0),
+    [contextData?.parametros, maxCompanions]
+  );
+  const maxPromotionsPerBooking = useMemo(
+    () => Math.max(
+      1,
+      Math.trunc(
+        readNumberParam(
+          contextData?.parametros,
+          'agendamiento_max_promociones_por_reserva',
+          MAX_PROMOTIONS_PER_BOOKING
+        )
+      )
+    ),
     [contextData?.parametros]
   );
   const paymentRequired = useMemo(
@@ -953,13 +990,23 @@ export default function PublicBookingFlow() {
     return map;
   }, [promotions]);
 
+  const selectedPromotionIds = useMemo(
+    () => normalizePromotionIds(activeBlock?.promotionIds, activeBlock?.promotionId),
+    [activeBlock?.promotionId, activeBlock?.promotionIds]
+  );
   const selectedPromotionId = useMemo(
-    () => String(activeBlock?.promotionId || '').trim(),
-    [activeBlock?.promotionId]
+    () => selectedPromotionIds[0] || '',
+    [selectedPromotionIds]
   );
   const selectedPromotion = useMemo(
     () => promotionsById.get(selectedPromotionId) || null,
     [promotionsById, selectedPromotionId]
+  );
+  const selectedPromotions = useMemo(
+    () => selectedPromotionIds
+      .map((promotionId) => promotionsById.get(promotionId) || null)
+      .filter(Boolean),
+    [promotionsById, selectedPromotionIds]
   );
 
   const effectiveSelectionType = useMemo(() => {
@@ -1187,17 +1234,30 @@ export default function PublicBookingFlow() {
         const blockHasSelection = Boolean(blockPackage) || blockServices.length > 0;
         const blockBufferMin = blockHasSelection ? barberPrepTime : 0;
 
-        const selectedPromotionIdInBlock = String(block?.promotionId || '').trim();
-        const blockPromotion = selectedPromotionIdInBlock ? promotionsById.get(selectedPromotionIdInBlock) || null : null;
-        const promotionEvaluation = evaluatePromotionForBlock({
+        const selectedPromotionIdsInBlock = normalizePromotionIds(block?.promotionIds, block?.promotionId)
+          .slice(0, maxPromotionsPerBooking);
+        const selectedPromotionsInBlock = selectedPromotionIdsInBlock
+          .map((promotionId) => promotionsById.get(promotionId) || null)
+          .filter(Boolean);
+        const promotionEvaluations = selectedPromotionsInBlock.map((promotion) => evaluatePromotionForBlock({
           block,
-          promotion: blockPromotion,
+          promotion,
           servicesById,
           packagesById,
-        });
-        const estimatedPromotionDiscount = promotionEvaluation.canSelect
-          ? promotionEvaluation.estimatedDiscount
-          : 0;
+        }));
+        const estimatedPromotionDiscount = Math.max(
+          0,
+          Math.min(
+            blockTotal,
+            promotionEvaluations.reduce(
+              (sum, evaluation) => sum + (evaluation.canSelect ? Number(evaluation.estimatedDiscount || 0) : 0),
+              0
+            )
+          )
+        );
+        const firstPromotionEvaluation = promotionEvaluations[0] || null;
+        const selectedPromotionIdInBlock = selectedPromotionIdsInBlock[0] || '';
+        const blockPromotion = selectedPromotionsInBlock[0] || null;
 
         return {
           ...block,
@@ -1217,11 +1277,13 @@ export default function PublicBookingFlow() {
           selectionConflicts: summary.conflicts,
           total_hnl: blockTotal,
           selectedPromotion: blockPromotion,
+          selectedPromotions: selectedPromotionsInBlock,
+          promotionIds: selectedPromotionIdsInBlock,
           promocion_id: selectedPromotionIdInBlock || null,
-          promocion_objetivo_seleccionado: promotionEvaluation.isTargetSelected,
-          promocion_objetivo_nombre: promotionEvaluation.targetName || null,
+          promocion_objetivo_seleccionado: firstPromotionEvaluation?.isTargetSelected || false,
+          promocion_objetivo_nombre: firstPromotionEvaluation?.targetName || null,
           promocion_descuento_estimado_hnl: estimatedPromotionDiscount,
-          promocion_requiere_calculo_final: promotionEvaluation.requiresFinalCalculation,
+          promocion_requiere_calculo_final: promotionEvaluations.some((evaluation) => Boolean(evaluation.requiresFinalCalculation)),
           total_estimado_hnl: Math.max(0, blockTotal - estimatedPromotionDiscount),
           duracion_servicios_min: serviceDurationMin,
           buffer_total_min: blockBufferMin,
@@ -1244,6 +1306,7 @@ export default function PublicBookingFlow() {
       packages,
       packagesById,
       promotionsById,
+      maxPromotionsPerBooking,
       barbersById,
       membershipLockedServiceIdsForTitular,
       rewardLockedServiceIdsForTitular,
@@ -1350,6 +1413,61 @@ export default function PublicBookingFlow() {
       && bookingBlocksSummary.every((block) => block.isComplete && !hasBlockingGroupConflict(block)),
     [bookingBlocksSummary, hasBlockingGroupConflict]
   );
+  const bookingBlockingReason = useMemo(() => {
+    if (!Array.isArray(bookingBlocksSummary) || bookingBlocksSummary.length === 0) {
+      return 'Agrega al menos un bloque de cita.';
+    }
+
+    const firstInvalidContact = bookingBlocksSummary.find((block) => !block?.contactResolved?.isValid);
+    if (firstInvalidContact) {
+      const label = firstInvalidContact.index === 0
+        ? 'titular'
+        : `acompañante ${firstInvalidContact.index}`;
+      if (!firstInvalidContact?.contactResolved?.fullName) {
+        return `El ${label} no tiene nombre completo.`;
+      }
+      return `Completa los datos del ${label}.`;
+    }
+
+    const firstMissingService = bookingBlocksSummary.find((block) =>
+      !block?.selectedPackage && (!Array.isArray(block?.selectedServices) || block.selectedServices.length === 0)
+    );
+    if (firstMissingService) {
+      return firstMissingService.index === 0
+        ? 'El titular no tiene servicio o paquete seleccionado.'
+        : `El acompañante ${firstMissingService.index} no tiene servicio seleccionado.`;
+    }
+
+    const firstMissingBarber = bookingBlocksSummary.find((block) => !block?.idBarbero);
+    if (firstMissingBarber) {
+      return firstMissingBarber.index === 0
+        ? 'El titular no tiene barbero seleccionado.'
+        : `El acompañante ${firstMissingBarber.index} no tiene barbero seleccionado.`;
+    }
+
+    const firstMissingDate = bookingBlocksSummary.find((block) => !block?.selectedDate);
+    if (firstMissingDate) {
+      return firstMissingDate.index === 0
+        ? 'El titular no tiene fecha seleccionada.'
+        : `El acompañante ${firstMissingDate.index} no tiene fecha seleccionada.`;
+    }
+
+    const firstMissingTime = bookingBlocksSummary.find((block) => !block?.selectedTime);
+    if (firstMissingTime) {
+      return firstMissingTime.index === 0
+        ? 'El titular no tiene horario seleccionado.'
+        : `El acompañante ${firstMissingTime.index} no tiene horario seleccionado.`;
+    }
+
+    const firstConflict = bookingBlocksSummary.find((block) => hasBlockingGroupConflict(block));
+    if (firstConflict) {
+      return firstConflict.index === 0
+        ? 'El horario del titular se solapa con otro integrante.'
+        : `El horario del acompañante ${firstConflict.index} se solapa con otro integrante.`;
+    }
+
+    return '';
+  }, [bookingBlocksSummary, hasBlockingGroupConflict]);
   const holdExpiresAtIso = useMemo(() => {
     if (holdResult?.expires_at) return holdResult.expires_at;
     if (paymentIntent?.expires_at) return paymentIntent.expires_at;
@@ -1364,8 +1482,8 @@ export default function PublicBookingFlow() {
   const holdExpired = holdRemainingMs != null && holdRemainingMs <= 0;
 
   const canAddCompanionBlock = useMemo(
-    () => bookingBlocks.length < (MAX_COMPANIONS + 1),
-    [bookingBlocks.length]
+    () => allowCompanions && bookingBlocks.length < (maxCompanions + 1),
+    [allowCompanions, bookingBlocks.length, maxCompanions]
   );
 
   const monthRange = useMemo(() => {
@@ -1489,6 +1607,7 @@ export default function PublicBookingFlow() {
       setServices([]);
       setPackages([]);
       setPromotions([]);
+      setPromotionsLoadError('');
       setBarbersRefreshing(false);
       setPackagesLoading(false);
       setPromotionsLoading(false);
@@ -1505,6 +1624,7 @@ export default function PublicBookingFlow() {
     setServicesLoading(!hasExistingCatalog);
     setPackagesLoading(!hasExistingCatalog);
     setPromotionsLoading(!hasExistingPromotions);
+    setPromotionsLoadError('');
     setAvailabilityError('');
 
     try {
@@ -1519,7 +1639,7 @@ export default function PublicBookingFlow() {
         ? activeBlockBarberId
         : '';
 
-      const [servicesResponse, packagesResponse, promotionsResponse] = await Promise.all([
+      const [servicesResult, packagesResult, promotionsResult] = await Promise.allSettled([
         listPublicCatalogServicios({
           id_sucursal: selectedBranchId,
           id_barbero: scopedBarberId || undefined,
@@ -1534,6 +1654,14 @@ export default function PublicBookingFlow() {
       ]);
       if (requestSeq !== branchDataRequestSeqRef.current) return;
 
+      if (servicesResult.status !== 'fulfilled') {
+        throw servicesResult.reason;
+      }
+      if (packagesResult.status !== 'fulfilled') {
+        throw packagesResult.reason;
+      }
+
+      const servicesResponse = servicesResult.value;
       const servicesPayload = servicesResponse?.data ?? servicesResponse;
       const rawServices = Array.isArray(servicesPayload?.servicios)
         ? servicesPayload.servicios.filter(
@@ -1549,17 +1677,26 @@ export default function PublicBookingFlow() {
       const nextServices = Array.from(dedupedServicesMap.values());
       const validServiceIds = new Set(nextServices.map((service) => service.id_servicio));
 
+      const packagesResponse = packagesResult.value;
       const packagesPayload = packagesResponse?.data ?? packagesResponse;
       const nextPackages = Array.isArray(packagesPayload?.paquetes)
         ? packagesPayload.paquetes
         : [];
       const validPackageIds = new Set(nextPackages.map((pkg) => pkg.id_paquete));
 
-      const promotionsPayload = promotionsResponse?.data ?? promotionsResponse;
-      const nextPromotions = Array.isArray(promotionsPayload?.promociones)
-        ? promotionsPayload.promociones
+      const nextPromotions = promotionsResult.status === 'fulfilled'
+        ? (() => {
+          const promotionsResponse = promotionsResult.value;
+          const promotionsPayload = promotionsResponse?.data ?? promotionsResponse;
+          return Array.isArray(promotionsPayload?.promociones)
+            ? promotionsPayload.promociones
+            : [];
+        })()
         : [];
       const validPromotionIds = new Set(nextPromotions.map((promotion) => String(promotion?.id_promocion || '').trim()).filter(Boolean));
+      if (promotionsResult.status !== 'fulfilled') {
+        setPromotionsLoadError('No se pudieron cargar promociones en este momento. Puedes continuar sin promociones.');
+      }
 
       setBarbers(nextBarbers);
       setServices(nextServices);
@@ -1582,9 +1719,10 @@ export default function PublicBookingFlow() {
           const nextPackageId = validPackageIds.has(block.packageId)
             ? block.packageId
             : '';
-          const nextPromotionId = validPromotionIds.has(block.promotionId)
-            ? block.promotionId
-            : '';
+          const nextPromotionIds = normalizePromotionIds(block.promotionIds, block.promotionId)
+            .filter((id) => validPromotionIds.has(id))
+            .slice(0, maxPromotionsPerBooking);
+          const nextPromotionId = nextPromotionIds[0] || '';
 
           const nextPackage = nextPackageId
             ? nextPackages.find((pkg) => pkg?.id_paquete === nextPackageId) || null
@@ -1608,6 +1746,7 @@ export default function PublicBookingFlow() {
             && block.selectionType === normalizedSelectionType
             && block.packageId === nextPackageId
             && block.promotionId === nextPromotionId
+            && areServiceIdsEqual(block.promotionIds, nextPromotionIds)
           ) {
             return block;
           }
@@ -1620,8 +1759,10 @@ export default function PublicBookingFlow() {
             packageId: nextPackageId,
             serviceIds: nextServiceIds,
             promotionId: nextPromotionId,
+            promotionIds: nextPromotionIds,
             selectedDate: '',
             selectedTime: '',
+            selectedDateTime: '',
           };
         });
 
@@ -1645,7 +1786,7 @@ export default function PublicBookingFlow() {
         setPromotionsLoading(false);
       }
     }
-  }, [activeBlockBarberId, notifyError, selectedBranchId]);
+  }, [activeBlockBarberId, maxPromotionsPerBooking, notifyError, selectedBranchId]);
 
   const fetchAvailability = useCallback(async () => {
     const hasSelection = Boolean(selectedPackageId) || effectiveSelectedServiceIdsForAgenda.length > 0;
@@ -1662,11 +1803,16 @@ export default function PublicBookingFlow() {
       setAvailabilityError('');
 
       const shouldValidateSelectedDate = selectedDate >= monthRange.from && selectedDate <= monthRange.to;
-      if (selectedDate && (selectedDate < minBookingDateKey || (shouldValidateSelectedDate && !cached[selectedDate]?.disponible))) {
+      if (
+        !holdResult
+        && selectedDate
+        && (selectedDate < minBookingDateKey || (shouldValidateSelectedDate && !cached[selectedDate]?.disponible))
+      ) {
         updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
           ...currentBlock,
           selectedDate: '',
           selectedTime: '',
+          selectedDateTime: '',
         }));
       }
       return;
@@ -1712,11 +1858,16 @@ export default function PublicBookingFlow() {
       setAvailabilityMap(nextMap);
 
       const shouldValidateSelectedDate = selectedDate >= monthRange.from && selectedDate <= monthRange.to;
-      if (selectedDate && (selectedDate < minBookingDateKey || (shouldValidateSelectedDate && !nextMap[selectedDate]?.disponible))) {
+      if (
+        !holdResult
+        && selectedDate
+        && (selectedDate < minBookingDateKey || (shouldValidateSelectedDate && !nextMap[selectedDate]?.disponible))
+      ) {
         updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
           ...currentBlock,
           selectedDate: '',
           selectedTime: '',
+          selectedDateTime: '',
         }));
       }
     } catch (err) {
@@ -1737,6 +1888,7 @@ export default function PublicBookingFlow() {
     monthRange.to,
     selectedBranchId,
     selectedDate,
+    holdResult,
     selectionCacheKey,
     effectiveSelectionType,
     effectiveSelectedServiceIdsForAgenda,
@@ -1813,6 +1965,7 @@ export default function PublicBookingFlow() {
         updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
           ...currentBlock,
           selectedTime: '',
+          selectedDateTime: '',
         }));
       }
     } catch (err) {
@@ -1969,6 +2122,7 @@ export default function PublicBookingFlow() {
         {
           ...block,
           selectedTime: '',
+          selectedDateTime: '',
         },
         index
       );
@@ -2104,12 +2258,42 @@ export default function PublicBookingFlow() {
           selectionType: nextType,
           serviceIds: mergedServiceIds,
           selectedTime: '',
+          selectedDateTime: '',
         },
         0
       );
       return next;
     });
   }, [rewardBranchId, rewardModeActive, rewardServiceId, selectedBarberId, selectedBranchId]);
+
+  useEffect(() => {
+    if (!rewardModeActive) return;
+    let clearedAnyPromotion = false;
+    setBookingBlocks((prev) => {
+      let changed = false;
+      const nextBlocks = prev.map((block) => {
+        const currentPromotionIds = normalizePromotionIds(block?.promotionIds, block?.promotionId);
+        if (!currentPromotionIds.length) return block;
+        changed = true;
+        clearedAnyPromotion = true;
+        return {
+          ...block,
+          promotionId: '',
+          promotionIds: [],
+        };
+      });
+      return changed ? nextBlocks : prev;
+    });
+    if (clearedAnyPromotion) {
+      notifications.info(
+        mapPublicBookingErrorMessage(
+          'REDEEM_NOT_APPLICABLE',
+          'El canje seleccionado no puede combinarse con promociones para esta reserva.'
+        ),
+        { dedupeKey: 'public-booking-redeem-cleared-promotions' }
+      );
+    }
+  }, [notifications, rewardModeActive]);
 
   useEffect(() => {
     if (!rewardModeActive) return;
@@ -2193,6 +2377,7 @@ export default function PublicBookingFlow() {
           selectionType: nextSelectionType,
           serviceIds: mergedServiceIds,
           selectedTime: '',
+          selectedDateTime: '',
         },
         0
       );
@@ -2251,6 +2436,7 @@ export default function PublicBookingFlow() {
             ...block,
             selectedDate: '',
             selectedTime: '',
+            selectedDateTime: '',
           },
           index
         );
@@ -2272,6 +2458,7 @@ export default function PublicBookingFlow() {
             ...block,
             selectedDate: nextTitularDate,
             selectedTime: '',
+            selectedDateTime: '',
           },
           index
         );
@@ -2284,26 +2471,41 @@ export default function PublicBookingFlow() {
     setBookingBlocks((prev) => {
       let changed = false;
       const nextBlocks = prev.map((block) => {
-        const currentPromotionId = String(block?.promotionId || '').trim();
-        if (!currentPromotionId) return block;
-        const promotion = promotionsById.get(currentPromotionId);
-        if (!promotion) {
+        const currentPromotionIds = normalizePromotionIds(block?.promotionIds, block?.promotionId)
+          .slice(0, maxPromotionsPerBooking);
+        if (!currentPromotionIds.length) {
+          if (!block?.promotionId && (!Array.isArray(block?.promotionIds) || block.promotionIds.length === 0)) return block;
           changed = true;
-          return { ...block, promotionId: '' };
+          return { ...block, promotionId: '', promotionIds: [] };
         }
-        const evaluation = evaluatePromotionForBlock({
-          block,
-          promotion,
-          servicesById,
-          packagesById,
+        const validPromotionIds = currentPromotionIds.filter((promotionId) => {
+          const promotion = promotionsById.get(promotionId);
+          if (!promotion) return false;
+          const evaluation = evaluatePromotionForBlock({
+            block,
+            promotion,
+            servicesById,
+            packagesById,
+          });
+          return evaluation.canSelect;
         });
-        if (evaluation.canSelect) return block;
+        const nextPromotionId = validPromotionIds[0] || '';
+        if (
+          nextPromotionId === String(block?.promotionId || '').trim()
+          && areServiceIdsEqual(validPromotionIds, block?.promotionIds || [])
+        ) {
+          return block;
+        }
         changed = true;
-        return { ...block, promotionId: '' };
+        return {
+          ...block,
+          promotionId: nextPromotionId,
+          promotionIds: validPromotionIds,
+        };
       });
       return changed ? nextBlocks : prev;
     });
-  }, [bookingBlocks, packagesById, promotionsById, servicesById]);
+  }, [bookingBlocks, maxPromotionsPerBooking, packagesById, promotionsById, servicesById]);
 
   useEffect(() => {
     if (!selectedDate || !selectedTime) return;
@@ -2311,6 +2513,7 @@ export default function PublicBookingFlow() {
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
       ...currentBlock,
       selectedTime: '',
+      selectedDateTime: '',
     }));
   }, [
     effectiveActiveBlockIndex,
@@ -2333,6 +2536,7 @@ export default function PublicBookingFlow() {
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
       ...currentBlock,
       selectedTime: '',
+      selectedDateTime: '',
     }));
   }, [
     activeBlockBarberId,
@@ -2420,6 +2624,7 @@ export default function PublicBookingFlow() {
       selectionType: 'services',
       selectedDate: '',
       selectedTime: '',
+      selectedDateTime: '',
     }));
     navigate('/agendar/agenda');
   }, [clearRequestState, navigate, updateBlockAtIndex]);
@@ -2435,7 +2640,7 @@ export default function PublicBookingFlow() {
   const addCompanionBlock = useCallback(() => {
     let createdBlockId = '';
     setBookingBlocks((prev) => {
-      if (prev.length >= (MAX_COMPANIONS + 1)) return prev;
+      if (!allowCompanions || prev.length >= (maxCompanions + 1)) return prev;
       const source = prev.length > 0 ? prev : [createBookingBlock({ alias: 'Titular' })];
       const companionNumber = source.length;
       const inheritedBarberId = source[effectiveActiveBlockIndex]?.idBarbero || source[0]?.idBarbero || '';
@@ -2448,6 +2653,7 @@ export default function PublicBookingFlow() {
           }),
           selectedDate: inheritedDate,
           selectedTime: '',
+          selectedDateTime: '',
         },
         companionNumber
       );
@@ -2460,7 +2666,7 @@ export default function PublicBookingFlow() {
       setPendingCompanionFocusId(createdBlockId);
     }
     resetAvailabilityViewState();
-  }, [effectiveActiveBlockIndex, resetAvailabilityViewState]);
+  }, [allowCompanions, effectiveActiveBlockIndex, maxCompanions, resetAvailabilityViewState]);
 
   const consumePendingCompanionFocus = useCallback((blockId) => {
     const normalizedId = String(blockId || '').trim();
@@ -2548,6 +2754,7 @@ export default function PublicBookingFlow() {
           selectionType: nextSelectionType,
           serviceIds: nextServiceIds,
           selectedTime: '',
+          selectedDateTime: '',
         },
         0
       );
@@ -2653,6 +2860,7 @@ export default function PublicBookingFlow() {
         serviceIds: nextServiceIds,
         selectedDate: (nextServiceIds.length > 0 || normalizedCurrent.packageId) ? currentBlock.selectedDate : '',
         selectedTime: '',
+        selectedDateTime: '',
       };
     });
 
@@ -2691,6 +2899,7 @@ export default function PublicBookingFlow() {
         selectionType: normalizedType,
         selectedDate: '',
         selectedTime: '',
+        selectedDateTime: '',
       };
     });
     resetAvailabilityViewState();
@@ -2728,6 +2937,7 @@ export default function PublicBookingFlow() {
         serviceIds: nextServiceIds,
         selectedDate: (nextPackageId || nextServiceIds.length > 0) ? currentBlock.selectedDate : '',
         selectedTime: '',
+        selectedDateTime: '',
       };
     });
     resetAvailabilityViewState();
@@ -2740,12 +2950,23 @@ export default function PublicBookingFlow() {
       });
       return;
     }
+    if (rewardModeActive) {
+      notifications.warning(
+        mapPublicBookingErrorMessage(
+          'REDEEM_NOT_APPLICABLE',
+          'El canje seleccionado no puede combinarse con promociones para esta reserva.'
+        ),
+        { dedupeKey: 'public-booking-redeem-promotion-not-allowed' }
+      );
+      return;
+    }
 
     const normalizedPromotionId = String(promotionId || '').trim();
     if (!normalizedPromotionId) {
       updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
         ...currentBlock,
         promotionId: '',
+        promotionIds: [],
       }));
       return;
     }
@@ -2754,6 +2975,24 @@ export default function PublicBookingFlow() {
     if (!promotion) return;
     const currentBlock = bookingBlocks[effectiveActiveBlockIndex];
     if (!currentBlock) return;
+    const currentPromotionIds = normalizePromotionIds(currentBlock?.promotionIds, currentBlock?.promotionId);
+    const alreadySelectedInCurrentBlock = currentPromotionIds.includes(normalizedPromotionId);
+    if (alreadySelectedInCurrentBlock) {
+      updateBlockAtIndex(effectiveActiveBlockIndex, (activeCurrentBlock) => {
+        const normalizedCurrentPromotionIds = normalizePromotionIds(
+          activeCurrentBlock?.promotionIds,
+          activeCurrentBlock?.promotionId
+        );
+        const nextPromotionIds = normalizedCurrentPromotionIds
+          .filter((promotionIdInBlock) => promotionIdInBlock !== normalizedPromotionId);
+        return {
+          ...activeCurrentBlock,
+          promotionId: nextPromotionIds[0] || '',
+          promotionIds: nextPromotionIds,
+        };
+      });
+      return;
+    }
     const evaluation = evaluatePromotionForBlock({
       block: currentBlock,
       promotion,
@@ -2767,19 +3006,46 @@ export default function PublicBookingFlow() {
       return;
     }
 
+    const selectedPromotionIdsAcrossBooking = new Set();
+    bookingBlocks.forEach((bookingBlock, bookingBlockIndex) => {
+      if (bookingBlockIndex === effectiveActiveBlockIndex) return;
+      normalizePromotionIds(bookingBlock?.promotionIds, bookingBlock?.promotionId)
+        .forEach((promotionIdInBlock) => selectedPromotionIdsAcrossBooking.add(promotionIdInBlock));
+    });
+    const nextPromotionIdsCurrentBlock = [...currentPromotionIds, normalizedPromotionId];
+    const nextPromotionIdsAcrossBooking = new Set([
+      ...selectedPromotionIdsAcrossBooking,
+      ...nextPromotionIdsCurrentBlock,
+    ]);
+    if (nextPromotionIdsAcrossBooking.size > maxPromotionsPerBooking) {
+      notifications.warning(mapPublicBookingErrorMessage('MAX_PROMOTIONS_EXCEEDED'), {
+        dedupeKey: 'public-booking-max-promotions-select',
+      });
+      return;
+    }
+
     updateBlockAtIndex(effectiveActiveBlockIndex, (activeCurrentBlock) => {
-      const currentPromotionId = String(activeCurrentBlock?.promotionId || '').trim();
+      const normalizedCurrentPromotionIds = normalizePromotionIds(
+        activeCurrentBlock?.promotionIds,
+        activeCurrentBlock?.promotionId
+      );
+      const nextPromotionIds = normalizedCurrentPromotionIds.includes(normalizedPromotionId)
+        ? normalizedCurrentPromotionIds.filter((promotionIdInBlock) => promotionIdInBlock !== normalizedPromotionId)
+        : [...normalizedCurrentPromotionIds, normalizedPromotionId];
       return {
         ...activeCurrentBlock,
-        promotionId: currentPromotionId === normalizedPromotionId ? '' : normalizedPromotionId,
+        promotionId: nextPromotionIds[0] || '',
+        promotionIds: nextPromotionIds.slice(0, maxPromotionsPerBooking),
       };
     });
   }, [
     bookingBlocks,
     effectiveActiveBlockIndex,
+    maxPromotionsPerBooking,
     notifications,
     packagesById,
     promotionsById,
+    rewardModeActive,
     selectedBranchId,
     servicesById,
     updateBlockAtIndex,
@@ -2789,6 +3055,7 @@ export default function PublicBookingFlow() {
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
       ...currentBlock,
       promotionId: '',
+      promotionIds: [],
     }));
   }, [effectiveActiveBlockIndex, updateBlockAtIndex]);
 
@@ -2798,6 +3065,7 @@ export default function PublicBookingFlow() {
       idBarbero: String(barberId || '').trim(),
       selectedDate: currentBlock.selectedDate || '',
       selectedTime: '',
+      selectedDateTime: '',
     }));
 
     resetAvailabilityViewState();
@@ -2878,6 +3146,7 @@ export default function PublicBookingFlow() {
       idBarbero: nextBarberId,
       selectedDate: preservedDate,
       selectedTime: preservedTime,
+      selectedDateTime: toLocalDateTimeWithOffset(preservedDate, preservedTime) || '',
     }));
 
     resetAvailabilityViewState();
@@ -2906,7 +3175,7 @@ export default function PublicBookingFlow() {
 
       const nextBlocks = [...prev];
       nextBlocks[effectiveActiveBlockIndex] = normalizeBookingBlock(
-        { ...currentBlock, selectedDate: dateKey, selectedTime: '' },
+        { ...currentBlock, selectedDate: dateKey, selectedTime: '', selectedDateTime: '' },
         effectiveActiveBlockIndex
       );
 
@@ -2961,6 +3230,7 @@ export default function PublicBookingFlow() {
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
       ...currentBlock,
       selectedTime: nextTime,
+      selectedDateTime: toLocalDateTimeWithOffset(selectedDate, nextTime) || '',
     }));
   }, [
     activeBlockBarberId,
@@ -2990,6 +3260,42 @@ export default function PublicBookingFlow() {
     if (blocksToSubmit.length === 0 || !allBlocksComplete) {
       notifications.warning('Completa servicios, fecha y hora en todos los bloques antes de confirmar.', {
         dedupeKey: 'public-booking-blocks-required',
+      });
+      navigate('/agendar/agenda');
+      return false;
+    }
+    const localSelectionConflict = blocksToSubmit.find(
+      (block) => Array.isArray(block?.selectionConflicts) && block.selectionConflicts.length > 0
+    );
+    if (localSelectionConflict) {
+      const firstConflictCode = String(localSelectionConflict.selectionConflicts[0]?.code || '').trim().toUpperCase();
+      notifications.warning(
+        mapPublicBookingErrorMessage(firstConflictCode, 'Revisa la selección de servicios y paquete antes de continuar.'),
+        { dedupeKey: `public-booking-local-selection-conflict-${firstConflictCode || 'unknown'}` }
+      );
+      setActiveBlockIndex(Math.max(0, Number(localSelectionConflict.index || 0)));
+      navigate('/agendar/agenda');
+      return false;
+    }
+    const requestedPromotionIds = new Set();
+    blocksToSubmit.forEach((block) => {
+      const blockPromotionIds = normalizePromotionIds(block?.promotionIds, block?.promotionId);
+      blockPromotionIds.forEach((id) => requestedPromotionIds.add(id));
+    });
+    if (rewardModeActive && requestedPromotionIds.size > 0) {
+      notifications.warning(
+        mapPublicBookingErrorMessage(
+          'REDEEM_NOT_APPLICABLE',
+          'El canje seleccionado no puede combinarse con promociones para esta reserva.'
+        ),
+        { dedupeKey: 'public-booking-redeem-and-promotions-not-allowed' }
+      );
+      navigate('/agendar/agenda');
+      return false;
+    }
+    if (requestedPromotionIds.size > maxPromotionsPerBooking) {
+      notifications.warning(mapPublicBookingErrorMessage('MAX_PROMOTIONS_EXCEEDED'), {
+        dedupeKey: 'public-booking-promotions-max-before-submit',
       });
       navigate('/agendar/agenda');
       return false;
@@ -3033,6 +3339,19 @@ export default function PublicBookingFlow() {
         navigate('/agendar/agenda');
         setFieldErrors((prev) => ({ ...prev, ...nextFieldErrors }));
         return false;
+      }
+      if (canUseClienteHold && titularState.isAuthenticated) {
+        const companionEmail = normalizeEmail(companionContact.email || '');
+        const holderEmail = normalizeEmail(titularEmail || '');
+        if (companionEmail && holderEmail && companionEmail === holderEmail) {
+          setFieldError(index, 'contactEmail', mapPublicBookingErrorMessage('AUTHENTICATED_USER_CANNOT_BE_COMPANION'));
+          notifications.warning(mapPublicBookingErrorMessage('AUTHENTICATED_USER_CANNOT_BE_COMPANION'), {
+            dedupeKey: 'public-booking-companion-same-auth-user',
+          });
+          setActiveBlockIndex(index);
+          navigate('/agendar/agenda');
+          return false;
+        }
       }
     }
     setFieldErrors({});
@@ -3103,26 +3422,37 @@ export default function PublicBookingFlow() {
     const integrantes = [];
     for (const block of blocksToSubmit) {
       const fechaInicio = toLocalDateTimeWithOffset(block.selectedDate, block.selectedTime);
-      if (!fechaInicio) {
+      const preservedFechaInicio = String(block?.selectedDateTime || '').trim();
+      const expectedPrefix = `${String(block?.selectedDate || '').trim()}T${String(block?.selectedTime || '').trim()}`;
+      const fechaInicioNormalizada = (preservedFechaInicio && expectedPrefix && preservedFechaInicio.startsWith(expectedPrefix))
+        ? preservedFechaInicio
+        : fechaInicio;
+      if (!fechaInicioNormalizada) {
         notifications.error('No se pudo construir la fecha y hora de una de las citas del grupo.', {
           dedupeKey: 'public-booking-datetime-invalid',
         });
         return false;
       }
       const blockContactState = resolveBlockContactState(block, block.index);
+      const blockPromotionIds = normalizePromotionIds(block?.promotionIds, block?.promotionId);
       const integrantePayload = {
         orden_integrante: block.index + 1,
         alias: blockContactState.fullName || block.alias,
+        rol_integrante_codigo: block.index === 0 ? 'titular' : 'acompanante',
         id_barbero: resolvedBarberByBlockId.has(block.id)
           ? resolvedBarberByBlockId.get(block.id)
           : (block.idBarbero || null),
         selection_type: block.selection_type,
         id_paquete: ['package', 'mixed'].includes(block.selection_type) ? (block.selectedPackage?.id_paquete || null) : null,
-        fecha_inicio: fechaInicio,
+        fecha_inicio: fechaInicioNormalizada,
         servicios: ['services', 'mixed'].includes(block.selection_type) ? block.selectedServices.map((service) => ({
           id_servicio: service.id_servicio,
         })) : [],
       };
+      if (blockPromotionIds.length > 0) {
+        integrantePayload.promotionIds = blockPromotionIds;
+        integrantePayload.promotionId = blockPromotionIds[0] || null;
+      }
       if (!canUseClienteHold) {
         integrantePayload.contacto = {
           nombre: String(blockContactState.fullName || block.alias || '').trim(),
@@ -3192,6 +3522,7 @@ export default function PublicBookingFlow() {
       const detailIndex = Number.isFinite(Number(detailIndexRaw)) ? Number(detailIndexRaw) : null;
       const conflictCode = String(apiError?.code || '').trim().toUpperCase();
       const conflictReason = String(apiError?.reason || '').trim().toUpperCase();
+      const safeConflictMessage = mapPublicBookingErrorMessage(conflictCode, extractMessage(err));
 
       if (detailField) {
         const mappedIndex = detailField.startsWith('titular.')
@@ -3209,7 +3540,7 @@ export default function PublicBookingFlow() {
                   ? 'contactFirstName'
                   : null;
         if (mappedField) {
-          setFieldError(mappedIndex, mappedField, extractMessage(err));
+          setFieldError(mappedIndex, mappedField, safeConflictMessage);
           setActiveBlockIndex(mappedIndex);
           navigate('/agendar/agenda');
         }
@@ -3217,32 +3548,72 @@ export default function PublicBookingFlow() {
 
       if (conflictCode === 'PUBLIC_CITAS_EMAIL_IN_USE' || conflictCode === 'EMAIL_BELONGS_TO_ACTIVE_USER') {
         const normalizedEmail = String(apiError?.details?.email || titularEmail || '').trim().toLowerCase();
-        setFieldError(
-          0,
-          'contactEmail',
-          'Este correo ya tiene una cuenta activa. Inicia sesión para continuar con la reserva.'
-        );
-        setActiveBlockIndex(0);
+        const emailErrorIndex = detailIndex != null ? Math.max(0, Math.trunc(detailIndex)) : 0;
+        const detailRole = String(apiError?.details?.rol_integrante_codigo || '').trim().toLowerCase();
+        const detailOrder = Number(apiError?.details?.orden_integrante);
+        const isTitularConflict = detailRole === 'titular' || emailErrorIndex === 0;
+        const companionNumber = Number.isInteger(detailOrder) && detailOrder > 1
+          ? detailOrder - 1
+          : Math.max(1, emailErrorIndex);
+        const emailLabel = normalizedEmail || 'correo no identificado';
+        const conflictMessage = isTitularConflict
+          ? `El correo del titular, ${emailLabel}, pertenece a un usuario activo. Debes iniciar sesión para continuar.`
+          : `El correo del acompañante ${companionNumber}, ${emailLabel}, pertenece a un usuario activo. Debe iniciar sesión o usar otro correo.`;
+        setFieldError(emailErrorIndex, 'contactEmail', mapPublicBookingErrorMessage(conflictCode));
+        setActiveBlockIndex(emailErrorIndex);
         navigate('/agendar/agenda');
-        notifications.warning(
-          'Este correo ya está registrado. Por seguridad, debes iniciar sesión para poder agendar.',
-          { dedupeKey: 'public-booking-email-registered-login-required' }
-        );
+        notifications.warning(conflictMessage, { dedupeKey: 'public-booking-email-registered-login-required' });
         openAuthRequiredModal(normalizedEmail);
       } else if (conflictCode === 'SERVICE_ALREADY_INCLUDED_IN_PACKAGE') {
-        notifications.warning('Ese servicio ya lo incluye el paquete seleccionado', {
+        notifications.warning(safeConflictMessage, {
           dedupeKey: 'public-booking-service-included-backend',
         });
         navigate('/agendar/agenda');
       } else if (conflictCode === 'ONLY_ONE_PACKAGE_ALLOWED') {
-        notifications.warning('Solo puedes seleccionar un paquete por cita', {
+        notifications.warning(safeConflictMessage, {
           dedupeKey: 'public-booking-only-one-package-backend',
+        });
+        navigate('/agendar/agenda');
+      } else if (
+        conflictCode === 'AUTHENTICATED_HOLDER_MISMATCH'
+        || conflictCode === 'AUTHENTICATED_USER_CANNOT_BE_COMPANION'
+        || conflictCode === 'BOOKING_AUTH_CONTEXT_INVALID'
+        || conflictCode === 'PACKAGE_NOT_AVAILABLE'
+        || conflictCode === 'MIXED_SELECTION_NOT_ALLOWED'
+        || conflictCode === 'DUPLICATED_SERVICE_SELECTION'
+        || conflictCode === 'EMPTY_BOOKING_SELECTION'
+        || conflictCode === 'MAX_COMPANIONS_EXCEEDED'
+        || conflictCode === 'MAX_PROMOTIONS_EXCEEDED'
+        || conflictCode === 'PROMOTION_NOT_APPLICABLE'
+        || conflictCode === 'PROMOTION_DUPLICATES_SELECTED_ITEM'
+        || conflictCode === 'PROMOTION_NOT_STACKABLE'
+        || conflictCode === 'PROMOTION_EXPIRED'
+        || conflictCode === 'PROMOTION_NOT_ACTIVE'
+        || conflictCode === 'PROMOTION_BRANCH_NOT_ALLOWED'
+        || conflictCode === 'PROMOTION_BARBER_NOT_ALLOWED'
+        || conflictCode === 'PROMOTION_SCHEDULE_NOT_ALLOWED'
+        || conflictCode === 'BOOKING_PROMOTION_APPLICATION_FAILED'
+        || conflictCode === 'REDEEM_NOT_APPLICABLE'
+        || conflictCode === 'REDEEM_CONTEXT_INVALID'
+        || conflictCode === 'REDEEM_TRANSACTION_NOT_FOUND'
+        || conflictCode === 'REDEEM_NOT_OWNED_BY_USER'
+        || conflictCode === 'REDEEM_EXPIRED'
+        || conflictCode === 'REDEEM_TRANSACTION_ALREADY_USED'
+        || conflictCode === 'REDEEM_AMOUNT_INVALID'
+        || conflictCode === 'REDEEM_APPLICATION_FAILED'
+        || conflictCode === 'BOOKING_REDEEM_CONSISTENCY_FAILED'
+        || conflictCode === 'BOOKING_RECEIPT_CREATION_FAILED'
+        || conflictCode === 'BOOKING_CREATION_FAILED'
+      ) {
+        notifications.warning(safeConflictMessage, {
+          dedupeKey: `public-booking-safe-error-${conflictCode || 'unknown'}`,
         });
         navigate('/agendar/agenda');
       } else if (err?.status === 409) {
         const isHoldConflict = conflictCode === 'PUBLIC_CITAS_HOLD_CONFLICT'
           || conflictCode === 'CITAS_HOLD_CONFLICT'
           || conflictCode === 'CITA_HOLD_CONFLICTO'
+          || conflictCode === 'SLOT_NOT_AVAILABLE'
           || conflictReason.startsWith('AGENDA_');
         if (isHoldConflict) {
           const shouldClearSelectedTime = conflictReason === 'AGENDA_SLOT_NOT_AVAILABLE'
@@ -3258,12 +3629,12 @@ export default function PublicBookingFlow() {
             }
           );
         } else {
-          notifications.warning('No pudimos confirmar esta reserva en este momento. Verifica los datos e inténtalo nuevamente.', {
+          notifications.warning(safeConflictMessage, {
             dedupeKey: 'public-booking-hold-conflict-generic',
           });
         }
       } else {
-        notifications.error(extractMessage(err), { dedupeKey: 'public-booking-hold-error' });
+        notifications.error(safeConflictMessage, { dedupeKey: 'public-booking-hold-error' });
       }
       return false;
     } finally {
@@ -3281,6 +3652,7 @@ export default function PublicBookingFlow() {
     navigate,
     notifications,
     openAuthRequiredModal,
+    maxPromotionsPerBooking,
     requestProfilePersistDecision,
     recoverToAgendaForReselection,
     resolveBlockContactState,
@@ -3296,18 +3668,9 @@ export default function PublicBookingFlow() {
   const goToConfirm = useCallback(async () => {
     if (holdSubmitting) return false;
     if (!allBlocksComplete) return false;
-    const holdPayload = await submitHold();
-    if (!holdPayload || typeof holdPayload !== 'object') return false;
-    const groupId = String(holdPayload?.id_grupo_cita || '').trim();
-    if (!groupId) {
-      notifications.error('No se pudo preparar tu reserva. Vuelve a agenda e inténtalo de nuevo.', {
-        dedupeKey: 'public-booking-confirm-hold-missing-group',
-      });
-      return false;
-    }
     navigate('/agendar/confirmar');
     return true;
-  }, [allBlocksComplete, holdSubmitting, navigate, notifications, submitHold]);
+  }, [allBlocksComplete, holdSubmitting, navigate]);
 
   const goToPayment = useCallback(() => {
     if (!allBlocksComplete) return;
@@ -3760,6 +4123,7 @@ export default function PublicBookingFlow() {
       barberPrepTime,
       bookingBlocks,
       bookingBlocksSummary,
+      bookingBlockingReason,
       blockedServiceIds,
       membershipLockedServiceIdsForTitular,
       membershipBranchNotice,
@@ -3772,6 +4136,7 @@ export default function PublicBookingFlow() {
       cancelRewardRedemptionUsage,
       branchList,
       canAddCompanionBlock,
+      canUseClienteHold,
       canGoPrevMonth,
       contextData,
       currentMonth,
@@ -3798,7 +4163,8 @@ export default function PublicBookingFlow() {
       pendingCompanionFocusId,
       holdSubmitting,
       isPastSlotForToday,
-      maxCompanions: MAX_COMPANIONS,
+      maxCompanions,
+      maxPromotionsPerBooking,
       minBookingDateKey,
       titularSelectedDate,
       monthRange,
@@ -3817,7 +4183,9 @@ export default function PublicBookingFlow() {
       selectedPackage,
       selectedPackageId,
       selectedPromotion,
+      selectedPromotions,
       selectedPromotionId,
+      selectedPromotionIds,
       includedServiceIdsFromPackage,
       selectedServicesDurationSum,
       selectedServices,
@@ -3829,6 +4197,7 @@ export default function PublicBookingFlow() {
       promotions,
       packagesLoading,
       promotionsLoading,
+      promotionsLoadError,
       removeCompanionBlock,
       servicesAtEnd,
       servicesCanScroll,
@@ -3879,6 +4248,7 @@ export default function PublicBookingFlow() {
       barberPrepTime,
       bookingBlocks,
       bookingBlocksSummary,
+      bookingBlockingReason,
       blockedServiceIds,
       membershipLockedServiceIdsForTitular,
       membershipBranchNotice,
@@ -3891,6 +4261,7 @@ export default function PublicBookingFlow() {
       cancelRewardRedemptionUsage,
       branchList,
       canAddCompanionBlock,
+      canUseClienteHold,
       canGoPrevMonth,
       contextData,
       currentMonth,
@@ -3917,6 +4288,8 @@ export default function PublicBookingFlow() {
       pendingCompanionFocusId,
       holdSubmitting,
       isPastSlotForToday,
+      maxCompanions,
+      maxPromotionsPerBooking,
       minBookingDateKey,
       titularSelectedDate,
       monthRange,
@@ -3935,7 +4308,9 @@ export default function PublicBookingFlow() {
       selectedPackage,
       selectedPackageId,
       selectedPromotion,
+      selectedPromotions,
       selectedPromotionId,
+      selectedPromotionIds,
       includedServiceIdsFromPackage,
       selectedServicesDurationSum,
       selectedServices,
@@ -3947,6 +4322,7 @@ export default function PublicBookingFlow() {
       promotions,
       packagesLoading,
       promotionsLoading,
+      promotionsLoadError,
       removeCompanionBlock,
       servicesAtEnd,
       servicesCanScroll,
@@ -4110,3 +4486,5 @@ export default function PublicBookingFlow() {
     </div>
   );
 }
+
+

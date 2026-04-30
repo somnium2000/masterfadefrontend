@@ -37,11 +37,6 @@ const SLOT_TIME_PERIODS = [
   { key: 'tarde', label: 'Tarde' },
   { key: 'noche', label: 'Noche' },
 ];
-const DEFAULT_EXPANDED_PERIODS = {
-  manana: false,
-  tarde: false,
-  noche: false,
-};
 
 function getSlotPeriodKey(timeKey) {
   const normalized = String(timeKey || '').trim();
@@ -110,7 +105,7 @@ function formatPromotionVigencyLabel(promotion) {
         ? `Hasta ${toHour}`
         : '';
 
-  if (dateLabel && hourLabel) return `${dateLabel} · ${hourLabel}`;
+  if (dateLabel && hourLabel) return `${dateLabel} � ${hourLabel}`;
   return dateLabel || hourLabel;
 }
 
@@ -174,9 +169,12 @@ function BookingBlocksSummary({
   totalEstimatedToPay,
 }) {
   const completedBlocks = bookingBlocksSummary.filter((block) => block.isComplete);
-  const hasAnyPromotionSelected = bookingBlocksSummary.some((block) => Boolean(block.selectedPromotion));
+  const hasAnyPromotionSelected = bookingBlocksSummary.some(
+    (block) => Array.isArray(block.promotionIds) && block.promotionIds.length > 0
+  );
   const hasAnyPendingTwoByOne = bookingBlocksSummary.some(
-    (block) => Boolean(block.selectedPromotion) && Boolean(block.promocion_requiere_calculo_final)
+    (block) => (Array.isArray(block.promotionIds) && block.promotionIds.length > 0)
+      && Boolean(block.promocion_requiere_calculo_final)
   );
   const safeEstimatedDiscount = Math.max(0, Number(totalEstimatedPromotionDiscountHnl || 0));
 
@@ -215,9 +213,11 @@ function BookingBlocksSummary({
               <div className="citas-selected-date">
                 {formatFriendlyDate(block.selectedDate)} - {formatTime12Hour(block.selectedTime)}
               </div>
-              {block.selectedPromotion ? (
+              {Array.isArray(block.selectedPromotions) && block.selectedPromotions.length > 0 ? (
                 <div className="citas-selected-date">
-                  Promoción seleccionada: {block.selectedPromotion.titulo || 'Promoción seleccionada'}
+                  Promociones: {block.selectedPromotions
+                    .map((promotion) => String(promotion?.titulo || '').trim() || 'Promoción')
+                    .join(', ')}
                 </div>
               ) : null}
             </article>
@@ -269,12 +269,15 @@ export default function PublicBookingAgendaStep() {
     consumePendingCompanionFocus,
     allBlocksComplete,
     allowCompanions,
+    maxCompanions,
+    maxPromotionsPerBooking,
     availabilityError,
     availabilityLoading,
     availabilityMap,
     barbers,
     bookingBlocks,
     bookingBlocksSummary,
+    bookingBlockingReason,
     blockedServiceIds,
     membershipLockedServiceIdsForTitular,
     membershipBranchNotice,
@@ -295,6 +298,7 @@ export default function PublicBookingAgendaStep() {
     onSelectDay,
     onSelectTime,
     promotions,
+    promotionsLoadError,
     promotionsLoading,
     clearSelectedPromotion,
     selectSuggestedBarber,
@@ -302,8 +306,7 @@ export default function PublicBookingAgendaStep() {
     selectedDate,
     selectedPackage,
     selectedPackageId,
-    selectedPromotion,
-    selectedPromotionId,
+    selectedPromotionIds,
     selectedBranchId,
     selectPackage,
     selectedServicesDurationSum,
@@ -445,6 +448,12 @@ export default function PublicBookingAgendaStep() {
     () => new Set(serviceIds),
     [serviceIds]
   );
+  const selectedPromotionIdsSet = useMemo(
+    () => new Set(Array.isArray(selectedPromotionIds) ? selectedPromotionIds : []),
+    [selectedPromotionIds]
+  );
+  const selectedPromotionCount = selectedPromotionIdsSet.size;
+  const canSelectMorePromotions = selectedPromotionCount < maxPromotionsPerBooking;
 
   const promotionsForCards = useMemo(() => {
     const list = Array.isArray(promotions) ? promotions : [];
@@ -460,14 +469,21 @@ export default function PublicBookingAgendaStep() {
       const benefitLabel = formatPromotionBenefitLabel(promotion);
       const vigencyLabel = formatPromotionVigencyLabel(promotion);
       const disabledByBranch = !selectedBranchId;
-      const disabledByContact = !canSelectServices;
-      const canSelect = !disabledByBranch && !disabledByContact && targetSelected;
+      const isSelected = selectedPromotionIdsSet.has(promotionId);
+      const disabledByReward = rewardModeActive;
+      const disabledByLimit = !isSelected && !canSelectMorePromotions;
+      const canSelect = isSelected
+        || (!disabledByBranch && !disabledByReward && !disabledByLimit && targetSelected);
 
       let disabledReason = '';
-      if (disabledByBranch) {
+      if (isSelected) {
+        disabledReason = '';
+      } else if (disabledByBranch) {
         disabledReason = 'Selecciona una sucursal para ver promociones aplicables.';
-      } else if (disabledByContact) {
-        disabledReason = contactNameRequiredMessage;
+      } else if (disabledByReward) {
+        disabledReason = 'El canje seleccionado no puede combinarse con promociones para esta reserva.';
+      } else if (disabledByLimit) {
+        disabledReason = `Puedes seleccionar hasta ${maxPromotionsPerBooking} promociones por reserva.`;
       } else if (!targetSelected) {
         disabledReason = `Requiere seleccionar ${targetLabel}`;
       }
@@ -480,18 +496,32 @@ export default function PublicBookingAgendaStep() {
         vigencyLabel,
         canSelect,
         disabledReason,
-        isSelected: selectedPromotionId === promotionId,
+        isSelected,
       };
     });
   }, [
-    canSelectServices,
-    contactNameRequiredMessage,
+    canSelectMorePromotions,
+    maxPromotionsPerBooking,
     promotions,
+    rewardModeActive,
     selectedBranchId,
     selectedPackageId,
-    selectedPromotionId,
+    selectedPromotionIdsSet,
     selectedServiceIdsForPromotionSet,
   ]);
+  const selectedPromotionsForBlock = useMemo(
+    () => promotionsForCards.filter((promotion) => promotion.isSelected),
+    [promotionsForCards]
+  );
+  const selectedPromotionTitles = useMemo(() => {
+    const promotionById = new Map(
+      promotionsForCards.map((promotion) => [promotion.promotionId, promotion])
+    );
+    return (Array.isArray(selectedPromotionIds) ? selectedPromotionIds : [])
+      .map((promotionId) => promotionById.get(promotionId))
+      .filter(Boolean)
+      .map((promotion) => String(promotion?.titulo || '').trim() || 'Promoción');
+  }, [promotionsForCards, selectedPromotionIds]);
 
   const activeBlockEstimatedDiscount = Math.max(
     0,
@@ -502,16 +532,6 @@ export default function PublicBookingAgendaStep() {
   const visibleEstimatedDiscount = Math.max(activeBlockEstimatedDiscount, safeEstimatedDiscountGlobal);
 
   const [preferredSlotPeriod, setPreferredSlotPeriod] = useState('manana');
-  const expansionScopeKey = `${activeBlock?.id || 'block'}|${selectedDate || ''}`;
-  const [expandedState, setExpandedState] = useState(() => ({
-    scopeKey: '',
-    periods: { ...DEFAULT_EXPANDED_PERIODS },
-  }));
-
-  const expandedPeriods = expandedState.scopeKey === expansionScopeKey
-    ? expandedState.periods
-    : DEFAULT_EXPANDED_PERIODS;
-
   const periodSlotModels = useMemo(() => {
     const baseByPeriod = {
       manana: [],
@@ -535,7 +555,6 @@ export default function PublicBookingAgendaStep() {
       const periodKey = period.key;
       const fallbackSlots = baseByPeriod[periodKey] || [];
       const curatedPeriod = slotsCurated?.[periodKey] || null;
-      const mergedSlots = [];
       const seen = new Set();
 
       const curatedRecommended = [];
@@ -545,15 +564,6 @@ export default function PublicBookingAgendaStep() {
       pushUniqueSlots(
         curatedAlternatives,
         Array.isArray(curatedPeriod?.alternatives) ? curatedPeriod.alternatives : [],
-        seen,
-        selectedDate,
-        isPastSlotForToday
-      );
-
-      const curatedOverflow = [];
-      pushUniqueSlots(
-        curatedOverflow,
-        Array.isArray(curatedPeriod?.overflow) ? curatedPeriod.overflow : [],
         seen,
         selectedDate,
         isPastSlotForToday
@@ -571,47 +581,22 @@ export default function PublicBookingAgendaStep() {
       });
 
       const recommended = curatedRecommended[0] || fallbackUnique[0] || null;
-      const alternativesPool = [
+      const alternatives = [
         ...curatedAlternatives,
         ...(recommended ? fallbackUnique.filter((slot) => slot.hora !== recommended.hora) : fallbackUnique),
       ];
-      const alternatives = alternativesPool.slice(0, 3);
-
-      const usedHours = new Set(
-        [recommended, ...alternatives]
-          .filter(Boolean)
-          .map((slot) => String(slot.hora || '').trim())
-      );
-
-      const overflow = [
-        ...curatedOverflow,
-        ...fallbackUnique,
-      ].filter((slot) => {
-        const hour = String(slot?.hora || '').trim();
-        if (!hour) return false;
-        if (usedHours.has(hour)) return false;
-        usedHours.add(hour);
-        return true;
-      });
-
-      mergedSlots.push(...[recommended, ...alternatives, ...overflow].filter(Boolean));
-      const isExpanded = Boolean(expandedPeriods?.[periodKey]);
+      const total = [recommended, ...alternatives].filter(Boolean).length;
 
       models[periodKey] = {
         recommended,
         alternatives,
-        overflow,
-        hasMore: overflow.length > 0,
-        isExpanded,
-        total: mergedSlots.length,
-        visibleSlots: isExpanded
-          ? [recommended, ...alternatives, ...overflow].filter(Boolean)
-          : [recommended, ...alternatives].filter(Boolean),
+        total,
+        visibleSlots: [recommended, ...alternatives].filter(Boolean),
       };
     });
 
     return models;
-  }, [expandedPeriods, isPastSlotForToday, selectedDate, slots, slotsCurated]);
+  }, [isPastSlotForToday, selectedDate, slots, slotsCurated]);
 
   const totalAvailableSlots = useMemo(
     () => SLOT_TIME_PERIODS.reduce((total, period) => total + Number(periodSlotModels?.[period.key]?.total || 0), 0),
@@ -627,9 +612,6 @@ export default function PublicBookingAgendaStep() {
   const activePeriodModel = periodSlotModels?.[activeSlotPeriod] || {
     recommended: null,
     alternatives: [],
-    overflow: [],
-    hasMore: false,
-    isExpanded: false,
     total: 0,
     visibleSlots: [],
   };
@@ -1041,41 +1023,48 @@ export default function PublicBookingAgendaStep() {
               promotionsLoading && promotionsForCards.length === 0 ? (
                 <LoadingSpinner />
               ) : (
-                <div className="citas-services-grid public-booking-promotions-grid">
-                  {promotionsForCards.map((promotion) => (
-                    <button
-                      key={promotion.promotionId}
-                      type="button"
-                      className={`citas-service-card public-booking-promo-card ${promotion.isSelected ? 'is-selected' : ''} ${promotion.canSelect ? '' : 'is-disabled'}`.trim()}
-                      disabled={!promotion.canSelect}
-                      aria-pressed={promotion.isSelected}
-                      title={!promotion.canSelect ? promotion.disabledReason : undefined}
-                      onClick={() => selectPromotion(promotion.promotionId)}
-                    >
-                      <div className="public-booking-promo-head">
-                        <span className="public-booking-promo-badge">
-                          <Tag size={12} />
-                          PROMO
-                        </span>
-                        <span className="public-booking-promo-benefit">{promotion.benefitLabel}</span>
-                      </div>
-                      <div className="citas-service-name">{promotion.titulo || 'Promoción'}</div>
-                      {promotion.subtitulo ? (
-                        <p className="public-booking-promo-subtitle">{promotion.subtitulo}</p>
-                      ) : null}
-                      <p className="public-booking-promo-target">Aplica a: {promotion.targetLabel}</p>
-                      {promotion.vigencyLabel ? (
-                        <p className="public-booking-promo-vigency">Vigencia: {promotion.vigencyLabel}</p>
-                      ) : null}
-                      {!promotion.canSelect ? (
-                        <p className="public-booking-promo-requirement">{promotion.disabledReason}</p>
-                      ) : null}
-                      {promotion.isSelected ? (
-                        <p className="public-booking-promo-selected">Promoción seleccionada</p>
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div className="public-booking-actions is-inline mt-2">
+                    <p className="citas-selected-date">
+                      Promociones seleccionadas: {selectedPromotionCount}/{maxPromotionsPerBooking}
+                    </p>
+                  </div>
+                  <div className="citas-services-grid public-booking-promotions-grid">
+                    {promotionsForCards.map((promotion) => (
+                      <button
+                        key={promotion.promotionId}
+                        type="button"
+                        className={`citas-service-card public-booking-promo-card ${promotion.isSelected ? 'is-selected' : ''} ${promotion.canSelect ? '' : 'is-disabled'}`.trim()}
+                        disabled={!promotion.canSelect}
+                        aria-pressed={promotion.isSelected}
+                        title={!promotion.canSelect ? promotion.disabledReason : undefined}
+                        onClick={() => selectPromotion(promotion.promotionId)}
+                      >
+                        <div className="public-booking-promo-head">
+                          <span className="public-booking-promo-badge">
+                            <Tag size={12} />
+                            PROMO
+                          </span>
+                          <span className="public-booking-promo-benefit">{promotion.benefitLabel}</span>
+                        </div>
+                        <div className="citas-service-name">{promotion.titulo || 'Promoción'}</div>
+                        {promotion.subtitulo ? (
+                          <p className="public-booking-promo-subtitle">{promotion.subtitulo}</p>
+                        ) : null}
+                        <p className="public-booking-promo-target">Aplica a: {promotion.targetLabel}</p>
+                        {promotion.vigencyLabel ? (
+                          <p className="public-booking-promo-vigency">Vigencia: {promotion.vigencyLabel}</p>
+                        ) : null}
+                        {!promotion.canSelect ? (
+                          <p className="public-booking-promo-requirement">{promotion.disabledReason}</p>
+                        ) : null}
+                        {promotion.isSelected ? (
+                          <p className="public-booking-promo-selected">Promoción seleccionada</p>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                </>
               )
             ) : null}
 
@@ -1084,16 +1073,19 @@ export default function PublicBookingAgendaStep() {
             ) : null}
 
             {catalogTab === 'promotions' && !promotionsLoading && promotionsForCards.length === 0 ? (
-              <p className="citas-selected-date mt-2">No hay promociones disponibles para esta sucursal.</p>
+              <p className="citas-selected-date mt-2">
+                {promotionsLoadError || 'No hay promociones aplicables para esta selección.'}
+              </p>
             ) : null}
 
-            {catalogTab === 'promotions' && selectedPromotion ? (
+            {catalogTab === 'promotions' && selectedPromotionsForBlock.length > 0 ? (
               <div className="public-booking-actions is-inline mt-2">
                 <p className="citas-selected-date">
-                  Promoción seleccionada: {selectedPromotion.titulo || 'Promoción seleccionada'}
+                  Promociones activas: {selectedPromotionTitles
+                    .join(', ')}
                 </p>
                 <Button type="button" variant="outline" size="sm" onClick={clearSelectedPromotion}>
-                  Quitar promoción
+                  Quitar promociones
                 </Button>
               </div>
             ) : null}
@@ -1115,15 +1107,15 @@ export default function PublicBookingAgendaStep() {
           ) : null}
 
           <div className="citas-services-summary-row mt-3">
-            {selectedPromotion ? (
+            {selectedPromotionIds.length > 0 ? (
               <div className="public-booking-promo-summary">
                 <div className="public-booking-promo-summary-row">
                   <span className="public-booking-promo-summary-label">Subtotal servicios:</span>
                   <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalToPay)}</strong>
                 </div>
                 <div className="public-booking-promo-summary-row">
-                  <span className="public-booking-promo-summary-label">Promoción seleccionada:</span>
-                  <strong className="public-booking-promo-summary-value">{selectedPromotion.titulo || 'Promoción'}</strong>
+                  <span className="public-booking-promo-summary-label">Promociones seleccionadas:</span>
+                  <strong className="public-booking-promo-summary-value">{selectedPromotionIds.length}</strong>
                 </div>
                 {activeBlockNeedsFinalCalculation ? (
                   <div className="public-booking-promo-summary-row">
@@ -1346,49 +1338,6 @@ export default function PublicBookingAgendaStep() {
                                 </section>
                               ) : null}
 
-                              {activePeriodModel.hasMore && !activePeriodModel.isExpanded ? (
-                                <div className="public-booking-curated-more">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setExpandedState((prev) => {
-                                      const currentPeriods = prev.scopeKey === expansionScopeKey
-                                        ? prev.periods
-                                        : DEFAULT_EXPANDED_PERIODS;
-                                      return {
-                                        scopeKey: expansionScopeKey,
-                                        periods: {
-                                          ...currentPeriods,
-                                          [activeSlotPeriod]: true,
-                                        },
-                                      };
-                                    })}
-                                  >
-                                    Ver más horarios
-                                  </Button>
-                                </div>
-                              ) : null}
-
-                              {activePeriodModel.isExpanded && activePeriodModel.overflow.length > 0 ? (
-                                <section className="public-booking-curated-section">
-                                  <p className="public-booking-curated-title">Más horarios</p>
-                                  {activePeriodModel.overflow.map((slot) => {
-                                    const restriction = getSlotRestriction(slot);
-                                    return (
-                                      <SlotButton
-                                        key={`overflow-${slot.hora}`}
-                                        slot={slot}
-                                        selectedTime={selectedTime}
-                                        onSelect={onSelectTime}
-                                        disabled={restriction.disabled}
-                                        variant={restriction.variant}
-                                        helperText={restriction.reason}
-                                      />
-                                    );
-                                  })}
-                                </section>
-                              ) : null}
                             </>
                           ) : (
                             <div className="public-booking-period-empty">
@@ -1437,6 +1386,9 @@ export default function PublicBookingAgendaStep() {
             {holdSubmitting ? 'Preparando resumen...' : 'Continuar a resumen'}
             <ArrowRight size={15} />
           </Button>
+          {!canGoToConfirm && bookingBlockingReason ? (
+            <p className="citas-selected-date mt-2">{bookingBlockingReason}</p>
+          ) : null}
         </motion.div>
 
         <motion.div
@@ -1452,11 +1404,11 @@ export default function PublicBookingAgendaStep() {
             disabled={!allowCompanions || !canAddCompanionBlock}
           >
             <Plus size={15} />
-            {!allowCompanions
-              ? 'Acompañantes no habilitados'
-              : canAddCompanionBlock
-                ? 'Añadir acompañante'
-                : 'Límite de 4 acompañantes alcanzado'}
+              {!allowCompanions
+                ? 'Acompañantes no habilitados'
+                : canAddCompanionBlock
+                  ? 'Añadir acompañante'
+                  : `Límite de ${maxCompanions} acompañantes alcanzado`}
           </Button>
         </motion.div>
       </div>
