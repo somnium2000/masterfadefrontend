@@ -618,7 +618,7 @@ export default function AdminServicesCatalogPage() {
     }
 
     useEffect(() => {
-        if (!dialogOpen || !editTarget || !isSuperAdmin || !Boolean(formValues.servicio_informativo)) {
+        if (!dialogOpen || !editTarget || !isSuperAdmin || !formValues.servicio_informativo) {
             setServiceBarberAssignments(SERVICE_BARBER_ASSIGNMENTS_DEFAULTS);
             return undefined;
         }
@@ -667,7 +667,7 @@ export default function AdminServicesCatalogPage() {
         const validationError = validateForm(formValues);
         if (validationError) { setFormError(validationError); return; }
 
-        if (isSuperAdmin && editTarget && Boolean(formValues.servicio_informativo)) {
+        if (isSuperAdmin && editTarget && formValues.servicio_informativo) {
             if (serviceBarberAssignments.loading) {
                 setFormError('Espera a que termine de cargar la asignacion de barberos.');
                 return;
@@ -720,7 +720,7 @@ export default function AdminServicesCatalogPage() {
                 savedServiceData = response?.data ?? response;
             }
 
-            if (isSuperAdmin && editTarget && Boolean(formValues.servicio_informativo)) {
+            if (isSuperAdmin && editTarget && formValues.servicio_informativo) {
                 const savedServiceId = savedServiceData?.id_servicio || editTarget.id_servicio || editTarget.id;
                 await saveAdminServicioBarberos(savedServiceId, {
                     id_sucursal: mutationBranchId,

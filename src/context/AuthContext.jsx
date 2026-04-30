@@ -8,29 +8,6 @@ import {
 import { supabase } from '../config/supabaseClient.js';
 
 const AuthContext = createContext(null);
-const PUBLIC_OPTIONAL_AUTH_ROUTES = new Set([
-  '/',
-  '/membresias-vip',
-  '/barberos',
-  '/promociones',
-  '/login',
-  '/registro',
-]);
-
-function readClientCookie(name) {
-  if (typeof document === 'undefined') return '';
-  const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = document.cookie.match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : '';
-}
-
-function isPublicOptionalAuthRoute(pathname) {
-  return PUBLIC_OPTIONAL_AUTH_ROUTES.has(String(pathname || '').trim());
-}
-
-function hasSessionHint() {
-  return Boolean(readClientCookie('mf_csrf'));
-}
 
 function normalizeRoles(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
@@ -103,6 +80,8 @@ function shouldHydrateForPath(pathname) {
 }
 
 export function AuthProvider({ children }) {
+  const initialPathname = typeof window !== 'undefined' ? String(window.location?.pathname || '').trim() : '';
+  const shouldHydrateOnBoot = shouldHydrateForPath(initialPathname);
   const [token, setToken] = useState('');
   const [user, setUser] = useState(null);
   const [roles, setRoles] = useState([]);
@@ -110,8 +89,8 @@ export function AuthProvider({ children }) {
   const [empresaId, setEmpresaId] = useState(null);
   const [empleadoId, setEmpleadoId] = useState(null);
   const [clienteId, setClienteId] = useState(null);
-  const [isHydrating, setIsHydrating] = useState(true);
-  const [isHydrated, setIsHydrated] = useState(false);
+  const [isHydrating, setIsHydrating] = useState(shouldHydrateOnBoot);
+  const [isHydrated, setIsHydrated] = useState(!shouldHydrateOnBoot);
 
   const applyUserState = useCallback((nextUser) => {
     setUser(nextUser);
@@ -246,17 +225,15 @@ export function AuthProvider({ children }) {
     const currentPathname = window.location?.pathname || '';
 
     if (currentPathname.startsWith('/auth/callback')) {
-      setIsHydrating(false);
-      setIsHydrated(true);
       return;
     }
     if (shouldHydrateForPath(currentPathname)) {
-      void hydrateSession();
-      return;
+      const timer = setTimeout(() => {
+        void hydrateSession();
+      }, 0);
+      return () => clearTimeout(timer);
     }
-
-    setIsHydrating(false);
-    setIsHydrated(true);
+    return undefined;
   }, [hydrateSession]);
 
   const value = useMemo(

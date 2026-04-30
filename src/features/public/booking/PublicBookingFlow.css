@@ -567,6 +567,16 @@
 
 .public-booking-agenda-cta {
   margin-top: 2px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.public-booking-agenda-cta .citas-selected-date {
+  margin: 0;
+  max-width: min(100%, 480px);
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .public-booking-agenda-secondary-cta {
@@ -936,6 +946,15 @@
   .public-booking-actions.is-inline {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .public-booking-agenda-cta {
+    align-items: stretch;
+  }
+
+  .public-booking-agenda-cta .citas-selected-date {
+    max-width: 100%;
+    text-align: left;
   }
 
   .public-booking-form-grid {

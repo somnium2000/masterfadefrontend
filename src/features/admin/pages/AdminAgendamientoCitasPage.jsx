@@ -75,6 +75,18 @@ function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
 }
 
+function mapAdminCitasErrorMessage(err, fallback = 'No fue posible cargar la información de la cita.') {
+  const code = String(err?.data?.error?.code || '').trim().toUpperCase();
+  if (code === 'BOOKING_NOT_FOUND') return 'La cita solicitada no existe.';
+  if (code === 'BOOKING_GROUP_NOT_FOUND') return 'No se encontró la reserva solicitada.';
+  if (code === 'BOOKING_DETAIL_LOAD_FAILED') return 'No fue posible cargar el detalle de la cita.';
+  if (code === 'BOOKING_RECEIPT_NOT_FOUND') return 'No se encontró comprobante para esta reserva.';
+  if (code === 'BOOKING_ADMIN_QUERY_FAILED') return 'No fue posible consultar la información de citas.';
+  if (code === 'SLOT_NOT_AVAILABLE') return 'El horario seleccionado ya no está disponible.';
+  if (code === 'EMAIL_BELONGS_TO_ACTIVE_USER') return 'El correo ingresado pertenece a una cuenta activa.';
+  return extractMessage(err) || fallback;
+}
+
 function extractSafeEstadoMessage(err) {
   const code = String(err?.data?.error?.code || '').trim();
   if (code === 'ADMIN_CITAS_STATUS_WINDOW_NOT_OPEN') {
@@ -142,6 +154,54 @@ function formatCurrencyHnl(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return 'L 0.00';
   return new Intl.NumberFormat('es-HN', { style: 'currency', currency: 'HNL' }).format(amount);
+}
+
+function getSelectionTypeLabel(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'package') return 'Paquete';
+  if (normalized === 'mixed') return 'Mixta';
+  return 'Servicios';
+}
+
+function getAppointmentDisplayInfo(cita) {
+  const integrante = cita?.integrante || null;
+  const titular = cita?.titular || null;
+  const alias = String(
+    integrante?.alias_integrante
+    || integrante?.nombre_snapshot
+    || cita?.alias_integrante
+    || ''
+  ).trim() || 'Titular';
+  const titularNombre = String(
+    titular?.nombre_snapshot
+    || cita?.nombre_cliente
+    || ''
+  ).trim() || 'Cliente';
+  const paqueteNombre = String(
+    cita?.paquete?.nombre_paquete_snapshot
+    || cita?.paquete?.nombre_paquete
+    || ''
+  ).trim() || null;
+  const serviciosManual = Array.isArray(cita?.servicios_manual) ? cita.servicios_manual : [];
+  const serviciosExtra = Array.isArray(cita?.servicios_extra) ? cita.servicios_extra : [];
+  const serviciosIncluidos = Array.isArray(cita?.servicios_incluidos) ? cita.servicios_incluidos : [];
+  const promociones = Array.isArray(cita?.promociones) ? cita.promociones : [];
+  const descuentoPromociones = promociones.reduce((acc, item) => acc + Number(item?.descuento_hnl || 0), 0);
+  const comprobante = cita?.comprobante || null;
+
+  return {
+    aliasIntegrante: alias,
+    titularNombre,
+    selectionLabel: getSelectionTypeLabel(cita?.selection_type),
+    paqueteNombre,
+    serviciosManualCount: serviciosManual.length,
+    serviciosExtraCount: serviciosExtra.length,
+    serviciosIncluidosCount: serviciosIncluidos.length,
+    promocionesCount: promociones.length,
+    descuentoPromociones,
+    comprobanteCodigo: comprobante?.codigo_comprobante || null,
+    comprobanteEstado: comprobante?.estado_comprobante_codigo || null,
+  };
 }
 
 function getStateBadgeClass(state) {
@@ -369,7 +429,7 @@ export default function AdminAgendamientoCitasPage() {
     } catch (err) {
       if (isAbortError(err)) return;
       if (handleAuthError(err)) return;
-      setContextError(extractMessage(err));
+      setContextError(mapAdminCitasErrorMessage(err, 'No fue posible cargar el contexto operativo.'));
     } finally {
       setContextLoading(false);
     }
@@ -397,7 +457,7 @@ export default function AdminAgendamientoCitasPage() {
     } catch (err) {
       if (isAbortError(err)) return;
       if (handleAuthError(err)) return;
-      setListError(extractMessage(err));
+      setListError(mapAdminCitasErrorMessage(err));
     } finally {
       fetchInFlightRef.current = false;
       if (!silent) setLoading(false);
@@ -577,7 +637,7 @@ export default function AdminAgendamientoCitasPage() {
       setSingleTarget(null);
       void fetchCitas();
     } catch (err) {
-      notifications.error(extractMessage(err), { dedupeKey: 'agendamiento-citas-single-error' });
+      notifications.error(mapAdminCitasErrorMessage(err, 'No fue posible reagendar la cita.'), { dedupeKey: 'agendamiento-citas-single-error' });
     } finally {
       setSingleSaving(false);
     }
@@ -615,7 +675,7 @@ export default function AdminAgendamientoCitasPage() {
         picker_slots: [],
       })));
     } catch (err) {
-      notifications.error(extractMessage(err), { dedupeKey: 'agendamiento-citas-batch-fetch-error' });
+      notifications.error(mapAdminCitasErrorMessage(err, 'No fue posible consultar citas afectadas.'), { dedupeKey: 'agendamiento-citas-batch-fetch-error' });
     } finally {
       setBatchLoading(false);
     }
@@ -703,7 +763,7 @@ export default function AdminAgendamientoCitasPage() {
       setBatchItems((prev) => prev.filter((item) => !item.selected));
       void fetchCitas();
     } catch (err) {
-      notifications.error(extractMessage(err), { dedupeKey: 'agendamiento-citas-batch-error' });
+      notifications.error(mapAdminCitasErrorMessage(err, 'No fue posible completar la reagendación masiva.'), { dedupeKey: 'agendamiento-citas-batch-error' });
     } finally {
       setBatchSaving(false);
     }
@@ -750,17 +810,30 @@ export default function AdminAgendamientoCitasPage() {
     return (
       <div className="space-y-3">
         {items.map((cita) => (
+          (() => {
+            const viewInfo = getAppointmentDisplayInfo(cita);
+            return (
           <article key={`mobile-${cita.id_cita}`} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_92%,transparent)] p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 space-y-1">
-                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Cliente: <span className="font-semibold text-[var(--mf-text)]">{cita.nombre_cliente || 'Cliente'}</span></p>
+                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Titular: <span className="font-semibold text-[var(--mf-text)]">{viewInfo.titularNombre}</span></p>
+                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Integrante: <span className="text-[var(--mf-text)]">{viewInfo.aliasIntegrante}</span></p>
                 <p className="truncate text-[13px] text-[var(--mf-text-2)]">Barbero: <span className="text-[var(--mf-text)]">{cita.nombre_barbero || '-'}</span></p>
                 <p className="text-[13px] text-[var(--mf-text-2)]">Cita: <span className="text-[var(--mf-text)]">{formatDateTime(cita.inicio_at)}</span></p>
+                <p className="text-[13px] text-[var(--mf-text-2)]">Seleccion: <span className="text-[var(--mf-text)]">{viewInfo.selectionLabel}</span></p>
+                {viewInfo.paqueteNombre ? (
+                  <p className="truncate text-[13px] text-[var(--mf-text-2)]">Paquete: <span className="text-[var(--mf-text)]">{viewInfo.paqueteNombre}</span></p>
+                ) : null}
               </div>
               <div className="text-right">
                 <span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>
                 <p className="mt-2 text-[1.75rem] font-semibold leading-none text-[var(--mf-text)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p>
               </div>
+            </div>
+            <div className="mt-2 text-[11px] text-[var(--mf-text-2)]">
+              Manuales: {viewInfo.serviciosManualCount} · Extra: {viewInfo.serviciosExtraCount} · Incluidos: {viewInfo.serviciosIncluidosCount}
+              {viewInfo.promocionesCount > 0 ? ` · Promos: ${viewInfo.promocionesCount}` : ''}
+              {viewInfo.comprobanteCodigo ? ` · Comp: ${viewInfo.comprobanteCodigo}` : ''}
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--mf-nav-border)] pt-2 text-xs text-[var(--mf-text-2)]">
               <span className="inline-flex items-center gap-1">
@@ -776,34 +849,44 @@ export default function AdminAgendamientoCitasPage() {
               {renderItemActions(cita, { compact: true })}
             </div>
           </article>
+            );
+          })()
         ))}
       </div>
     );
   }
 
-function renderCardsList(items, emptyText) {
-  if (!items.length) return <p className="text-sm text-[var(--mf-text-2)]">{emptyText}</p>;
-  return (
-    <div className="space-y-0">
-      {items.map((cita, index) => (
-          <div key={cita.id_cita} className="h-[440px] snap-start">
-            <DataCard
-              animationDelay={index * 0.04}
-              avatar={<CalendarDays size={16} />}
-              title={cita.nombre_cliente || 'Cliente'}
-              subtitle={`${cita.nombre_barbero || '-'} Â· ${formatDateTime(cita.inicio_at)}`}
-              badge={<span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>}
-              fields={[
-                { label: 'Sucursal', value: cita.nombre_sucursal || '-' },
-                { label: 'Integrante', value: cita.alias_integrante || 'Titular' },
-                { label: 'TelÃ©fono', value: cita.telefono_cliente || '-' },
-                { label: 'Inicio', value: formatDateTime(cita.inicio_at) },
-                { label: 'Monto', value: formatCurrencyHnl(cita.total_pagar_hnl) },
-              ]}
-              actions={renderItemActions(cita)}
-            />
-          </div>
-        ))}
+  function renderCardsList(items, emptyText) {
+    if (!items.length) return <p className="text-sm text-[var(--mf-text-2)]">{emptyText}</p>;
+    return (
+      <div className="space-y-0">
+        {items.map((cita, index) => {
+          const viewInfo = getAppointmentDisplayInfo(cita);
+          return (
+            <div key={cita.id_cita} className="h-[440px] snap-start">
+              <DataCard
+                animationDelay={index * 0.04}
+                avatar={<CalendarDays size={16} />}
+                title={viewInfo.titularNombre}
+                subtitle={`${cita.nombre_barbero || '-'} · ${formatDateTime(cita.inicio_at)}`}
+                badge={<span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>}
+                fields={[
+                  { label: 'Sucursal', value: cita.nombre_sucursal || '-' },
+                  { label: 'Integrante', value: viewInfo.aliasIntegrante },
+                  { label: 'Seleccion', value: viewInfo.selectionLabel },
+                  { label: 'Paquete', value: viewInfo.paqueteNombre || '-' },
+                  { label: 'Servicios', value: `M:${viewInfo.serviciosManualCount} · E:${viewInfo.serviciosExtraCount} · I:${viewInfo.serviciosIncluidosCount}` },
+                  { label: 'Promociones', value: viewInfo.promocionesCount > 0 ? `${viewInfo.promocionesCount} (${formatCurrencyHnl(viewInfo.descuentoPromociones)})` : '-' },
+                  { label: 'Comprobante', value: viewInfo.comprobanteCodigo || '-' },
+                  { label: 'Telefono', value: cita.telefono_cliente || '-' },
+                  { label: 'Inicio', value: formatDateTime(cita.inicio_at) },
+                  { label: 'Monto', value: formatCurrencyHnl(cita.total_pagar_hnl) },
+                ]}
+                actions={renderItemActions(cita)}
+              />
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -822,18 +905,32 @@ function renderCardsList(items, emptyText) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {items.map((cita) => (
-              <TableRow key={cita.id_cita} className="border-[var(--mf-nav-border)]">
-                <TableCell className="font-medium">
-                  {cita.nombre_cliente || 'Cliente'}
-                  {cita.alias_integrante ? <p className="text-xs text-[var(--mf-text-2)]">{cita.alias_integrante}</p> : null}
-                  {cita.telefono_cliente ? <p className="text-xs text-[var(--mf-text-2)]">{cita.telefono_cliente}</p> : null}
-                </TableCell>
-                <TableCell>{cita.nombre_barbero || '-'}<p className="text-xs text-[var(--mf-text-2)]">{cita.nombre_sucursal || '-'}</p></TableCell>
-                <TableCell>{formatDateTime(cita.inicio_at)}<p className="text-xs text-[var(--mf-text-2)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p></TableCell>
-                <TableCell className="text-right">{renderItemActions(cita)}</TableCell>
-              </TableRow>
-            ))}
+            {items.map((cita) => {
+              const viewInfo = getAppointmentDisplayInfo(cita);
+              return (
+                <TableRow key={cita.id_cita} className="border-[var(--mf-nav-border)]">
+                  <TableCell className="font-medium">
+                    {viewInfo.titularNombre}
+                    <p className="text-xs text-[var(--mf-text-2)]">{viewInfo.aliasIntegrante}</p>
+                    {cita.telefono_cliente ? <p className="text-xs text-[var(--mf-text-2)]">{cita.telefono_cliente}</p> : null}
+                  </TableCell>
+                  <TableCell>
+                    {cita.nombre_barbero || '-'}
+                    <p className="text-xs text-[var(--mf-text-2)]">{cita.nombre_sucursal || '-'}</p>
+                    <p className="text-xs text-[var(--mf-text-2)]">Sel: {viewInfo.selectionLabel}{viewInfo.paqueteNombre ? ` · ${viewInfo.paqueteNombre}` : ''}</p>
+                  </TableCell>
+                  <TableCell>
+                    {formatDateTime(cita.inicio_at)}
+                    <p className="text-xs text-[var(--mf-text-2)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p>
+                    <p className="text-xs text-[var(--mf-text-2)]">
+                      M:{viewInfo.serviciosManualCount} · E:{viewInfo.serviciosExtraCount} · I:{viewInfo.serviciosIncluidosCount}
+                      {viewInfo.promocionesCount > 0 ? ` · P:${viewInfo.promocionesCount}` : ''}
+                    </p>
+                  </TableCell>
+                  <TableCell className="text-right">{renderItemActions(cita)}</TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
