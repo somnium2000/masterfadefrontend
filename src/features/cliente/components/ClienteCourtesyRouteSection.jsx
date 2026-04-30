@@ -3,6 +3,7 @@ import { Coins, Gift, Loader2, RefreshCw, Sparkles, Users, UserRound } from 'luc
 import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { Button } from '../../../components/ui/button.jsx';
+import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import {
   Dialog,
   DialogContent,
@@ -427,6 +428,11 @@ export default function ClienteCourtesyRouteSection() {
   }
 
   const canSubmitRedeem = Boolean(selectedServiceId && selectedBranchId && !redeemLoading && !redeemSubmitting);
+  const movementHistory = useMemo(
+    () => (Array.isArray(summary?.history) ? summary.history : []),
+    [summary?.history]
+  );
+  const shouldUseMovementCarousel = movementHistory.length > 4;
 
   return (
     <section className="mf-glass-surface relative overflow-hidden rounded-[24px] border border-[var(--mf-nav-border)] p-4 sm:p-5">
@@ -543,28 +549,57 @@ export default function ClienteCourtesyRouteSection() {
 
             <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">Ultimos movimientos</p>
-              {summary.history.length ? (
-                <div className="mt-3 space-y-2">
-                  {summary.history.map((movement) => {
-                    const positive = movement.puntos >= 0;
-                    return (
-                      <article
-                        key={movement.id}
-                        className="flex items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-[var(--mf-text)]">{movement.motivo}</p>
-                          <p className="text-xs text-[var(--mf-text-2)]">
-                            {formatCompactDate(movement.created_at)} - {resolveMovementOriginLabel(movement.origen_punto_codigo)}
-                          </p>
-                        </div>
-                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${positive ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>
-                          {formatSignedPoints(movement.puntos)}
-                        </span>
-                      </article>
-                    );
-                  })}
-                </div>
+              {movementHistory.length ? (
+                shouldUseMovementCarousel ? (
+                  <div className="mt-3">
+                    <CardsCarousel
+                      items={movementHistory}
+                      getItemKey={(movement) => movement.id}
+                      pageSizeByViewport={{ mobile: 4, tablet: 4, desktop: 4 }}
+                      gridClassName="grid grid-cols-1 gap-2"
+                      compactControls
+                      showHeaderTag={false}
+                      renderItem={(movement) => {
+                        const positive = movement.puntos >= 0;
+                        return (
+                          <article className="flex items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-[var(--mf-text)]">{movement.motivo}</p>
+                              <p className="truncate text-xs text-[var(--mf-text-2)]">
+                                {formatCompactDate(movement.created_at)} - {resolveMovementOriginLabel(movement.origen_punto_codigo)}
+                              </p>
+                            </div>
+                            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${positive ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>
+                              {formatSignedPoints(movement.puntos)}
+                            </span>
+                          </article>
+                        );
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {movementHistory.map((movement) => {
+                      const positive = movement.puntos >= 0;
+                      return (
+                        <article
+                          key={movement.id}
+                          className="flex items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-[var(--mf-text)]">{movement.motivo}</p>
+                            <p className="truncate text-xs text-[var(--mf-text-2)]">
+                              {formatCompactDate(movement.created_at)} - {resolveMovementOriginLabel(movement.origen_punto_codigo)}
+                            </p>
+                          </div>
+                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${positive ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>
+                            {formatSignedPoints(movement.puntos)}
+                          </span>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )
               ) : (
                 <p className="mt-2 text-sm text-[var(--mf-text-2)]">Aun no hay movimientos de puntos.</p>
               )}

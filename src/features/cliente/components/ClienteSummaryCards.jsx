@@ -75,6 +75,7 @@ export default function ClienteSummaryCards({
   onNewAppointment,
   onOpenProfile,
   hideRewardsHero = false,
+  hideProfileKpi = false,
 }) {
   const reduceMotion = useReducedMotion();
   const safeMasterpuntos = Math.max(0, Number(masterpuntos || 0));
@@ -96,7 +97,7 @@ export default function ClienteSummaryCards({
 
   if (hideRewardsHero) {
     return (
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <section className={`grid grid-cols-1 gap-3 ${hideProfileKpi ? 'sm:grid-cols-1' : 'sm:grid-cols-2'}`}>
         <KpiCard
           icon={CalendarDays}
           label="Citas proximas"
@@ -106,15 +107,17 @@ export default function ClienteSummaryCards({
           onAction={onNewAppointment}
           tone="accent"
         />
-        <KpiCard
-          icon={UserRound}
-          label="Perfil"
-          value={profileCompleted ? 'Completo' : `${safeCompletionPercent}%`}
-          helper={profileCompleted ? 'Tu perfil ya esta al dia.' : 'Completa tus datos para mejorar tu experiencia.'}
-          actionLabel={profileCompleted ? 'Ver perfil' : 'Completar perfil'}
-          onAction={onOpenProfile}
-          tone={profileCompleted ? 'success' : 'default'}
-        />
+        {!hideProfileKpi ? (
+          <KpiCard
+            icon={UserRound}
+            label="Perfil"
+            value={profileCompleted ? 'Completo' : `${safeCompletionPercent}%`}
+            helper={profileCompleted ? 'Tu perfil ya esta al dia.' : 'Completa tus datos para mejorar tu experiencia.'}
+            actionLabel={profileCompleted ? 'Ver perfil' : 'Completar perfil'}
+            onAction={onOpenProfile}
+            tone={profileCompleted ? 'success' : 'default'}
+          />
+        ) : null}
       </section>
     );
   }
@@ -196,7 +199,7 @@ export default function ClienteSummaryCards({
         </div>
       </article>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1">
+      <div className={`grid grid-cols-1 gap-3 ${hideProfileKpi ? 'sm:grid-cols-1 xl:grid-cols-1' : 'sm:grid-cols-2 xl:grid-cols-1'}`}>
         <KpiCard
           icon={CalendarDays}
           label="Citas próximas"
@@ -206,15 +209,17 @@ export default function ClienteSummaryCards({
           onAction={onNewAppointment}
           tone="accent"
         />
-        <KpiCard
-          icon={UserRound}
-          label="Perfil"
-          value={profileCompleted ? 'Completo' : `${safeCompletionPercent}%`}
-          helper={profileCompleted ? 'Tu perfil ya está al día.' : 'Completa tus datos para mejorar tu experiencia.'}
-          actionLabel={profileCompleted ? 'Ver perfil' : 'Completar perfil'}
-          onAction={onOpenProfile}
-          tone={profileCompleted ? 'success' : 'default'}
-        />
+        {!hideProfileKpi ? (
+          <KpiCard
+            icon={UserRound}
+            label="Perfil"
+            value={profileCompleted ? 'Completo' : `${safeCompletionPercent}%`}
+            helper={profileCompleted ? 'Tu perfil ya está al día.' : 'Completa tus datos para mejorar tu experiencia.'}
+            actionLabel={profileCompleted ? 'Ver perfil' : 'Completar perfil'}
+            onAction={onOpenProfile}
+            tone={profileCompleted ? 'success' : 'default'}
+          />
+        ) : null}
       </div>
     </section>
   );

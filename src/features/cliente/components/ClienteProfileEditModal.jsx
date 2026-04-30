@@ -174,11 +174,17 @@ export default function ClienteProfileEditModal({
 
   async function handleSubmit(event) {
     event.preventDefault();
+    const telefonoPrincipal = extractSafeText(form.telefono_principal);
+    if (!telefonoPrincipal) {
+      notifications.warning('El teléfono principal es obligatorio para guardar tu perfil.');
+      return;
+    }
+
     setSaving(true);
 
     try {
       const payload = {
-        telefono_principal: extractSafeText(form.telefono_principal) || null,
+        telefono_principal: telefonoPrincipal,
         fecha_nacimiento: String(form.fecha_nacimiento || '').trim() || null,
         genero_codigo: normalizeGeneroCode(form.genero_codigo) || null,
         direccion_texto: extractSafeText(form.direccion_texto) || null,
@@ -273,13 +279,15 @@ export default function ClienteProfileEditModal({
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Identidad y contacto</p>
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className="mf-label">TelÃ©fono principal</label>
+                <label className="mf-label">TelÃ©fono principal *</label>
                 <div className="relative">
                   <Phone size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
                   <input
                     className="mf-input pl-9"
                     value={form.telefono_principal}
                     onChange={(event) => setField('telefono_principal', event.target.value)}
+                    required
+                    aria-required="true"
                     maxLength={40}
                     placeholder="Ej. +504 9999-9999"
                   />
