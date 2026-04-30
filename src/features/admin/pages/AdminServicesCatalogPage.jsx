@@ -13,6 +13,7 @@ import {
     setAdminServicioEstado,
     getAdminServicioBarberos,
     saveAdminServicioBarberos,
+    SERVICE_BARBER_ASSIGNMENTS_ENABLED,
 } from '../lib/adminCatalogApi.js';
 import { listAdminSucursales } from '../lib/adminSucursalesApi.js';
 import { Button } from '../../../components/ui/button.jsx';
@@ -344,6 +345,7 @@ export default function AdminServicesCatalogPage() {
     const navigate = useNavigate();
     const { branchIds, roles } = useAuth();
     const isSuperAdmin = Array.isArray(roles) && roles.includes('super_admin');
+    const canManageServiceBarberAssignments = isSuperAdmin && SERVICE_BARBER_ASSIGNMENTS_ENABLED;
     const notifications = useNotifications();
 
     // Sucursal activa según reglas
@@ -618,7 +620,7 @@ export default function AdminServicesCatalogPage() {
     }
 
     useEffect(() => {
-        if (!dialogOpen || !editTarget || !isSuperAdmin || !formValues.servicio_informativo) {
+        if (!dialogOpen || !editTarget || !canManageServiceBarberAssignments || !formValues.servicio_informativo) {
             setServiceBarberAssignments(SERVICE_BARBER_ASSIGNMENTS_DEFAULTS);
             return undefined;
         }
@@ -661,13 +663,13 @@ export default function AdminServicesCatalogPage() {
             });
 
         return () => { cancelled = true; };
-    }, [dialogOpen, editTarget, formValues.servicio_informativo, isSuperAdmin]);
+    }, [canManageServiceBarberAssignments, dialogOpen, editTarget, formValues.servicio_informativo]);
 
     async function handleGuardar() {
         const validationError = validateForm(formValues);
         if (validationError) { setFormError(validationError); return; }
 
-        if (isSuperAdmin && editTarget && formValues.servicio_informativo) {
+        if (canManageServiceBarberAssignments && editTarget && Boolean(formValues.servicio_informativo)) {
             if (serviceBarberAssignments.loading) {
                 setFormError('Espera a que termine de cargar la asignacion de barberos.');
                 return;
@@ -720,7 +722,7 @@ export default function AdminServicesCatalogPage() {
                 savedServiceData = response?.data ?? response;
             }
 
-            if (isSuperAdmin && editTarget && formValues.servicio_informativo) {
+            if (canManageServiceBarberAssignments && editTarget && Boolean(formValues.servicio_informativo)) {
                 const savedServiceId = savedServiceData?.id_servicio || editTarget.id_servicio || editTarget.id;
                 await saveAdminServicioBarberos(savedServiceId, {
                     id_sucursal: mutationBranchId,
@@ -731,7 +733,7 @@ export default function AdminServicesCatalogPage() {
                 notifications.success('Servicio actualizado.', { dedupeKey: 'servicios-save-ok' });
             } else {
                 notifications.success('Servicio creado.', { dedupeKey: 'servicios-save-ok' });
-                if (isSuperAdmin) {
+                if (canManageServiceBarberAssignments) {
                     notifications.warning('El servicio se creo. Editalo para asignar los barberos que lo ofreceran.', {
                         dedupeKey: 'servicios-assign-after-create',
                     });
@@ -862,7 +864,7 @@ export default function AdminServicesCatalogPage() {
                             { label: 'Tipo', value: s.servicio_informativo ? 'Informativo' : 'Agendable' },
                             { label: 'Precio', value: <span className="font-mono font-bold text-[var(--mf-accent)]">{formatServicePrice(s.precio_hnl)}</span> },
                             { label: 'Duracion', value: `${s.duracion_min} min` },
-                            ...(isSuperAdmin ? [{ label: 'Barberos', value: summarizeAssignedBarbers(s.barberos_ofrecen) }] : []),
+                            ...(canManageServiceBarberAssignments ? [{ label: 'Barberos', value: summarizeAssignedBarbers(s.barberos_ofrecen) }] : []),
                             { label: 'Orden visual', value: Number(s.orden_visual ?? 100) },
                         ]}
                         actions={
@@ -1018,7 +1020,7 @@ export default function AdminServicesCatalogPage() {
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Tipo</TableHead>
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Grupo</TableHead>
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden lg:table-cell">Agendable</TableHead>
-                                    {isSuperAdmin ? (
+                                    {canManageServiceBarberAssignments ? (
                                         <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden xl:table-cell">Barberos</TableHead>
                                     ) : null}
                                     <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Dur (min)</TableHead>
@@ -1060,7 +1062,7 @@ export default function AdminServicesCatalogPage() {
                                         <TableCell className="text-center hidden lg:table-cell">
                                             <ServiceAgendableBadge agendable={Boolean(s.agendable)} />
                                         </TableCell>
-                                        {isSuperAdmin ? (
+                                        {canManageServiceBarberAssignments ? (
                                             <TableCell className="hidden xl:table-cell text-sm text-[var(--mf-text-2)]">
                                                 <div className="space-y-1">
                                                     <div className="font-medium text-[var(--mf-text)]">
@@ -1121,17 +1123,17 @@ export default function AdminServicesCatalogPage() {
 
             {/* Dialog Crear / Editar */}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogContent className={`w-[calc(100vw-1rem)] max-h-[calc(100vh-1.5rem)] overflow-y-auto ${isSuperAdmin && editTarget ? 'sm:max-w-2xl' : 'sm:max-w-md'}`}>
+                <DialogContent className={`w-[calc(100vw-1rem)] max-h-[calc(100vh-1.5rem)] overflow-y-auto ${canManageServiceBarberAssignments && editTarget ? 'sm:max-w-2xl' : 'sm:max-w-md'}`}>
                     <DialogHeader>
                         <DialogTitle>{editTarget ? 'Editar servicio' : 'Nuevo servicio'}</DialogTitle>
                         <DialogDescription className="sr-only">
                             Configura nombre, duracion, precio y visibilidad del servicio por sucursal.
                         </DialogDescription>
                     </DialogHeader>
-                    <div className={`grid gap-5 ${isSuperAdmin && editTarget ? 'lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]' : 'grid-cols-1'}`}>
+                    <div className={`grid gap-5 ${canManageServiceBarberAssignments && editTarget ? 'lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]' : 'grid-cols-1'}`}>
                         <ServicioForm values={formValues} onChange={handleFormChange} />
 
-                        {isSuperAdmin && Boolean(formValues.servicio_informativo) ? (
+                        {canManageServiceBarberAssignments && Boolean(formValues.servicio_informativo) ? (
                             <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_38%,transparent)] p-4">
                                 <div className="space-y-1">
                                     <p className="text-xs uppercase tracking-[0.22em] text-[var(--mf-accent)]">Barberos que ofrecen este servicio</p>
@@ -1225,7 +1227,7 @@ export default function AdminServicesCatalogPage() {
                         </Button>
                         <Button
                             onClick={handleGuardar}
-                            disabled={formLoading || (isSuperAdmin && editTarget && Boolean(formValues.servicio_informativo) && serviceBarberAssignments.loading)}
+                            disabled={formLoading || (canManageServiceBarberAssignments && editTarget && Boolean(formValues.servicio_informativo) && serviceBarberAssignments.loading)}
                             className="gap-2 min-w-[120px]"
                         >
                             {formLoading ? 'Guardando...' : editTarget ? 'Guardar cambios' : 'Crear servicio'}
@@ -1280,7 +1282,7 @@ export default function AdminServicesCatalogPage() {
                                     fields: [
                                         { label: 'Sucursal', value: detailTarget.id_sucursal ? (branchNameById[detailTarget.id_sucursal] || detailTarget.id_sucursal) : 'No definida' },
                                         { label: 'ID servicio', value: detailTarget.id_servicio || '-' },
-                                        ...(isSuperAdmin ? [{ label: 'Barberos asignados', value: summarizeAssignedBarbers(detailTarget.barberos_ofrecen, 3) }] : []),
+                                        ...(canManageServiceBarberAssignments ? [{ label: 'Barberos asignados', value: summarizeAssignedBarbers(detailTarget.barberos_ofrecen, 3) }] : []),
                                     ],
                                 },
                             ]}

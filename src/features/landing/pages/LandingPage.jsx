@@ -125,7 +125,7 @@ export default function LandingPage() {
                 >
                   Tu estilo, nuestra pasión.
                   <br />
-                  La experiencia premium en barbería.
+                  La experiencia premium en barbería con Jonathan.
                 </motion.p>
 
                 <motion.div
