@@ -4,6 +4,8 @@
 
 import { http } from '../../../services/httpClient.js';
 
+export const SERVICE_BARBER_ASSIGNMENTS_ENABLED = false;
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function normalizeBranchId(value) {
@@ -71,6 +73,16 @@ export async function setAdminServicioEstado(id, payload) {
  * @param {{ id_sucursal: string }} params
  */
 export async function getAdminServicioBarberos(id, { id_sucursal }) {
+    if (!SERVICE_BARBER_ASSIGNMENTS_ENABLED) {
+        return {
+            ok: true,
+            data: {
+                id_servicio: String(id || '').trim() || null,
+                id_sucursal: normalizeBranchId(id_sucursal) || null,
+                barberos: [],
+            },
+        };
+    }
     const branchId = normalizeBranchId(id_sucursal);
     if (!branchId) {
         throw new Error('Debes seleccionar una sucursal valida para consultar barberos del servicio.');
@@ -85,6 +97,16 @@ export async function getAdminServicioBarberos(id, { id_sucursal }) {
  * @param {{ id_sucursal: string, id_empleados: string[] }} payload
  */
 export async function saveAdminServicioBarberos(id, payload) {
+    if (!SERVICE_BARBER_ASSIGNMENTS_ENABLED) {
+        return {
+            ok: true,
+            data: {
+                id_servicio: String(id || '').trim() || null,
+                id_sucursal: normalizeBranchId(payload?.id_sucursal) || null,
+                barberos: [],
+            },
+        };
+    }
     const branchId = normalizeBranchId(payload?.id_sucursal);
     if (!branchId) {
         throw new Error('Debes seleccionar una sucursal valida para guardar barberos del servicio.');
