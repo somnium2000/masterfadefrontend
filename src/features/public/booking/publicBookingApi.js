@@ -57,6 +57,26 @@ export async function createPublicCitaHold(payload) {
   return http.post('/v1/public/citas/hold', payload);
 }
 
+export async function validatePublicTitularForBooking(payload) {
+  return http.post('/v1/public/citas/validar-titular', payload);
+}
+
+export async function releasePublicCitaHold(idGrupoCita) {
+  const groupId = String(idGrupoCita || '').trim();
+  if (!UUID_PATTERN.test(groupId)) {
+    const error = new Error('No se pudo identificar la reserva temporal.');
+    error.status = 400;
+    error.data = {
+      error: {
+        code: 'PUBLIC_BOOKING_HOLD_GROUP_INVALID',
+        message: error.message,
+      },
+    };
+    throw error;
+  }
+  return http.delete(`/v1/public/citas/hold/${encodeURIComponent(groupId)}`);
+}
+
 export async function createClienteCitaHold(payload) {
   return http.post('/v1/citas/hold', payload);
 }

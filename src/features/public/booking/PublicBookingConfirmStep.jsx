@@ -18,6 +18,7 @@ export default function PublicBookingConfirmStep() {
     confirmHoldWithoutPayment,
     holdResult,
     holdPricing,
+    cancelBookingFlow,
     canConfirmWithoutPayment,
     paymentRequired,
     mode = 'public',
@@ -206,6 +207,16 @@ export default function PublicBookingConfirmStep() {
           <Button variant="outline" className="gap-2" onClick={goToAgenda} disabled={submitting}>
             <ArrowLeft size={15} />
             Volver a agenda
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => {
+              void cancelBookingFlow();
+            }}
+            disabled={submitting}
+          >
+            Cancelar
           </Button>
           <Button
             className="gap-2"

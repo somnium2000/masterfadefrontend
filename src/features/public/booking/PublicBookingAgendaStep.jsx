@@ -60,6 +60,12 @@ function toMinutes(timeKey) {
   return (hours * 60) + minutes;
 }
 
+function isThirtyMinuteStepSlot(slot) {
+  const totalMinutes = toMinutes(slot?.hora);
+  if (!Number.isFinite(totalMinutes)) return false;
+  return totalMinutes % 30 === 0;
+}
+
 function overlapByMinutes(leftStart, leftDuration, rightStart, rightDuration) {
   const leftMinutes = toMinutes(leftStart);
   const rightMinutes = toMinutes(rightStart);
@@ -105,7 +111,7 @@ function formatPromotionVigencyLabel(promotion) {
         ? `Hasta ${toHour}`
         : '';
 
-  if (dateLabel && hourLabel) return `${dateLabel} � ${hourLabel}`;
+  if (dateLabel && hourLabel) return `${dateLabel} · ${hourLabel}`;
   return dateLabel || hourLabel;
 }
 
@@ -267,7 +273,6 @@ export default function PublicBookingAgendaStep() {
     activeBlockIndex,
     addCompanionBlock,
     consumePendingCompanionFocus,
-    allBlocksComplete,
     allowCompanions,
     maxCompanions,
     maxPromotionsPerBooking,
@@ -277,7 +282,6 @@ export default function PublicBookingAgendaStep() {
     barbers,
     bookingBlocks,
     bookingBlocksSummary,
-    bookingBlockingReason,
     blockedServiceIds,
     membershipLockedServiceIdsForTitular,
     membershipBranchNotice,
@@ -287,6 +291,7 @@ export default function PublicBookingAgendaStep() {
     rewardBranchName,
     rewardBranchMismatch,
     cancelRewardRedemptionUsage,
+    cancelBookingFlow,
     removeCompanionBlock,
     canAddCompanionBlock,
     canGoPrevMonth,
@@ -345,7 +350,6 @@ export default function PublicBookingAgendaStep() {
   } = usePublicBookingFlow();
 
   const calendarCells = useMemo(() => buildCalendarCells(currentMonth), [currentMonth]);
-  const canGoToConfirm = Boolean(allBlocksComplete);
 
   const selectedServiceIdsSet = useMemo(
     () => new Set((Array.isArray(selectedServices) ? selectedServices : []).map((service) => String(service?.id_servicio || '').trim()).filter(Boolean)),
@@ -419,10 +423,21 @@ export default function PublicBookingAgendaStep() {
   const isAuthenticatedTitular = Boolean(isTitularBlock && titularState?.isAuthenticated);
   const showTitularIdentityOnly = Boolean(isAuthenticatedTitular && titularState?.hasFullProfile);
 
-  const showFirstNameInput = !isTitularBlock || !isAuthenticatedTitular || titularMissingFields.has('nombres');
-  const showLastNameInput = !isTitularBlock || (isAuthenticatedTitular && titularMissingFields.has('apellidos'));
-  const showEmailInput = !isTitularBlock || !isAuthenticatedTitular;
-  const showPhoneInput = !isTitularBlock || !isAuthenticatedTitular || titularMissingFields.has('telefono_principal');
+  const showFirstNameInput = !isTitularBlock
+    || !isAuthenticatedTitular
+    || titularMissingFields.has('nombres')
+    || !activeContactFirstName;
+  const showLastNameInput = !isTitularBlock
+    || !isAuthenticatedTitular
+    || titularMissingFields.has('apellidos')
+    || !activeContactLastName;
+  const showEmailInput = !isTitularBlock
+    || !isAuthenticatedTitular
+    || !activeContactEmail;
+  const showPhoneInput = !isTitularBlock
+    || !isAuthenticatedTitular
+    || titularMissingFields.has('telefono_principal')
+    || !activeContactPhone;
 
   const titularDisplayName = buildFullName(titularState?.profile?.nombres, titularState?.profile?.apellidos)
     || String(activeBlockContactState?.fullName || '').trim();
@@ -580,18 +595,26 @@ export default function PublicBookingAgendaStep() {
         return leftMin - rightMin;
       });
 
-      const recommended = curatedRecommended[0] || fallbackUnique[0] || null;
-      const alternatives = [
+      const recommendedPool = [...curatedRecommended, ...fallbackUnique];
+      const recommended = recommendedPool.find((slot) => isThirtyMinuteStepSlot(slot)) || null;
+      const alternativesRaw = [
         ...curatedAlternatives,
         ...(recommended ? fallbackUnique.filter((slot) => slot.hora !== recommended.hora) : fallbackUnique),
       ];
-      const total = [recommended, ...alternatives].filter(Boolean).length;
+      const alternatives = alternativesRaw
+        .filter((slot) => slot && slot.hora !== recommended?.hora)
+        .filter((slot) => isThirtyMinuteStepSlot(slot))
+        .slice(0, 3);
+      const visibleSlots = [recommended, ...alternatives]
+        .filter(Boolean)
+        .filter((slot, index, list) => list.findIndex((candidate) => candidate?.hora === slot?.hora) === index);
+      const total = visibleSlots.length;
 
       models[periodKey] = {
         recommended,
         alternatives,
         total,
-        visibleSlots: [recommended, ...alternatives].filter(Boolean),
+        visibleSlots,
       };
     });
 
@@ -1376,30 +1399,27 @@ export default function PublicBookingAgendaStep() {
           transition={{ duration: 0.4, delay: 0.12, ease: LANDING_EASE }}
         >
           <Button
-            className="gap-2"
+            className="gap-2 public-booking-agenda-action-button"
             onClick={() => {
               void goToConfirm();
             }}
-            disabled={!canGoToConfirm || holdSubmitting}
+            disabled={holdSubmitting}
           >
             {holdSubmitting ? <Loader2 size={16} className="animate-spin" /> : null}
             {holdSubmitting ? 'Preparando resumen...' : 'Continuar a resumen'}
             <ArrowRight size={15} />
           </Button>
-          {!canGoToConfirm && bookingBlockingReason ? (
-            <p className="citas-selected-date mt-2">{bookingBlockingReason}</p>
-          ) : null}
         </motion.div>
 
         <motion.div
-          className="public-booking-actions public-booking-agenda-secondary-cta"
+          className="public-booking-actions public-booking-agenda-secondary-cta flex-col"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.16, ease: LANDING_EASE }}
         >
           <Button
             variant="outline"
-            className="gap-2"
+            className="gap-2 public-booking-agenda-action-button"
             onClick={addCompanionBlock}
             disabled={!allowCompanions || !canAddCompanionBlock}
           >
@@ -1409,6 +1429,15 @@ export default function PublicBookingAgendaStep() {
                 : canAddCompanionBlock
                   ? 'Añadir acompañante'
                   : `Límite de ${maxCompanions} acompañantes alcanzado`}
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-2 public-booking-agenda-action-button"
+            onClick={() => {
+              void cancelBookingFlow();
+            }}
+          >
+            Cancelar
           </Button>
         </motion.div>
       </div>
