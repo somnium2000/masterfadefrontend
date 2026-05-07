@@ -62,6 +62,66 @@ async function parseResponse(response) {
 const inFlightControllers = new Set();
 let sessionInvalidated = false;
 let sessionInvalidationHandler = null;
+const CSRF_SESSION_KEY = "mf_cached_csrf_token";
+let inMemoryCsrfToken = "";
+let csrfFetchInFlight = null;
+
+function readStoredCsrfToken() {
+  if (inMemoryCsrfToken) return inMemoryCsrfToken;
+  if (typeof window === "undefined") return "";
+  try {
+    const cached = String(window.sessionStorage.getItem(CSRF_SESSION_KEY) || "").trim();
+    if (cached) {
+      inMemoryCsrfToken = cached;
+      return cached;
+    }
+  } catch {
+    // no-op
+  }
+  return "";
+}
+
+function cacheCsrfToken(token) {
+  const normalized = String(token || "").trim();
+  inMemoryCsrfToken = normalized;
+  if (typeof window === "undefined") return;
+  try {
+    if (normalized) {
+      window.sessionStorage.setItem(CSRF_SESSION_KEY, normalized);
+    } else {
+      window.sessionStorage.removeItem(CSRF_SESSION_KEY);
+    }
+  } catch {
+    // no-op
+  }
+}
+
+async function fetchCsrfTokenFromApi(baseUrl) {
+  if (csrfFetchInFlight) return csrfFetchInFlight;
+
+  const csrfUrl = joinUrl(baseUrl, "/v1/auth/csrf");
+  csrfFetchInFlight = (async () => {
+    const response = await fetch(csrfUrl, {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return "";
+    const data = await parseResponse(response);
+    const payload = data?.data || data;
+    const token = String(payload?.csrf_token || "").trim();
+    if (token) cacheCsrfToken(token);
+    return token;
+  })();
+
+  try {
+    return await csrfFetchInFlight;
+  } catch {
+    return "";
+  } finally {
+    csrfFetchInFlight = null;
+  }
+}
 
 export function isAbortError(err) {
   return (
@@ -87,6 +147,7 @@ function notifySessionInvalidation(reason) {
 
 export function resetSessionInvalidation() {
   sessionInvalidated = false;
+  cacheCsrfToken("");
 }
 
 export function registerSessionInvalidationHandler(handler) {
@@ -118,10 +179,14 @@ export async function request(path, options = {}) {
   }
 
   if (isUnsafeMethod(method) && !finalHeaders["X-CSRF-Token"]) {
-    const csrfToken = readCookie("mf_csrf");
-    if (csrfToken) {
-      finalHeaders["X-CSRF-Token"] = csrfToken;
+    let csrfToken = readCookie("mf_csrf") || readStoredCsrfToken();
+    if (!csrfToken) {
+      const pathname = toPathname(path, baseUrl);
+      if (pathname !== "/v1/auth/csrf") {
+        csrfToken = await fetchCsrfTokenFromApi(baseUrl);
+      }
     }
+    if (csrfToken) finalHeaders["X-CSRF-Token"] = csrfToken;
   }
 
   if (signal?.aborted) {
