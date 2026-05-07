@@ -246,6 +246,12 @@ select {
   margin: 0 auto;
 }
 
+@media (min-width: 640px) and (max-width: 1023px) {
+  .mf-mobile-frame {
+    max-width: 900px;
+  }
+}
+
 .mf-page-gradient {
   position: relative;
   isolation: isolate;

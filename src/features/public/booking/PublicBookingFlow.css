@@ -81,40 +81,51 @@
   gap: 6px;
 }
 
+.public-booking-barberos-shell {
+  overflow: hidden;
+}
+
+.public-booking-barber-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .public-booking-barber-card {
   width: 100%;
-  border-radius: 18px;
+  min-height: 320px;
+  border-radius: 20px;
   border: 1px solid var(--mf-nav-border);
-  background: color-mix(in srgb, var(--mf-btn-bg) 70%, var(--mf-card) 30%);
-  padding: 12px;
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--mf-btn-bg) 78%, var(--mf-card) 22%),
+    color-mix(in srgb, var(--mf-card) 90%, #000 10%)
+  );
+  padding: 12px 12px 14px;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  align-items: center;
+  justify-content: flex-start;
   text-align: left;
-  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  overflow: hidden;
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
 
 .public-booking-barber-card:hover {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--mf-accent) 48%, var(--mf-nav-border) 52%);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
 }
 
 .public-booking-barber-card:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--mf-accent) 80%, transparent);
-  outline-offset: 1px;
-}
-
-.public-booking-barber-card.is-selected {
-  border-color: color-mix(in srgb, var(--mf-accent) 78%, var(--mf-nav-border) 22%);
-  background: color-mix(in srgb, var(--mf-accent) 12%, var(--mf-card) 88%);
-  box-shadow: var(--mf-shadow-accent);
+  outline: 2px solid color-mix(in srgb, var(--mf-accent) 90%, transparent);
+  outline-offset: 2px;
 }
 
 .public-booking-barber-card-media {
-  width: 72px;
-  aspect-ratio: 1 / 1;
-  border-radius: 14px;
+  width: 100%;
+  min-height: 212px;
+  border-radius: 16px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--mf-nav-border) 78%, transparent);
   background: color-mix(in srgb, var(--mf-card) 82%, transparent);
@@ -131,7 +142,7 @@
 }
 
 .public-booking-barber-card-avatar {
-  font-size: 19px;
+  font-size: 26px;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--mf-text);
@@ -139,27 +150,78 @@
 
 .public-booking-barber-card-body {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .public-booking-barber-card-name {
   margin: 0;
   color: var(--mf-text);
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.25;
 }
 
-.public-booking-barber-card-alias {
-  margin: 4px 0 0;
+.public-booking-barber-card-summary {
+  margin: 0;
   color: var(--mf-text-2);
-  font-size: 12px;
-  line-height: 1.2;
-  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.35;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.public-booking-skeleton {
+  display: block;
+  border-radius: 12px;
+  background: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.04) 15%,
+    rgba(255, 255, 255, 0.14) 35%,
+    rgba(255, 255, 255, 0.04) 55%
+  );
+  background-size: 240% 100%;
+  animation: public-booking-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.public-booking-skeleton-select {
+  height: 44px;
+}
+
+.public-booking-skeleton-image {
+  width: 100%;
+  min-height: 212px;
+}
+
+.public-booking-skeleton-title {
+  height: 18px;
+  width: 74%;
+}
+
+.public-booking-skeleton-text {
+  height: 13px;
+  width: 95%;
+}
+
+.public-booking-skeleton-text.short {
+  width: 60%;
+}
+
+.public-booking-barber-card-skeleton {
+  pointer-events: none;
+}
+
+@keyframes public-booking-skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
 }
 
 .public-booking-services-head {
@@ -581,6 +643,12 @@
 
 .public-booking-agenda-secondary-cta {
   margin-top: -2px;
+  align-items: flex-end;
+}
+
+.public-booking-agenda-action-button {
+  width: min(100%, 300px);
+  justify-content: center;
 }
 
 .public-booking-actions.is-inline {
@@ -952,6 +1020,14 @@
     align-items: stretch;
   }
 
+  .public-booking-agenda-secondary-cta {
+    align-items: stretch;
+  }
+
+  .public-booking-agenda-action-button {
+    width: 100%;
+  }
+
   .public-booking-agenda-cta .citas-selected-date {
     max-width: 100%;
     text-align: left;
@@ -961,20 +1037,27 @@
     grid-template-columns: 1fr;
   }
 
+  .public-booking-barber-grid {
+    grid-template-columns: 1fr;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+
   .public-booking-barber-card {
-    grid-template-columns: 64px minmax(0, 1fr);
-    gap: 10px;
+    min-height: 0;
+    aspect-ratio: 1 / 1;
     border-radius: 16px;
-    padding: 10px;
+    padding: 10px 10px 12px;
   }
 
   .public-booking-barber-card-media {
-    width: 64px;
+    min-height: 0;
+    height: 72%;
     border-radius: 12px;
   }
 
   .public-booking-barber-card-name {
-    font-size: 15px;
+    font-size: 16px;
   }
 
   .public-booking-time-block {
@@ -1000,5 +1083,11 @@
 
   .public-booking-package-card {
     min-height: 160px;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1023px) {
+  .public-booking-barber-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

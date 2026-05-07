@@ -32,6 +32,8 @@ import {
   completePublicMockPayment,
   getClienteMembershipEstado,
   getPublicBookingContext,
+  releasePublicCitaHold,
+  validatePublicTitularForBooking,
   listPublicAgendaBarberos,
   listPublicAgendaDisponibilidad,
   listPublicAgendaHorarios,
@@ -653,6 +655,8 @@ export default function PublicBookingFlow() {
   const rewardPreparedShownRef = useRef(false);
   const rewardUnavailableShownRef = useRef(false);
   const rewardDiscountInfoShownRef = useRef(false);
+  const lastHoldFingerprintRef = useRef('');
+  const holderProfileHydratedRef = useRef(false);
   const [servicesCanScroll, setServicesCanScroll] = useState(false);
   const [servicesAtEnd, setServicesAtEnd] = useState(true);
 
@@ -675,22 +679,31 @@ export default function PublicBookingFlow() {
   const titularSelectedDate = bookingBlocks[0]?.selectedDate || '';
 
   useEffect(() => {
-    if (!titularState.isAuthenticated) return;
+    if (!titularState.isAuthenticated) {
+      holderProfileHydratedRef.current = false;
+      return;
+    }
+    if (holderProfileHydratedRef.current) return;
     setBookingBlocks((prev) => {
       const source = Array.isArray(prev) && prev.length > 0
         ? prev
         : [createBookingBlock({ alias: 'Titular' })];
       const currentTitular = normalizeBookingBlock(source[0], 0);
+      const nextFirstName = currentTitular.contactFirstName || titularState.profile.nombres || '';
+      const nextLastName = currentTitular.contactLastName || titularState.profile.apellidos || '';
+      const nextEmail = currentTitular.contactEmail || titularState.profile.email || '';
+      const nextPhone = currentTitular.contactPhone || titularState.profile.telefono_principal || '';
       const nextTitular = normalizeBookingBlock(
         {
           ...currentTitular,
-          contactFirstName: titularState.profile.nombres || currentTitular.contactFirstName,
-          contactLastName: titularState.profile.apellidos || currentTitular.contactLastName,
-          contactEmail: titularState.profile.email || currentTitular.contactEmail,
-          contactPhone: titularState.profile.telefono_principal || currentTitular.contactPhone,
+          contactFirstName: nextFirstName,
+          contactLastName: nextLastName,
+          contactEmail: nextEmail,
+          contactPhone: nextPhone,
         },
         0
       );
+      holderProfileHydratedRef.current = true;
       if (areBlocksEqual(currentTitular, nextTitular)) return prev;
       const next = [...source];
       next[0] = nextTitular;
@@ -1332,6 +1345,22 @@ export default function PublicBookingFlow() {
     () => Math.max(0, totalToPay - totalEstimatedPromotionDiscountHnl),
     [totalEstimatedPromotionDiscountHnl, totalToPay]
   );
+  const bookingSelectionFingerprint = useMemo(
+    () => JSON.stringify(
+      bookingBlocksSummary.map((block) => ({
+        id: block.id,
+        idBarbero: block.idBarbero,
+        selectedDate: block.selectedDate,
+        selectedTime: block.selectedTime,
+        selectedDateTime: block.selectedDateTime,
+        selection_type: block.selection_type,
+        packageId: block.selectedPackage?.id_paquete || '',
+        serviceIds: Array.isArray(block.selectedServiceIdsEffective) ? block.selectedServiceIdsEffective : [],
+        promotionIds: Array.isArray(block.promotionIds) ? block.promotionIds : [],
+      }))
+    ),
+    [bookingBlocksSummary]
+  );
 
   const holdPricing = useMemo(() => {
     if (!holdResult || typeof holdResult !== 'object') return null;
@@ -1639,6 +1668,10 @@ export default function PublicBookingFlow() {
         ? activeBlockBarberId
         : '';
 
+      setBarbers(nextBarbers);
+      setBarbersLoading(false);
+      setBarbersRefreshing(false);
+
       const [servicesResult, packagesResult, promotionsResult] = await Promise.allSettled([
         listPublicCatalogServicios({
           id_sucursal: selectedBranchId,
@@ -1654,35 +1687,36 @@ export default function PublicBookingFlow() {
       ]);
       if (requestSeq !== branchDataRequestSeqRef.current) return;
 
-      if (servicesResult.status !== 'fulfilled') {
-        throw servicesResult.reason;
-      }
-      if (packagesResult.status !== 'fulfilled') {
-        throw packagesResult.reason;
+      let nextServices = [];
+      let validServiceIds = new Set();
+      if (servicesResult.status === 'fulfilled') {
+        const servicesResponse = servicesResult.value;
+        const servicesPayload = servicesResponse?.data ?? servicesResponse;
+        const rawServices = Array.isArray(servicesPayload?.servicios)
+          ? servicesPayload.servicios.filter(
+            (service) => service?.activo !== false && service?.agendable && !service?.servicio_informativo
+          )
+          : [];
+        const dedupedServicesMap = new Map();
+        rawServices.forEach((service) => {
+          const serviceId = String(service?.id_servicio || '').trim();
+          if (!serviceId || dedupedServicesMap.has(serviceId)) return;
+          dedupedServicesMap.set(serviceId, service);
+        });
+        nextServices = Array.from(dedupedServicesMap.values());
+        validServiceIds = new Set(nextServices.map((service) => service.id_servicio));
       }
 
-      const servicesResponse = servicesResult.value;
-      const servicesPayload = servicesResponse?.data ?? servicesResponse;
-      const rawServices = Array.isArray(servicesPayload?.servicios)
-        ? servicesPayload.servicios.filter(
-          (service) => service?.activo !== false && service?.agendable && !service?.servicio_informativo
-        )
-        : [];
-      const dedupedServicesMap = new Map();
-      rawServices.forEach((service) => {
-        const serviceId = String(service?.id_servicio || '').trim();
-        if (!serviceId || dedupedServicesMap.has(serviceId)) return;
-        dedupedServicesMap.set(serviceId, service);
-      });
-      const nextServices = Array.from(dedupedServicesMap.values());
-      const validServiceIds = new Set(nextServices.map((service) => service.id_servicio));
-
-      const packagesResponse = packagesResult.value;
-      const packagesPayload = packagesResponse?.data ?? packagesResponse;
-      const nextPackages = Array.isArray(packagesPayload?.paquetes)
-        ? packagesPayload.paquetes
-        : [];
-      const validPackageIds = new Set(nextPackages.map((pkg) => pkg.id_paquete));
+      let nextPackages = [];
+      let validPackageIds = new Set();
+      if (packagesResult.status === 'fulfilled') {
+        const packagesResponse = packagesResult.value;
+        const packagesPayload = packagesResponse?.data ?? packagesResponse;
+        nextPackages = Array.isArray(packagesPayload?.paquetes)
+          ? packagesPayload.paquetes
+          : [];
+        validPackageIds = new Set(nextPackages.map((pkg) => pkg.id_paquete));
+      }
 
       const nextPromotions = promotionsResult.status === 'fulfilled'
         ? (() => {
@@ -1697,8 +1731,10 @@ export default function PublicBookingFlow() {
       if (promotionsResult.status !== 'fulfilled') {
         setPromotionsLoadError('No se pudieron cargar promociones en este momento. Puedes continuar sin promociones.');
       }
+      if (servicesResult.status !== 'fulfilled' || packagesResult.status !== 'fulfilled') {
+        setAvailabilityError('No se pudo cargar el catálogo completo de esta sucursal en este momento. Puedes reintentar.');
+      }
 
-      setBarbers(nextBarbers);
       setServices(nextServices);
       setPackages(nextPackages);
       setPromotions(nextPromotions);
@@ -2130,12 +2166,16 @@ export default function PublicBookingFlow() {
   }, []);
 
   const recoverToAgendaForReselection = useCallback((message, options = {}) => {
-    const { onlyIndex = null, dedupeKey = 'public-booking-reselect-hours' } = options;
+    const fallbackIndex = Number.isInteger(effectiveActiveBlockIndex) ? effectiveActiveBlockIndex : 0;
+    const { onlyIndex = null, dedupeKey = 'public-booking-reselect-hours', keepOtherTimes = true } = options;
+    const normalizedOnlyIndex = Number.isInteger(onlyIndex) && onlyIndex >= 0
+      ? onlyIndex
+      : (keepOtherTimes ? fallbackIndex : null);
     setHoldResult(null);
     setPaymentIntent(null);
     setPaymentResult(null);
     setBookingSuccessResult(null);
-    clearSelectedTimes({ onlyIndex });
+    clearSelectedTimes({ onlyIndex: normalizedOnlyIndex });
     invalidateAgendaCaches();
     notifications.warning(
       String(message || 'El horario ya no está disponible. Selecciona una nueva hora para continuar.'),
@@ -2145,6 +2185,7 @@ export default function PublicBookingFlow() {
     void fetchAvailability();
     void fetchSlots();
   }, [
+    effectiveActiveBlockIndex,
     clearSelectedTimes,
     fetchAvailability,
     fetchSlots,
@@ -2730,6 +2771,45 @@ export default function PublicBookingFlow() {
     navigate('/agendar/barberos');
   }, [holdResult, navigate]);
 
+  const cancelBookingFlow = useCallback(async () => {
+    const confirmed = window.confirm('¿Seguro que deseas cancelar el agendamiento? Se perderán los datos seleccionados.');
+    if (!confirmed) return false;
+
+    const groupId = String(holdResult?.id_grupo_cita || '').trim();
+    if (groupId) {
+      try {
+        await releasePublicCitaHold(groupId);
+      } catch {
+        notifications.warning('No se pudo liberar la reserva temporal en este momento, pero se canceló el flujo local.', {
+          dedupeKey: 'public-booking-release-hold-warning',
+        });
+      }
+    }
+
+    persistRewardBookingContext(null);
+    setRewardBookingContext(null);
+    setHoldResult(null);
+    setPaymentIntent(null);
+    setPaymentResult(null);
+    setBookingSuccessResult(null);
+    setContextError('');
+    setAvailabilityError('');
+    setFieldErrors({});
+    setPendingCompanionFocusId('');
+    setBookingBlocks([createBookingBlock({ alias: 'Titular' })]);
+    setActiveBlockIndex(0);
+    setCurrentMonth(new Date(minBookingMonth.getFullYear(), minBookingMonth.getMonth(), 1));
+    holderProfileHydratedRef.current = false;
+    invalidateAgendaCaches();
+    setSlots(buildDefaultSlots());
+    setSlotsCurated(createEmptyCuratedSlots());
+    setAvailabilityMap({});
+    setSlotConflict(null);
+    setSlotSuggestions([]);
+    navigate('/', { replace: true });
+    return true;
+  }, [holdResult?.id_grupo_cita, minBookingMonth, navigate, notifications, invalidateAgendaCaches]);
+
   const cancelRewardRedemptionUsage = useCallback(() => {
     if (!rewardModeActive) return;
     setRewardBookingContext(null);
@@ -3257,7 +3337,7 @@ export default function PublicBookingFlow() {
     const blocksToSubmit = bookingBlocksSummary.filter((block) =>
       Boolean(block.selectedPackage) || block.selectedServices.length > 0
     );
-    if (blocksToSubmit.length === 0 || !allBlocksComplete) {
+    if (blocksToSubmit.length === 0) {
       notifications.warning('Completa servicios, fecha y hora en todos los bloques antes de confirmar.', {
         dedupeKey: 'public-booking-blocks-required',
       });
@@ -3308,14 +3388,24 @@ export default function PublicBookingFlow() {
     const titularNombre = titularContactState.fullName;
     const titularEmail = titularContactState.email;
     const titularTelefono = titularContactState.phone;
-    if (!titularContactState.isValid) {
-      Object.entries(titularContactState.errors || {}).forEach(([field, message]) => {
-        nextFieldErrors[buildFieldErrorKey(0, field)] = message;
-      });
+    const titularMissingData = [];
+    if (!titularNombre) {
+      titularMissingData.push('nombre');
+      nextFieldErrors[buildFieldErrorKey(0, 'contactFirstName')] = 'Ingresa el nombre del titular.';
+    }
+    if (!titularEmail) {
+      titularMissingData.push('correo');
+      nextFieldErrors[buildFieldErrorKey(0, 'contactEmail')] = 'Ingresa el correo del titular.';
+    }
+    if (!titularTelefono) {
+      titularMissingData.push('telefono');
+      nextFieldErrors[buildFieldErrorKey(0, 'contactPhone')] = 'Ingresa el telefono del titular.';
+    }
+    if (titularMissingData.length > 0) {
       notifications.warning(
         titularState.isAuthenticated
           ? 'Completa los datos faltantes del titular para continuar.'
-          : 'Completa correctamente los datos del titular antes de confirmar.',
+          : 'Completa nombre, correo y telefono del titular antes de confirmar.',
         {
           dedupeKey: 'public-booking-holder-data-required',
         }
@@ -3328,10 +3418,9 @@ export default function PublicBookingFlow() {
     for (let index = 1; index < bookingBlocks.length; index += 1) {
       const companion = normalizeBookingBlock(bookingBlocks[index], index);
       const companionContact = resolveBlockContactState(companion, index);
-      if (!companionContact.isValid) {
-        Object.entries(companionContact.errors || {}).forEach(([field, message]) => {
-          nextFieldErrors[buildFieldErrorKey(index, field)] = message;
-        });
+      if (!companionContact.fullName) {
+        nextFieldErrors[buildFieldErrorKey(index, 'contactFirstName')] = 'Completa nombre y apellido del acompanante.';
+        nextFieldErrors[buildFieldErrorKey(index, 'contactLastName')] = 'Completa nombre y apellido del acompanante.';
         notifications.warning('Cada acompañante debe tener nombre y apellido válidos para confirmar.', {
           dedupeKey: 'public-booking-companion-data-required-submit',
         });
@@ -3519,10 +3608,20 @@ export default function PublicBookingFlow() {
       const apiError = err?.data?.error || err?.error || {};
       const detailField = String(apiError?.details?.field || '').trim();
       const detailIndexRaw = apiError?.details?.blockIndex;
-      const detailIndex = Number.isFinite(Number(detailIndexRaw)) ? Number(detailIndexRaw) : null;
+      const detailOrderRaw = apiError?.details?.orden_integrante;
+      const detailOrder = Number.isFinite(Number(detailOrderRaw)) ? Number(detailOrderRaw) : null;
+      const detailIndex = Number.isFinite(Number(detailIndexRaw))
+        ? Number(detailIndexRaw)
+        : (detailOrder != null ? Math.max(0, detailOrder - 1) : null);
       const conflictCode = String(apiError?.code || '').trim().toUpperCase();
       const conflictReason = String(apiError?.reason || '').trim().toUpperCase();
       const safeConflictMessage = mapPublicBookingErrorMessage(conflictCode, extractMessage(err));
+      const fallbackConflictIndex = Number.isInteger(effectiveActiveBlockIndex) ? effectiveActiveBlockIndex : 0;
+      const affectedIndex = detailIndex != null ? Math.max(0, Math.trunc(detailIndex)) : fallbackConflictIndex;
+      const affectedSummaryBlock = bookingBlocksSummary[affectedIndex] || null;
+      const affectedLabel = affectedIndex === 0
+        ? 'titular'
+        : (affectedSummaryBlock?.alias || `Acompañante ${affectedIndex}`);
 
       if (detailField) {
         const mappedIndex = detailField.startsWith('titular.')
@@ -3620,11 +3719,16 @@ export default function PublicBookingFlow() {
             || conflictReason === 'AGENDA_AUTOASSIGN_NOT_AVAILABLE';
           const affectedIndex = detailIndex != null
             ? Math.max(0, Math.trunc(detailIndex))
-            : null;
+            : fallbackConflictIndex;
+          const isSameBarberConflict = conflictReason === 'AGENDA_INTERNAL_GROUP_CONFLICT';
+          const conflictMessage = isSameBarberConflict
+            ? `${affectedLabel} usa el mismo barbero en un horario que se cruza. Selecciona una hora posterior o cambia de barbero.`
+            : `El horario seleccionado para ${affectedLabel} ya no está disponible.`;
           recoverToAgendaForReselection(
-            'La hora seleccionada ya no está disponible. Selecciona una hora distinta para continuar.',
+            conflictMessage,
             {
-              onlyIndex: shouldClearSelectedTime ? affectedIndex : null,
+              onlyIndex: shouldClearSelectedTime ? affectedIndex : affectedIndex,
+              keepOtherTimes: true,
               dedupeKey: 'public-booking-hold-conflict',
             }
           );
@@ -3641,7 +3745,6 @@ export default function PublicBookingFlow() {
       setHoldSubmitting(false);
     }
   }, [
-    allBlocksComplete,
     buildFieldErrorKey,
     bookingBlocks,
     bookingBlocksSummary,
@@ -3665,12 +3768,80 @@ export default function PublicBookingFlow() {
     titularState.missingFields,
   ]);
 
+  useEffect(() => {
+    if (!holdResult) {
+      lastHoldFingerprintRef.current = '';
+      return;
+    }
+    if (!lastHoldFingerprintRef.current) {
+      lastHoldFingerprintRef.current = bookingSelectionFingerprint;
+      return;
+    }
+    if (lastHoldFingerprintRef.current !== bookingSelectionFingerprint) {
+      setHoldResult(null);
+      setPaymentIntent(null);
+      setPaymentResult(null);
+      setBookingSuccessResult(null);
+      lastHoldFingerprintRef.current = '';
+    }
+  }, [bookingSelectionFingerprint, holdResult]);
+
   const goToConfirm = useCallback(async () => {
     if (holdSubmitting) return false;
-    if (!allBlocksComplete) return false;
+    if (!allBlocksComplete) {
+      notifications.warning('Completa servicios, fecha y hora antes de continuar a resumen.', {
+        dedupeKey: 'public-booking-confirm-requires-complete-blocks',
+      });
+      return false;
+    }
+    if (!canUseClienteHold) {
+      const titularBlock = normalizeBookingBlock(bookingBlocks[0] || null, 0);
+      const titularContactState = resolveBlockContactState(titularBlock, 0);
+      const titularNombre = String(titularContactState.fullName || '').trim();
+      const titularEmail = String(titularContactState.email || '').trim().toLowerCase();
+      const titularTelefono = String(titularContactState.phone || '').trim();
+      try {
+        await validatePublicTitularForBooking({
+          titular: {
+            nombre: titularNombre,
+            email: titularEmail,
+            telefono: titularTelefono,
+          },
+        });
+      } catch (err) {
+        const apiError = err?.data?.error || err?.error || {};
+        const conflictCode = String(apiError?.code || '').trim().toUpperCase();
+        if (conflictCode === 'PUBLIC_CITAS_EMAIL_IN_USE' || conflictCode === 'EMAIL_BELONGS_TO_ACTIVE_USER') {
+          setFieldError(0, 'contactEmail', mapPublicBookingErrorMessage(conflictCode));
+          setActiveBlockIndex(0);
+          navigate('/agendar/agenda');
+          notifications.warning(
+            `El correo del titular, ${titularEmail || 'correo no identificado'}, pertenece a un usuario activo. Debes iniciar sesión para continuar.`,
+            { dedupeKey: 'public-booking-email-registered-login-required-preconfirm' }
+          );
+          openAuthRequiredModal(titularEmail);
+          return false;
+        }
+        notifications.warning(extractMessage(err), {
+          dedupeKey: 'public-booking-validate-titular-before-confirm',
+        });
+        return false;
+      }
+    }
     navigate('/agendar/confirmar');
     return true;
-  }, [allBlocksComplete, holdSubmitting, navigate]);
+  }, [
+    allBlocksComplete,
+    holdSubmitting,
+    canUseClienteHold,
+    bookingBlocks,
+    resolveBlockContactState,
+    navigate,
+    notifications,
+    setFieldError,
+    setActiveBlockIndex,
+    openAuthRequiredModal,
+  ]);
 
   const goToPayment = useCallback(() => {
     if (!allBlocksComplete) return;
@@ -4134,6 +4305,7 @@ export default function PublicBookingFlow() {
       rewardBranchName,
       rewardBranchMismatch,
       cancelRewardRedemptionUsage,
+      cancelBookingFlow,
       branchList,
       canAddCompanionBlock,
       canUseClienteHold,
@@ -4259,6 +4431,7 @@ export default function PublicBookingFlow() {
       rewardBranchName,
       rewardBranchMismatch,
       cancelRewardRedemptionUsage,
+      cancelBookingFlow,
       branchList,
       canAddCompanionBlock,
       canUseClienteHold,

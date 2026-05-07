@@ -5,8 +5,6 @@ import {
   Armchair,
   CalendarCheck2,
   CalendarClock,
-  CalendarDays,
-  CheckCircle2,
   MapPin,
   Phone,
   Search,
@@ -19,7 +17,6 @@ import { Label } from '../../../components/ui/label.jsx';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table.jsx';
 import ViewToggle from '../../../components/data/ViewToggle.jsx';
-import DataCard from '../../../components/data/DataCard.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
@@ -27,7 +24,6 @@ import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import {
   getAdminCitasOperativasContexto,
-  getAdminCitasOperativasCompletadasHoy,
   listAdminCitasAfectadasReagendacion,
   listAdminCitasOperativas,
   listPublicAgendaHorarios,
@@ -50,13 +46,14 @@ const FILTER_DEFAULTS = {
 
 const LIVE_REFRESH_DEBOUNCE_MS = 180;
 const LIVE_REFRESH_POLL_MS = 8000;
+const AGENDAMIENTO_SELECTED_SUCURSAL_KEY = 'masterfade.admin.agendamiento.selectedSucursalId';
 
 const STATE_LABELS = {
   en_espera: 'En espera',
   pendiente_pago: 'Pendiente de pago',
   confirmada: 'Confirmada',
-  en_salon: 'En salÃ³n',
-  en_atencion: 'En atenciÃ³n',
+  en_salon: 'En salón',
+  en_atencion: 'En atención',
   completada: 'Completada',
   cancelada: 'Cancelada',
   expirada: 'Expirada',
@@ -65,10 +62,9 @@ const STATE_LABELS = {
 };
 
 const CONTAINER_META = {
-  confirmada: { title: 'Confirmadas', subtitle: 'Pendientes de llegada al salÃ³n', accent: 'text-sky-300', border: 'border-sky-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(56,189,248,0.08))]' },
-  en_salon: { title: 'En salÃ³n', subtitle: 'Cliente llegÃ³, pendiente de iniciar atenciÃ³n', accent: 'text-amber-300', border: 'border-amber-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(245,158,11,0.08))]' },
-  en_atencion: { title: 'En atenciÃ³n', subtitle: 'Servicio iniciado por el barbero', accent: 'text-indigo-300', border: 'border-indigo-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(99,102,241,0.11))]' },
-  completada_hoy: { title: 'Completadas hoy', subtitle: 'Se reinicia visualmente cada dÃ­a', accent: 'text-emerald-300', border: 'border-emerald-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(16,185,129,0.08))]' },
+  confirmada: { title: 'Confirmadas', subtitle: 'Pendientes de llegada al salón', accent: 'text-sky-300', border: 'border-sky-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(56,189,248,0.08))]' },
+  en_salon: { title: 'En salón', subtitle: 'Cliente llegó, pendiente de iniciar atención', accent: 'text-amber-300', border: 'border-amber-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(245,158,11,0.08))]' },
+  en_atencion: { title: 'En atención', subtitle: 'Servicio iniciado por el barbero', accent: 'text-indigo-300', border: 'border-indigo-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(99,102,241,0.11))]' },
 };
 
 function extractMessage(err) {
@@ -77,6 +73,7 @@ function extractMessage(err) {
 
 function mapAdminCitasErrorMessage(err, fallback = 'No fue posible cargar la información de la cita.') {
   const code = String(err?.data?.error?.code || '').trim().toUpperCase();
+  const rawMessage = String(extractMessage(err) || '').toLowerCase();
   if (code === 'BOOKING_NOT_FOUND') return 'La cita solicitada no existe.';
   if (code === 'BOOKING_GROUP_NOT_FOUND') return 'No se encontró la reserva solicitada.';
   if (code === 'BOOKING_DETAIL_LOAD_FAILED') return 'No fue posible cargar el detalle de la cita.';
@@ -84,28 +81,35 @@ function mapAdminCitasErrorMessage(err, fallback = 'No fue posible cargar la inf
   if (code === 'BOOKING_ADMIN_QUERY_FAILED') return 'No fue posible consultar la información de citas.';
   if (code === 'SLOT_NOT_AVAILABLE') return 'El horario seleccionado ya no está disponible.';
   if (code === 'EMAIL_BELONGS_TO_ACTIVE_USER') return 'El correo ingresado pertenece a una cuenta activa.';
+  if (code === 'MEMBERSHIP_BRANCH_MISMATCH' || rawMessage.includes('membresía activa no corresponde a la sucursal de la cita')) {
+    return 'No se puede completar la acción porque la cita no corresponde a la sucursal operativa seleccionada.';
+  }
   return extractMessage(err) || fallback;
 }
 
 function extractSafeEstadoMessage(err) {
   const code = String(err?.data?.error?.code || '').trim();
+  const rawMessage = String(extractMessage(err) || '').toLowerCase();
   if (code === 'ADMIN_CITAS_STATUS_WINDOW_NOT_OPEN') {
-    return 'La cita aÃºn no estÃ¡ disponible para marcarse en este estado.';
+    return 'La cita aún no está disponible para marcarse en este estado.';
   }
   if (code === 'ADMIN_CITAS_STATUS_TRANSITION_INVALID') {
-    return 'El cambio de estado solicitado no estÃ¡ disponible para esta cita.';
+    return 'El cambio de estado solicitado no está disponible para esta cita.';
   }
   if (code === 'ADMIN_CITAS_STATUS_START_INVALID') {
     return 'La cita no se puede actualizar en este momento.';
   }
   if (code === 'ADMIN_CITAS_ARRIVAL_STATE_INVALID') {
-    return 'La cita no estÃ¡ en estado confirmada para registrar llegada.';
+    return 'La cita no está en estado confirmada para registrar llegada.';
   }
   if (code === 'ADMIN_CITAS_START_ATTENTION_STATE_INVALID') {
-    return 'La cita debe estar en salÃ³n para iniciar atenciÃ³n.';
+    return 'La cita debe estar en salón para iniciar atención.';
   }
   if (code === 'ADMIN_CITAS_FINISH_ATTENTION_STATE_INVALID') {
-    return 'La cita debe estar en atenciÃ³n para finalizar.';
+    return 'La cita debe estar en atención para finalizar.';
+  }
+  if (rawMessage.includes('membresía activa no corresponde a la sucursal de la cita')) {
+    return 'No se puede completar la acción porque la cita no corresponde a la sucursal operativa seleccionada.';
   }
   return extractMessage(err);
 }
@@ -201,7 +205,39 @@ function getAppointmentDisplayInfo(cita) {
     descuentoPromociones,
     comprobanteCodigo: comprobante?.codigo_comprobante || null,
     comprobanteEstado: comprobante?.estado_comprobante_codigo || null,
+    serviciosManual,
+    serviciosExtra,
+    serviciosIncluidos,
   };
+}
+
+function getServicioNombre(item) {
+  if (!item) return '';
+  if (typeof item === 'string') return item.trim();
+  if (typeof item !== 'object') return '';
+  return String(
+    item?.nombre_servicio_snapshot
+    || item?.nombre_servicio
+    || item?.servicio_nombre
+    || item?.nombre
+    || ''
+  ).trim();
+}
+
+function getServiciosLegibles(cita) {
+  const serviciosManual = Array.isArray(cita?.servicios_manual) ? cita.servicios_manual : [];
+  const serviciosIncluidos = Array.isArray(cita?.servicios_incluidos) ? cita.servicios_incluidos : [];
+  const serviciosExtra = Array.isArray(cita?.servicios_extra) ? cita.servicios_extra : [];
+  const servicios = [...serviciosManual, ...serviciosIncluidos, ...serviciosExtra];
+  const nombres = servicios.map(getServicioNombre).filter(Boolean);
+  return [...new Set(nombres)];
+}
+
+function getServicioResumen(cita) {
+  const servicios = getServiciosLegibles(cita);
+  if (!servicios.length) return 'Sin servicios registrados';
+  if (servicios.length === 1) return servicios[0];
+  return `${servicios[0]} + ${servicios.length - 1} más`;
 }
 
 function getStateBadgeClass(state) {
@@ -215,24 +251,9 @@ function getStateBadgeClass(state) {
 function getOperationLabel(operationCode) {
   const normalized = String(operationCode || '').trim().toLowerCase();
   if (normalized === 'registrar_llegada') return 'Registrar llegada';
-  if (normalized === 'iniciar_atencion') return 'Iniciar atenciÃ³n';
-  if (normalized === 'finalizar_atencion') return 'Finalizar atenciÃ³n';
+  if (normalized === 'iniciar_atencion') return 'Iniciar atención';
+  if (normalized === 'finalizar_atencion') return 'Finalizar atención';
   return operationCode || '';
-}
-
-function getDateInHonduras(isoValue = null) {
-  const date = isoValue ? new Date(isoValue) : new Date();
-  if (Number.isNaN(date.getTime())) return '';
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Tegucigalpa',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const year = parts.find((part) => part.type === 'year')?.value;
-  const month = parts.find((part) => part.type === 'month')?.value;
-  const day = parts.find((part) => part.type === 'day')?.value;
-  return year && month && day ? `${year}-${month}-${day}` : '';
 }
 
 function buildFilterParams(filters, search) {
@@ -264,16 +285,6 @@ function compareOperationalByProximity(a, b, nowMs) {
   return bDiff - aDiff;
 }
 
-function getCompletedSortTimestamp(item) {
-  return toTimestamp(item?.completada_at || item?.fin_at || item?.updated_at || item?.inicio_at);
-}
-
-function compareCompletedByRecent(a, b) {
-  const aMs = getCompletedSortTimestamp(a);
-  const bMs = getCompletedSortTimestamp(b);
-  return bMs - aMs;
-}
-
 export default function AdminAgendamientoCitasPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
@@ -295,6 +306,7 @@ export default function AdminAgendamientoCitasPage() {
     }
   });
   const [filters, setFilters] = useState(FILTER_DEFAULTS);
+  const [selectedSucursalId, setSelectedSucursalId] = useState('');
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -322,9 +334,23 @@ export default function AdminAgendamientoCitasPage() {
   const liveRefreshTimeoutRef = useRef(null);
   const realtimeStatusRef = useRef('idle');
 
-  const sucursales = Array.isArray(context?.sucursales) ? context.sucursales : [];
-  const barberos = Array.isArray(context?.barberos) ? context.barberos : [];
-  const todayHn = useMemo(() => getDateInHonduras(new Date(nowMs).toISOString()), [nowMs]);
+  const sucursales = useMemo(
+    () => (Array.isArray(context?.sucursales) ? context.sucursales : []),
+    [context?.sucursales]
+  );
+  const barberos = useMemo(
+    () => (Array.isArray(context?.barberos) ? context.barberos : []),
+    [context?.barberos]
+  );
+  const selectedSucursal = useMemo(
+    () => sucursales.find((item) => item?.id_sucursal === selectedSucursalId) || null,
+    [selectedSucursalId, sucursales]
+  );
+  const hasMultipleSucursales = sucursales.length > 1;
+  const requiresSucursalSelection = hasMultipleSucursales && !selectedSucursalId;
+  const canOperateWithSucursal = !hasMultipleSucursales || Boolean(selectedSucursalId);
+  const isInitialPageLoading = contextLoading || (loading && citas.length === 0 && !listError);
+  const canRenderCitasContent = !isInitialPageLoading && !contextError && !listError && canOperateWithSucursal;
 
   useEffect(() => {
     const timerId = window.setInterval(() => setNowMs(Date.now()), 30000);
@@ -354,40 +380,74 @@ export default function AdminAgendamientoCitasPage() {
       .sort((a, b) => compareOperationalByProximity(a, b, nowMs)),
     [citas, nowMs]
   );
-  const citasCompletadasHoy = useMemo(
-    () => citas
-      .filter((item) => String(item?.estado_cita_codigo || '').toLowerCase() === 'completada' && getDateInHonduras(item?.inicio_at) === todayHn)
-      .sort(compareCompletedByRecent),
-    [citas, todayHn]
-  );
   const containerItemsByKey = useMemo(
     () => ({
       confirmada: citasConfirmadas,
       en_salon: citasEnSalon,
       en_atencion: citasEnAtencion,
-      completada_hoy: citasCompletadasHoy,
     }),
-    [citasCompletadasHoy, citasConfirmadas, citasEnAtencion, citasEnSalon]
+    [citasConfirmadas, citasEnAtencion, citasEnSalon]
   );
   const mobileTabs = useMemo(
     () => ([
       { key: 'confirmada', label: 'Confirmadas', accent: 'text-sky-300', count: citasConfirmadas.length },
-      { key: 'en_salon', label: 'En salÃ³n', accent: 'text-amber-300', count: citasEnSalon.length },
-      { key: 'en_atencion', label: 'En atenciÃ³n', accent: 'text-indigo-300', count: citasEnAtencion.length },
-      { key: 'completada_hoy', label: 'Completadas', accent: 'text-emerald-300', count: citasCompletadasHoy.length },
+      { key: 'en_salon', label: 'En salón', accent: 'text-amber-300', count: citasEnSalon.length },
+      { key: 'en_atencion', label: 'En atención', accent: 'text-indigo-300', count: citasEnAtencion.length },
     ]),
-    [citasCompletadasHoy.length, citasConfirmadas.length, citasEnAtencion.length, citasEnSalon.length]
+    [citasConfirmadas.length, citasEnAtencion.length, citasEnSalon.length]
   );
   const activeMobileItems = containerItemsByKey[activeMobileContainer] || [];
 
   useEffect(() => {
-    const hasActive = (containerItemsByKey[activeMobileContainer] || []).length > 0;
-    if (hasActive) return;
-    const firstNonEmpty = mobileTabs.find((tab) => tab.count > 0);
-    if (firstNonEmpty && firstNonEmpty.key !== activeMobileContainer) {
-      setActiveMobileContainer(firstNonEmpty.key);
+    const activeExists = mobileTabs.some((tab) => tab.key === activeMobileContainer);
+    if (activeExists) return;
+    const fallbackKey = mobileTabs[0]?.key || 'confirmada';
+    setActiveMobileContainer(fallbackKey);
+  }, [activeMobileContainer, mobileTabs]);
+
+  useEffect(() => {
+    if (!sucursales.length) return;
+    const allowedIds = new Set(sucursales.map((item) => item.id_sucursal));
+    if (sucursales.length === 1) {
+      const onlyId = sucursales[0].id_sucursal;
+      setSelectedSucursalId((prev) => (prev === onlyId ? prev : onlyId));
+      setFilters((prev) => (prev.idSucursal === onlyId ? prev : { ...prev, idSucursal: onlyId }));
+      try {
+        localStorage.setItem(AGENDAMIENTO_SELECTED_SUCURSAL_KEY, onlyId);
+      } catch {
+        // ignore localStorage errors
+      }
+      return;
     }
-  }, [activeMobileContainer, containerItemsByKey, mobileTabs]);
+
+    let storedId = '';
+    try {
+      storedId = String(localStorage.getItem(AGENDAMIENTO_SELECTED_SUCURSAL_KEY) || '').trim();
+    } catch {
+      storedId = '';
+    }
+    const currentValid = selectedSucursalId && allowedIds.has(selectedSucursalId) ? selectedSucursalId : '';
+    const nextId = currentValid || (storedId && allowedIds.has(storedId) ? storedId : '');
+    if (nextId) {
+      setSelectedSucursalId((prev) => (prev === nextId ? prev : nextId));
+      setFilters((prev) => (prev.idSucursal === nextId ? prev : { ...prev, idSucursal: nextId }));
+      try {
+        localStorage.setItem(AGENDAMIENTO_SELECTED_SUCURSAL_KEY, nextId);
+      } catch {
+        // ignore localStorage errors
+      }
+      return;
+    }
+
+    setSelectedSucursalId('');
+    setFilters((prev) => (prev.idSucursal === 'all' ? prev : { ...prev, idSucursal: 'all' }));
+    setCitas([]);
+    try {
+      localStorage.removeItem(AGENDAMIENTO_SELECTED_SUCURSAL_KEY);
+    } catch {
+      // ignore localStorage errors
+    }
+  }, [selectedSucursalId, sucursales]);
 
   const hiddenOperationalCount = useMemo(
     () => citas.filter((item) => ['en_espera', 'pendiente_pago'].includes(String(item?.estado_cita_codigo || '').toLowerCase())).length,
@@ -421,10 +481,10 @@ export default function AdminAgendamientoCitasPage() {
       const sucursalesPayload = Array.isArray(payload?.sucursales) ? payload.sucursales : [];
       const barberosPayload = Array.isArray(payload?.barberos) ? payload.barberos : [];
       setContext({ sucursales: sucursalesPayload, barberos: barberosPayload });
-      if (sucursalesPayload.length === 1) setFilters((prev) => ({ ...prev, idSucursal: sucursalesPayload[0].id_sucursal }));
       if (barberosPayload.length === 1) {
-        setFilters((prev) => ({ ...prev, idBarbero: barberosPayload[0].id_empleado }));
-        setBatchForm((prev) => ({ ...prev, id_empleado_barbero: barberosPayload[0].id_empleado }));
+        const nextBarbero = barberosPayload[0].id_empleado;
+        setFilters((prev) => (prev.idBarbero === nextBarbero ? prev : { ...prev, idBarbero: nextBarbero }));
+        setBatchForm((prev) => (prev.id_empleado_barbero === nextBarbero ? prev : { ...prev, id_empleado_barbero: nextBarbero }));
       }
     } catch (err) {
       if (isAbortError(err)) return;
@@ -437,20 +497,18 @@ export default function AdminAgendamientoCitasPage() {
 
   const fetchCitas = useCallback(async ({ silent = false } = {}) => {
     if (!isAuthenticated) return;
+    if (!canOperateWithSucursal) return;
     if (fetchInFlightRef.current) return;
     fetchInFlightRef.current = true;
     if (!silent) setLoading(true);
     setListError('');
     try {
       const params = buildFilterParams(filters, search);
-      const [operativasResponse, completadasResponse] = await Promise.all([
-        listAdminCitasOperativas(params),
-        getAdminCitasOperativasCompletadasHoy({ ...params, limit: 300 }),
-      ]);
+      params.id_sucursal = selectedSucursalId;
+      const operativasResponse = await listAdminCitasOperativas(params);
       const operativas = Array.isArray((operativasResponse?.data ?? operativasResponse)?.citas) ? (operativasResponse?.data ?? operativasResponse).citas : [];
-      const completadas = Array.isArray((completadasResponse?.data ?? completadasResponse)?.citas) ? (completadasResponse?.data ?? completadasResponse).citas : [];
       const byId = new Map();
-      [...operativas, ...completadas].forEach((item) => {
+      operativas.forEach((item) => {
         if (item?.id_cita) byId.set(item.id_cita, item);
       });
       setCitas(Array.from(byId.values()).sort((a, b) => new Date(a?.inicio_at || '').getTime() - new Date(b?.inicio_at || '').getTime()));
@@ -462,9 +520,10 @@ export default function AdminAgendamientoCitasPage() {
       fetchInFlightRef.current = false;
       if (!silent) setLoading(false);
     }
-  }, [filters, handleAuthError, isAuthenticated, search]);
+  }, [canOperateWithSucursal, filters, handleAuthError, isAuthenticated, search, selectedSucursalId]);
   const scheduleLiveRefresh = useCallback((options = {}) => {
     if (!isAuthenticated) return;
+    if (!canOperateWithSucursal) return;
     const { immediate = false } = options;
     if (liveRefreshTimeoutRef.current) {
       window.clearTimeout(liveRefreshTimeoutRef.current);
@@ -479,20 +538,22 @@ export default function AdminAgendamientoCitasPage() {
       return;
     }
     liveRefreshTimeoutRef.current = window.setTimeout(runRefresh, LIVE_REFRESH_DEBOUNCE_MS);
-  }, [fetchCitas, isAuthenticated]);
+  }, [canOperateWithSucursal, fetchCitas, isAuthenticated]);
   useEffect(() => {
     if (!isAuthenticated) return;
     void fetchContext();
   }, [fetchContext, isAuthenticated]);
   useEffect(() => {
     if (!isAuthenticated) return undefined;
+    if (!canOperateWithSucursal) return undefined;
     const timer = setTimeout(() => {
       void fetchCitas();
     }, 260);
     return () => clearTimeout(timer);
-  }, [fetchCitas, isAuthenticated]);
+  }, [canOperateWithSucursal, fetchCitas, isAuthenticated]);
   useEffect(() => {
     if (!isAuthenticated) return undefined;
+    if (!canOperateWithSucursal) return undefined;
     if (!supabase) return undefined;
     const channel = supabase
       .channel('admin-agendamiento-realtime')
@@ -502,7 +563,7 @@ export default function AdminAgendamientoCitasPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_reagendaciones' }, () => { scheduleLiveRefresh(); })
       .subscribe((status) => {
         realtimeStatusRef.current = status;
-        // Se omite el refresh en SUBSCRIBED para evitar rÃ¡faga doble de red en el montaje, 
+        // Se omite el refresh en SUBSCRIBED para evitar ráfaga doble de red en el montaje,
         // ya que el useEffect superior ya dispara fetchCitas.
       });
     return () => {
@@ -516,9 +577,10 @@ export default function AdminAgendamientoCitasPage() {
         // ignore teardown errors
       }
     };
-  }, [isAuthenticated, scheduleLiveRefresh]);
+  }, [canOperateWithSucursal, isAuthenticated, scheduleLiveRefresh]);
   useEffect(() => {
     if (!isAuthenticated) return undefined;
+    if (!canOperateWithSucursal) return undefined;
     const handleFocus = () => {
       scheduleLiveRefresh({ immediate: true });
     };
@@ -531,29 +593,61 @@ export default function AdminAgendamientoCitasPage() {
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [isAuthenticated, scheduleLiveRefresh]);
+  }, [canOperateWithSucursal, isAuthenticated, scheduleLiveRefresh]);
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       if (!isAuthenticated) return;
+      if (!canOperateWithSucursal) return;
       if (typeof document !== 'undefined' && document.hidden) return;
       const channelHealthy = realtimeStatusRef.current === 'SUBSCRIBED';
       scheduleLiveRefresh({ immediate: !channelHealthy });
     }, LIVE_REFRESH_POLL_MS);
     return () => window.clearInterval(intervalId);
-  }, [isAuthenticated, scheduleLiveRefresh]);
+  }, [canOperateWithSucursal, isAuthenticated, scheduleLiveRefresh]);
+
+  function handleSucursalSelectionChange(nextId) {
+    const safeId = String(nextId || '').trim();
+    setSelectedSucursalId(safeId);
+    setFilters((prev) => ({ ...prev, idSucursal: safeId || 'all' }));
+    setSearch('');
+    setCitas([]);
+    try {
+      if (safeId) localStorage.setItem(AGENDAMIENTO_SELECTED_SUCURSAL_KEY, safeId);
+      else localStorage.removeItem(AGENDAMIENTO_SELECTED_SUCURSAL_KEY);
+    } catch {
+      // ignore localStorage errors
+    }
+  }
+
+  function canOperateOnCita(cita) {
+    if (!selectedSucursalId) return false;
+    const citaSucursal = String(cita?.id_sucursal || '').trim();
+    return Boolean(citaSucursal) && citaSucursal === selectedSucursalId;
+  }
 
   function clearAllFilters() {
     setSearch('');
-    setFilters(FILTER_DEFAULTS);
+    setFilters({
+      ...FILTER_DEFAULTS,
+      idSucursal: selectedSucursalId || 'all',
+    });
   }
 
   function openStatusDialog(cita, estadoDestino) {
     if (!cita?.id_cita || !estadoDestino) return;
+    if (!selectedSucursalId || !canOperateOnCita(cita)) {
+      notifications.warning('Selecciona la sucursal correcta para operar esta cita.', { dedupeKey: 'agendamiento-citas-sucursal-required' });
+      return;
+    }
     setStateDialog({ open: true, cita, estadoDestino });
   }
 
   async function submitEstadoChange() {
     if (!stateDialog?.cita?.id_cita || !stateDialog?.estadoDestino) return;
+    if (!selectedSucursalId || !canOperateOnCita(stateDialog.cita)) {
+      notifications.warning('Selecciona la sucursal correcta para operar esta cita.', { dedupeKey: 'agendamiento-citas-sucursal-required' });
+      return;
+    }
     setStateActionLoadingId(stateDialog.cita.id_cita);
     try {
       let response = null;
@@ -583,7 +677,7 @@ export default function AdminAgendamientoCitasPage() {
 
   function openSingleReschedule(cita) {
     setSingleTarget(cita);
-    setSingleForm({ fecha_inicio_nueva: toInputDateTime(cita?.inicio_at), id_empleado_barbero_nuevo: '', motivo: 'ReagendaciÃ³n por emergencia operativa.' });
+    setSingleForm({ fecha_inicio_nueva: toInputDateTime(cita?.inicio_at), id_empleado_barbero_nuevo: '', motivo: 'Reagendación por emergencia operativa.' });
     setSinglePickerDate(toDateKey(cita?.inicio_at));
     setSinglePickerSlots([]);
     setSinglePickerOpen(false);
@@ -622,7 +716,7 @@ export default function AdminAgendamientoCitasPage() {
     if (!singleTarget?.id_cita) return;
     const fechaInicio = toIsoDateTime(singleForm.fecha_inicio_nueva);
     if (!fechaInicio) {
-      notifications.warning('Debes indicar una fecha y hora vÃ¡lida.', { dedupeKey: 'agendamiento-citas-single-date' });
+      notifications.warning('Debes indicar una fecha y hora válida.', { dedupeKey: 'agendamiento-citas-single-date' });
       return;
     }
     setSingleSaving(true);
@@ -644,6 +738,10 @@ export default function AdminAgendamientoCitasPage() {
   }
 
   async function fetchBatchAffected() {
+    if (!selectedSucursalId) {
+      notifications.warning('Selecciona una sucursal para operar.', { dedupeKey: 'agendamiento-citas-sucursal-required' });
+      return;
+    }
     if (!batchForm.id_empleado_barbero || !batchForm.fecha) {
       notifications.warning('Selecciona barbero y fecha para buscar citas afectadas.', { dedupeKey: 'agendamiento-citas-batch-missing' });
       return;
@@ -653,7 +751,7 @@ export default function AdminAgendamientoCitasPage() {
       const response = await listAdminCitasAfectadasReagendacion({
         id_empleado_barbero: batchForm.id_empleado_barbero,
         fecha: batchForm.fecha,
-        id_sucursal: filters.idSucursal !== 'all' ? filters.idSucursal : undefined,
+        id_sucursal: selectedSucursalId,
       });
       const payload = response?.data ?? response;
       const affected = Array.isArray(payload?.citas_afectadas) ? payload.citas_afectadas : [];
@@ -741,7 +839,7 @@ export default function AdminAgendamientoCitasPage() {
     }
     const hasInvalid = selectedItems.some((item) => !toIsoDateTime(item.fecha_inicio_nueva));
     if (hasInvalid) {
-      notifications.warning('Todas las filas seleccionadas deben tener fecha y hora nueva vÃ¡lida.', {
+      notifications.warning('Todas las filas seleccionadas deben tener fecha y hora nueva válida.', {
         dedupeKey: 'agendamiento-citas-batch-invalid',
       });
       return;
@@ -759,7 +857,7 @@ export default function AdminAgendamientoCitasPage() {
           motivo: item.motivo || null,
         })),
       });
-      notifications.success('ReagendaciÃ³n masiva completada sin cobro adicional.', { dedupeKey: 'agendamiento-citas-batch-ok' });
+      notifications.success('Reagendación masiva completada sin cobro adicional.', { dedupeKey: 'agendamiento-citas-batch-ok' });
       setBatchItems((prev) => prev.filter((item) => !item.selected));
       void fetchCitas();
     } catch (err) {
@@ -773,35 +871,54 @@ export default function AdminAgendamientoCitasPage() {
     const { compact = false } = options;
     const state = String(cita?.estado_cita_codigo || '').toLowerCase();
     if (!['confirmada', 'en_salon', 'en_atencion'].includes(state)) return null;
-    const fitClass = compact ? 'flex-1 justify-center' : '';
+    const fitClass = compact ? 'w-full justify-center' : '';
+    const operationCode = state === 'confirmada' ? 'registrar_llegada' : state === 'en_salon' ? 'iniciar_atencion' : 'finalizar_atencion';
+    const actionLabel = state === 'confirmada' ? 'Registrar llegada' : state === 'en_salon' ? 'Iniciar atención' : 'Finalizar atención';
 
+    const actionBlocked = !selectedSucursalId || !canOperateOnCita(cita);
     return (
-      <div className="flex w-full flex-wrap items-center gap-2">
-        {state === 'confirmada' ? (
-          <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita} onClick={() => openStatusDialog(cita, 'registrar_llegada')}>
-            <CalendarCheck2 size={14} />
-            Registrar llegada
-          </Button>
-        ) : null}
-        {state === 'en_salon' ? (
-          <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita} onClick={() => openStatusDialog(cita, 'iniciar_atencion')}>
-            <CalendarCheck2 size={14} />
-            Iniciar atenciÃ³n
-          </Button>
-        ) : null}
-        {state === 'en_atencion' ? (
-          <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita} onClick={() => openStatusDialog(cita, 'finalizar_atencion')}>
-            <CalendarCheck2 size={14} />
-            Finalizar atenciÃ³n
-          </Button>
-        ) : null}
-        {canManageEmergency ? (
-          <Button type="button" size="sm" variant="outline" className={`gap-2 ${fitClass}`} onClick={() => openSingleReschedule(cita)}>
-            <CalendarClock size={14} />
-            {compact ? 'Reagendar' : 'Reagendar emergencia'}
-          </Button>
-        ) : null}
+      <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita || actionBlocked} onClick={() => openStatusDialog(cita, operationCode)}>
+        <CalendarCheck2 size={14} />
+        {actionLabel}
+      </Button>
+    );
+  }
+
+  function renderSecondaryActions(cita, options = {}) {
+    const { compact = false } = options;
+    if (!canManageEmergency) return null;
+    return (
+      <div className={`flex items-center ${compact ? 'justify-center' : 'justify-start'}`}>
+        <Button type="button" size="sm" variant="ghost" className="gap-2 text-xs" onClick={() => openSingleReschedule(cita)}>
+          <CalendarClock size={14} />
+          Reagendación de emergencia
+        </Button>
       </div>
+    );
+  }
+
+  function renderCitaDetail(cita) {
+    const viewInfo = getAppointmentDisplayInfo(cita);
+    const serviciosLegibles = getServiciosLegibles(cita);
+    const telefono = String(cita?.telefono_cliente || '').trim();
+    return (
+      <details className="mt-2 rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2">
+        <summary className="cursor-pointer text-xs font-semibold text-[var(--mf-text)]">Ver detalle</summary>
+        <div className="mt-2 space-y-1 text-xs text-[var(--mf-text-2)]">
+          <p>Titular: <span className="text-[var(--mf-text)]">{viewInfo.titularNombre || 'Sin registrar'}</span></p>
+          <p>Integrante: <span className="text-[var(--mf-text)]">{viewInfo.aliasIntegrante || 'Sin registrar'}</span></p>
+          {telefono ? <p>Teléfono: <span className="text-[var(--mf-text)]">{telefono}</span></p> : null}
+          <p>Barbero: <span className="text-[var(--mf-text)]">{cita.nombre_barbero || 'Sin registrar'}</span></p>
+          <p>Sucursal: <span className="text-[var(--mf-text)]">{cita.nombre_sucursal || 'Sin registrar'}</span></p>
+          <p>Fecha y hora: <span className="text-[var(--mf-text)]">{formatDateTime(cita.inicio_at)}</span></p>
+          <p>Estado: <span className="text-[var(--mf-text)]">{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo || 'Sin registrar'}</span></p>
+          <p>Servicios: <span className="text-[var(--mf-text)]">{serviciosLegibles.length ? serviciosLegibles.join(' · ') : 'Sin servicios registrados'}</span></p>
+          {viewInfo.paqueteNombre ? <p>Paquete: <span className="text-[var(--mf-text)]">{viewInfo.paqueteNombre}</span></p> : null}
+          {viewInfo.promocionesCount > 0 ? <p>Promoción: <span className="text-[var(--mf-text)]">{viewInfo.promocionesCount} aplicada(s)</span></p> : null}
+          {viewInfo.comprobanteCodigo ? <p>Comprobante: <span className="text-[var(--mf-text)]">{viewInfo.comprobanteCodigo}</span></p> : null}
+        </div>
+        {renderSecondaryActions(cita)}
+      </details>
     );
   }
 
@@ -812,42 +929,40 @@ export default function AdminAgendamientoCitasPage() {
         {items.map((cita) => (
           (() => {
             const viewInfo = getAppointmentDisplayInfo(cita);
+            const servicioResumen = getServicioResumen(cita);
+            const telefono = String(cita?.telefono_cliente || '').trim();
             return (
           <article key={`mobile-${cita.id_cita}`} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_92%,transparent)] p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 space-y-1">
-                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Titular: <span className="font-semibold text-[var(--mf-text)]">{viewInfo.titularNombre}</span></p>
-                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Integrante: <span className="text-[var(--mf-text)]">{viewInfo.aliasIntegrante}</span></p>
+                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Integrante</p>
+                <p className="truncate text-[15px] font-semibold text-[var(--mf-text)]">{viewInfo.aliasIntegrante}</p>
+                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Titular: <span className="text-[var(--mf-text)]">{viewInfo.titularNombre}</span></p>
                 <p className="truncate text-[13px] text-[var(--mf-text-2)]">Barbero: <span className="text-[var(--mf-text)]">{cita.nombre_barbero || '-'}</span></p>
                 <p className="text-[13px] text-[var(--mf-text-2)]">Cita: <span className="text-[var(--mf-text)]">{formatDateTime(cita.inicio_at)}</span></p>
-                <p className="text-[13px] text-[var(--mf-text-2)]">Seleccion: <span className="text-[var(--mf-text)]">{viewInfo.selectionLabel}</span></p>
-                {viewInfo.paqueteNombre ? (
-                  <p className="truncate text-[13px] text-[var(--mf-text-2)]">Paquete: <span className="text-[var(--mf-text)]">{viewInfo.paqueteNombre}</span></p>
-                ) : null}
+                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Servicio: <span className="text-[var(--mf-text)]">{servicioResumen}</span></p>
               </div>
               <div className="text-right">
                 <span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>
                 <p className="mt-2 text-[1.75rem] font-semibold leading-none text-[var(--mf-text)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p>
               </div>
             </div>
-            <div className="mt-2 text-[11px] text-[var(--mf-text-2)]">
-              Manuales: {viewInfo.serviciosManualCount} · Extra: {viewInfo.serviciosExtraCount} · Incluidos: {viewInfo.serviciosIncluidosCount}
-              {viewInfo.promocionesCount > 0 ? ` · Promos: ${viewInfo.promocionesCount}` : ''}
-              {viewInfo.comprobanteCodigo ? ` · Comp: ${viewInfo.comprobanteCodigo}` : ''}
-            </div>
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--mf-nav-border)] pt-2 text-xs text-[var(--mf-text-2)]">
               <span className="inline-flex items-center gap-1">
                 <MapPin size={12} />
-                {cita.nombre_sucursal || '-'}
+                {cita.nombre_sucursal || 'Sin registrar'}
               </span>
-              <span className="inline-flex items-center gap-1">
-                <Phone size={12} />
-                {cita.telefono_cliente || 'Sin telÃ©fono'}
-              </span>
+              {telefono ? (
+                <span className="inline-flex items-center gap-1">
+                  <Phone size={12} />
+                  {telefono}
+                </span>
+              ) : null}
             </div>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
               {renderItemActions(cita, { compact: true })}
             </div>
+            {renderCitaDetail(cita)}
           </article>
             );
           })()
@@ -859,32 +974,41 @@ export default function AdminAgendamientoCitasPage() {
   function renderCardsList(items, emptyText) {
     if (!items.length) return <p className="text-sm text-[var(--mf-text-2)]">{emptyText}</p>;
     return (
-      <div className="space-y-0">
-        {items.map((cita, index) => {
+      <div className="space-y-3">
+        {items.map((cita) => {
           const viewInfo = getAppointmentDisplayInfo(cita);
+          const servicioResumen = getServicioResumen(cita);
+          const telefono = String(cita?.telefono_cliente || '').trim();
           return (
-            <div key={cita.id_cita} className="h-[440px] snap-start">
-              <DataCard
-                animationDelay={index * 0.04}
-                avatar={<CalendarDays size={16} />}
-                title={viewInfo.titularNombre}
-                subtitle={`${cita.nombre_barbero || '-'} · ${formatDateTime(cita.inicio_at)}`}
-                badge={<span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>}
-                fields={[
-                  { label: 'Sucursal', value: cita.nombre_sucursal || '-' },
-                  { label: 'Integrante', value: viewInfo.aliasIntegrante },
-                  { label: 'Seleccion', value: viewInfo.selectionLabel },
-                  { label: 'Paquete', value: viewInfo.paqueteNombre || '-' },
-                  { label: 'Servicios', value: `M:${viewInfo.serviciosManualCount} · E:${viewInfo.serviciosExtraCount} · I:${viewInfo.serviciosIncluidosCount}` },
-                  { label: 'Promociones', value: viewInfo.promocionesCount > 0 ? `${viewInfo.promocionesCount} (${formatCurrencyHnl(viewInfo.descuentoPromociones)})` : '-' },
-                  { label: 'Comprobante', value: viewInfo.comprobanteCodigo || '-' },
-                  { label: 'Telefono', value: cita.telefono_cliente || '-' },
-                  { label: 'Inicio', value: formatDateTime(cita.inicio_at) },
-                  { label: 'Monto', value: formatCurrencyHnl(cita.total_pagar_hnl) },
-                ]}
-                actions={renderItemActions(cita)}
-              />
-            </div>
+            <article key={cita.id_cita} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_92%,transparent)] p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <p className="truncate text-[13px] text-[var(--mf-text-2)]">Integrante</p>
+                  <p className="truncate text-base font-semibold text-[var(--mf-text)]">{viewInfo.aliasIntegrante}</p>
+                  <p className="truncate text-[13px] text-[var(--mf-text-2)]">Barbero: <span className="text-[var(--mf-text)]">{cita.nombre_barbero || 'Sin registrar'}</span></p>
+                  <p className="text-[13px] text-[var(--mf-text-2)]">Fecha y hora: <span className="text-[var(--mf-text)]">{formatDateTime(cita.inicio_at)}</span></p>
+                  <p className="truncate text-[13px] text-[var(--mf-text-2)]">Servicio: <span className="text-[var(--mf-text)]">{servicioResumen}</span></p>
+                </div>
+                <div className="text-right">
+                  <span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>
+                  <p className="mt-2 text-xl font-semibold leading-none text-[var(--mf-text)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--mf-nav-border)] pt-2 text-xs text-[var(--mf-text-2)]">
+                <span className="inline-flex items-center gap-1">
+                  <MapPin size={12} />
+                  {cita.nombre_sucursal || 'Sin registrar'}
+                </span>
+                {telefono ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Phone size={12} />
+                    {telefono}
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-3">{renderItemActions(cita)}</div>
+              {renderCitaDetail(cita)}
+            </article>
           );
         })}
       </div>
@@ -948,7 +1072,7 @@ export default function AdminAgendamientoCitasPage() {
           </div>
           <span className="rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-2 py-1 text-xs text-[var(--mf-text)]">{items.length}</span>
         </div>
-        <div className={`overflow-y-auto ${view === 'cards' ? 'h-[440px] snap-y snap-mandatory pr-1' : 'h-[440px] pr-1'}`}>
+        <div className={`pr-1 ${view === 'cards' ? 'max-h-[70vh] overflow-y-auto' : ''}`}>
           {view === 'cards' ? renderCardsList(items, emptyText) : renderTableList(items, emptyText)}
         </div>
       </section>
@@ -956,40 +1080,52 @@ export default function AdminAgendamientoCitasPage() {
   }
 
   return (
-    <div className="space-y-4 px-0 pb-4 sm:px-4 sm:pb-6">
-      <section className="space-y-4 px-2 pt-1 md:hidden">
+    <div className="space-y-4 overflow-x-hidden px-3 pb-24 sm:px-4 sm:pb-6">
+      <section className="space-y-4 pt-1 lg:hidden">
         <div className="space-y-3">
           <div className="space-y-1">
-            <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento Â· OperaciÃ³n</p>
+            <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
             <h1 className="mf-font-display text-3xl text-[var(--mf-text)]">Citas</h1>
           </div>
 
-          <div className="relative w-full">
-            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
-            <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por cliente, barbero o ID" className="h-11 rounded-2xl pl-9 pr-[6.25rem] text-[0.98rem] min-[390px]:pr-28 min-[390px]:text-[1.03rem]" />
-            <div className="absolute right-1 top-1/2 -translate-y-1/2">
-              <div className="relative">
-                <div className="origin-right scale-[0.92]">
-                  <ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" />
-                </div>
-                {activeFilterCount > 0 ? (
-                  <span className="absolute -right-2 -top-2 inline-flex h-6 min-w-6 items-center justify-center rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-card)] px-1.5 text-xs font-semibold text-[var(--mf-text)]">
-                    {activeFilterCount}
-                  </span>
-                ) : null}
+          <div>
+            <Label className="mf-label">Sucursal operativa</Label>
+            <select
+              className="mf-select mt-1"
+              value={selectedSucursalId}
+              onChange={(event) => handleSucursalSelectionChange(event.target.value)}
+            >
+              {hasMultipleSucursales ? <option value="">Selecciona una sucursal</option> : null}
+              {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
+              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por cliente, barbero o ID" className="h-11 rounded-2xl pl-9 pr-3 text-[0.98rem] min-[390px]:text-[1.03rem]" />
+            </div>
+            <div className="relative shrink-0">
+              <div className="origin-right scale-[0.94]">
+                <ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" />
               </div>
+              {activeFilterCount > 0 ? (
+                <span className="absolute -right-2 -top-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-card)] px-1 text-[10px] font-semibold text-[var(--mf-text)]">
+                  {activeFilterCount}
+                </span>
+              ) : null}
             </div>
           </div>
 
-          <div className={`grid gap-2 ${canManageEmergency ? 'grid-cols-1 min-[380px]:grid-cols-[0.95fr_1.35fr]' : 'grid-cols-1'}`}>
-            <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-base font-semibold" onClick={() => setFiltersOpen(true)}>
+          <div className={`grid gap-2 ${canManageEmergency ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-sm font-semibold min-[390px]:text-base" onClick={() => setFiltersOpen(true)}>
               <SlidersHorizontal size={15} />
               Filtros
             </Button>
             {canManageEmergency ? (
-              <Button type="button" variant="outline" className="h-auto min-h-11 min-w-0 gap-2 whitespace-normal rounded-2xl px-3 py-2 text-center text-sm font-semibold leading-tight min-[390px]:text-base" onClick={() => setBatchDialogOpen(true)}>
+              <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-center text-sm font-semibold min-[390px]:text-base" onClick={() => setBatchDialogOpen(true)}>
                 <AlertTriangle size={14} />
-                ReagendaciÃ³n masiva
+                Reagendación masiva
               </Button>
             ) : null}
           </div>
@@ -1002,8 +1138,8 @@ export default function AdminAgendamientoCitasPage() {
         </div>
       </section>
 
-      <section className="border-b border-[var(--mf-nav-border)] px-2 pb-1 md:hidden">
-        <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
+      <section className="border-b border-[var(--mf-nav-border)] pb-1 lg:hidden">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
           {mobileTabs.map((tab) => {
             const active = activeMobileContainer === tab.key;
             return (
@@ -1011,7 +1147,7 @@ export default function AdminAgendamientoCitasPage() {
                 key={tab.key}
                 type="button"
                 onClick={() => setActiveMobileContainer(tab.key)}
-                className={`relative inline-flex shrink-0 items-center justify-center gap-1 whitespace-nowrap px-1 pb-2 text-[0.96rem] font-semibold transition-colors min-[375px]:text-[1.02rem] ${
+                className={`relative inline-flex shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-lg px-2 pb-2 pt-1 text-[0.94rem] font-semibold transition-colors min-[375px]:text-[1rem] ${
                   active ? `${tab.accent}` : 'text-[var(--mf-text-2)]'
                 }`}
               >
@@ -1024,14 +1160,28 @@ export default function AdminAgendamientoCitasPage() {
         </div>
       </section>
 
-      <header className="hidden rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5 md:block">
+      <header className="hidden rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5 lg:block">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div className="space-y-1">
-            <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento Â· OperaciÃ³n</p>
+            <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
             <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Citas</h1>
-            <p className="text-sm text-[var(--mf-text-2)]">Gestiona confirmadas, en salÃ³n, en atenciÃ³n y completadas del dÃ­a sin salir de la operaciÃ³n.</p>
+            <p className="text-sm text-[var(--mf-text-2)]">Gestiona confirmadas, en salón y en atención sin salir de la operación.</p>
           </div>
           <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[640px]">
+            <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Label className="mf-label mb-0">Sucursal operativa</Label>
+                <select
+                  className="mf-select h-9 min-w-[260px]"
+                  value={selectedSucursalId}
+                  onChange={(event) => handleSucursalSelectionChange(event.target.value)}
+                >
+                  {hasMultipleSucursales ? <option value="">Selecciona una sucursal</option> : null}
+                  {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
+                </select>
+                {selectedSucursal ? <span className="text-xs text-[var(--mf-text-2)]">Operando en: {selectedSucursal.nombre_sucursal}</span> : null}
+              </div>
+            </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm text-[var(--mf-text-2)]">{loading ? 'Cargando...' : `${citas.length} cita(s)`}</span>
               <ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" />
@@ -1057,7 +1207,7 @@ export default function AdminAgendamientoCitasPage() {
               {canManageEmergency ? (
                 <Button type="button" variant="outline" className="gap-2" onClick={() => setBatchDialogOpen(true)}>
                   <AlertTriangle size={14} />
-                  ReagendaciÃ³n masiva
+                  Reagendación masiva
                 </Button>
               ) : null}
             </div>
@@ -1066,67 +1216,63 @@ export default function AdminAgendamientoCitasPage() {
       </header>
 
       {hiddenOperationalCount > 0 ? (
-        <div className="hidden rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-2 text-sm text-[var(--mf-text-2)] md:block">
+        <div className="hidden rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-2 text-sm text-[var(--mf-text-2)] lg:block">
           {hiddenOperationalCount} cita(s) en espera o pendiente de pago no se muestran en estos contenedores.
         </div>
       ) : null}
 
-      {contextLoading ? <LoadingSpinner /> : null}
+      {isInitialPageLoading ? <LoadingSpinner /> : null}
       {contextError ? <ErrorBanner message={contextError} onRetry={fetchContext} /> : null}
       {listError ? <ErrorBanner message={listError} onRetry={fetchCitas} /> : null}
-      {loading && !listError ? <LoadingSpinner /> : null}
+      {!contextError && !isInitialPageLoading && requiresSucursalSelection ? (
+        <EmptyState
+          icon={AlertTriangle}
+          title="Selecciona una sucursal para operar"
+          description="Las citas se cargarán solo para la sucursal seleccionada."
+        />
+      ) : null}
 
-      {!loading && !listError ? (
-        <div className="md:hidden space-y-4">
+      {canRenderCitasContent ? (
+        <div className="lg:hidden space-y-4">
           {renderMobileCardsList(
             activeMobileItems,
               activeMobileContainer === 'confirmada'
                 ? 'No hay citas confirmadas pendientes.'
                 : activeMobileContainer === 'en_salon'
-                  ? 'No hay citas en salÃ³n en este momento.'
+                  ? 'No hay citas en salón en este momento.'
                   : activeMobileContainer === 'en_atencion'
-                    ? 'No hay citas en atenciÃ³n en este momento.'
-                    : 'No hay citas completadas hoy.'
+                    ? 'No hay citas en atención en este momento.'
+                    : 'No hay citas confirmadas pendientes.'
           )}
 
           <div className="grid grid-cols-3 gap-3">
             <div className="rounded-2xl border border-amber-400/30 bg-[color:color-mix(in_srgb,var(--mf-card)_90%,rgba(245,158,11,0.08))] p-3">
               <p className="inline-flex items-center gap-2 text-sm font-semibold text-amber-300">
                 <Armchair size={16} />
-                En salÃ³n
+                En salón
               </p>
               <p className="mt-2 text-xs text-[var(--mf-text-2)]">
-                {citasEnSalon.length > 0 ? `${citasEnSalon.length} cita(s) esperando inicio.` : 'No hay citas en salÃ³n hoy.'}
+                {citasEnSalon.length > 0 ? `${citasEnSalon.length} cita(s) esperando inicio.` : 'No hay citas en salón hoy.'}
               </p>
             </div>
             <div className="rounded-2xl border border-indigo-400/30 bg-[color:color-mix(in_srgb,var(--mf-card)_90%,rgba(99,102,241,0.12))] p-3">
               <p className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-300">
                 <CalendarClock size={16} />
-                En atenciÃ³n
+                En atención
               </p>
               <p className="mt-2 text-xs text-[var(--mf-text-2)]">
-                {citasEnAtencion.length > 0 ? `${citasEnAtencion.length} cita(s) en servicio.` : 'No hay citas en atenciÃ³n hoy.'}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-emerald-400/30 bg-[color:color-mix(in_srgb,var(--mf-card)_90%,rgba(16,185,129,0.08))] p-3">
-              <p className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-300">
-                <CheckCircle2 size={16} />
-                Completadas
-              </p>
-              <p className="mt-2 text-xs text-[var(--mf-text-2)]">
-                {citasCompletadasHoy.length > 0 ? `${citasCompletadasHoy.length} cita(s) completadas hoy.` : 'No hay citas completadas hoy.'}
+                {citasEnAtencion.length > 0 ? `${citasEnAtencion.length} cita(s) en servicio.` : 'No hay citas en atención hoy.'}
               </p>
             </div>
           </div>
         </div>
       ) : null}
 
-      {!loading && !listError ? (
-        <div className="hidden grid-cols-1 gap-4 xl:grid-cols-4 md:grid">
+      {canRenderCitasContent ? (
+        <div className="hidden grid-cols-1 gap-4 xl:grid-cols-3 lg:grid">
           {renderContainer('confirmada', citasConfirmadas, 'No hay citas confirmadas pendientes.')}
-          {renderContainer('en_salon', citasEnSalon, 'No hay citas en salÃ³n en este momento.')}
-          {renderContainer('en_atencion', citasEnAtencion, 'No hay citas en atenciÃ³n en este momento.')}
-          {renderContainer('completada_hoy', citasCompletadasHoy, 'No hay citas completadas hoy.')}
+          {renderContainer('en_salon', citasEnSalon, 'No hay citas en salón en este momento.')}
+          {renderContainer('en_atencion', citasEnAtencion, 'No hay citas en atención en este momento.')}
         </div>
       ) : null}
 
@@ -1139,8 +1285,8 @@ export default function AdminAgendamientoCitasPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label className="mf-label">Sucursal</Label>
-              <select className="mf-select mt-1" value={filters.idSucursal} onChange={(event) => setFilters((prev) => ({ ...prev, idSucursal: event.target.value }))}>
-                <option value="all">Todas</option>
+              <select className="mf-select mt-1" value={selectedSucursalId || filters.idSucursal} onChange={(event) => handleSucursalSelectionChange(event.target.value)}>
+                {hasMultipleSucursales ? <option value="">Selecciona una sucursal</option> : null}
                 {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
               </select>
             </div>
@@ -1174,7 +1320,7 @@ export default function AdminAgendamientoCitasPage() {
             <DialogDescription>Confirma la transición operativa de esta cita antes de aplicarla.</DialogDescription>
           </DialogHeader>
           <p className="text-sm text-[var(--mf-text-2)]">
-            Â¿Deseas ejecutar <strong>{getOperationLabel(stateDialog.estadoDestino)}</strong> para la cita de <strong>{stateDialog.cita?.nombre_cliente || 'Cliente'}</strong>?
+            ¿Deseas ejecutar <strong>{getOperationLabel(stateDialog.estadoDestino)}</strong> para la cita de <strong>{stateDialog.cita?.nombre_cliente || 'Cliente'}</strong>?
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setStateDialog({ open: false, cita: null, estadoDestino: '' })} disabled={Boolean(stateActionLoadingId)}>Cancelar</Button>
@@ -1194,7 +1340,7 @@ export default function AdminAgendamientoCitasPage() {
               {singleTarget?.nombre_cliente || '-'} - {singleTarget?.nombre_barbero || '-'} ({formatDateTime(singleTarget?.inicio_at)})
             </p>
             {singleTarget?.telefono_cliente ? (
-              <p className="text-sm text-[var(--mf-text-2)]">TelÃ©fono cliente: {singleTarget.telefono_cliente}</p>
+              <p className="text-sm text-[var(--mf-text-2)]">Teléfono cliente: {singleTarget.telefono_cliente}</p>
             ) : null}
             <div>
               <Label className="mf-label">Nueva fecha y hora *</Label>
@@ -1209,7 +1355,7 @@ export default function AdminAgendamientoCitasPage() {
                   void loadSingleSlots(singlePickerDate, value);
                 }
               }}>
-                <option value="">AsignaciÃ³n aleatoria</option>
+                <option value="">Asignación aleatoria</option>
                 {barberos.map((barbero) => <option key={barbero.id_empleado} value={barbero.id_empleado}>{barbero.nombre_completo}</option>)}
               </select>
             </div>
@@ -1389,7 +1535,7 @@ export default function AdminAgendamientoCitasPage() {
                               void loadBatchRowSlots({ ...item, id_empleado_barbero_nuevo: value }, item.picker_date, value);
                             }
                           }}>
-                            <option value="">AsignaciÃ³n aleatoria</option>
+                            <option value="">Asignación aleatoria</option>
                             {barberos.map((barbero) => <option key={barbero.id_empleado} value={barbero.id_empleado}>{barbero.nombre_completo}</option>)}
                           </select>
                         </TableCell>
@@ -1398,7 +1544,7 @@ export default function AdminAgendamientoCitasPage() {
                   </TableBody>
                 </Table>
               </div>
-            ) : !batchLoading ? <p className="text-sm text-[var(--mf-text-2)]">Busca las citas afectadas para preparar el lote de reagendaciÃ³n.</p> : null}
+            ) : !batchLoading ? <p className="text-sm text-[var(--mf-text-2)]">Busca las citas afectadas para preparar el lote de reagendación.</p> : null}
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setBatchDialogOpen(false)} disabled={batchSaving}>Cerrar</Button>

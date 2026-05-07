@@ -10,12 +10,11 @@ import { withImageVersion } from '../../../lib/imageCache.js';
 
 export function BarberCard({
   barber,
-  isSelected,
   onSelect,
 }) {
   const displayName = String(barber?.nombre_completo || '').trim() || 'Barbero';
-  const aliasPublico = String(barber?.alias_publico || '').trim();
-  const aliasLabel = aliasPublico || 'Barbero';
+  const aliasPublico = String(barber?.alias_publico || '').trim() || displayName;
+  const resumenPublico = String(barber?.resumen_publico || '').trim();
   const [failedPhotoUrl, setFailedPhotoUrl] = useState('');
   const photoUrl = withImageVersion(
     String(barber?.foto_perfil_url || '').trim(),
@@ -26,15 +25,15 @@ export function BarberCard({
   return (
     <button
       type="button"
-      className={`public-booking-barber-card ${isSelected ? 'is-selected' : ''}`}
+      className="public-booking-barber-card"
       onClick={onSelect}
-      aria-pressed={isSelected}
+      aria-label={`Seleccionar a ${aliasPublico}`}
     >
       <div className="public-booking-barber-card-media">
         {hasPhoto ? (
           <img
             src={photoUrl}
-            alt={displayName}
+            alt={aliasPublico}
             className="public-booking-barber-card-image"
             loading="lazy"
             onError={() => setFailedPhotoUrl(photoUrl)}
@@ -44,8 +43,8 @@ export function BarberCard({
         )}
       </div>
       <div className="public-booking-barber-card-body">
-        <p className="public-booking-barber-card-name">{displayName}</p>
-        <p className="public-booking-barber-card-alias">{aliasLabel}</p>
+        <p className="public-booking-barber-card-name">{aliasPublico}</p>
+        {resumenPublico ? <p className="public-booking-barber-card-summary">{resumenPublico}</p> : null}
       </div>
     </button>
   );
