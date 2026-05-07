@@ -1,10 +1,13 @@
 # syntax=docker/dockerfile:1
 
 FROM node:20-alpine AS builder
+
 WORKDIR /app
 
-ARG VITE_API_URL=https://masterfadeapp.com
-ARG VITE_APP_URL=https://masterfadeapp.com
+# Valores por defecto para QA.
+# Easypanel puede sobrescribirlos si configuras Build Args.
+ARG VITE_API_URL=https://api-qa.masterfadeapp.com
+ARG VITE_APP_URL=https://qa.masterfadeapp.com
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
 
@@ -17,7 +20,8 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
-RUN VITE_API_URL=https://masterfadeapp.com VITE_APP_URL=https://masterfadeapp.com npm run build
+
+RUN npm run build
 
 FROM nginx:1.27-alpine AS runner
 
@@ -29,19 +33,6 @@ RUN rm -f /etc/nginx/conf.d/default.conf \
     '' \
     '  root /usr/share/nginx/html;' \
     '  index index.html;' \
-    '' \
-    '  location /v1/ {' \
-    '    proxy_pass http://backend-qa:3002/v1/;' \
-    '    proxy_http_version 1.1;' \
-    '' \
-    '    proxy_set_header Host $host;' \
-    '    proxy_set_header X-Real-IP $remote_addr;' \
-    '    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
-    '    proxy_set_header X-Forwarded-Proto $scheme;' \
-    '' \
-    '    proxy_set_header Upgrade $http_upgrade;' \
-    '    proxy_set_header Connection "upgrade";' \
-    '  }' \
     '' \
     '  location / {' \
     '    try_files $uri $uri/ /index.html;' \
