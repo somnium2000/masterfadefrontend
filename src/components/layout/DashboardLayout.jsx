@@ -5,7 +5,7 @@ import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     House, Users, Scissors, Building2, CalendarDays, Shield, BarChart3,
-    Settings, Star, LogOut, ChevronLeft, ChevronRight, Menu, X, ChevronDown
+    Settings, Star, LogOut, ChevronLeft, ChevronRight, Menu, X, ChevronDown, UserRound
 } from 'lucide-react';
 import { useLocation, useNavigate, Outlet } from 'react-router-dom';
 import MasterfadeLogo from '../branding/MasterfadeLogo.jsx';
@@ -14,9 +14,81 @@ import { getUserDisplayName, useAuth } from '../../context/AuthContext.jsx';
 import { getRoleLabel, resolveHomePath } from '../../features/home/lib/roleRouting.js';
 import PremiumBottomNav from '../navigation/PremiumBottomNav.jsx';
 
-// ── Definición de módulos del sidebar ───────────────────────────────────────
-function buildNavModules(basePath) {
-    return [
+// ── Definición de módulos del sidebar ────────────────────────────────────────────────────────
+function buildNavModules(basePath, role) {
+    const isBarbero = role === 'barbero';
+    const isCliente = role === 'cliente';
+    const isSecurityRole = role === 'security_admin' || role === 'security_auditor';
+    const canSeeSecurityModule = role === 'super_admin';
+
+    if (isBarbero) {
+        return [
+            {
+                id: 'inicio',
+                label: 'Inicio',
+                icon: House,
+                path: basePath,
+                subItems: null,
+            },
+            {
+                id: 'citas',
+                label: 'Calendario',
+                icon: CalendarDays,
+                path: `${basePath}/citas`,
+                subItems: null,
+            },
+            {
+                id: 'perfil-barbero',
+                label: 'Perfil Barbero',
+                icon: UserRound,
+                path: `${basePath}/perfil`,
+                subItems: null,
+            },
+        ];
+    }
+
+    if (isSecurityRole) {
+        return [
+            {
+                id: 'seguridad',
+                label: 'Seguridad',
+                icon: Shield,
+                path: `${basePath}/seguridad/login-logs`,
+                subItems: [
+                    { id: 'seg-login-logs', label: 'Login Logs', path: `${basePath}/seguridad/login-logs` },
+                    { id: 'seg-sesiones', label: 'Sesiones', path: `${basePath}/seguridad/sesiones` },
+                    { id: 'seg-usuarios', label: 'Usuarios', path: `${basePath}/seguridad/usuarios` },
+                    { id: 'seg-alertas', label: 'Alertas', path: `${basePath}/seguridad/alertas` },
+                ],
+            },
+        ];
+    }
+
+    // Sub-items de agendamiento basados en el rol (provenientes de dev)
+    const agendamientoSubItems = isBarbero
+        ? [
+            { id: 'agendamiento-citas', label: 'Citas', path: `${basePath}/citas` },
+            { id: 'agendamiento-historial', label: 'Historial', path: `${basePath}/citas/historial` },
+        ]
+        : [
+            { id: 'agendamiento-citas', label: 'Citas', path: `${basePath}/citas` },
+            { id: 'agendamiento-historial', label: 'Historial', path: `${basePath}/citas/historial` },
+            { id: 'agendamiento-preview', label: 'Vista previa', path: `${basePath}/citas/preview` },
+            { id: 'agendamiento-config', label: 'Configuración', path: `${basePath}/citas/config` },
+        ];
+
+    // Sub-items de configuración basados en el rol (provenientes de PersonasF)
+    const configSubItems = role === 'super_admin'
+        ? [
+            { id: 'conf-comunicacion', label: 'Correos informativos', path: `${basePath}/configuracion/comunicacion` },
+            { id: 'conf-promociones', label: 'Promociones', path: `${basePath}/configuracion/promociones` },
+        ]
+        : [
+            { id: 'conf-comunicacion', label: 'Correos informativos', path: `${basePath}/configuracion/comunicacion` },
+            { id: 'conf-promociones', label: 'Promociones', path: `${basePath}/configuracion/promociones` },
+        ];
+
+    const modules = [
         {
             id: 'inicio',
             label: 'Inicio',
@@ -45,8 +117,10 @@ function buildNavModules(basePath) {
             path: `${basePath}/catalog/servicios`,
             subItems: [
                 { id: 'cat-servicios', label: 'Servicios', path: `${basePath}/catalog/servicios` },
+                { id: 'cortesias', label: 'Cortesías', path: `${basePath}/catalog/cortesias` },
                 { id: 'paquetes', label: 'Paquetes', path: `${basePath}/catalog/paquetes` },
                 { id: 'planes', label: 'Planes', path: `${basePath}/catalog/planes` },
+                { id: 'cat-publico', label: 'Catálogo público', path: `${basePath}/catalog/servicios/publico` },
             ],
         },
         {
@@ -54,44 +128,47 @@ function buildNavModules(basePath) {
             label: 'Sucursales',
             icon: Building2,
             path: `${basePath}/sucursales`,
-            subItems: null, // sin submenú → navegación directa
+            subItems: null,
         },
         {
             id: 'citas',
-            label: 'Citas',
+            label: 'Agendamiento',
             icon: CalendarDays,
             path: `${basePath}/citas`,
-            subItems: [
-                { id: 'citas-preview', label: 'Vista Previa', path: `${basePath}/citas/preview` },
-                { id: 'citas-config', label: 'Panel de Configuración', path: `${basePath}/citas/config` },
-            ],
+            subItems: agendamientoSubItems,
         },
-        {
-            id: 'seguridad',
-            label: 'Seguridad',
-            icon: Shield,
-            path: `${basePath}/seguridad`,
-            subItems: [
-                { id: 'seg-logs', label: 'Logs del Sistema', path: `${basePath}/seguridad/logs` },
-                { id: 'seg-sesiones', label: 'Sesiones Activas', path: `${basePath}/seguridad/sesiones` },
-                { id: 'seg-bitacoras', label: 'Bitácoras de Auditoría', path: `${basePath}/seguridad/bitacoras` },
-            ],
-        },
+        ...(canSeeSecurityModule
+            ? [{
+                id: 'seguridad',
+                label: 'Seguridad',
+                icon: Shield,
+                path: `${basePath}/seguridad`,
+                subItems: [
+                    { id: 'seg-login-logs', label: 'Login Logs', path: `${basePath}/seguridad/login-logs` },
+                    { id: 'seg-sesiones', label: 'Sesiones', path: `${basePath}/seguridad/sesiones` },
+                    { id: 'seg-usuarios', label: 'Usuarios', path: `${basePath}/seguridad/usuarios` },
+                    { id: 'seg-alertas', label: 'Alertas', path: `${basePath}/seguridad/alertas` },
+                ],
+            }]
+            : []),
         {
             id: 'reportes',
             label: 'Reportes',
             icon: BarChart3,
             path: `${basePath}/reportes`,
+            // JK: Oculta el indicador de submenu en sidebar para que se vea como modulo directo.
+            showSidebarDropdown: false,
             subItems: [
-                { id: 'rep-ventas', label: 'Ventas', path: `${basePath}/reportes/ventas` },
-                { id: 'rep-ingresos', label: 'Reportes de Ingresos', path: `${basePath}/reportes/ingresos` },
-                { id: 'rep-barberos', label: 'Productividad Barberos', path: `${basePath}/reportes/barberos` },
-                { id: 'rep-concurrencia', label: 'Concurrencia de Clientes', path: `${basePath}/reportes/concurrencia` },
+                // JK: Tabs unificadas de reportes (sin vista intermedia por cards).
+                { id: 'rep-ingresos', label: 'Ingresos', path: `${basePath}/reportes/ingresos` },
+                { id: 'rep-membresias', label: 'Membresias', path: `${basePath}/reportes/membresias` },
+                { id: 'rep-barberos', label: 'Barberos', path: `${basePath}/reportes/barberos` },
+                { id: 'rep-concurrencia', label: 'Concurrencia', path: `${basePath}/reportes/concurrencia` },
             ],
         },
         {
             id: 'superpuntos',
-            label: 'Superpuntos',
+            label: 'Masterpuntos',
             icon: Star,
             path: `${basePath}/superpuntos`,
             subItems: null,
@@ -100,14 +177,16 @@ function buildNavModules(basePath) {
             id: 'configuracion',
             label: 'Configuración',
             icon: Settings,
-            path: `${basePath}/configuracion`,
-            subItems: [
-                { id: 'conf-notificaciones', label: 'Notificaciones', path: `${basePath}/configuracion/notificaciones` },
-                { id: 'conf-perfil', label: 'Perfil', path: `${basePath}/configuracion/perfil` },
-                { id: 'conf-spam', label: 'Spam', path: `${basePath}/configuracion/spam` },
-            ],
+            path: configSubItems[0].path,
+            subItems: configSubItems,
         },
     ];
+
+    if (isCliente) {
+        return modules.filter((module) => ['inicio'].includes(module.id));
+    }
+
+    return modules;
 }
 
 function normalizePath(path) {
@@ -145,7 +224,7 @@ function resolveActiveModule(modules, pathname) {
     return bestModule || modules[0] || null;
 }
 
-// ── Sidebar Item ─────────────────────────────────────────────────────────────
+// ── Sidebar Item ─────────────────────────────────────────────────────────────────────────────
 function SidebarItem({ module, isActive, isCollapsed, onClick }) {
     const Icon = module.icon;
     return (
@@ -189,14 +268,14 @@ function SidebarItem({ module, isActive, isCollapsed, onClick }) {
                     </motion.span>
                 )}
             </AnimatePresence>
-            {!isCollapsed && module.subItems && (
+            {!isCollapsed && module.subItems && module.showSidebarDropdown !== false && (
                 <ChevronDown size={13} className={`relative z-10 shrink-0 transition-transform duration-200 opacity-50 ${isActive ? 'rotate-180' : ''}`} />
             )}
         </motion.button>
     );
 }
 
-// ── Topbar submenú pills ─────────────────────────────────────────────────────
+// ── Topbar submenú pills ─────────────────────────────────────────────────────────────────────
 function TopbarSubMenu({ subItems, currentPath }) {
     const navigate = useNavigate();
     if (!subItems || subItems.length === 0) return null;
@@ -226,15 +305,17 @@ function TopbarSubMenu({ subItems, currentPath }) {
     );
 }
 
-// ── Main Layout ──────────────────────────────────────────────────────────────
+// ── Main Layout ──────────────────────────────────────────────────────────────────────────────
 export const ROLE_META = {
     super_admin: { kicker: 'Panel global', title: 'Visión total' },
-    admin: { kicker: 'Operación', title: 'Panel Admin' },
+    admin: { kicker: 'Operacion', title: 'Panel Admin' },
+    security_admin: { kicker: 'Seguridad', title: 'Panel Seguridad' },
+    security_auditor: { kicker: 'Auditoria', title: 'Panel Seguridad' },
     barbero: { kicker: 'Agenda', title: 'Panel Barbero' },
     cliente: { kicker: 'Cliente', title: 'Mi Espacio' },
 };
 
-export default function DashboardLayout({ pageRole }) {
+export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
     const navigate = useNavigate();
     const location = useLocation();
     const { user, roles, logout } = useAuth();
@@ -246,8 +327,8 @@ export default function DashboardLayout({ pageRole }) {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-    const basePath = resolvedHomePath;
-    const modules = buildNavModules(basePath);
+    const basePath = String(basePathOverride || '').trim() || resolvedHomePath;
+    const modules = buildNavModules(basePath, currentRole);
 
     // Módulo activo: el que cuya path coincide más con la ubicación actual
     const activeModule = resolveActiveModule(modules, location.pathname);
@@ -261,28 +342,45 @@ export default function DashboardLayout({ pageRole }) {
         setMobileMenuOpen(false);
     }, [navigate]);
 
-    function handleLogout() {
-        logout();
+    async function handleLogout() {
+        await logout();
         navigate('/login', { replace: true });
     }
 
     const sidebarWidth = isCollapsed ? 72 : 260;
+    const isSecurityRole = currentRole === 'security_admin' || currentRole === 'security_auditor';
 
     // Mobile nav items
-    const mobileItems = [
-        { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate(basePath) },
-        { id: 'personas', label: 'Personas', icon: Users, onClick: () => navigate(`${basePath}/empleados`) },
-        { id: 'servicios', label: 'Servicios', icon: Scissors, onClick: () => navigate(`${basePath}/catalog/servicios`) },
-        { id: 'sucursales', label: 'Sucursales', icon: Building2, onClick: () => navigate(`${basePath}/sucursales`) },
-        { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
-    ];
+    const mobileItems = currentRole === 'barbero'
+        ? [
+            { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate(basePath) },
+            { id: 'citas', label: 'Calendario', icon: CalendarDays, onClick: () => navigate(`${basePath}/citas`) },
+            { id: 'perfil-barbero', label: 'Perfil', icon: UserRound, onClick: () => navigate(`${basePath}/perfil`) },
+            { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
+        ]
+        : isSecurityRole
+            ? [
+                { id: 'seg-login-logs', label: 'Login Logs', icon: Shield, onClick: () => navigate(`${basePath}/seguridad/login-logs`) },
+                { id: 'seg-sesiones', label: 'Sesiones', icon: CalendarDays, onClick: () => navigate(`${basePath}/seguridad/sesiones`) },
+                { id: 'seg-usuarios', label: 'Usuarios', icon: Users, onClick: () => navigate(`${basePath}/seguridad/usuarios`) },
+                { id: 'seg-alertas', label: 'Alertas', icon: BarChart3, onClick: () => navigate(`${basePath}/seguridad/alertas`) },
+                { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
+            ]
+            : [
+                { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate(basePath) },
+                { id: 'personas', label: 'Personas', icon: Users, onClick: () => navigate(`${basePath}/empleados`) },
+                { id: 'servicios', label: 'Servicios', icon: Scissors, onClick: () => navigate(`${basePath}/catalog/servicios`) },
+                { id: 'sucursales', label: 'Sucursales', icon: Building2, onClick: () => navigate(`${basePath}/sucursales`) },
+                { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
+            ];
+    const mobileSideItems = currentRole === 'barbero' ? mobileItems : mobileItems.slice(0, 4);
 
     return (
         <div className="min-h-screen bg-[var(--mf-bg)] text-[var(--mf-text)]">
             {/* ── DESKTOP LAYOUT ── */}
             <div className="hidden lg:flex min-h-screen">
 
-                {/* ── Sidebar ─────────────────────────────────────────── */}
+                {/* ── Sidebar ────────────────────────────────────────────────────────────── */}
                 <motion.aside
                     animate={{ width: sidebarWidth }}
                     transition={{ type: 'spring', stiffness: 300, damping: 30 }}
@@ -292,7 +390,7 @@ export default function DashboardLayout({ pageRole }) {
                     <div className="sticky top-0 flex h-screen flex-col px-3 py-5 overflow-hidden">
 
                         {/* Logo + collapse button */}
-                        <div className="flex items-center justify-between gap-2 mb-6">
+                        <div className="relative flex items-center justify-end gap-2 mb-5">
                             <AnimatePresence initial={false}>
                                 {!isCollapsed && (
                                     <motion.div
@@ -301,9 +399,9 @@ export default function DashboardLayout({ pageRole }) {
                                         animate={{ opacity: 1, x: 0 }}
                                         exit={{ opacity: 0, x: -10 }}
                                         transition={{ duration: 0.2 }}
-                                        className="pl-1"
+                                        className="absolute left-1/2 -translate-x-1/2"
                                     >
-                                        <MasterfadeLogo variant="compact" />
+                                        <MasterfadeLogo variant="sidebar" />
                                     </motion.div>
                                 )}
                             </AnimatePresence>
@@ -370,13 +468,13 @@ export default function DashboardLayout({ pageRole }) {
                     </div>
                 </motion.aside>
 
-                {/* ── Content Area ─────────────────────────────────────── */}
+                {/* ── Content Area ─────────────────────────────────────────────────────────── */}
                 <div className="flex min-h-screen flex-1 flex-col min-w-0">
 
-                    {/* ── Topbar ──────────────────────────────────────── */}
+                    {/* ── Topbar ─────────────────────────────────────────────────────────────── */}
                     <header className="sticky top-0 z-30 border-b border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-bg)_82%,transparent)] backdrop-blur-xl">
                         <div className="flex items-center gap-4 px-6 py-3">
-                            {/* Módulo activo label */}
+                            {/* Módulo activo */}
                             <div className="flex items-center gap-2 shrink-0">
                                 {activeModule && (() => {
                                     const Icon = activeModule.icon;
@@ -416,13 +514,17 @@ export default function DashboardLayout({ pageRole }) {
                 </div>
             </div>
 
-            {/* ── MOBILE LAYOUT ─────────────────────────────────────────── */}
+            {/* ── MOBILE LAYOUT ──────────────────────────────────────────────────────────── */}
             <div className="mf-page-gradient min-h-screen pb-[100px] lg:hidden">
                 <div className="mf-mobile-frame mf-screen-pad mf-safe-top">
-                    <header className="flex items-center justify-between pt-3">
-                        <MasterfadeLogo variant="compact" />
-                        <div className="flex items-center gap-3">
-                            <ThemeSwitcher />
+                    <header className="flex min-w-0 items-start justify-between gap-2 pt-3">
+                        <MasterfadeLogo variant="topbar" className="shrink min-w-0" />
+                        <div className="flex shrink-0 items-center gap-2">
+                            <ThemeSwitcher
+                                showLabel
+                                labelClassName="w-[70px] whitespace-normal text-right leading-[1.05]"
+                                buttonClassName="h-10 w-10 rounded-lg"
+                            />
                             <button
                                 type="button"
                                 onClick={() => setMobileMenuOpen(true)}
@@ -511,10 +613,12 @@ export default function DashboardLayout({ pageRole }) {
                 <PremiumBottomNav
                     className="lg:hidden"
                     activeId={activeModule?.id || 'inicio'}
-                    sideItems={mobileItems.slice(0, 4)}
-                    fabItem={{ id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout }}
+                    sideItems={mobileSideItems}
+                    fabItem={currentRole === 'barbero' ? undefined : { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout }}
+                    mobilePreset={currentRole === 'barbero' ? 'barber' : 'default'}
                 />
             </div>
         </div>
     );
 }
+

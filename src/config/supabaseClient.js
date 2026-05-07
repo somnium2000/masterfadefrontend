@@ -13,9 +13,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 export const supabase = supabaseUrl && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: true,
+        autoRefreshToken: false,
+        persistSession: false,
+        // AM: El callback OAuth se resuelve manualmente en /auth/callback
+        // para evitar lecturas repetitivas y loops de exchange.
+        detectSessionInUrl: false,
       },
     })
   : null;

@@ -1,18 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { http, setTokenGetter } from '../services/httpClient.js';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  abortInFlightRequests,
+  http,
+  registerSessionInvalidationHandler,
+  resetSessionInvalidation,
+} from '../services/httpClient.js';
+import { supabase } from '../config/supabaseClient.js';
 
 const AuthContext = createContext(null);
-
-const LS_TOKEN_KEY = 'mf_auth_token';
-const LS_USER_KEY = 'mf_auth_user';
-
-function safeJsonParse(value) {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
 
 function normalizeRoles(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
@@ -33,6 +28,7 @@ function buildEnrichedUser(payload) {
     email: baseUser.email ?? null,
     nombres: baseUser.nombres ?? null,
     apellidos: baseUser.apellidos ?? null,
+    telefono_principal: baseUser.telefono_principal ?? null,
     roles,
     branch_ids: branchIds,
     empresa_id: payload?.empresa_id ?? null,
@@ -49,33 +45,52 @@ export function getUserDisplayName(user) {
   return nombreCompleto || user?.email || user?.id_usuario || 'Usuario';
 }
 
+function isLikelyEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
+function resolveLoginErrorMessage(rawMessage, errorCode) {
+  const fallback = 'Correo o contrasena incorrecta, intentalo de nuevo.';
+  const code = String(errorCode || '').trim().toUpperCase();
+  const tooManyAttemptsMessage = 'No fue posible iniciar sesion en este momento. Intenta nuevamente mas tarde.';
+
+  if (code === 'AUTH_INVALID_CREDENTIALS') return fallback;
+  if (code === 'AUTH_LOGIN_RATE_LIMITED') return tooManyAttemptsMessage;
+  if (code === 'AUTH_USER_TEMPORARILY_LOCKED') return tooManyAttemptsMessage;
+
+  const normalized = String(rawMessage || '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized.includes('invalid login credentials')) return fallback;
+  if (normalized.includes('credenciales invalidas')) return fallback;
+  if (normalized.includes('failed to fetch')) return 'No fue posible iniciar sesion en este momento. Intenta nuevamente.';
+  if (normalized.includes('network')) return 'No fue posible iniciar sesion en este momento. Intenta nuevamente.';
+  if (normalized.includes('timeout')) return 'No fue posible iniciar sesion en este momento. Intenta nuevamente.';
+
+  return String(rawMessage).trim();
+}
+
+function shouldHydrateForPath(pathname) {
+  const path = String(pathname || '').trim();
+  if (!path) return false;
+  if (path.startsWith('/auth/callback')) return false;
+  if (path.startsWith('/home')) return true;
+  if (path.startsWith('/admin')) return true;
+  if (path === '/login' || path === '/register') return true;
+  return false;
+}
+
 export function AuthProvider({ children }) {
-  const initialToken = localStorage.getItem(LS_TOKEN_KEY) || '';
-  const initialUser = initialToken ? safeJsonParse(localStorage.getItem(LS_USER_KEY) || 'null') : null;
-
-  const [token, setToken] = useState(initialToken);
-  const [user, setUser] = useState(initialUser);
-  const [roles, setRoles] = useState(normalizeRoles(initialUser?.roles));
-  const [branchIds, setBranchIds] = useState(normalizeBranchIds(initialUser?.branch_ids));
-  const [empresaId, setEmpresaId] = useState(initialUser?.empresa_id ?? null);
-  const [empleadoId, setEmpleadoId] = useState(initialUser?.empleado_id ?? null);
-  const [clienteId, setClienteId] = useState(initialUser?.cliente_id ?? null);
-  const [isHydrating, setIsHydrating] = useState(Boolean(initialToken));
-  const [isHydrated, setIsHydrated] = useState(!initialToken);
-
-  const tokenRef = useRef(initialToken);
-  const shouldPersistRef = useRef(Boolean(initialToken));
-
-  const writeLocalSession = useCallback((nextToken, nextUser) => {
-    if (shouldPersistRef.current && nextToken) {
-      localStorage.setItem(LS_TOKEN_KEY, nextToken);
-      localStorage.setItem(LS_USER_KEY, JSON.stringify(nextUser));
-      return;
-    }
-
-    localStorage.removeItem(LS_TOKEN_KEY);
-    localStorage.removeItem(LS_USER_KEY);
-  }, []);
+  const initialPathname = typeof window !== 'undefined' ? String(window.location?.pathname || '').trim() : '';
+  const shouldHydrateOnBoot = shouldHydrateForPath(initialPathname);
+  const [token, setToken] = useState('');
+  const [user, setUser] = useState(null);
+  const [roles, setRoles] = useState([]);
+  const [branchIds, setBranchIds] = useState([]);
+  const [empresaId, setEmpresaId] = useState(null);
+  const [empleadoId, setEmpleadoId] = useState(null);
+  const [clienteId, setClienteId] = useState(null);
+  const [isHydrating, setIsHydrating] = useState(shouldHydrateOnBoot);
+  const [isHydrated, setIsHydrated] = useState(!shouldHydrateOnBoot);
 
   const applyUserState = useCallback((nextUser) => {
     setUser(nextUser);
@@ -84,42 +99,29 @@ export function AuthProvider({ children }) {
     setEmpresaId(nextUser?.empresa_id ?? null);
     setEmpleadoId(nextUser?.empleado_id ?? null);
     setClienteId(nextUser?.cliente_id ?? null);
+    setToken(nextUser?.id_usuario ? 'cookie-session' : '');
   }, []);
 
   const clearSessionState = useCallback(() => {
-    tokenRef.current = '';
-    shouldPersistRef.current = false;
-    setToken('');
     applyUserState(null);
     setIsHydrating(false);
     setIsHydrated(true);
-    localStorage.removeItem(LS_TOKEN_KEY);
-    localStorage.removeItem(LS_USER_KEY);
   }, [applyUserState]);
 
-  useEffect(() => {
-    tokenRef.current = token;
-    setTokenGetter(() => tokenRef.current || null);
-  }, [token]);
-
-  useEffect(() => {
-    setTokenGetter(() => tokenRef.current || null);
-    return () => setTokenGetter(null);
-  }, []);
-
-  const hydrateSession = useCallback(async (options = {}) => {
-    const resolvedToken = options.tokenOverride ?? tokenRef.current;
-
-    if (!resolvedToken) {
-      clearSessionState();
-      return { ok: false, message: 'No hay una sesion activa.' };
+  const invalidateSession = useCallback((reason = 'session_invalidated') => {
+    abortInFlightRequests(reason);
+    clearSessionState();
+    if (supabase) {
+      void supabase.auth.signOut({ scope: 'local' }).catch(() => {});
     }
+  }, [clearSessionState]);
 
+  const hydrateSession = useCallback(async () => {
     setIsHydrating(true);
     setIsHydrated(false);
 
     try {
-      const response = await http.get('/v1/auth/me', { token: resolvedToken });
+      const response = await http.get('/v1/auth/me');
       const payload = response?.data || response;
 
       if (!response?.ok || !payload?.user) {
@@ -128,59 +130,58 @@ export function AuthProvider({ children }) {
       }
 
       const enrichedUser = buildEnrichedUser(payload);
-
-      tokenRef.current = resolvedToken;
-      setToken(resolvedToken);
       applyUserState(enrichedUser);
-      writeLocalSession(resolvedToken, enrichedUser);
+      resetSessionInvalidation();
       setIsHydrating(false);
       setIsHydrated(true);
-
       return { ok: true };
     } catch (err) {
       clearSessionState();
+      if (Number(err?.status) === 401) {
+        return {
+          ok: false,
+          expectedUnauthenticated: true,
+          message: '',
+        };
+      }
       return {
         ok: false,
         message: err?.data?.error?.message || err?.message || 'No se pudo hidratar la sesion.',
       };
     }
-  }, [applyUserState, clearSessionState, writeLocalSession]);
+  }, [applyUserState, clearSessionState]);
 
-  const login = useCallback(async (nombre_usuario, contrasena, remember) => {
-    const username = String(nombre_usuario || '').trim();
-    const password = String(contrasena || '').trim();
+  const login = useCallback(async (identifier, contrasena, remember, options = {}) => {
+    const normalizedIdentifier = String(identifier || '').trim().toLowerCase();
+    const password = String(contrasena || '');
+    const replaceActiveSession = Boolean(options?.replaceActiveSession);
 
-    if (!username || !password) {
-      return { ok: false, message: 'Usuario y contrasena son requeridos.' };
+    if (!normalizedIdentifier || !password) {
+      return { ok: false, message: 'Correo y contrasena son requeridos.' };
+    }
+
+    if (!isLikelyEmail(normalizedIdentifier)) {
+      return { ok: false, message: 'Ingresa un correo valido para iniciar sesion.' };
     }
 
     try {
       const response = await http.post('/v1/auth/login', {
-        nombre_usuario: username,
+        identifier: normalizedIdentifier,
+        email: normalizedIdentifier,
         contrasena: password,
+        remember: Boolean(remember),
+        ...(replaceActiveSession ? { replace_active_session: true } : {}),
       });
 
-      const payload = response?.data || response;
-
-      if (!response?.ok || !payload?.token) {
-        return { ok: false, message: response?.error?.message || response?.message || 'Credenciales invalidas.' };
+      if (!response?.ok) {
+        return {
+          ok: false,
+          code: response?.error?.code || null,
+          message: resolveLoginErrorMessage(response?.error?.message || response?.message, response?.error?.code),
+        };
       }
 
-      shouldPersistRef.current = Boolean(remember);
-      tokenRef.current = payload.token;
-      setToken(payload.token);
-      setIsHydrating(true);
-      setIsHydrated(false);
-
-      if (shouldPersistRef.current) {
-        localStorage.setItem(LS_TOKEN_KEY, payload.token);
-      } else {
-        localStorage.removeItem(LS_TOKEN_KEY);
-        localStorage.removeItem(LS_USER_KEY);
-      }
-
-      const hydrated = await hydrateSession({ tokenOverride: payload.token });
-
+      const hydrated = await hydrateSession();
       if (!hydrated.ok) {
         return { ok: false, message: hydrated.message || 'La sesion no se pudo completar.' };
       }
@@ -190,20 +191,49 @@ export function AuthProvider({ children }) {
       clearSessionState();
       return {
         ok: false,
-        message: err?.data?.error?.message || err?.message || 'Error al intentar iniciar sesion.',
+        code: err?.data?.error?.code || null,
+        message: resolveLoginErrorMessage(err?.data?.error?.message || err?.message, err?.data?.error?.code),
       };
     }
   }, [clearSessionState, hydrateSession]);
 
-  const logout = useCallback(() => {
-    clearSessionState();
-  }, [clearSessionState]);
+  const completeExchangeLogin = useCallback(async () => {
+    const hydrated = await hydrateSession();
+    if (!hydrated.ok) {
+      return { ok: false, message: hydrated.message || 'No se pudo completar la sesion social.' };
+    }
+    return { ok: true };
+  }, [hydrateSession]);
+
+  const logout = useCallback(async () => {
+    invalidateSession('logout');
+    try {
+      await http.post('/v1/auth/logout', {}, { skipAuthInvalidation: true });
+    } catch {
+      // noop: de todas formas limpiamos estado local.
+    }
+  }, [invalidateSession]);
 
   useEffect(() => {
-    if (!tokenRef.current) return;
-    // Hidrata sesión persistida en el arranque (lectura inicial de auth/me).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void hydrateSession();
+    const unsubscribe = registerSessionInvalidationHandler(() => {
+      invalidateSession('private_endpoint_401');
+    });
+    return unsubscribe;
+  }, [invalidateSession]);
+
+  useEffect(() => {
+    const currentPathname = window.location?.pathname || '';
+
+    if (currentPathname.startsWith('/auth/callback')) {
+      return;
+    }
+    if (shouldHydrateForPath(currentPathname)) {
+      const timer = setTimeout(() => {
+        void hydrateSession();
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
   }, [hydrateSession]);
 
   const value = useMemo(
@@ -215,14 +245,31 @@ export function AuthProvider({ children }) {
       empresaId,
       empleadoId,
       clienteId,
-      isAuthenticated: Boolean(token),
+      isAuthenticated: Boolean(user?.id_usuario),
       isHydrating,
       isHydrated,
       login,
+      completeExchangeLogin,
       hydrateSession,
       logout,
+      invalidateSession,
     }),
-    [token, user, roles, branchIds, empresaId, empleadoId, clienteId, isHydrating, isHydrated, login, hydrateSession, logout]
+    [
+      token,
+      user,
+      roles,
+      branchIds,
+      empresaId,
+      empleadoId,
+      clienteId,
+      isHydrating,
+      isHydrated,
+      login,
+      completeExchangeLogin,
+      hydrateSession,
+      logout,
+      invalidateSession,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -19,14 +20,49 @@ function ProtectedRouteLoader() {
 }
 
 export default function ProtectedRoute({ children, allowedRoles }) {
-  const { isAuthenticated, isHydrating, roles } = useAuth();
+  const { isAuthenticated, isHydrating, isHydrated, roles, hydrateSession } = useAuth();
+  const [rehydrationChecked, setRehydrationChecked] = useState(false);
+  const rehydrationStartedRef = useRef(false);
+
+  const needsInitialHydration =
+    !isAuthenticated &&
+    !isHydrating &&
+    !isHydrated &&
+    !rehydrationChecked;
+
+  const needsRouteRehydration =
+    isAuthenticated &&
+    !isHydrating &&
+    roles.length === 0 &&
+    !rehydrationChecked;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if ((!needsInitialHydration && !needsRouteRehydration) || rehydrationStartedRef.current) {
+      return undefined;
+    }
+
+    rehydrationStartedRef.current = true;
+
+    void hydrateSession()
+      .catch(() => {})
+      .finally(() => {
+        if (cancelled) return;
+        setRehydrationChecked(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateSession, needsInitialHydration, needsRouteRehydration]);
+
+  if (isHydrating || needsInitialHydration || needsRouteRehydration) {
+    return <ProtectedRouteLoader />;
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
-  }
-
-  if (isHydrating) {
-    return <ProtectedRouteLoader />;
   }
 
   if (allowedRoles && allowedRoles.length > 0) {

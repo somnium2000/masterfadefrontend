@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <clipPath id="mfCircleClip">
+      <circle cx="32" cy="32" r="30" />
+    </clipPath>
+  </defs>
+  <circle cx="32" cy="32" r="31" fill="#0D0D0D" />
+  <image
+    href="/mf-logo.png"
+    x="0"
+    y="0"
+    width="64"
+    height="64"
+    preserveAspectRatio="xMidYMid slice"
+    clip-path="url(#mfCircleClip)"
+  />
+  <circle cx="32" cy="32" r="30" fill="none" stroke="#E9C85C" stroke-width="2" />
+</svg>

@@ -8,14 +8,25 @@ import million from "million/compiler";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export default defineConfig({
-  plugins: [million.vite({ auto: true }), react(), tailwindcss()],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
+export default defineConfig(({ mode }) => {
+  const isProduction = mode === "production";
+
+  return {
+    plugins: [
+      ...(isProduction ? [million.vite({ auto: true })] : []),
+      react(),
+      tailwindcss(),
+    ],
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "./src"),
+      },
     },
-  },
-  server: {
-    open: "/",
-  },
+    server: {
+      host: "localhost",
+      port: 5173,
+      strictPort: true,
+      open: "/",
+    },
+  };
 });

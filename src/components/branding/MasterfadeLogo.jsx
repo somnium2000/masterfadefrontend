@@ -1,32 +1,42 @@
-import scriptDark from '../../assets/branding/masterfade-script-dark.jpeg';
+import scriptDark from '../../assets/branding/masterfade-script-dark.png';
+import scriptLight from '../../assets/branding/masterfade-script-light.png';
 import { useTheme } from '../../context/ThemeContext.jsx';
 
 const VARIANTS = {
   hero: {
     gap: 'gap-0',
-    script: 'w-[250px] max-w-[78vw]',
+    script: 'w-[300px] sm:w-[360px] md:w-[460px] max-w-[92vw]',
   },
   compact: {
     gap: 'gap-0',
-    script: 'w-[190px] max-w-[70vw]',
+    script: 'w-[220px] sm:w-[250px] md:w-[320px] max-w-[82vw]',
+  },
+  topbar: {
+    gap: 'gap-0',
+    script: 'w-[116px] min-[360px]:w-[132px] sm:w-[150px] md:w-[180px] max-w-[46vw]',
+  },
+  public: {
+    gap: 'gap-0',
+    script: 'w-[300px] sm:w-[360px] md:w-[500px] max-w-[94vw]',
+  },
+  publicPromotions: {
+    gap: 'gap-0',
+    script: 'w-[340px] sm:w-[420px] md:w-[580px] lg:w-[620px] max-w-[96vw]',
+  },
+  auth: {
+    gap: 'gap-0',
+    script: 'w-[280px] sm:w-[330px] md:w-[430px] max-w-[92vw]',
+  },
+  sidebar: {
+    gap: 'gap-0',
+    script: 'w-[210px] max-w-full',
   },
 };
 
 export default function MasterfadeLogo({ variant = 'hero', className = '', showScriptMark = true }) {
   const { variant: themeVariant } = useTheme();
   const styles = VARIANTS[variant] || VARIANTS.hero;
-  const foreground = themeVariant === 'dark' ? '#f7f2e9' : '#101010';
-  const scriptMaskStyle = {
-    WebkitMaskImage: `url(${scriptDark})`,
-    WebkitMaskRepeat: 'no-repeat',
-    WebkitMaskPosition: 'center',
-    WebkitMaskSize: '100% 100%',
-    maskImage: `url(${scriptDark})`,
-    maskRepeat: 'no-repeat',
-    maskPosition: 'center',
-    maskSize: '100% 100%',
-    maskMode: 'luminance',
-  };
+  const scriptSrc = themeVariant === 'dark' ? scriptLight : scriptDark;
 
   return (
     <div className={`flex flex-col items-center text-center ${styles.gap} ${className}`.trim()}>
@@ -37,23 +47,13 @@ export default function MasterfadeLogo({ variant = 'hero', className = '', showS
           role="img"
           style={{ aspectRatio: '1600 / 475' }}
         >
-          <div
-            className="absolute inset-0"
-            style={{
-              ...scriptMaskStyle,
-              backgroundColor: 'var(--mf-accent)',
-              filter: 'blur(1.15px)',
-              transform: 'translateY(0.4px) scale(1.012)',
-              opacity: 0.95,
-            }}
-          />
-
-          <div
-            className="absolute inset-0"
-            style={{
-              ...scriptMaskStyle,
-              backgroundColor: foreground,
-            }}
+          <img
+            src={scriptSrc}
+            alt="Masterfade"
+            className="absolute inset-0 h-full w-full object-contain"
+            loading="eager"
+            decoding="async"
+            draggable="false"
           />
         </div>
       ) : null}

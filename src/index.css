@@ -225,6 +225,13 @@ select {
   padding-right: 24px;
 }
 
+@media (max-width: 420px) {
+  .mf-screen-pad {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
+
 .mf-safe-top {
   padding-top: env(safe-area-inset-top, 0px);
 }
@@ -237,6 +244,12 @@ select {
   width: 100%;
   max-width: 420px;
   margin: 0 auto;
+}
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  .mf-mobile-frame {
+    max-width: 900px;
+  }
 }
 
 .mf-page-gradient {
@@ -337,7 +350,7 @@ select {
   }
 }
 
-/* ── Utilidades premium Figma MasterFade ──────────────────────────── */
+/* Utilidades premium Figma MasterFade */
 
 /* Ocultar scrollbar manteniendo funcionalidad */
 .scrollbar-hide {

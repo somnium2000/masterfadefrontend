@@ -1,13 +1,133 @@
 import { http } from '../../../services/httpClient.js';
 
-export async function getPublicCatalog() {
-  const [servicesResponse, packagesResponse] = await Promise.all([
-    http.get('/v1/public/catalog/servicios'),
-    http.get('/v1/public/catalog/paquetes'),
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeBranchId(value) {
+  const raw = String(value ?? '').trim();
+  return UUID_REGEX.test(raw) ? raw : '';
+}
+
+function normalizePlanOfferId(record = {}) {
+  const candidates = [
+    record?.id_plan_sucursal,
+    record?.plan_sucursal_id,
+    record?.id_oferta,
+    record?.id_membership_plan_sucursal,
+  ];
+  for (const candidate of candidates) {
+    const normalized = String(candidate ?? '').trim();
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+function normalizePublicPlanRecord(record = {}) {
+  if (!record || typeof record !== 'object') return null;
+  const rawPrice = Number(record?.precio_hnl ?? record?.precio ?? 0);
+  return {
+    ...record,
+    id_plan: String(record?.id_plan ?? record?.plan_id ?? '').trim() || null,
+    id_plan_sucursal: normalizePlanOfferId(record),
+    nombre_plan: String(record?.nombre_plan ?? record?.nombre ?? '').trim() || 'Plan',
+    precio_hnl: Number.isFinite(rawPrice) ? rawPrice : 0,
+  };
+}
+
+export async function listPublicCatalogBranches() {
+  const response = await http.get('/v1/public/catalog/sucursales');
+  return {
+    branches: response?.data?.sucursales || [],
+  };
+}
+
+export async function listPublicCatalogPlans({ id_sucursal } = {}) {
+  // AM: Reutiliza el mismo scope de sucursal para planes en catalogo publico.
+  const branchId = normalizeBranchId(id_sucursal);
+  const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
+  const response = await http.get(`/v1/public/catalog/planes${query}`);
+  const plans = Array.isArray(response?.data?.planes) ? response.data.planes : [];
+  return {
+    plans: plans.map(normalizePublicPlanRecord).filter(Boolean),
+  };
+}
+
+export async function listPublicPlansByBranch(id_sucursal) {
+  const branchId = normalizeBranchId(id_sucursal);
+  if (!branchId) {
+    return { plans: [] };
+  }
+  return listPublicCatalogPlans({ id_sucursal: branchId });
+}
+
+export async function listPublicCatalogPromotions({ id_sucursal } = {}) {
+  // AM: Reutiliza el mismo scope de sucursal para promociones en catalogo publico.
+  const branchId = normalizeBranchId(id_sucursal);
+  const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
+  const response = await http.get(`/v1/public/catalog/promociones${query}`);
+  return {
+    promotions: response?.data?.promociones || [],
+  };
+}
+
+export async function listPublicCatalogServices({ id_sucursal } = {}) {
+  // AM: Scope explicito para servicios publicos por sucursal.
+  const branchId = normalizeBranchId(id_sucursal);
+  const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
+  const response = await http.get(`/v1/public/catalog/servicios${query}`);
+  return {
+    services: response?.data?.servicios || [],
+  };
+}
+
+export async function listPublicCatalogPackages({ id_sucursal } = {}) {
+  // AM: Scope explicito para paquetes publicos por sucursal.
+  const branchId = normalizeBranchId(id_sucursal);
+  const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
+  const response = await http.get(`/v1/public/catalog/paquetes${query}`);
+  return {
+    packages: response?.data?.paquetes || [],
+  };
+}
+
+export async function getPublicCatalog({ id_sucursal } = {}) {
+  // AM: Mantiene servicios y paquetes sincronizados bajo el mismo scope de sucursal.
+  const branchId = normalizeBranchId(id_sucursal);
+  const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
+  const [servicesResult, packagesResult] = await Promise.allSettled([
+    http.get(`/v1/public/catalog/servicios${query}`),
+    http.get(`/v1/public/catalog/paquetes${query}`),
   ]);
 
+  const allRejected = [servicesResult, packagesResult].every((result) => result?.status === 'rejected');
+  if (allRejected) {
+    throw servicesResult.reason || packagesResult.reason;
+  }
+
   return {
-    services: servicesResponse?.data?.servicios || [],
-    packages: packagesResponse?.data?.paquetes || [],
+    services: servicesResult.status === 'fulfilled' ? servicesResult.value?.data?.servicios || [] : [],
+    packages: packagesResult.status === 'fulfilled' ? packagesResult.value?.data?.paquetes || [] : [],
+  };
+}
+
+export async function searchPublicCatalog({ q, id_sucursal } = {}) {
+  const query = String(q || '').trim();
+  if (!query) {
+    return {
+      services: [],
+      packages: [],
+      plans: [],
+    };
+  }
+
+  const branchId = normalizeBranchId(id_sucursal);
+  const params = new URLSearchParams();
+  params.set('q', query);
+  if (branchId) params.set('id_sucursal', branchId);
+
+  const response = await http.get(`/v1/public/catalog/busqueda?${params.toString()}`);
+  return {
+    services: response?.data?.servicios || [],
+    packages: response?.data?.paquetes || [],
+    plans: response?.data?.planes || [],
   };
 }
