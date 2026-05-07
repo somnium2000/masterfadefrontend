@@ -1,5 +1,5 @@
 import { ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/button.jsx';
 import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
 import { formatCurrencyHnl } from './bookingUtils.js';
@@ -20,6 +20,34 @@ export default function PublicBookingPaymentStep() {
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+
+  const fallbackSubtotal = useMemo(
+    () => bookingBlocksSummary.reduce((total, block) => total + Number(block?.total_hnl || 0), 0),
+    [bookingBlocksSummary]
+  );
+
+  const fallbackCoveredByPlan = useMemo(
+    () =>
+      bookingBlocksSummary.reduce((total, block) => {
+        const services = Array.isArray(block?.selectedServices) ? block.selectedServices : [];
+        return total + services.reduce((lineTotal, service) => {
+          if (!service?.coveredByPlan) return lineTotal;
+          return lineTotal + Number(service?.precio_hnl || 0);
+        }, 0);
+      }, 0),
+    [bookingBlocksSummary]
+  );
+
+  const effectiveSubtotal = Number(holdPricing?.subtotal_hnl ?? fallbackSubtotal ?? 0);
+  const effectiveCoveredByPlan = Number(holdPricing?.cubierto_por_plan_hnl ?? fallbackCoveredByPlan ?? 0);
+  const effectiveExtras = Number(
+    holdPricing?.extras_a_pagar_hnl
+    ?? Math.max(0, effectiveSubtotal - effectiveCoveredByPlan)
+  );
+  const effectiveTotalToPay = Number(
+    holdPricing?.total_pagar_hnl
+    ?? (holdTotalToPay > 0 ? holdTotalToPay : effectiveExtras)
+  );
 
   const holdCountdownLabel = (() => {
     if (holdRemainingMs == null) return null;
@@ -139,19 +167,19 @@ export default function PublicBookingPaymentStep() {
           ))}
           <div className="citas-confirm-row mt-3">
             <span>Total servicios</span>
-            <span>{formatCurrencyHnl(Number(holdPricing?.subtotal_hnl || 0))}</span>
+            <span>{formatCurrencyHnl(effectiveSubtotal)}</span>
           </div>
           <div className="citas-confirm-row">
             <span>Cubierto por tu plan</span>
-            <span>-{formatCurrencyHnl(Number(holdPricing?.cubierto_por_plan_hnl || 0))}</span>
+            <span>-{formatCurrencyHnl(effectiveCoveredByPlan)}</span>
           </div>
           <div className="citas-confirm-row">
             <span>Extras a pagar</span>
-            <span>{formatCurrencyHnl(Number(holdPricing?.extras_a_pagar_hnl || holdTotalToPay || 0))}</span>
+            <span>{formatCurrencyHnl(effectiveExtras)}</span>
           </div>
           <div className="citas-confirm-row">
             <span>Total a pagar</span>
-            <span>{formatCurrencyHnl(Number(holdTotalToPay || 0))}</span>
+            <span>{formatCurrencyHnl(effectiveTotalToPay)}</span>
           </div>
         </div>
       </div>

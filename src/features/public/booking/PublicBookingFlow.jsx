@@ -657,6 +657,7 @@ export default function PublicBookingFlow() {
   const rewardDiscountInfoShownRef = useRef(false);
   const lastHoldFingerprintRef = useRef('');
   const holderProfileHydratedRef = useRef(false);
+  const paymentAutoBootstrapAttemptRef = useRef('');
   const [servicesCanScroll, setServicesCanScroll] = useState(false);
   const [servicesAtEnd, setServicesAtEnd] = useState(true);
 
@@ -1437,17 +1438,25 @@ export default function PublicBookingFlow() {
     );
   }, [bookingBlocksSummary]);
 
+  const blocksToSubmitSummary = useMemo(
+    () => bookingBlocksSummary.filter((block) =>
+      Boolean(block?.selectedPackage)
+      || (Array.isArray(block?.selectedServices) && block.selectedServices.length > 0)
+    ),
+    [bookingBlocksSummary]
+  );
+
   const allBlocksComplete = useMemo(
-    () => bookingBlocksSummary.length > 0
-      && bookingBlocksSummary.every((block) => block.isComplete && !hasBlockingGroupConflict(block)),
-    [bookingBlocksSummary, hasBlockingGroupConflict]
+    () => blocksToSubmitSummary.length > 0
+      && blocksToSubmitSummary.every((block) => block.isComplete && !hasBlockingGroupConflict(block)),
+    [blocksToSubmitSummary, hasBlockingGroupConflict]
   );
   const bookingBlockingReason = useMemo(() => {
-    if (!Array.isArray(bookingBlocksSummary) || bookingBlocksSummary.length === 0) {
+    if (!Array.isArray(blocksToSubmitSummary) || blocksToSubmitSummary.length === 0) {
       return 'Agrega al menos un bloque de cita.';
     }
 
-    const firstInvalidContact = bookingBlocksSummary.find((block) => !block?.contactResolved?.isValid);
+    const firstInvalidContact = blocksToSubmitSummary.find((block) => !block?.contactResolved?.isValid);
     if (firstInvalidContact) {
       const label = firstInvalidContact.index === 0
         ? 'titular'
@@ -1458,7 +1467,7 @@ export default function PublicBookingFlow() {
       return `Completa los datos del ${label}.`;
     }
 
-    const firstMissingService = bookingBlocksSummary.find((block) =>
+    const firstMissingService = blocksToSubmitSummary.find((block) =>
       !block?.selectedPackage && (!Array.isArray(block?.selectedServices) || block.selectedServices.length === 0)
     );
     if (firstMissingService) {
@@ -1467,28 +1476,28 @@ export default function PublicBookingFlow() {
         : `El acompañante ${firstMissingService.index} no tiene servicio seleccionado.`;
     }
 
-    const firstMissingBarber = bookingBlocksSummary.find((block) => !block?.idBarbero);
+    const firstMissingBarber = blocksToSubmitSummary.find((block) => !block?.idBarbero);
     if (firstMissingBarber) {
       return firstMissingBarber.index === 0
         ? 'El titular no tiene barbero seleccionado.'
         : `El acompañante ${firstMissingBarber.index} no tiene barbero seleccionado.`;
     }
 
-    const firstMissingDate = bookingBlocksSummary.find((block) => !block?.selectedDate);
+    const firstMissingDate = blocksToSubmitSummary.find((block) => !block?.selectedDate);
     if (firstMissingDate) {
       return firstMissingDate.index === 0
         ? 'El titular no tiene fecha seleccionada.'
         : `El acompañante ${firstMissingDate.index} no tiene fecha seleccionada.`;
     }
 
-    const firstMissingTime = bookingBlocksSummary.find((block) => !block?.selectedTime);
+    const firstMissingTime = blocksToSubmitSummary.find((block) => !block?.selectedTime);
     if (firstMissingTime) {
       return firstMissingTime.index === 0
         ? 'El titular no tiene horario seleccionado.'
         : `El acompañante ${firstMissingTime.index} no tiene horario seleccionado.`;
     }
 
-    const firstConflict = bookingBlocksSummary.find((block) => hasBlockingGroupConflict(block));
+    const firstConflict = blocksToSubmitSummary.find((block) => hasBlockingGroupConflict(block));
     if (firstConflict) {
       return firstConflict.index === 0
         ? 'El horario del titular se solapa con otro integrante.'
@@ -1496,7 +1505,7 @@ export default function PublicBookingFlow() {
     }
 
     return '';
-  }, [bookingBlocksSummary, hasBlockingGroupConflict]);
+  }, [blocksToSubmitSummary, hasBlockingGroupConflict]);
   const holdExpiresAtIso = useMemo(() => {
     if (holdResult?.expires_at) return holdResult.expires_at;
     if (paymentIntent?.expires_at) return paymentIntent.expires_at;
@@ -3334,9 +3343,7 @@ export default function PublicBookingFlow() {
       navigate('/agendar/barberos');
       return false;
     }
-    const blocksToSubmit = bookingBlocksSummary.filter((block) =>
-      Boolean(block.selectedPackage) || block.selectedServices.length > 0
-    );
+    const blocksToSubmit = blocksToSubmitSummary;
     if (blocksToSubmit.length === 0) {
       notifications.warning('Completa servicios, fecha y hora en todos los bloques antes de confirmar.', {
         dedupeKey: 'public-booking-blocks-required',
@@ -3415,16 +3422,15 @@ export default function PublicBookingFlow() {
       setFieldErrors((prev) => ({ ...prev, ...nextFieldErrors }));
       return false;
     }
-    for (let index = 1; index < bookingBlocks.length; index += 1) {
-      const companion = normalizeBookingBlock(bookingBlocks[index], index);
-      const companionContact = resolveBlockContactState(companion, index);
+    for (const companion of blocksToSubmit.filter((block) => Number(block?.index) > 0)) {
+      const companionContact = companion?.contactResolved || resolveBlockContactState(companion, companion.index);
       if (!companionContact.fullName) {
-        nextFieldErrors[buildFieldErrorKey(index, 'contactFirstName')] = 'Completa nombre y apellido del acompanante.';
-        nextFieldErrors[buildFieldErrorKey(index, 'contactLastName')] = 'Completa nombre y apellido del acompanante.';
+        nextFieldErrors[buildFieldErrorKey(companion.index, 'contactFirstName')] = 'Completa nombre y apellido del acompanante.';
+        nextFieldErrors[buildFieldErrorKey(companion.index, 'contactLastName')] = 'Completa nombre y apellido del acompanante.';
         notifications.warning('Cada acompañante debe tener nombre y apellido válidos para confirmar.', {
           dedupeKey: 'public-booking-companion-data-required-submit',
         });
-        setActiveBlockIndex(index);
+        setActiveBlockIndex(companion.index);
         navigate('/agendar/agenda');
         setFieldErrors((prev) => ({ ...prev, ...nextFieldErrors }));
         return false;
@@ -3433,11 +3439,11 @@ export default function PublicBookingFlow() {
         const companionEmail = normalizeEmail(companionContact.email || '');
         const holderEmail = normalizeEmail(titularEmail || '');
         if (companionEmail && holderEmail && companionEmail === holderEmail) {
-          setFieldError(index, 'contactEmail', mapPublicBookingErrorMessage('AUTHENTICATED_USER_CANNOT_BE_COMPANION'));
+          setFieldError(companion.index, 'contactEmail', mapPublicBookingErrorMessage('AUTHENTICATED_USER_CANNOT_BE_COMPANION'));
           notifications.warning(mapPublicBookingErrorMessage('AUTHENTICATED_USER_CANNOT_BE_COMPANION'), {
             dedupeKey: 'public-booking-companion-same-auth-user',
           });
-          setActiveBlockIndex(index);
+          setActiveBlockIndex(companion.index);
           navigate('/agendar/agenda');
           return false;
         }
@@ -3748,6 +3754,7 @@ export default function PublicBookingFlow() {
     buildFieldErrorKey,
     bookingBlocks,
     bookingBlocksSummary,
+    blocksToSubmitSummary,
     effectiveActiveBlockIndex,
     canUseClienteHold,
     isPastSlotForToday,
@@ -3789,7 +3796,7 @@ export default function PublicBookingFlow() {
   const goToConfirm = useCallback(async () => {
     if (holdSubmitting) return false;
     if (!allBlocksComplete) {
-      notifications.warning('Completa servicios, fecha y hora antes de continuar a resumen.', {
+      notifications.warning(bookingBlockingReason || 'Completa servicios, fecha y hora antes de continuar a resumen.', {
         dedupeKey: 'public-booking-confirm-requires-complete-blocks',
       });
       return false;
@@ -3832,6 +3839,7 @@ export default function PublicBookingFlow() {
     return true;
   }, [
     allBlocksComplete,
+    bookingBlockingReason,
     holdSubmitting,
     canUseClienteHold,
     bookingBlocks,
@@ -4214,13 +4222,22 @@ export default function PublicBookingFlow() {
   }, [allBlocksComplete, holdResult, navigate, notifications, paymentResult?.booking_confirmed]);
 
   useEffect(() => {
+    if (!location.pathname.startsWith('/agendar/pagar')) {
+      paymentAutoBootstrapAttemptRef.current = '';
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
     if (!location.pathname.startsWith('/agendar/pagar')) return;
     if (paymentResult?.booking_confirmed) return;
 
     let cancelled = false;
+    const attemptKey = `${location.pathname}|${bookingSelectionFingerprint}`;
     async function bootstrapCheckout() {
       if (!allBlocksComplete) return;
       if (!holdResult) {
+        if (paymentAutoBootstrapAttemptRef.current === attemptKey) return;
+        paymentAutoBootstrapAttemptRef.current = attemptKey;
         const ok = await submitHold();
         if (!ok || cancelled) return;
         return;
@@ -4239,6 +4256,7 @@ export default function PublicBookingFlow() {
     };
   }, [
     allBlocksComplete,
+    bookingSelectionFingerprint,
     createPaymentIntentForHold,
     holdResult,
     holdResult?.total_pagar_hnl,
