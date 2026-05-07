@@ -64,7 +64,7 @@ export default function ForgotPasswordPage() {
 
     setLoading(true);
     try {
-      const response = await http.post('/v1/auth/forgot-password', { email: value });
+      const response = await http.post('/v1/auth/forgot-password', { email: value }, { skipCsrf: true });
       const data = response?.data || response;
 
       const successMessage =

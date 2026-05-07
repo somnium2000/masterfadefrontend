@@ -51,6 +51,29 @@ function shouldInvalidateSessionOn401(path, baseUrl) {
   return pathname.startsWith("/v1/");
 }
 
+function shouldSkipCsrfPrefetch(path, baseUrl) {
+  const pathname = toPathname(path, baseUrl);
+  if (!pathname) return false;
+
+  const PUBLIC_MUTABLE_PATHS = new Set([
+    "/v1/auth/login",
+    "/v1/auth/register",
+    "/v1/auth/forgot-password",
+    "/v1/auth/exchange",
+    "/v1/auth/social/confirm",
+    "/v1/auth/csrf",
+    "/v1/public/citas/hold",
+    "/v1/public/citas/validar-titular",
+    "/v1/public/pagos/crear-intent",
+    "/v1/public/pagos/mock-completar",
+  ]);
+
+  return (
+    PUBLIC_MUTABLE_PATHS.has(pathname) ||
+    pathname.startsWith("/v1/public/citas/hold/")
+  );
+}
+
 async function parseResponse(response) {
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -166,6 +189,7 @@ export async function request(path, options = {}) {
     headers = {},
     signal,
     skipAuthInvalidation = false,
+    skipCsrf = false,
   } = options;
 
   const baseUrl = import.meta.env.VITE_API_URL;
@@ -178,11 +202,10 @@ export async function request(path, options = {}) {
     finalHeaders["Content-Type"] = "application/json";
   }
 
-  if (isUnsafeMethod(method) && !finalHeaders["X-CSRF-Token"]) {
+  if (!skipCsrf && isUnsafeMethod(method) && !finalHeaders["X-CSRF-Token"]) {
     let csrfToken = readCookie("mf_csrf") || readStoredCsrfToken();
     if (!csrfToken) {
-      const pathname = toPathname(path, baseUrl);
-      if (pathname !== "/v1/auth/csrf") {
+      if (!shouldSkipCsrfPrefetch(path, baseUrl)) {
         csrfToken = await fetchCsrfTokenFromApi(baseUrl);
       }
     }

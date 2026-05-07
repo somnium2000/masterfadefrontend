@@ -24,3 +24,8 @@ dist-ssr
 *.sw?
 .env
 
+
+# Archivos comprimidos locales / respaldos
+*.zip
+*.rar
+*.7z
