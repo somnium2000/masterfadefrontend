@@ -122,6 +122,8 @@ export default function AuthCallbackPage() {
 
           const confirmationResponse = await http.post('/v1/auth/social/confirm', {
             social_confirm_token: socialConfirmToken,
+          }, {
+            skipCsrf: true,
           });
           const confirmationPayload = confirmationResponse?.data || confirmationResponse;
           if (!confirmationResponse?.ok || !confirmationPayload?.session?.authenticated) {
@@ -229,6 +231,8 @@ export default function AuthCallbackPage() {
         setStepMessage('Verificando cuenta MasterFade...');
         const exchangeResponse = await http.post('/v1/auth/exchange', {
           supabase_token: supabaseToken,
+        }, {
+          skipCsrf: true,
         });
 
         const payload = exchangeResponse?.data || exchangeResponse;

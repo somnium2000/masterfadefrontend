@@ -144,6 +144,8 @@ export default function RegisterPage() {
         acepta_terminos: true,
         consentimiento_marketing: consentimientoMarketing,
         id_sucursal_origen: branchId || null,
+      }, {
+        skipCsrf: true,
       });
 
       // AM: Registro exitoso: iniciamos sesion automaticamente para mantener UX fluida.

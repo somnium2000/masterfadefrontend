@@ -171,6 +171,8 @@ export function AuthProvider({ children }) {
         contrasena: password,
         remember: Boolean(remember),
         ...(replaceActiveSession ? { replace_active_session: true } : {}),
+      }, {
+        skipCsrf: true,
       });
 
       if (!response?.ok) {
