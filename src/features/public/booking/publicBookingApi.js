@@ -89,8 +89,8 @@ export async function createPublicPaymentIntent(payload) {
   return http.post('/v1/public/pagos/crear-intent', payload);
 }
 
-export async function getPublicPaymentStatus(params = {}) {
-  return http.get(`/v1/public/pagos/estado${toQueryString(params)}`);
+export async function getPublicPaymentStatus(params = {}, options = {}) {
+  return http.get(`/v1/public/pagos/estado${toQueryString(params)}`, options);
 }
 
 export async function completePublicMockPayment(payload) {
