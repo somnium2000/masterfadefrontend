@@ -654,10 +654,11 @@ export default function PublicBookingFlow() {
   const membershipBranchNoticeRef = useRef('');
   const rewardPreparedShownRef = useRef(false);
   const rewardUnavailableShownRef = useRef(false);
-  const rewardDiscountInfoShownRef = useRef(false);
-  const lastHoldFingerprintRef = useRef('');
-  const holderProfileHydratedRef = useRef(false);
-  const paymentAutoBootstrapAttemptRef = useRef('');
+const rewardDiscountInfoShownRef = useRef(false);
+const lastHoldFingerprintRef = useRef('');
+const holderProfileHydratedRef = useRef(false);
+const paymentAutoBootstrapAttemptRef = useRef('');
+const paymentStatusAbortRef = useRef(null);
   const [servicesCanScroll, setServicesCanScroll] = useState(false);
   const [servicesAtEnd, setServicesAtEnd] = useState(true);
 
@@ -4071,16 +4072,26 @@ export default function PublicBookingFlow() {
   }, [canUseClienteHold, holdResult, navigate, notifications, rewardBookingContext]);
 
   const refreshPaymentStatus = useCallback(async () => {
+    if (!location.pathname.startsWith('/agendar/pagar')) return null;
     const groupId = String(holdResult?.id_grupo_cita || '').trim();
     const intentId = String(paymentIntent?.id_intent || '').trim();
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
     const titularEmail = String(titularContact.email || '').trim().toLowerCase();
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
+
+    if (paymentStatusAbortRef.current) {
+      paymentStatusAbortRef.current.abort('payment_status_refresh_replaced');
+    }
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    paymentStatusAbortRef.current = controller;
+
     try {
       const response = await getPublicPaymentStatus({
         id_grupo_cita: groupId,
         id_intent: intentId,
         titular_email: titularEmail,
+      }, {
+        signal: controller?.signal,
       });
       const payload = response?.data ?? response;
       let rewardFinalization = null;
@@ -4157,6 +4168,9 @@ export default function PublicBookingFlow() {
       }
       return payload;
     } catch (err) {
+      if (err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('aborted')) {
+        return null;
+      }
       const apiError = err?.data?.error || err?.error || {};
       const errorCode = String(apiError?.code || '').trim().toUpperCase();
       if (shouldRecoverFromPaymentError(errorCode)) {
@@ -4168,11 +4182,16 @@ export default function PublicBookingFlow() {
       }
       notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-status-error' });
       return null;
+    } finally {
+      if (paymentStatusAbortRef.current === controller) {
+        paymentStatusAbortRef.current = null;
+      }
     }
   }, [
     bookingBlocks,
     holdResult?.id_grupo_cita,
     holdResult?.total_pagar_hnl,
+    location.pathname,
     notifications,
     paymentIntent?.id_intent,
     rewardBookingContext,
@@ -4284,13 +4303,27 @@ export default function PublicBookingFlow() {
   ]);
 
   useEffect(() => {
+    if (location.pathname.startsWith('/agendar/pagar')) return;
+    if (paymentStatusAbortRef.current) {
+      paymentStatusAbortRef.current.abort('payment_screen_left');
+      paymentStatusAbortRef.current = null;
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
     if (!location.pathname.startsWith('/agendar/pagar')) return undefined;
     if (!paymentIntent?.id_intent) return undefined;
     void refreshPaymentStatus();
     const intervalId = setInterval(() => {
       void refreshPaymentStatus();
     }, 4000);
-    return () => clearInterval(intervalId);
+    return () => {
+      clearInterval(intervalId);
+      if (paymentStatusAbortRef.current) {
+        paymentStatusAbortRef.current.abort('payment_polling_cleanup');
+        paymentStatusAbortRef.current = null;
+      }
+    };
   }, [location.pathname, paymentIntent?.id_intent, refreshPaymentStatus]);
 
   const contextValue = useMemo(
