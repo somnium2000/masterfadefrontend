@@ -4,6 +4,23 @@ import { Button } from '../../../components/ui/button.jsx';
 import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
 import { formatCurrencyHnl } from './bookingUtils.js';
 
+function isLocalHostname(value) {
+  const hostname = String(value || '').trim().toLowerCase();
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function canShowMockPaymentAction() {
+  const provider = String(
+    import.meta.env.VITE_PAYMENT_PROVIDER
+    || import.meta.env.VITE_PAYMENT_PROVIDER_CODE
+    || ''
+  ).trim().toLowerCase();
+  const explicitMock = String(import.meta.env.VITE_ENABLE_MOCK_PAYMENT || '').trim().toLowerCase() === 'true';
+  const providerAllowsMock = !provider || provider === 'mock';
+  const localHost = typeof window !== 'undefined' && isLocalHostname(window.location?.hostname);
+  return providerAllowsMock && (Boolean(import.meta.env.DEV) || localHost || explicitMock);
+}
+
 export default function PublicBookingPaymentStep() {
   const {
     bookingBlocksSummary,
@@ -20,6 +37,7 @@ export default function PublicBookingPaymentStep() {
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const showMockPaymentAction = canShowMockPaymentAction();
 
   const fallbackSubtotal = useMemo(
     () => bookingBlocksSummary.reduce((total, block) => total + Number(block?.total_hnl || 0), 0),
@@ -46,7 +64,8 @@ export default function PublicBookingPaymentStep() {
   );
   const effectiveTotalToPay = Number(
     holdPricing?.total_pagar_hnl
-    ?? (holdTotalToPay > 0 ? holdTotalToPay : effectiveExtras)
+    ?? holdTotalToPay
+    ?? 0
   );
 
   const holdCountdownLabel = (() => {
@@ -131,7 +150,7 @@ export default function PublicBookingPaymentStep() {
             ) : (
               <div className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)] public-booking-payment-meta">
                 <p>Estado: {paymentResult?.estado_intent_codigo || paymentIntent.estado_intent_codigo || 'pendiente'}</p>
-                <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || holdTotalToPay)}</p>
+                <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || effectiveTotalToPay)}</p>
                 {paymentIntent.payment_url ? (
                   <a
                     href={paymentIntent.payment_url}
@@ -149,10 +168,12 @@ export default function PublicBookingPaymentStep() {
               <Button variant="outline" onClick={() => refreshPaymentStatus()} disabled={!paymentIntent?.id_intent}>
                 Actualizar estado
               </Button>
-              <Button onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
-                {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
-                Simular pago exitoso
-              </Button>
+              {showMockPaymentAction ? (
+                <Button onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
+                  {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
+                  Simular pago exitoso
+                </Button>
+              ) : null}
             </div>
           </div>
         </div>

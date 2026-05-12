@@ -75,6 +75,7 @@ function shouldHydrateForPath(pathname) {
   if (path.startsWith('/auth/callback')) return false;
   if (path.startsWith('/home')) return true;
   if (path.startsWith('/admin')) return true;
+  if (path === '/agendar' || path.startsWith('/agendar/')) return true;
   if (path === '/login' || path === '/register') return true;
   return false;
 }

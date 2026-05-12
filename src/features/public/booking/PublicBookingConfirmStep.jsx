@@ -47,9 +47,8 @@ export default function PublicBookingConfirmStep() {
   const totalToPayApi = Number(holdPricing?.total_pagar_hnl ?? holdResult?.total_pagar_hnl ?? 0);
   const subtotalMenosDescuento = Math.max(0, subtotalResolved - Math.max(0, descuento));
   const totalServiciosNeto = Math.max(0, subtotalMenosDescuento - coveredTotal);
-  const totalToPay = paymentRequired
-    ? (Number.isFinite(totalToPayApi) && totalToPayApi > 0 ? totalToPayApi : totalServiciosNeto)
-    : totalServiciosNeto;
+  const hasBackendTotal = hasHoldReady && Number.isFinite(totalToPayApi);
+  const totalToPay = hasBackendTotal ? Math.max(0, totalToPayApi) : totalServiciosNeto;
   const requiresOnlinePayment = Boolean(paymentRequired && totalToPay > 0);
   const totalLabel = paymentRequired ? 'Total a pagar' : 'Total a pagar en salón';
   const showExtrasRow = Number.isFinite(extrasToPay) && extrasToPay > 0;
@@ -59,7 +58,19 @@ export default function PublicBookingConfirmStep() {
     if (submitting) return;
     setSubmitting(true);
     try {
-      if (requiresOnlinePayment) {
+      let currentHold = holdResult;
+      if (!currentHold && typeof submitHold === 'function') {
+        currentHold = await submitHold();
+      }
+      if (!currentHold) return;
+
+      const backendTotalToPay = Number(
+        currentHold?.total_pagar_hnl
+        ?? currentHold?.monto_pendiente_hnl
+        ?? NaN
+      );
+      const hasResolvedBackendTotal = Number.isFinite(backendTotalToPay);
+      if (paymentRequired && (!hasResolvedBackendTotal || backendTotalToPay > 0)) {
         if (typeof startCheckout === 'function') {
           await startCheckout();
         }
@@ -71,9 +82,9 @@ export default function PublicBookingConfirmStep() {
       }
 
       const resolvedTotalToPay = Number(
-        holdPricing?.total_pagar_hnl
-        ?? holdResult?.total_pagar_hnl
-        ?? totalToPay
+        currentHold?.total_pagar_hnl
+        ?? currentHold?.monto_pendiente_hnl
+        ?? holdPricing?.total_pagar_hnl
         ?? 0
       );
       const canConfirmNow = Boolean(
@@ -83,11 +94,7 @@ export default function PublicBookingConfirmStep() {
       );
       if (!canConfirmNow) return;
 
-      let localGroupId = String(holdResult?.id_grupo_cita || '').trim();
-      if (!localGroupId && typeof submitHold === 'function') {
-        const freshHold = await submitHold();
-        localGroupId = String(freshHold?.id_grupo_cita || '').trim();
-      }
+      const localGroupId = String(currentHold?.id_grupo_cita || '').trim();
       if (!localGroupId) {
         notifications.error('No se pudo preparar la reserva para confirmar. Vuelve a agenda e inténtalo de nuevo.', {
           dedupeKey: 'public-booking-confirm-no-payment-group-missing',

@@ -12,11 +12,11 @@ function toQueryString(params = {}) {
   return query ? `?${query}` : '';
 }
 
-export async function getPublicBookingContext() {
-  return http.get('/v1/public/citas/contexto');
+export async function getPublicBookingContext(options = {}) {
+  return http.get('/v1/public/citas/contexto', options);
 }
 
-export async function listPublicAgendaBarberos(params = {}) {
+export async function listPublicAgendaBarberos(params = {}, options = {}) {
   const idSucursal = String(params?.id_sucursal || '').trim();
   if (!UUID_PATTERN.test(idSucursal)) {
     const error = new Error('Selecciona una sucursal valida para consultar barberos.');
@@ -29,20 +29,20 @@ export async function listPublicAgendaBarberos(params = {}) {
     };
     throw error;
   }
-  return http.get(`/v1/public/agenda/barberos${toQueryString({ ...params, id_sucursal: idSucursal })}`);
+  return http.get(`/v1/public/agenda/barberos${toQueryString({ ...params, id_sucursal: idSucursal })}`, options);
 }
 
-export async function listPublicCatalogServicios(params = {}) {
-  return http.get(`/v1/public/catalog/servicios${toQueryString(params)}`);
+export async function listPublicCatalogServicios(params = {}, options = {}) {
+  return http.get(`/v1/public/catalog/servicios${toQueryString(params)}`, options);
 }
 
-export async function listPublicCatalogPaquetes(params = {}) {
-  return http.get(`/v1/public/catalog/paquetes${toQueryString(params)}`);
+export async function listPublicCatalogPaquetes(params = {}, options = {}) {
+  return http.get(`/v1/public/catalog/paquetes${toQueryString(params)}`, options);
 }
 
 // JK: Consulta promociones vigentes para el flujo de agendamiento sin afectar pagos/factura.
-export async function listPublicAgendaPromociones(params = {}) {
-  return http.get(`/v1/public/agenda/promociones${toQueryString(params)}`);
+export async function listPublicAgendaPromociones(params = {}, options = {}) {
+  return http.get(`/v1/public/agenda/promociones${toQueryString(params)}`, options);
 }
 
 export async function listPublicAgendaDisponibilidad(params = {}, options = {}) {
@@ -61,7 +61,7 @@ export async function validatePublicTitularForBooking(payload) {
   return http.post('/v1/public/citas/validar-titular', payload);
 }
 
-export async function releasePublicCitaHold(idGrupoCita) {
+export async function releasePublicCitaHold(idGrupoCita, releaseToken) {
   const groupId = String(idGrupoCita || '').trim();
   if (!UUID_PATTERN.test(groupId)) {
     const error = new Error('No se pudo identificar la reserva temporal.');
@@ -74,11 +74,41 @@ export async function releasePublicCitaHold(idGrupoCita) {
     };
     throw error;
   }
-  return http.delete(`/v1/public/citas/hold/${encodeURIComponent(groupId)}`);
+  const token = String(releaseToken || '').trim();
+  if (!token) {
+    const error = new Error('No se pudo validar la reserva temporal publica.');
+    error.status = 400;
+    error.data = {
+      error: {
+        code: 'PUBLIC_BOOKING_HOLD_RELEASE_TOKEN_REQUIRED',
+        message: error.message,
+      },
+    };
+    throw error;
+  }
+  return http.del(`/v1/public/citas/hold/${encodeURIComponent(groupId)}`, {
+    body: { release_token: token },
+  });
 }
 
 export async function createClienteCitaHold(payload) {
   return http.post('/v1/citas/hold', payload);
+}
+
+export async function releaseClienteCitaHold(idGrupoCita) {
+  const groupId = String(idGrupoCita || '').trim();
+  if (!UUID_PATTERN.test(groupId)) {
+    const error = new Error('No se pudo identificar la reserva temporal.');
+    error.status = 400;
+    error.data = {
+      error: {
+        code: 'CLIENT_BOOKING_HOLD_GROUP_INVALID',
+        message: error.message,
+      },
+    };
+    throw error;
+  }
+  return http.del(`/v1/citas/hold/${encodeURIComponent(groupId)}`);
 }
 
 export async function confirmClienteCitaHoldWithoutPayment(idGrupoCita, payload = {}, options = {}) {
@@ -98,6 +128,6 @@ export async function completePublicMockPayment(payload) {
 }
 
 // AM: Consulta de estado de membresía para propuesta automática de servicios cubiertos en booking autenticado.
-export async function getClienteMembershipEstado() {
-  return http.get('/v1/cliente/planes/estado');
+export async function getClienteMembershipEstado(options = {}) {
+  return http.get('/v1/cliente/planes/estado', options);
 }

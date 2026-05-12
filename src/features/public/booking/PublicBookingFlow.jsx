@@ -32,6 +32,7 @@ import {
   completePublicMockPayment,
   getClienteMembershipEstado,
   getPublicBookingContext,
+  releaseClienteCitaHold,
   releasePublicCitaHold,
   validatePublicTitularForBooking,
   listPublicAgendaBarberos,
@@ -64,7 +65,7 @@ import {
 } from './bookingUtils.js';
 import '../../admin/pages/AdminCitasPage.css';
 import './PublicBookingFlow.css';
-import usePublicAgendaRealtime from './usePublicAgendaRealtime.js';
+import usePublicAgendaPolling from './usePublicAgendaPolling.js';
 
 const EMPTY_CONTEXT = {
   sucursales: [],
@@ -78,6 +79,12 @@ const PublicBookingContext = createContext(null);
 
 export function PublicBookingProvider({ value, children }) {
   return <PublicBookingContext.Provider value={value}>{children}</PublicBookingContext.Provider>;
+}
+
+function resolveBookingMode({ isHydrating, isHydrated, isAuthenticated, roles }) {
+  if (isHydrating || !isHydrated) return 'loading';
+  if (isAuthenticated && Array.isArray(roles) && roles.includes('cliente')) return 'authenticated';
+  return 'public';
 }
 
 function readBooleanParam(parametros, key, fallback) {
@@ -571,8 +578,12 @@ export default function PublicBookingFlow() {
   const navigate = useNavigate();
   const notifications = useNotifications();
   const notifyError = notifications.error;
-  const { isAuthenticated, roles, user } = useAuth();
-  const canUseClienteHold = Boolean(isAuthenticated && Array.isArray(roles) && roles.includes('cliente'));
+  const { isAuthenticated, isHydrating, isHydrated, roles, user } = useAuth();
+  const bookingMode = useMemo(
+    () => resolveBookingMode({ isHydrating, isHydrated, isAuthenticated, roles }),
+    [isHydrating, isHydrated, isAuthenticated, roles]
+  );
+  const canUseClienteHold = bookingMode === 'authenticated';
   const titularState = useMemo(
     () => getTitularState(canUseClienteHold ? user : null),
     [canUseClienteHold, user]
@@ -636,12 +647,17 @@ export default function PublicBookingFlow() {
   const [membershipStateData, setMembershipStateData] = useState(null);
   const [membershipBranchNotice, setMembershipBranchNotice] = useState('');
 
+  const contextAbortRef = useRef(null);
+  const branchDataAbortRef = useRef(null);
   const availabilityAbortRef = useRef(null);
   const slotsAbortRef = useRef(null);
+  const slotSuggestionsAbortRef = useRef(null);
+  const membershipStateAbortRef = useRef(null);
   const branchDataRequestSeqRef = useRef(0);
   const availabilityRequestSeqRef = useRef(0);
   const slotsRequestSeqRef = useRef(0);
   const slotSuggestionRequestSeqRef = useRef(0);
+  const branchDataCacheRef = useRef(new Map());
   const availabilityCacheRef = useRef(new Map());
   const slotsCacheRef = useRef(new Map());
   const servicesScrollRef = useRef(null);
@@ -933,12 +949,13 @@ const paymentStatusAbortRef = useRef(null);
   const selectedServiceIdsEffective = activeSelectionSummary.selectedServiceIdsEffective;
 
   const activeBlockMembershipServiceIdsForAgenda = useMemo(
-    () => (
-      effectiveActiveBlockIndex === 0
-        ? [...membershipLockedServiceIdsForTitular, ...rewardLockedServiceIdsForTitular]
-        : []
-    ),
-    [effectiveActiveBlockIndex, membershipLockedServiceIdsForTitular, rewardLockedServiceIdsForTitular]
+    () => {
+      if (effectiveActiveBlockIndex !== 0) return [];
+      const includedSet = new Set(activeSelectionSummary.includedServiceIdsFromPackage || []);
+      return [...membershipLockedServiceIdsForTitular, ...rewardLockedServiceIdsForTitular]
+        .filter((serviceId) => !includedSet.has(String(serviceId || '').trim()));
+    },
+    [activeSelectionSummary.includedServiceIdsFromPackage, effectiveActiveBlockIndex, membershipLockedServiceIdsForTitular, rewardLockedServiceIdsForTitular]
   );
   const effectiveSelectedServiceIdsForAgenda = useMemo(
     () => Array.from(new Set([
@@ -1214,10 +1231,15 @@ const paymentStatusAbortRef = useRef(null);
         });
 
         if (index === 0 && (membershipCoveredSet.size > 0 || rewardCoveredSet.size > 0)) {
+          const packageIncludedSet = new Set(
+            (Array.isArray(summary.includedServiceIdsFromPackage) ? summary.includedServiceIdsFromPackage : [])
+              .map((serviceId) => String(serviceId || '').trim())
+              .filter(Boolean)
+          );
           const mergedCoveredIds = new Set([
             ...membershipCoveredSet,
             ...rewardCoveredSet,
-          ]);
+          ].filter((serviceId) => !packageIncludedSet.has(String(serviceId || '').trim())));
           mergedCoveredIds.forEach((serviceId) => {
             if (!serviceId || blockServicesById.has(serviceId)) return;
             const serviceCatalog = servicesById.get(serviceId);
@@ -1566,11 +1588,27 @@ const paymentStatusAbortRef = useRef(null);
   }, [clearSlotConflict]);
 
   const clearRequestState = useCallback(() => {
-    if (availabilityAbortRef.current) availabilityAbortRef.current.abort();
-    if (slotsAbortRef.current) slotsAbortRef.current.abort();
+    if (branchDataAbortRef.current) {
+      branchDataAbortRef.current.abort();
+      branchDataAbortRef.current = null;
+    }
+    if (availabilityAbortRef.current) {
+      availabilityAbortRef.current.abort();
+      availabilityAbortRef.current = null;
+    }
+    if (slotsAbortRef.current) {
+      slotsAbortRef.current.abort();
+      slotsAbortRef.current = null;
+    }
+    if (slotSuggestionsAbortRef.current) {
+      slotSuggestionsAbortRef.current.abort();
+      slotSuggestionsAbortRef.current = null;
+    }
     availabilityCacheRef.current.clear();
     slotsCacheRef.current.clear();
     setAvailabilityMap({});
+    setSlotSuggestions([]);
+    setSlotSuggestionsLoading(false);
     setFieldErrors({});
     resetAvailabilityViewState();
   }, [resetAvailabilityViewState]);
@@ -1623,10 +1661,16 @@ const paymentStatusAbortRef = useRef(null);
   }, []);
 
   const fetchContext = useCallback(async () => {
+    if (contextAbortRef.current) {
+      contextAbortRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    contextAbortRef.current = controller;
     setContextLoading(true);
     setContextError('');
     try {
-      const response = await getPublicBookingContext();
+      const response = await getPublicBookingContext({ signal: controller.signal });
       const payload = response?.data ?? response;
       const nextContext = {
         sucursales: Array.isArray(payload?.sucursales) ? payload.sucursales : [],
@@ -1634,25 +1678,64 @@ const paymentStatusAbortRef = useRef(null);
       };
       setContextData(nextContext);
     } catch (err) {
+      if (err?.name === 'AbortError') return;
       setContextError(extractMessage(err));
     } finally {
-      setContextLoading(false);
+      if (contextAbortRef.current === controller) {
+        contextAbortRef.current = null;
+        setContextLoading(false);
+      }
     }
   }, []);
 
   const fetchBranchData = useCallback(async () => {
     if (!selectedBranchId) {
+      if (branchDataAbortRef.current) {
+        branchDataAbortRef.current.abort();
+        branchDataAbortRef.current = null;
+      }
+      branchDataRequestSeqRef.current += 1;
       setBarbers([]);
       setServices([]);
       setPackages([]);
       setPromotions([]);
       setPromotionsLoadError('');
+      setBarbersLoading(false);
       setBarbersRefreshing(false);
+      setServicesLoading(false);
       setPackagesLoading(false);
       setPromotionsLoading(false);
       return;
     }
 
+    const cacheKey = [selectedBranchId, activeBlockBarberId || 'auto', maxPromotionsPerBooking].join('|');
+    const cached = branchDataCacheRef.current.get(cacheKey);
+    if (cached) {
+      if (branchDataAbortRef.current) {
+        branchDataAbortRef.current.abort();
+        branchDataAbortRef.current = null;
+      }
+      branchDataRequestSeqRef.current += 1;
+      setBarbers(cached.barbers);
+      setServices(cached.services);
+      setPackages(cached.packages);
+      setPromotions(cached.promotions);
+      setPromotionsLoadError(cached.promotionsLoadError || '');
+      setAvailabilityError(cached.availabilityError || '');
+      setBarbersLoading(false);
+      setBarbersRefreshing(false);
+      setServicesLoading(false);
+      setPackagesLoading(false);
+      setPromotionsLoading(false);
+      return;
+    }
+
+    if (branchDataAbortRef.current) {
+      branchDataAbortRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    branchDataAbortRef.current = controller;
     const requestSeq = branchDataRequestSeqRef.current + 1;
     branchDataRequestSeqRef.current = requestSeq;
     const hasExistingBarbers = barbersCountRef.current > 0;
@@ -1667,7 +1750,10 @@ const paymentStatusAbortRef = useRef(null);
     setAvailabilityError('');
 
     try {
-      const barbersResponse = await listPublicAgendaBarberos({ id_sucursal: selectedBranchId });
+      const barbersResponse = await listPublicAgendaBarberos(
+        { id_sucursal: selectedBranchId },
+        { signal: controller.signal }
+      );
       if (requestSeq !== branchDataRequestSeqRef.current) return;
 
       const barbersPayload = barbersResponse?.data ?? barbersResponse;
@@ -1686,16 +1772,17 @@ const paymentStatusAbortRef = useRef(null);
         listPublicCatalogServicios({
           id_sucursal: selectedBranchId,
           id_barbero: scopedBarberId || undefined,
-        }),
+        }, { signal: controller.signal }),
         listPublicCatalogPaquetes({
           id_sucursal: selectedBranchId,
           id_barbero: scopedBarberId || undefined,
-        }),
+        }, { signal: controller.signal }),
         listPublicAgendaPromociones({
           id_sucursal: selectedBranchId,
-        }),
+        }, { signal: controller.signal }),
       ]);
       if (requestSeq !== branchDataRequestSeqRef.current) return;
+      if (controller.signal.aborted) return;
 
       let nextServices = [];
       let validServiceIds = new Set();
@@ -1738,16 +1825,28 @@ const paymentStatusAbortRef = useRef(null);
         })()
         : [];
       const validPromotionIds = new Set(nextPromotions.map((promotion) => String(promotion?.id_promocion || '').trim()).filter(Boolean));
+      let nextPromotionsLoadError = '';
+      let nextAvailabilityError = '';
       if (promotionsResult.status !== 'fulfilled') {
-        setPromotionsLoadError('No se pudieron cargar promociones en este momento. Puedes continuar sin promociones.');
+        nextPromotionsLoadError = 'No se pudieron cargar promociones en este momento. Puedes continuar sin promociones.';
+        setPromotionsLoadError(nextPromotionsLoadError);
       }
       if (servicesResult.status !== 'fulfilled' || packagesResult.status !== 'fulfilled') {
-        setAvailabilityError('No se pudo cargar el catálogo completo de esta sucursal en este momento. Puedes reintentar.');
+        nextAvailabilityError = 'No se pudo cargar el catálogo completo de esta sucursal en este momento. Puedes reintentar.';
+        setAvailabilityError(nextAvailabilityError);
       }
 
       setServices(nextServices);
       setPackages(nextPackages);
       setPromotions(nextPromotions);
+      branchDataCacheRef.current.set(cacheKey, {
+        barbers: nextBarbers,
+        services: nextServices,
+        packages: nextPackages,
+        promotions: nextPromotions,
+        promotionsLoadError: nextPromotionsLoadError,
+        availabilityError: nextAvailabilityError,
+      });
 
       setBookingBlocks((prev) => {
         const sourceBlocks = prev.length > 0
@@ -1815,6 +1914,7 @@ const paymentStatusAbortRef = useRef(null);
         return hasChanges ? nextBlocks : normalizedSource;
       });
     } catch (err) {
+      if (err?.name === 'AbortError') return;
       if (requestSeq !== branchDataRequestSeqRef.current) return;
       const status = Number(err?.status || 0);
       const message = status >= 500
@@ -1825,6 +1925,9 @@ const paymentStatusAbortRef = useRef(null);
       notifyError(message, { dedupeKey: 'public-booking-branch-data-error' });
     } finally {
       if (requestSeq === branchDataRequestSeqRef.current) {
+        if (branchDataAbortRef.current === controller) {
+          branchDataAbortRef.current = null;
+        }
         setBarbersLoading(false);
         setBarbersRefreshing(false);
         setServicesLoading(false);
@@ -1837,6 +1940,11 @@ const paymentStatusAbortRef = useRef(null);
   const fetchAvailability = useCallback(async () => {
     const hasSelection = Boolean(selectedPackageId) || effectiveSelectedServiceIdsForAgenda.length > 0;
     if (!selectedBranchId || !hasSelection) {
+      if (availabilityAbortRef.current) {
+        availabilityAbortRef.current.abort();
+        availabilityAbortRef.current = null;
+      }
+      availabilityRequestSeqRef.current += 1;
       setAvailabilityMap({});
       setAvailabilityLoading(false);
       return;
@@ -1923,6 +2031,9 @@ const paymentStatusAbortRef = useRef(null);
       setAvailabilityError(message);
     } finally {
       if (requestSeq === availabilityRequestSeqRef.current) {
+        if (availabilityAbortRef.current === controller) {
+          availabilityAbortRef.current = null;
+        }
         setAvailabilityLoading(false);
       }
     }
@@ -1945,6 +2056,11 @@ const paymentStatusAbortRef = useRef(null);
   const fetchSlots = useCallback(async () => {
     const hasSelection = Boolean(selectedPackageId) || effectiveSelectedServiceIdsForAgenda.length > 0;
     if (!selectedBranchId || !hasSelection || !selectedDate) {
+      if (slotsAbortRef.current) {
+        slotsAbortRef.current.abort();
+        slotsAbortRef.current = null;
+      }
+      slotsRequestSeqRef.current += 1;
       setSlots(buildDefaultSlots());
       setSlotsCurated(createEmptyCuratedSlots());
       setSlotMetrics({ duracionTotalMin: 0, bufferTotalMin: 0 });
@@ -2020,6 +2136,9 @@ const paymentStatusAbortRef = useRef(null);
       notifyError(extractMessage(err), { dedupeKey: 'public-booking-slots-error' });
     } finally {
       if (requestSeq === slotsRequestSeqRef.current) {
+        if (slotsAbortRef.current === controller) {
+          slotsAbortRef.current = null;
+        }
         setSlotsLoading(false);
       }
     }
@@ -2042,9 +2161,10 @@ const paymentStatusAbortRef = useRef(null);
     selectionTypeValue,
     servicesCsvValue,
     packageIdValue,
+    signal,
   }) => {
     const hasSelection = Boolean(packageIdValue) || Boolean(servicesCsvValue);
-    if (!selectedBranchId || !barberId || !dateKey || !hasSelection) {
+    if (!selectedBranchId || !barberId || !dateKey || !hasSelection || signal?.aborted) {
       return buildDefaultSlots();
     }
 
@@ -2053,14 +2173,17 @@ const paymentStatusAbortRef = useRef(null);
     const cached = slotsCacheRef.current.get(cacheKey);
     if (cached) return cached.slots;
 
-    const response = await listPublicAgendaHorarios({
-      id_sucursal: selectedBranchId,
-      id_barbero: barberId,
-      selection_type: selectionTypeValue,
-      servicios: servicesCsvValue || undefined,
-      id_paquete: packageIdValue || undefined,
-      fecha: dateKey,
-    });
+    const response = await listPublicAgendaHorarios(
+      {
+        id_sucursal: selectedBranchId,
+        id_barbero: barberId,
+        selection_type: selectionTypeValue,
+        servicios: servicesCsvValue || undefined,
+        id_paquete: packageIdValue || undefined,
+        fecha: dateKey,
+      },
+      { signal }
+    );
 
     const payload = response?.data ?? response;
     const mapped = buildDynamicSlots({
@@ -2096,6 +2219,10 @@ const paymentStatusAbortRef = useRef(null);
   }) => {
     const hasSelection = Boolean(packageIdValue) || Boolean(servicesCsvValue);
     if (!barberId || !dateKey || !timeKey || !hasSelection) {
+      if (slotSuggestionsAbortRef.current) {
+        slotSuggestionsAbortRef.current.abort();
+        slotSuggestionsAbortRef.current = null;
+      }
       setSlotSuggestions([]);
       setSlotSuggestionsLoading(false);
       return;
@@ -2104,6 +2231,10 @@ const paymentStatusAbortRef = useRef(null);
     const barberCandidates = (Array.isArray(barbers) ? barbers : [])
       .filter((barber) => barber?.id_empleado && barber.id_empleado !== barberId);
     if (!barberCandidates.length) {
+      if (slotSuggestionsAbortRef.current) {
+        slotSuggestionsAbortRef.current.abort();
+        slotSuggestionsAbortRef.current = null;
+      }
       setSlotSuggestions([]);
       setSlotSuggestionsLoading(false);
       return;
@@ -2111,6 +2242,11 @@ const paymentStatusAbortRef = useRef(null);
 
     const requestSeq = slotSuggestionRequestSeqRef.current + 1;
     slotSuggestionRequestSeqRef.current = requestSeq;
+    if (slotSuggestionsAbortRef.current) {
+      slotSuggestionsAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    slotSuggestionsAbortRef.current = controller;
     setSlotSuggestionsLoading(true);
     setSlotSuggestions([]);
 
@@ -2124,6 +2260,7 @@ const paymentStatusAbortRef = useRef(null);
               selectionTypeValue,
               servicesCsvValue,
               packageIdValue,
+              signal: controller.signal,
             });
             const isAvailable = barberSlots.some((slot) => slot.hora === timeKey && slot.disponible);
             if (!isAvailable) return null;
@@ -2138,9 +2275,13 @@ const paymentStatusAbortRef = useRef(null);
       );
 
       if (requestSeq !== slotSuggestionRequestSeqRef.current) return;
+      if (controller.signal.aborted) return;
       setSlotSuggestions(results.filter(Boolean));
     } finally {
       if (requestSeq === slotSuggestionRequestSeqRef.current) {
+        if (slotSuggestionsAbortRef.current === controller) {
+          slotSuggestionsAbortRef.current = null;
+        }
         setSlotSuggestionsLoading(false);
       }
     }
@@ -2151,7 +2292,7 @@ const paymentStatusAbortRef = useRef(null);
     slotsCacheRef.current.clear();
   }, []);
 
-  const refreshRealtimeAgenda = useCallback(() => {
+  const refreshPolledAgenda = useCallback(() => {
     invalidateAgendaCaches();
     void fetchAvailability();
     if (selectedDate) {
@@ -2204,7 +2345,7 @@ const paymentStatusAbortRef = useRef(null);
     notifications,
   ]);
 
-  usePublicAgendaRealtime({
+  usePublicAgendaPolling({
     barberId: activeBlockBarberId,
     dateKey: selectedDate,
     enabled: Boolean(
@@ -2213,7 +2354,7 @@ const paymentStatusAbortRef = useRef(null);
       && activeBlockBarberId
       && (selectedPackageId || selectedServiceIdsEffective.length > 0)
     ),
-    onInvalidate: refreshRealtimeAgenda,
+    onInvalidate: refreshPolledAgenda,
   });
 
   useEffect(() => {
@@ -2237,27 +2378,42 @@ const paymentStatusAbortRef = useRef(null);
 
   useEffect(() => {
     if (!canUseClienteHold) {
+      if (membershipStateAbortRef.current) {
+        membershipStateAbortRef.current.abort();
+        membershipStateAbortRef.current = null;
+      }
       setMembershipStateData(null);
       setMembershipBranchNotice('');
       membershipBranchNoticeRef.current = '';
       return;
     }
 
-    let cancelled = false;
+    if (membershipStateAbortRef.current) {
+      membershipStateAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    membershipStateAbortRef.current = controller;
     (async () => {
       try {
-        const response = await getClienteMembershipEstado();
-        if (cancelled) return;
+        const response = await getClienteMembershipEstado({ signal: controller.signal });
+        if (controller.signal.aborted) return;
         const payload = response?.data ?? response;
         setMembershipStateData(payload && typeof payload === 'object' ? payload : null);
-      } catch {
-        if (cancelled) return;
+      } catch (err) {
+        if (err?.name === 'AbortError' || controller.signal.aborted) return;
         setMembershipStateData(null);
+      } finally {
+        if (membershipStateAbortRef.current === controller) {
+          membershipStateAbortRef.current = null;
+        }
       }
     })();
 
     return () => {
-      cancelled = true;
+      controller.abort();
+      if (membershipStateAbortRef.current === controller) {
+        membershipStateAbortRef.current = null;
+      }
     };
   }, [canUseClienteHold]);
 
@@ -2460,8 +2616,12 @@ const paymentStatusAbortRef = useRef(null);
 
   useEffect(() => {
     return () => {
+      if (contextAbortRef.current) contextAbortRef.current.abort();
+      if (branchDataAbortRef.current) branchDataAbortRef.current.abort();
       if (availabilityAbortRef.current) availabilityAbortRef.current.abort();
       if (slotsAbortRef.current) slotsAbortRef.current.abort();
+      if (slotSuggestionsAbortRef.current) slotSuggestionsAbortRef.current.abort();
+      if (membershipStateAbortRef.current) membershipStateAbortRef.current.abort();
     };
   }, []);
 
@@ -2788,7 +2948,11 @@ const paymentStatusAbortRef = useRef(null);
     const groupId = String(holdResult?.id_grupo_cita || '').trim();
     if (groupId) {
       try {
-        await releasePublicCitaHold(groupId);
+        if (canUseClienteHold) {
+          await releaseClienteCitaHold(groupId);
+        } else {
+          await releasePublicCitaHold(groupId, holdResult?.release_token);
+        }
       } catch {
         notifications.warning('No se pudo liberar la reserva temporal en este momento, pero se canceló el flujo local.', {
           dedupeKey: 'public-booking-release-hold-warning',
@@ -2818,7 +2982,7 @@ const paymentStatusAbortRef = useRef(null);
     setSlotSuggestions([]);
     navigate('/', { replace: true });
     return true;
-  }, [holdResult?.id_grupo_cita, minBookingMonth, navigate, notifications, invalidateAgendaCaches]);
+  }, [canUseClienteHold, holdResult?.id_grupo_cita, holdResult?.release_token, minBookingMonth, navigate, notifications, invalidateAgendaCaches]);
 
   const cancelRewardRedemptionUsage = useCallback(() => {
     if (!rewardModeActive) return;
@@ -3339,6 +3503,12 @@ const paymentStatusAbortRef = useRef(null);
   ]);
 
   const submitHold = useCallback(async () => {
+    if (bookingMode === 'loading') {
+      notifications.info('Estamos verificando tu sesion antes de continuar.', {
+        dedupeKey: 'public-booking-auth-loading-submit',
+      });
+      return false;
+    }
     if (!selectedBranchId || !selectedBarberId) {
       notifications.warning('Debes seleccionar sucursal y barbero.', { dedupeKey: 'public-booking-hold-context' });
       navigate('/agendar/barberos');
@@ -3517,12 +3687,11 @@ const paymentStatusAbortRef = useRef(null);
 
     const integrantes = [];
     for (const block of blocksToSubmit) {
-      const fechaInicio = toLocalDateTimeWithOffset(block.selectedDate, block.selectedTime);
       const preservedFechaInicio = String(block?.selectedDateTime || '').trim();
       const expectedPrefix = `${String(block?.selectedDate || '').trim()}T${String(block?.selectedTime || '').trim()}`;
       const fechaInicioNormalizada = (preservedFechaInicio && expectedPrefix && preservedFechaInicio.startsWith(expectedPrefix))
         ? preservedFechaInicio
-        : fechaInicio;
+        : toLocalDateTimeWithOffset(block.selectedDate, block.selectedTime);
       if (!fechaInicioNormalizada) {
         notifications.error('No se pudo construir la fecha y hora de una de las citas del grupo.', {
           dedupeKey: 'public-booking-datetime-invalid',
@@ -3549,7 +3718,8 @@ const paymentStatusAbortRef = useRef(null);
         integrantePayload.promotionIds = blockPromotionIds;
         integrantePayload.promotionId = blockPromotionIds[0] || null;
       }
-      if (!canUseClienteHold) {
+      const shouldSendContact = bookingMode === 'public' || block.index > 0;
+      if (shouldSendContact) {
         integrantePayload.contacto = {
           nombre: String(blockContactState.fullName || block.alias || '').trim(),
           nombres: String(blockContactState.firstName || '').trim() || null,
@@ -3590,8 +3760,12 @@ const paymentStatusAbortRef = useRef(null);
       }
       if (canUseClienteHold) {
         holdPayload.titular = {
-          nombres: normalizedTitularBlock.contactFirstName || null,
-          apellidos: normalizedTitularBlock.contactLastName || null,
+          nombres: titularState.missingFields.includes('nombres')
+            ? (normalizedTitularBlock.contactFirstName || null)
+            : null,
+          apellidos: titularState.missingFields.includes('apellidos')
+            ? (normalizedTitularBlock.contactLastName || null)
+            : null,
           telefono: titularState.missingFields.includes('telefono_principal')
             ? (normalizePhone(normalizedTitularBlock.contactPhone || '') || null)
             : null,
@@ -3753,6 +3927,7 @@ const paymentStatusAbortRef = useRef(null);
     }
   }, [
     buildFieldErrorKey,
+    bookingMode,
     bookingBlocks,
     bookingBlocksSummary,
     blocksToSubmitSummary,
@@ -3796,6 +3971,12 @@ const paymentStatusAbortRef = useRef(null);
 
   const goToConfirm = useCallback(async () => {
     if (holdSubmitting) return false;
+    if (bookingMode === 'loading') {
+      notifications.info('Estamos verificando tu sesion antes de continuar.', {
+        dedupeKey: 'public-booking-auth-loading-confirm',
+      });
+      return false;
+    }
     if (!allBlocksComplete) {
       notifications.warning(bookingBlockingReason || 'Completa servicios, fecha y hora antes de continuar a resumen.', {
         dedupeKey: 'public-booking-confirm-requires-complete-blocks',
@@ -3841,6 +4022,7 @@ const paymentStatusAbortRef = useRef(null);
   }, [
     allBlocksComplete,
     bookingBlockingReason,
+    bookingMode,
     holdSubmitting,
     canUseClienteHold,
     bookingBlocks,
@@ -3863,7 +4045,8 @@ const paymentStatusAbortRef = useRef(null);
     return code === 'PUBLIC_PAGOS_HOLD_EXPIRED'
       || code === 'PUBLIC_PAGOS_GROUP_STATE_INVALID'
       || code === 'PUBLIC_PAGOS_GROUP_NOT_FOUND'
-      || code === 'PUBLIC_PAGOS_INTENT_NOT_FOUND';
+      || code === 'PUBLIC_PAGOS_INTENT_NOT_FOUND'
+      || code === 'PUBLIC_PAGOS_INTENT_GROUP_MISMATCH';
   }, []);
 
   const createPaymentIntentForHold = useCallback(async () => {
@@ -4202,12 +4385,14 @@ const paymentStatusAbortRef = useRef(null);
   ]);
 
   const completeMockPayment = useCallback(async () => {
+    const groupId = String(holdResult?.id_grupo_cita || '').trim();
     const intentId = String(paymentIntent?.id_intent || '').trim();
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
     const titularEmail = String(titularContact.email || '').trim().toLowerCase();
-    if (!intentId || !isValidEmail(titularEmail)) return false;
+    if (!groupId || !intentId || !isValidEmail(titularEmail)) return false;
     try {
       await completePublicMockPayment({
+        id_grupo_cita: groupId,
         id_intent: intentId,
         titular_email: titularEmail,
         status: 'paid',
@@ -4218,7 +4403,7 @@ const paymentStatusAbortRef = useRef(null);
       notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-complete-error' });
       return false;
     }
-  }, [bookingBlocks, notifications, paymentIntent?.id_intent, refreshPaymentStatus, resolveBlockContactState]);
+  }, [bookingBlocks, holdResult?.id_grupo_cita, notifications, paymentIntent?.id_intent, refreshPaymentStatus, resolveBlockContactState]);
 
   const startCheckout = useCallback(async () => {
     if (paymentResult?.booking_confirmed) return true;
@@ -4443,6 +4628,7 @@ const paymentStatusAbortRef = useRef(null);
       syncServicesScrollState,
       toggleService,
       clearSelectedPromotion,
+      bookingMode,
       totalEstimatedPromotionDiscountHnl,
       totalEstimatedToPay,
       totalToPay,
@@ -4585,8 +4771,7 @@ const paymentStatusAbortRef = useRef(null);
   }
 
   const showTopbarBackToBarberos = location.pathname.startsWith('/agendar/agenda');
-  const isClienteSession = isAuthenticated && Array.isArray(roles) && roles.includes('cliente');
-  const homePath = isClienteSession ? '/home/cliente' : '/';
+  const homePath = bookingMode === 'authenticated' ? '/home/cliente' : '/';
   const homeLabel = 'Inicio MasterFade';
   const showBranchDataErrorBanner = Boolean(
     location.pathname.startsWith('/agendar/barberos')
