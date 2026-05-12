@@ -2,7 +2,9 @@ import { ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '../../../components/ui/button.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
-import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
+import { usePublicBookingFlow } from './BookingFlowContext.jsx';
+import BookingActions from './components/BookingActions.jsx';
+import BookingStepHeader from './components/BookingStepHeader.jsx';
 import {
   formatCurrencyHnl,
   formatDateOnly,
@@ -124,7 +126,11 @@ export default function PublicBookingConfirmStep() {
   return (
     <div className="citas-confirm-wrap">
       <div className="citas-surface p-5">
-        <h3 className="citas-confirm-title">Resumen de cita</h3>
+        <BookingStepHeader
+          title="Resumen de cita"
+          headingLevel="h3"
+          titleClassName="citas-confirm-title"
+        />
         {mode === 'preview' ? (
           <p className="citas-selected-date mt-2">Modo vista previa: puedes validar estructura y reglas antes de publicar.</p>
         ) : null}
@@ -210,7 +216,7 @@ export default function PublicBookingConfirmStep() {
           </span>
         </div>
 
-        <div className="public-booking-actions is-inline mt-4">
+        <BookingActions inline className="mt-4">
           <Button variant="outline" className="gap-2" onClick={goToAgenda} disabled={submitting}>
             <ArrowLeft size={15} />
             Volver a agenda
@@ -238,7 +244,7 @@ export default function PublicBookingConfirmStep() {
             {requiresOnlinePayment ? 'Continuar al pago' : 'Confirmar cita'}
             <ArrowRight size={15} />
           </Button>
-        </div>
+        </BookingActions>
         {mustLoginForNoPaymentConfirmation ? (
           <p className="citas-selected-date mt-2">
             Para confirmar sin pago en línea debes iniciar sesión.

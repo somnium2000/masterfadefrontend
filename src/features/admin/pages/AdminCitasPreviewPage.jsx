@@ -14,7 +14,7 @@ import PublicBookingAgendaStep from '../../public/booking/PublicBookingAgendaSte
 import PublicBookingConfirmStep from '../../public/booking/PublicBookingConfirmStep.jsx';
 import {
   PublicBookingProvider,
-} from '../../public/booking/PublicBookingFlow.jsx';
+} from '../../public/booking/BookingFlowContext.jsx';
 import {
   getPublicBookingContext,
   listPublicAgendaBarberos,

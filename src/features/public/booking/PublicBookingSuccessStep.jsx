@@ -1,6 +1,7 @@
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
-import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
+import { usePublicBookingFlow } from './BookingFlowContext.jsx';
+import BookingActions from './components/BookingActions.jsx';
 import { buildBookingShortCode, formatCurrencyHnl } from './bookingUtils.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -70,17 +71,39 @@ function resolvePaymentSummary({ bookingSuccessResult, paymentResult, totalToPay
   return { estadoPago, totalPagadoHnl };
 }
 
+function normalizeReturnStatus({ bookingSuccessResult, paymentResult }) {
+  if (bookingSuccessResult || paymentResult?.booking_confirmed) return 'paid';
+  const raw = String(paymentResult?.estado_intent_codigo || paymentResult?.status || '').trim().toLowerCase();
+  if (['pendiente_confirmacion', 'processing', 'procesando', 'confirmando'].includes(raw)) return 'processing';
+  if (['fallido', 'failed', 'rechazado'].includes(raw)) return 'failed';
+  if (['expirado', 'expired'].includes(raw)) return 'expired';
+  return 'pending';
+}
+
+function getReturnStatusText(status) {
+  if (status === 'paid') return 'Pago confirmado y reserva cerrada';
+  if (status === 'processing') return 'Estamos confirmando tu pago';
+  if (status === 'failed') return 'El pago no pudo completarse';
+  if (status === 'expired') return 'La reserva temporal venció';
+  return 'Tu pago aún está pendiente';
+}
+
 export default function PublicBookingSuccessStep() {
   const {
     bookingSuccessResult,
     bookingBlocksSummary,
+    checkingPaymentStatus,
     completeBookingFlow,
     holdResult,
+    paymentIntent,
     paymentResult,
+    refreshPaymentStatus,
     totalToPay,
   } = usePublicBookingFlow();
   const bookingCodes = resolveBookingCodes({ bookingSuccessResult, paymentResult, holdResult });
   const paymentSummary = resolvePaymentSummary({ bookingSuccessResult, paymentResult, totalToPay });
+  const returnStatus = normalizeReturnStatus({ bookingSuccessResult, paymentResult });
+  const returnStatusText = getReturnStatusText(returnStatus);
   const fallbackShortCode = buildBookingShortCode(holdResult?.id_grupo_cita || null, 5);
   const hasRealCode = bookingCodes.length > 0;
   const displayCodes = hasRealCode
@@ -92,17 +115,23 @@ export default function PublicBookingSuccessStep() {
       <div className="citas-surface p-5 public-booking-success">
         <div className="public-booking-success-head">
           <CheckCircle2 size={20} />
-          <span>Pago confirmado y reserva cerrada</span>
+          <span>{returnStatusText}</span>
         </div>
 
-        <div className="public-booking-final-code mt-3">
-          Codigo de cita:{' '}
-          {displayCodes.length > 0 ? (
-            <strong>{displayCodes.join(', ')}</strong>
-          ) : (
-            <strong>En proceso de asignacion</strong>
-          )}
-        </div>
+        {returnStatus === 'paid' ? (
+          <div className="public-booking-final-code mt-3">
+            Codigo de cita:{' '}
+            {displayCodes.length > 0 ? (
+              <strong>{displayCodes.join(', ')}</strong>
+            ) : (
+              <strong>En proceso de asignacion</strong>
+            )}
+          </div>
+        ) : (
+          <div className="public-booking-final-code mt-3">
+            <strong>El backend confirmará la reserva cuando el proveedor notifique el pago.</strong>
+          </div>
+        )}
 
         <div className="citas-confirm-row">
           <span>Estado de pago</span>
@@ -123,9 +152,21 @@ export default function PublicBookingSuccessStep() {
           ))}
         </div>
 
-        <div className="public-booking-actions mt-4">
-          <Button onClick={completeBookingFlow}>Entendido</Button>
-        </div>
+        <BookingActions className="mt-4">
+          {returnStatus !== 'paid' && paymentIntent?.id_intent ? (
+            <Button
+              variant="outline"
+              onClick={() => refreshPaymentStatus()}
+              disabled={checkingPaymentStatus}
+            >
+              {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
+              Verificar estado del pago
+            </Button>
+          ) : null}
+          {returnStatus === 'paid' ? (
+            <Button onClick={completeBookingFlow}>Entendido</Button>
+          ) : null}
+        </BookingActions>
       </div>
     </div>
   );

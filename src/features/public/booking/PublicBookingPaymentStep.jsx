@@ -1,8 +1,10 @@
 import { ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/button.jsx';
-import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
+import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import { formatCurrencyHnl } from './bookingUtils.js';
+import BookingActions from './components/BookingActions.jsx';
+import BookingStepHeader from './components/BookingStepHeader.jsx';
 
 function isLocalHostname(value) {
   const hostname = String(value || '').trim().toLowerCase();
@@ -21,16 +23,40 @@ function canShowMockPaymentAction() {
   return providerAllowsMock && (Boolean(import.meta.env.DEV) || localHost || explicitMock);
 }
 
+function normalizePaymentStatus(intent, result) {
+  const raw = String(
+    result?.estado_intent_codigo
+    || result?.status
+    || intent?.estado_intent_codigo
+    || 'pending'
+  ).trim().toLowerCase();
+  if (result?.booking_confirmed || ['confirmado', 'pagado', 'paid', 'capturado'].includes(raw)) return 'paid';
+  if (['pendiente_confirmacion', 'processing', 'procesando', 'confirmando'].includes(raw)) return 'processing';
+  if (['fallido', 'failed', 'rechazado'].includes(raw)) return 'failed';
+  if (['expirado', 'expired'].includes(raw)) return 'expired';
+  return 'pending';
+}
+
+function getPaymentStatusText(status) {
+  if (status === 'paid') return 'Pago confirmado';
+  if (status === 'processing') return 'Estamos confirmando tu pago';
+  if (status === 'failed') return 'El pago no pudo completarse';
+  if (status === 'expired') return 'La reserva temporal venció';
+  return 'Tu pago aún está pendiente';
+}
+
 export default function PublicBookingPaymentStep() {
   const {
     bookingBlocksSummary,
     createPaymentIntentForHold,
+    creatingPaymentIntent,
     holdExpired,
     holdExpiresAtIso,
     holdRemainingMs,
     paymentIntent,
     paymentResult,
     refreshPaymentStatus,
+    checkingPaymentStatus,
     completeMockPayment,
     holdPricing,
     holdTotalToPay,
@@ -38,6 +64,8 @@ export default function PublicBookingPaymentStep() {
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
   const showMockPaymentAction = canShowMockPaymentAction();
+  const paymentStatus = normalizePaymentStatus(paymentIntent, paymentResult);
+  const paymentStatusText = getPaymentStatusText(paymentStatus);
 
   const fallbackSubtotal = useMemo(
     () => bookingBlocksSummary.reduce((total, block) => total + Number(block?.total_hnl || 0), 0),
@@ -77,13 +105,18 @@ export default function PublicBookingPaymentStep() {
   })();
 
   const handleCreateIntent = async () => {
-    if (loadingIntent) return;
+    if (loadingIntent || creatingPaymentIntent) return;
     setLoadingIntent(true);
     try {
       await createPaymentIntentForHold();
     } finally {
       setLoadingIntent(false);
     }
+  };
+
+  const handleVerifyPaymentStatus = async () => {
+    if (checkingPaymentStatus) return;
+    await refreshPaymentStatus();
   };
 
   const handleMockPay = async () => {
@@ -99,10 +132,13 @@ export default function PublicBookingPaymentStep() {
   return (
     <div className="citas-confirm-wrap public-booking-payment-wrap">
       <div className="citas-surface p-5">
-        <h3 className="citas-confirm-title">Pago seguro</h3>
-        <p className="citas-selected-date mt-2">
-          Completa los datos y finaliza el pago para confirmar la reserva.
-        </p>
+        <BookingStepHeader
+          title="Pago seguro"
+          subtitle="Completa los datos y finaliza el pago para confirmar la reserva."
+          headingLevel="h3"
+          titleClassName="citas-confirm-title"
+          subtitleClassName="citas-selected-date mt-2"
+        />
         {holdCountdownLabel ? (
           <div className={`public-booking-payment-note mt-3 ${holdExpired ? 'is-expired' : ''}`.trim()}>
             <ShieldCheck size={14} />
@@ -140,22 +176,20 @@ export default function PublicBookingPaymentStep() {
             <h4 className="citas-confirm-subtitle">Pasarela de pago</h4>
             <div className="public-booking-payment-note mt-2">
               <ShieldCheck size={14} />
-              <span>La pasarela se integra mediante proveedor desacoplado e idempotente.</span>
+              <span>{paymentIntent?.id_intent ? paymentStatusText : 'El backend confirmará el pago cuando el proveedor notifique el webhook.'}</span>
             </div>
             {!paymentIntent?.id_intent ? (
-              <Button className="mt-3 gap-2" onClick={handleCreateIntent} disabled={loadingIntent}>
-                {loadingIntent ? <Loader2 size={16} className="animate-spin" /> : null}
+              <Button className="mt-3 gap-2" onClick={handleCreateIntent} disabled={loadingIntent || creatingPaymentIntent}>
+                {loadingIntent || creatingPaymentIntent ? <Loader2 size={16} className="animate-spin" /> : null}
                 Crear intento de pago
               </Button>
             ) : (
               <div className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)] public-booking-payment-meta">
-                <p>Estado: {paymentResult?.estado_intent_codigo || paymentIntent.estado_intent_codigo || 'pendiente'}</p>
+                <p>Estado: {paymentStatusText}</p>
                 <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || effectiveTotalToPay)}</p>
                 {paymentIntent.payment_url ? (
                   <a
                     href={paymentIntent.payment_url}
-                    target="_blank"
-                    rel="noreferrer"
                     className="inline-flex items-center gap-2 text-[var(--mf-accent)]"
                   >
                     Abrir checkout del proveedor
@@ -164,9 +198,14 @@ export default function PublicBookingPaymentStep() {
                 ) : null}
               </div>
             )}
-            <div className="public-booking-actions is-inline public-booking-payment-actions mt-4">
-              <Button variant="outline" onClick={() => refreshPaymentStatus()} disabled={!paymentIntent?.id_intent}>
-                Actualizar estado
+            <BookingActions inline className="public-booking-payment-actions mt-4">
+              <Button
+                variant="outline"
+                onClick={handleVerifyPaymentStatus}
+                disabled={!paymentIntent?.id_intent || checkingPaymentStatus}
+              >
+                {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
+                Verificar estado del pago
               </Button>
               {showMockPaymentAction ? (
                 <Button onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
@@ -174,7 +213,7 @@ export default function PublicBookingPaymentStep() {
                   Simular pago exitoso
                 </Button>
               ) : null}
-            </div>
+            </BookingActions>
           </div>
         </div>
 

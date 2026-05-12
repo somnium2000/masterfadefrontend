@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import ForgotPasswordPage from './features/auth/pages/ForgotPasswordPage.jsx';
@@ -13,12 +14,9 @@ import MembershipPlansPage from './features/public/pages/MembershipPlansPage.jsx
 import PromotionsPage from './features/public/pages/PromotionsPage.jsx';
 import ServicesPage from './features/public/pages/ServicesPage.jsx';
 import BarbersLandingPage from './features/public/pages/BarbersLandingPage.jsx';
-import PublicBookingFlow from './features/public/booking/PublicBookingFlow.jsx';
-import PublicBookingBarberosStep from './features/public/booking/PublicBookingBarberosStep.jsx';
-import PublicBookingAgendaStep from './features/public/booking/PublicBookingAgendaStep.jsx';
-import PublicBookingConfirmStep from './features/public/booking/PublicBookingConfirmStep.jsx';
-import PublicBookingPaymentStep from './features/public/booking/PublicBookingPaymentStep.jsx';
-import PublicBookingSuccessStep from './features/public/booking/PublicBookingSuccessStep.jsx';
+import BookingLoadingState from './features/public/booking/components/BookingLoadingState.jsx';
+import { BOOKING_ROUTES } from './features/public/booking/constants/bookingRoutes.js';
+import { BOOKING_STEPS } from './features/public/booking/constants/bookingSteps.js';
 import UnauthorizedPage from './features/unauthorized/pages/UnauthorizedPage.jsx';
 import ProtectedRoute from './routes/ProtectedRoute.jsx';
 import AdminServicesCatalogPage from './features/admin/pages/AdminServicesCatalogPage.jsx';
@@ -41,7 +39,6 @@ import AdminUsuariosPage from './features/admin/pages/AdminUsuariosPage.jsx';
 import AdminConfiguracionComunicacionPage from './features/admin/pages/AdminConfiguracionComunicacionPage.jsx';
 import AdminConfiguracionPromocionesPage from './features/admin/pages/AdminConfiguracionPromocionesPage.jsx';
 import AdminCitasPage from './features/admin/pages/AdminCitasPage.jsx';
-import AdminCitasPreviewPage from './features/admin/pages/AdminCitasPreviewPage.jsx';
 import AdminReportesIngresosPage from './features/admin/pages/AdminReportesIngresosPage.jsx';
 import AdminReportesMembresiasPage from './features/admin/pages/AdminReportesMembresiasPage.jsx';
 import AdminReportesBarberosPage from './features/admin/pages/AdminReportesBarberosPage.jsx';
@@ -58,6 +55,18 @@ import AdminSeguridadUsuariosPage from './features/admin/pages/AdminSeguridadUsu
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
 
+const PublicBookingFlow = lazy(() => import('./features/public/booking/PublicBookingFlow.jsx'));
+const PublicBookingBarberosStep = lazy(() => import('./features/public/booking/PublicBookingBarberosStep.jsx'));
+const PublicBookingAgendaStep = lazy(() => import('./features/public/booking/PublicBookingAgendaStep.jsx'));
+const PublicBookingConfirmStep = lazy(() => import('./features/public/booking/PublicBookingConfirmStep.jsx'));
+const PublicBookingPaymentStep = lazy(() => import('./features/public/booking/PublicBookingPaymentStep.jsx'));
+const PublicBookingSuccessStep = lazy(() => import('./features/public/booking/PublicBookingSuccessStep.jsx'));
+const AdminCitasPreviewPage = lazy(() => import('./features/admin/pages/AdminCitasPreviewPage.jsx'));
+
+function BookingSuspense({ children }) {
+  return <Suspense fallback={<BookingLoadingState />}>{children}</Suspense>;
+}
+
 function AdminCortesiasCanonicalRedirect() {
   const { roles } = useAuth();
   const homePath = resolveHomePath(roles);
@@ -67,6 +76,16 @@ function AdminCortesiasCanonicalRedirect() {
   }
 
   return <Navigate to={`${homePath}/catalog/cortesias`} replace />;
+}
+
+function AdminCitasPreviewRoute() {
+  return (
+    <RouteErrorBoundary>
+      <Suspense fallback={null}>
+        <AdminCitasPreviewPage />
+      </Suspense>
+    </RouteErrorBoundary>
+  );
 }
 
 function SecurityDashboardShell() {
@@ -92,13 +111,57 @@ function App() {
       <Route path="/servicios" element={<ServicesPage />} />
       <Route path="/promociones" element={<PromotionsPage />} />
       <Route path="/barberos" element={<BarbersLandingPage />} />
-      <Route path="/agendar" element={<RouteErrorBoundary><PublicBookingFlow /></RouteErrorBoundary>}>
-        <Route index element={<Navigate to="barberos" replace />} />
-        <Route path="barberos" element={<PublicBookingBarberosStep />} />
-        <Route path="agenda" element={<PublicBookingAgendaStep />} />
-        <Route path="confirmar" element={<PublicBookingConfirmStep />} />
-        <Route path="pagar" element={<PublicBookingPaymentStep />} />
-        <Route path="exito" element={<PublicBookingSuccessStep />} />
+      <Route
+        path={BOOKING_ROUTES.root}
+        element={
+          <RouteErrorBoundary>
+            <BookingSuspense>
+              <PublicBookingFlow />
+            </BookingSuspense>
+          </RouteErrorBoundary>
+        }
+      >
+        <Route index element={<Navigate to={BOOKING_STEPS.barbers} replace />} />
+        <Route
+          path={BOOKING_STEPS.barbers}
+          element={
+            <BookingSuspense>
+              <PublicBookingBarberosStep />
+            </BookingSuspense>
+          }
+        />
+        <Route
+          path={BOOKING_STEPS.agenda}
+          element={
+            <BookingSuspense>
+              <PublicBookingAgendaStep />
+            </BookingSuspense>
+          }
+        />
+        <Route
+          path={BOOKING_STEPS.confirm}
+          element={
+            <BookingSuspense>
+              <PublicBookingConfirmStep />
+            </BookingSuspense>
+          }
+        />
+        <Route
+          path={BOOKING_STEPS.payment}
+          element={
+            <BookingSuspense>
+              <PublicBookingPaymentStep />
+            </BookingSuspense>
+          }
+        />
+        <Route
+          path={BOOKING_STEPS.success}
+          element={
+            <BookingSuspense>
+              <PublicBookingSuccessStep />
+            </BookingSuspense>
+          }
+        />
       </Route>
       <Route path="/membresias-vip" element={<MembershipPlansPage />} />
       <Route
@@ -146,7 +209,7 @@ function App() {
         {/* Citas y agendamiento */}
         <Route path="citas" element={<RouteErrorBoundary><AdminAgendamientoCitasPage /></RouteErrorBoundary>} />
         <Route path="citas/historial" element={<RouteErrorBoundary><AdminAgendamientoHistorialPage /></RouteErrorBoundary>} />
-        <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPreviewPage /></RouteErrorBoundary>} />
+        <Route path="citas/preview" element={<AdminCitasPreviewRoute />} />
         <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
         <Route path="seguridad" element={<Navigate to="../seguridad/login-logs" replace />} />
@@ -203,7 +266,7 @@ function App() {
         {/* Citas */}
         <Route path="citas" element={<RouteErrorBoundary><AdminAgendamientoCitasPage /></RouteErrorBoundary>} />
         <Route path="citas/historial" element={<RouteErrorBoundary><AdminAgendamientoHistorialPage /></RouteErrorBoundary>} />
-        <Route path="citas/preview" element={<RouteErrorBoundary><AdminCitasPreviewPage /></RouteErrorBoundary>} />
+        <Route path="citas/preview" element={<AdminCitasPreviewRoute />} />
         <Route path="citas/config" element={<RouteErrorBoundary><AdminCitasPage /></RouteErrorBoundary>} />
         {/* Seguridad */}
         <Route path="seguridad" element={<Navigate to="/unauthorized" replace />} />

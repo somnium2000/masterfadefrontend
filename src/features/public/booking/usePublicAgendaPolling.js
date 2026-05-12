@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 const DEFAULT_PUBLIC_AGENDA_POLL_INTERVAL_MS = 45000;
 const MIN_PUBLIC_AGENDA_POLL_INTERVAL_MS = 15000;
 
+// Polling solo de disponibilidad de agenda; no consulta ni confirma pagos.
 function normalizeIntervalMs(value) {
   const parsed = Number(value || 0);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_PUBLIC_AGENDA_POLL_INTERVAL_MS;

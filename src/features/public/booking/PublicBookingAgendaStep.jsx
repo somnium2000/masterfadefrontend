@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
@@ -19,7 +19,7 @@ import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import { DayButton, ServiceCard, SlotButton } from './PublicBookingBlocks.jsx';
-import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
+import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import {
   WEEK_DAYS,
   buildFullName,
@@ -168,7 +168,7 @@ function pushUniqueSlots(target, candidates, seen, selectedDate, isPastSlotForTo
   });
 }
 
-function BookingBlocksSummary({
+const BookingBlocksSummary = memo(function BookingBlocksSummary({
   bookingBlocksSummary,
   totalToPay,
   totalEstimatedPromotionDiscountHnl,
@@ -264,7 +264,7 @@ function BookingBlocksSummary({
       </div>
     </div>
   );
-}
+});
 
 export default function PublicBookingAgendaStep() {
   const {
@@ -993,7 +993,7 @@ export default function PublicBookingAgendaStep() {
                         blockedLabel={blockedLabel}
                         coveredByPlan={coveredByPlan || coveredByReward}
                         disabled={!canSelectServices}
-                        onToggle={() => toggleService(service.id_servicio)}
+                        onToggle={toggleService}
                       />
                     );
                   })()
@@ -1218,8 +1218,8 @@ export default function PublicBookingAgendaStep() {
                       cell={cell}
                       dayInfo={availabilityMap[cell.key]}
                       minDateKey={minBookingDateKey}
-                      selectedDate={selectedDate}
-                      onSelect={(dateKey, enabled) => onSelectDay(dateKey, enabled)}
+                      isSelected={selectedDate === cell.key}
+                      onSelect={onSelectDay}
                     />
                   ))}
                 </div>
@@ -1330,7 +1330,7 @@ export default function PublicBookingAgendaStep() {
                                       <SlotButton
                                         key={`recommended-${activePeriodModel.recommended.hora}`}
                                         slot={activePeriodModel.recommended}
-                                        selectedTime={selectedTime}
+                                        isSelected={selectedTime === activePeriodModel.recommended.hora}
                                         onSelect={onSelectTime}
                                         disabled={restriction.disabled}
                                         variant={restriction.variant}
@@ -1350,7 +1350,7 @@ export default function PublicBookingAgendaStep() {
                                       <SlotButton
                                         key={`alternative-${slot.hora}`}
                                         slot={slot}
-                                        selectedTime={selectedTime}
+                                        isSelected={selectedTime === slot.hora}
                                         onSelect={onSelectTime}
                                         disabled={restriction.disabled}
                                         variant={restriction.variant}

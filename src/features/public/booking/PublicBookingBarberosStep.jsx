@@ -1,7 +1,8 @@
 import { Scissors } from 'lucide-react';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import { BarberCard } from './PublicBookingBlocks.jsx';
-import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
+import { usePublicBookingFlow } from './BookingFlowContext.jsx';
+import BookingStepHeader from './components/BookingStepHeader.jsx';
 
 export default function PublicBookingBarberosStep() {
   const {
@@ -18,13 +19,13 @@ export default function PublicBookingBarberosStep() {
   return (
     <>
       <section className="citas-surface p-5 public-booking-barberos-shell">
-        <p className="public-booking-kicker">{mode === 'preview' ? 'Vista previa admin' : 'Agendamiento publico'}</p>
-        <h1 className="public-booking-title">Selecciona sucursal y barbero</h1>
-        <p className="public-booking-subtitle">
-          {mode === 'preview'
+        <BookingStepHeader
+          kicker={mode === 'preview' ? 'Vista previa admin' : 'Agendamiento publico'}
+          title="Selecciona sucursal y barbero"
+          subtitle={mode === 'preview'
             ? 'Esta vista replica el flujo publico con reglas guardadas para validar comportamiento antes de publicar.'
             : 'Este flujo esta disponible sin iniciar sesion y no comparte navbar o sidebar del panel interno.'}
-        </p>
+        />
 
         {barbersLoading && barbers.length === 0 ? (
           <div className="public-booking-form-row mt-4">
@@ -87,7 +88,7 @@ export default function PublicBookingBarberosStep() {
               <BarberCard
                 key={barber.id_empleado}
                 barber={barber}
-                onSelect={() => selectBarber(barber.id_empleado)}
+                onSelect={selectBarber}
               />
             ))}
           </div>
