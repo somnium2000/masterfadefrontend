@@ -14,6 +14,7 @@ import {
   normalizePersonName,
   normalizePersonNameForValidation,
   sanitizePersonNameInput,
+  sanitizePhoneInput,
   splitFullName,
   timeKeyToMinutes,
   toLocalDateTimeWithOffset,
@@ -228,7 +229,7 @@ export default function useBookingCompanions({
   const updateActiveBlockContact = useCallback((patch) => {
     const normalizedPatch = { ...patch };
     if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactPhone')) {
-      normalizedPatch.contactPhone = String(normalizedPatch.contactPhone || '').replace(/[^\d+\s()-]/g, '').slice(0, 24);
+      normalizedPatch.contactPhone = sanitizePhoneInput(normalizedPatch.contactPhone || '');
     }
     if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactEmail')) {
       normalizedPatch.contactEmail = normalizeEmail(normalizedPatch.contactEmail || '');

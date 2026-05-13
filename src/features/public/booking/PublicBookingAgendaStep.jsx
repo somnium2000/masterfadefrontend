@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
@@ -267,6 +267,7 @@ export default function PublicBookingAgendaStep() {
     activeBlockIndex,
     addCompanionBlock,
     consumePendingCompanionFocus,
+    consumePendingFieldFocus,
     allowCompanions,
     maxCompanions,
     maxPromotionsPerBooking,
@@ -318,6 +319,7 @@ export default function PublicBookingAgendaStep() {
     packages,
     packagesLoading,
     pendingCompanionFocusId,
+    pendingFieldFocus,
     servicesAtEnd,
     servicesCanScroll,
     servicesLoading,
@@ -398,6 +400,7 @@ export default function PublicBookingAgendaStep() {
   const slotsSectionRef = useRef(null);
   const contactCardRef = useRef(null);
   const contactNameInputRef = useRef(null);
+  const contactEmailInputRef = useRef(null);
 
   const activeContactFirstName = String(activeBlock?.contactFirstName || '');
   const activeContactLastName = String(activeBlock?.contactLastName || '');
@@ -690,28 +693,63 @@ export default function PublicBookingAgendaStep() {
     slotsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [selectedDate]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!pendingCompanionFocusId) return;
     if (activeBlockIndex <= 0) return;
     if (!activeBlock?.id || activeBlock.id !== pendingCompanionFocusId) return;
 
     let cancelled = false;
+    let innerRafId = 0;
     const rafId = requestAnimationFrame(() => {
       if (cancelled) return;
-      contactCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      contactNameInputRef.current?.focus({ preventScroll: true });
-      consumePendingCompanionFocus(pendingCompanionFocusId);
+      innerRafId = requestAnimationFrame(() => {
+        if (cancelled) return;
+        contactCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        contactNameInputRef.current?.focus({ preventScroll: true });
+        consumePendingCompanionFocus(pendingCompanionFocusId);
+      });
     });
 
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafId);
+      if (innerRafId) cancelAnimationFrame(innerRafId);
     };
   }, [
     activeBlock?.id,
     activeBlockIndex,
     consumePendingCompanionFocus,
     pendingCompanionFocusId,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!pendingFieldFocus?.blockId || !pendingFieldFocus?.field) return;
+    if (!activeBlock?.id || activeBlock.id !== pendingFieldFocus.blockId) return;
+
+    let cancelled = false;
+    let innerRafId = 0;
+    const rafId = requestAnimationFrame(() => {
+      if (cancelled) return;
+      innerRafId = requestAnimationFrame(() => {
+        if (cancelled) return;
+        const focusTarget = pendingFieldFocus.field === 'contactEmail'
+          ? contactEmailInputRef.current
+          : contactNameInputRef.current;
+        contactCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        focusTarget?.focus({ preventScroll: true });
+        consumePendingFieldFocus(pendingFieldFocus.requestId);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+      if (innerRafId) cancelAnimationFrame(innerRafId);
+    };
+  }, [
+    activeBlock?.id,
+    consumePendingFieldFocus,
+    pendingFieldFocus,
   ]);
 
   if ((servicesLoading || packagesLoading) && services.length === 0 && packages.length === 0) {
@@ -892,6 +930,7 @@ export default function PublicBookingAgendaStep() {
                       </label>
                       <input
                         id="booking-contact-email"
+                        ref={contactEmailInputRef}
                         type="email"
                         className={`mf-input ${activeEmailError ? 'is-invalid' : ''}`.trim()}
                         value={activeContactEmail}
@@ -909,6 +948,8 @@ export default function PublicBookingAgendaStep() {
                       <input
                         id="booking-contact-phone"
                         type="tel"
+                        inputMode="tel"
+                        maxLength={24}
                         className={`mf-input ${activePhoneError ? 'is-invalid' : ''}`.trim()}
                         value={activeContactPhone}
                         onChange={(event) => updateActiveBlockContact({ contactPhone: event.target.value })}
@@ -1433,7 +1474,7 @@ export default function PublicBookingAgendaStep() {
             variant="outline"
             className="gap-2 public-booking-agenda-action-button"
             onClick={() => {
-              void cancelBookingFlow();
+              void cancelBookingFlow('agenda');
             }}
           >
             Cancelar

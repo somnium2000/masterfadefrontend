@@ -225,7 +225,7 @@ export default function PublicBookingConfirmStep() {
             variant="outline"
             className="gap-2"
             onClick={() => {
-              void cancelBookingFlow();
+              void cancelBookingFlow('confirm');
             }}
             disabled={submitting}
           >
