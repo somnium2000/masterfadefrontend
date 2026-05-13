@@ -61,6 +61,10 @@ export async function validatePublicTitularForBooking(payload) {
   return http.post('/v1/public/citas/validar-titular', payload);
 }
 
+export async function validatePublicBookingContacts(payload) {
+  return http.post('/v1/public/citas/validar-contactos', payload);
+}
+
 export async function releasePublicCitaHold(idGrupoCita, releaseToken) {
   const groupId = String(idGrupoCita || '').trim();
   if (!UUID_PATTERN.test(groupId)) {

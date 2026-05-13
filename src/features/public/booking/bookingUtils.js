@@ -458,8 +458,31 @@ export function toLocalDateTimeWithOffset(dateValue, timeValue) {
   return `${date}T${normalizedTime}${HONDURAS_UTC_OFFSET}`;
 }
 
+export function sanitizePhoneInput(rawValue) {
+  const cleaned = String(rawValue || '').replace(/[^\d+\s-]/g, '').slice(0, 24);
+  let hasPlus = false;
+  return cleaned
+    .split('')
+    .filter((char, index) => {
+      if (char !== '+') return true;
+      if (index === 0 && !hasPlus) {
+        hasPlus = true;
+        return true;
+      }
+      return false;
+    })
+    .join('');
+}
+
+export function countPhoneDigits(rawValue) {
+  return String(rawValue || '').replace(/\D/g, '').length;
+}
+
 export function normalizePhone(rawValue) {
-  return String(rawValue || '').replace(/[^\d+]/g, '').slice(0, 20);
+  const sanitized = sanitizePhoneInput(rawValue);
+  const hasLeadingPlus = sanitized.startsWith('+');
+  const digits = sanitized.replace(/\D/g, '').slice(0, hasLeadingPlus ? 19 : 20);
+  return `${hasLeadingPlus ? '+' : ''}${digits}`;
 }
 
 function collapseWhitespace(value) {
@@ -545,12 +568,13 @@ export function getTitularState(user) {
   const nombres = normalizePersonNameForValidation(user?.nombres || '');
   const apellidos = normalizePersonNameForValidation(user?.apellidos || '');
   const telefonoPrincipal = normalizePhone(user?.telefono_principal || '');
+  const telefonoPrincipalDigits = countPhoneDigits(telefonoPrincipal);
 
   const missingFields = [];
   if (isAuthenticated) {
     if (!nombres) missingFields.push('nombres');
     if (!apellidos) missingFields.push('apellidos');
-    if (telefonoPrincipal.length < 8) missingFields.push('telefono_principal');
+    if (telefonoPrincipalDigits < 8) missingFields.push('telefono_principal');
   }
 
   const hasFullProfile = isAuthenticated && missingFields.length === 0;
@@ -565,7 +589,7 @@ export function getTitularState(user) {
       nombres,
       apellidos,
       email: normalizeEmail(user?.email || ''),
-      telefono_principal: telefonoPrincipal.length >= 8 ? telefonoPrincipal : '',
+      telefono_principal: telefonoPrincipalDigits >= 8 ? telefonoPrincipal : '',
     },
   };
 }

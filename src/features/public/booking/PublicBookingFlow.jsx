@@ -17,7 +17,7 @@ import {
 } from '../../../components/ui/dialog.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
-  validatePublicTitularForBooking,
+  validatePublicBookingContacts,
 } from './publicBookingApi.js';
 import {
   BOOKING_COMPANION_ALIAS_PREFIX,
@@ -50,6 +50,7 @@ import {
 } from './utils/bookingValidators.js';
 import {
   buildFullName,
+  countPhoneDigits,
   MAX_COMPANIONS,
   MAX_PROMOTIONS_PER_BOOKING,
   buildAppointmentSelectionSummary,
@@ -79,6 +80,102 @@ import BookingErrorState from './components/BookingErrorState.jsx';
 import { PublicBookingProvider } from './BookingFlowContext.jsx';
 
 export { PublicBookingProvider, usePublicBookingFlow } from './BookingFlowContext.jsx';
+
+const CONTACT_ERROR_FIELD_ORDER = ['contactFirstName', 'contactLastName', 'contactEmail', 'contactPhone'];
+
+function getContactValidationFeedback(contactState, blockIndex) {
+  const errors = contactState?.errors || {};
+  const field = CONTACT_ERROR_FIELD_ORDER.find((key) => String(errors?.[key] || '').trim());
+  if (!field) return null;
+  const isTitular = Number(blockIndex || 0) === 0;
+  const fallbackMessage = isTitular
+    ? 'Completa los datos del titular.'
+    : 'Completa los datos del acompaÃ±ante.';
+  return {
+    field,
+    message: String(errors[field] || '').trim() || fallbackMessage,
+  };
+}
+
+function toSafeBlockIndex(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
+function resolveBookingDetailBlockIndex(details) {
+  const directIndex = toSafeBlockIndex(details?.blockIndex);
+  if (directIndex != null) return directIndex;
+
+  const field = String(details?.field || '').trim();
+  const fieldMatch = field.match(/integrantes\[(\d+)\]/i);
+  if (fieldMatch) {
+    const fieldIndex = toSafeBlockIndex(fieldMatch[1]);
+    if (fieldIndex != null) return fieldIndex;
+  }
+
+  const order = Number(details?.orden_integrante);
+  if (Number.isInteger(order) && order > 0) return order - 1;
+  return null;
+}
+
+function mapBookingDetailFieldToContactField(field) {
+  const normalizedField = String(field || '').trim().toLowerCase();
+  if (!normalizedField) return null;
+  if (normalizedField.includes('telefono') || normalizedField.includes('phone')) return 'contactPhone';
+  if (normalizedField.includes('email') || normalizedField.includes('correo')) return 'contactEmail';
+  if (normalizedField.includes('apellidos') || normalizedField.includes('last_name')) return 'contactLastName';
+  if (normalizedField.includes('nombres') || normalizedField.includes('first_name')) return 'contactFirstName';
+  if (normalizedField.includes('nombre')) return 'contactFirstName';
+  return null;
+}
+
+function resolveEmailConflictBlockIndex(details) {
+  const detailIndex = resolveBookingDetailBlockIndex(details);
+  if (detailIndex != null) return detailIndex;
+
+  const field = String(details?.field || '').trim().toLowerCase();
+  if (field.includes('titular.email')) return 0;
+  return null;
+}
+
+function buildActiveUserEmailFeedback({ details, blockIndex, bookingBlocksSummary, fallbackEmail = '' } = {}) {
+  const safeIndex = Math.max(0, Math.trunc(Number(blockIndex || 0)));
+  const detailRole = String(details?.rol_integrante_codigo || '').trim().toLowerCase();
+  const isTitular = detailRole ? detailRole === 'titular' : safeIndex === 0;
+  const summaryBlock = Array.isArray(bookingBlocksSummary) ? bookingBlocksSummary[safeIndex] : null;
+  const alias = String(
+    details?.alias
+    || summaryBlock?.alias
+    || (isTitular ? BOOKING_HOLDER_ALIAS : `${BOOKING_COMPANION_ALIAS_PREFIX} ${safeIndex}`)
+  ).trim();
+  const email = String(details?.email || fallbackEmail || '').trim().toLowerCase();
+  const message = isTitular
+    ? 'Este correo ya pertenece a una cuenta activa. Inicia sesi\u00f3n para continuar.'
+    : `El correo de ${alias || `${BOOKING_COMPANION_ALIAS_PREFIX} ${safeIndex}`} pertenece a una cuenta activa. Ese acompa\u00f1ante debe iniciar sesi\u00f3n o usar otro correo.`;
+
+  return {
+    alias,
+    email,
+    isTitular,
+    message,
+  };
+}
+
+function normalizeContactEmailConflict(rawConflict) {
+  const conflictIndex = resolveBookingDetailBlockIndex(rawConflict);
+  if (conflictIndex == null) return null;
+  const mappedField = mapBookingDetailFieldToContactField(rawConflict?.field || 'contactEmail') || 'contactEmail';
+  const message = String(rawConflict?.message || '').trim() || 'Corrige el correo para continuar.';
+  return {
+    blockIndex: conflictIndex,
+    field: mappedField,
+    message,
+    code: String(rawConflict?.code || '').trim().toUpperCase(),
+    email: String(rawConflict?.email || '').trim().toLowerCase(),
+    rol_integrante_codigo: String(rawConflict?.rol_integrante_codigo || '').trim().toLowerCase(),
+  };
+}
 
 function readRewardBookingContext() {
   if (typeof window === 'undefined') return null;
@@ -131,6 +228,7 @@ export default function PublicBookingFlow() {
   const [bookingBlocks, setBookingBlocks] = useState(() => [createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })]);
   const [activeBlockIndex, setActiveBlockIndex] = useState(0);
   const [pendingCompanionFocusId, setPendingCompanionFocusId] = useState('');
+  const [pendingFieldFocus, setPendingFieldFocus] = useState(null);
 
   const [minBookingDateKey] = useState(() => getTodayDateKeyInTimeZone());
   const minBookingMonth = useMemo(
@@ -150,6 +248,8 @@ export default function PublicBookingFlow() {
   const [fieldErrors, setFieldErrors] = useState({});
   const [authRequiredModal, setAuthRequiredModal] = useState({ open: false, email: '' });
   const [profilePersistModal, setProfilePersistModal] = useState({ open: false, kind: '' });
+  const [cancelBookingModal, setCancelBookingModal] = useState({ open: false, source: '' });
+  const [cancelBookingProcessing, setCancelBookingProcessing] = useState(false);
 
   const [rewardBookingContext, setRewardBookingContext] = useState(() => readRewardBookingContext());
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
@@ -753,7 +853,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     const raw = String(value || '').trim();
     if (!raw) return true;
     if (hasLetters(raw)) return false;
-    return normalizePhone(raw).length >= 8;
+    return countPhoneDigits(raw) >= 8;
   }, []);
 
   const resolveBlockContactState = useCallback((rawBlock, index) => {
@@ -792,11 +892,11 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         errors.contactEmail = 'No pudimos validar el correo de tu cuenta. Vuelve a iniciar sesión.';
       }
       if (needsPhone && !phoneRaw) {
-        errors.contactPhone = 'Ingresa un teléfono válido para continuar.';
+        errors.contactPhone = 'Ingresa un teléfono válido del titular. Debe tener al menos 8 dígitos.';
       } else if (needsPhone && !isValidOptionalPhone(phoneRaw)) {
         errors.contactPhone = hasLetters(phoneRaw)
           ? 'El teléfono no admite letras.'
-          : 'Ingresa un teléfono válido para continuar.';
+          : 'Ingresa un teléfono válido del titular. Debe tener al menos 8 dígitos.';
       }
 
       return {
@@ -827,7 +927,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       if (!phoneRaw || !isValidOptionalPhone(phoneRaw)) {
         errors.contactPhone = phoneRaw && hasLetters(phoneRaw)
           ? 'El teléfono no admite letras.'
-          : 'Ingresa un teléfono válido del titular.';
+          : 'Ingresa un teléfono válido del titular. Debe tener al menos 8 dígitos.';
       }
       return {
         isTitular: true,
@@ -859,7 +959,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     if (!isValidOptionalPhone(phoneRaw)) {
       errors.contactPhone = hasLetters(phoneRaw)
         ? 'El teléfono del acompañante no admite letras.'
-        : 'El teléfono del acompañante debe ser válido.';
+        : 'Ingresa un teléfono válido del acompañante. Debe tener al menos 8 dígitos.';
     }
 
     return {
@@ -1146,6 +1246,8 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       const label = firstInvalidContact.index === 0
         ? 'titular'
         : `acompañante ${firstInvalidContact.index}`;
+      const feedback = getContactValidationFeedback(firstInvalidContact.contactResolved, firstInvalidContact.index);
+      if (feedback?.message) return feedback.message;
       if (!firstInvalidContact?.contactResolved?.fullName) {
         return `El ${label} no tiene nombre completo.`;
       }
@@ -1232,6 +1334,28 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     }));
   }, [buildFieldErrorKey]);
 
+  const focusBookingField = useCallback((blockIndex, field = 'contactEmail') => {
+    const parsedIndex = Number(blockIndex);
+    const normalizedIndex = Number.isInteger(parsedIndex) && parsedIndex >= 0 ? parsedIndex : 0;
+    const block = bookingBlocks[normalizedIndex] || null;
+    setActiveBlockIndex(normalizedIndex);
+    if (!block?.id) return;
+    setPendingFieldFocus({
+      blockId: block.id,
+      field,
+      requestId: `${block.id}:${field}:${Date.now()}`,
+    });
+  }, [bookingBlocks, setActiveBlockIndex]);
+
+  const consumePendingFieldFocus = useCallback((requestId) => {
+    const normalizedId = String(requestId || '').trim();
+    setPendingFieldFocus((current) => {
+      if (!current) return null;
+      if (!normalizedId || current.requestId === normalizedId) return null;
+      return current;
+    });
+  }, []);
+
   const resetAvailabilityViewState = useCallback((options = {}) => {
     resetAvailabilityHookViewState(options);
     clearSlotConflict();
@@ -1242,6 +1366,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     resetAvailabilityData();
     clearSlotConflict();
     setFieldErrors({});
+    setPendingFieldFocus(null);
   }, [abortBranchData, clearSlotConflict, resetAvailabilityData]);
 
   const {
@@ -1278,6 +1403,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     setBookingBlocks([createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })]);
     setActiveBlockIndex(0);
     setPendingCompanionFocusId('');
+    setPendingFieldFocus(null);
     setMembershipBranchNotice('');
     membershipBranchNoticeRef.current = '';
     clearHoldLocalState();
@@ -1827,10 +1953,21 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     navigate(BOOKING_ROUTES.barbers);
   }, [holdResult, navigate]);
 
-  const cancelBookingFlow = useCallback(async () => {
-    const confirmed = window.confirm('¿Seguro que deseas cancelar el agendamiento? Se perderán los datos seleccionados.');
-    if (!confirmed) return false;
+  const requestCancelBooking = useCallback((source = 'booking') => {
+    if (cancelBookingProcessing) return false;
+    setCancelBookingModal({
+      open: true,
+      source: String(source || 'booking').trim() || 'booking',
+    });
+    return false;
+  }, [cancelBookingProcessing]);
 
+  const closeCancelBookingModal = useCallback(() => {
+    if (cancelBookingProcessing) return;
+    setCancelBookingModal({ open: false, source: '' });
+  }, [cancelBookingProcessing]);
+
+  const executeCancelBooking = useCallback(async () => {
     const groupId = String(holdResult?.id_grupo_cita || '').trim();
     if (groupId && paymentIntent?.id_intent && !paymentResult?.booking_confirmed) {
       notifications.info('El pago ya fue iniciado. Verifica el estado del pago antes de cancelar la reserva temporal.', {
@@ -1856,6 +1993,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     setAvailabilityError('');
     setFieldErrors({});
     setPendingCompanionFocusId('');
+    setPendingFieldFocus(null);
     setBookingBlocks([createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })]);
     setActiveBlockIndex(0);
     setCurrentMonth(new Date(minBookingMonth.getFullYear(), minBookingMonth.getMonth(), 1));
@@ -1876,6 +2014,20 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     releaseHold,
     resetAvailabilityData,
   ]);
+
+  const confirmCancelBooking = useCallback(async () => {
+    if (cancelBookingProcessing) return false;
+    setCancelBookingProcessing(true);
+    try {
+      const result = await executeCancelBooking();
+      setCancelBookingModal({ open: false, source: '' });
+      return result;
+    } finally {
+      setCancelBookingProcessing(false);
+    }
+  }, [cancelBookingProcessing, executeCancelBooking]);
+
+  const cancelBookingFlow = useCallback((source = 'booking') => requestCancelBooking(source), [requestCancelBooking]);
 
   const cancelRewardRedemptionUsage = useCallback(() => {
     if (!rewardModeActive) return;
@@ -2408,11 +2560,21 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       titularMissingData.push('telefono');
       nextFieldErrors[buildFieldErrorKey(0, 'contactPhone')] = 'Ingresa el telefono del titular.';
     }
+    CONTACT_ERROR_FIELD_ORDER.forEach((field) => {
+      const message = String(titularContactState?.errors?.[field] || '').trim();
+      if (!message) return;
+      nextFieldErrors[buildFieldErrorKey(0, field)] = message;
+      if (field === 'contactPhone' && !titularMissingData.includes('telefono')) {
+        titularMissingData.push('telefono');
+      }
+    });
     if (titularMissingData.length > 0) {
+      const feedback = getContactValidationFeedback(titularContactState, 0);
       notifications.warning(
-        titularState.isAuthenticated
+        feedback?.message
+        || (titularState.isAuthenticated
           ? 'Completa los datos faltantes del titular para continuar.'
-          : 'Completa nombre, correo y telefono del titular antes de confirmar.',
+          : 'Completa nombre, correo y telefono del titular antes de confirmar.'),
         {
           dedupeKey: 'public-booking-holder-data-required',
         }
@@ -2424,6 +2586,19 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     }
     for (const companion of blocksToSubmit.filter((block) => Number(block?.index) > 0)) {
       const companionContact = companion?.contactResolved || resolveBlockContactState(companion, companion.index);
+      if (!companionContact.isValid) {
+        const feedback = getContactValidationFeedback(companionContact, companion.index);
+        if (feedback?.field) {
+          nextFieldErrors[buildFieldErrorKey(companion.index, feedback.field)] = feedback.message;
+        }
+        notifications.warning(feedback?.message || 'Completa los datos del acompaÃ±ante.', {
+          dedupeKey: 'public-booking-companion-data-invalid-submit',
+        });
+        setActiveBlockIndex(companion.index);
+        navigate(BOOKING_ROUTES.agenda);
+        setFieldErrors((prev) => ({ ...prev, ...nextFieldErrors }));
+        return false;
+      }
       if (!companionContact.firstName || !companionContact.lastName || !companionContact.fullName) {
         nextFieldErrors[buildFieldErrorKey(companion.index, 'contactFirstName')] = 'Completa nombre y apellido del acompanante.';
         nextFieldErrors[buildFieldErrorKey(companion.index, 'contactLastName')] = 'Completa nombre y apellido del acompanante.';
@@ -2530,7 +2705,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         || (titularState.missingFields.includes('apellidos') && normalizedTitularBlock.contactLastName)
       );
       const puedeGuardarTelefono = titularState.missingFields.includes('telefono_principal')
-        && normalizePhone(normalizedTitularBlock.contactPhone || '').length >= 8;
+        && countPhoneDigits(normalizedTitularBlock.contactPhone || '') >= 8;
 
       if (puedeGuardarNombres) {
         guardarNombresApellidos = await requestProfilePersistDecision('nombres_apellidos');
@@ -2572,13 +2747,9 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       return await createHold(holdPayload);
     } catch (err) {
       const apiError = err?.data?.error || err?.error || {};
+      const apiErrorDetails = apiError?.details || {};
       const detailField = String(apiError?.details?.field || '').trim();
-      const detailIndexRaw = apiError?.details?.blockIndex;
-      const detailOrderRaw = apiError?.details?.orden_integrante;
-      const detailOrder = Number.isFinite(Number(detailOrderRaw)) ? Number(detailOrderRaw) : null;
-      const detailIndex = Number.isFinite(Number(detailIndexRaw))
-        ? Number(detailIndexRaw)
-        : (detailOrder != null ? Math.max(0, detailOrder - 1) : null);
+      const detailIndex = resolveBookingDetailBlockIndex(apiErrorDetails);
       const conflictCode = String(apiError?.code || '').trim().toUpperCase();
       const conflictReason = String(apiError?.reason || '').trim().toUpperCase();
       const safeConflictMessage = mapPublicBookingErrorMessage(conflictCode, extractMessage(err));
@@ -2589,24 +2760,38 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         ? 'titular'
         : (affectedSummaryBlock?.alias || `${BOOKING_COMPANION_ALIAS_PREFIX} ${affectedIndex}`);
 
+      if (conflictCode === 'PUBLIC_CITAS_EMAIL_IN_USE' || conflictCode === 'EMAIL_BELONGS_TO_ACTIVE_USER') {
+        const emailErrorIndex = resolveEmailConflictBlockIndex(apiErrorDetails);
+        if (emailErrorIndex != null) {
+          const emailFeedback = buildActiveUserEmailFeedback({
+            details: apiErrorDetails,
+            blockIndex: emailErrorIndex,
+            bookingBlocksSummary,
+            fallbackEmail: titularEmail,
+          });
+          setFieldError(emailErrorIndex, 'contactEmail', emailFeedback.message);
+          focusBookingField(emailErrorIndex, 'contactEmail');
+          navigate(BOOKING_ROUTES.agenda);
+          notifications.warning(emailFeedback.message, { dedupeKey: 'public-booking-email-registered-login-required' });
+          if (emailFeedback.isTitular) {
+            openAuthRequiredModal(emailFeedback.email);
+          }
+          return false;
+        }
+
+        notifications.warning(safeConflictMessage, { dedupeKey: 'public-booking-email-registered-login-required' });
+        navigate(BOOKING_ROUTES.agenda);
+        return false;
+      }
+
       if (detailField) {
         const mappedIndex = detailField.startsWith('titular.')
           ? 0
           : (detailIndex != null ? detailIndex : effectiveActiveBlockIndex);
-        const mappedField = detailField.includes('telefono')
-          ? 'contactPhone'
-          : detailField.includes('email')
-            ? 'contactEmail'
-            : detailField.includes('apellidos')
-              ? 'contactLastName'
-              : detailField.includes('nombres')
-                ? 'contactFirstName'
-                : detailField.includes('nombre')
-                  ? 'contactFirstName'
-                  : null;
+        const mappedField = mapBookingDetailFieldToContactField(detailField);
         if (mappedField) {
           setFieldError(mappedIndex, mappedField, safeConflictMessage);
-          setActiveBlockIndex(mappedIndex);
+          focusBookingField(mappedIndex, mappedField);
           navigate(BOOKING_ROUTES.agenda);
         }
       }
@@ -2721,6 +2906,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     createHold,
     effectiveActiveBlockIndex,
     canUseClienteHold,
+    focusBookingField,
     holdSubmitting,
     isPastSlotForToday,
     isBlockSelectedSlotAvailable,
@@ -2757,6 +2943,82 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     }
   }, [bookingSelectionFingerprint, clearPaymentState, holdResult, markHoldObsolete]);
 
+  const buildContactValidationPayload = useCallback(() => {
+    const contactos = [];
+    bookingBlocks.forEach((block, index) => {
+      if (index === 0 && canUseClienteHold) return;
+      const contactState = resolveBlockContactState(block, index);
+      const email = String(contactState?.email || '').trim().toLowerCase();
+      if (index > 0 && !email) return;
+      const summaryBlock = bookingBlocksSummary[index] || null;
+      contactos.push({
+        blockIndex: index,
+        rol_integrante_codigo: index === 0 ? 'titular' : 'acompanante',
+        alias: summaryBlock?.alias || block?.alias || (index === 0 ? BOOKING_HOLDER_ALIAS : `${BOOKING_COMPANION_ALIAS_PREFIX} ${index}`),
+        email,
+      });
+    });
+    return contactos;
+  }, [bookingBlocks, bookingBlocksSummary, canUseClienteHold, resolveBlockContactState]);
+
+  const handleContactValidationError = useCallback((err) => {
+    const apiError = err?.data?.error || err?.error || {};
+    const conflictCode = String(apiError?.code || '').trim().toUpperCase();
+    const rawConflicts = Array.isArray(apiError?.details?.conflicts)
+      ? apiError.details.conflicts
+      : [];
+    if (conflictCode !== 'PUBLIC_CITAS_CONTACT_EMAIL_CONFLICT' || rawConflicts.length === 0) {
+      return false;
+    }
+
+    const conflicts = rawConflicts
+      .map((conflict) => normalizeContactEmailConflict(conflict))
+      .filter(Boolean);
+    if (conflicts.length === 0) return false;
+
+    const nextErrors = {};
+    conflicts.forEach((conflict) => {
+      nextErrors[buildFieldErrorKey(conflict.blockIndex, conflict.field)] = conflict.message;
+    });
+    const firstConflict = conflicts[0];
+    setFieldErrors((prev) => ({ ...prev, ...nextErrors }));
+    focusBookingField(firstConflict.blockIndex, firstConflict.field);
+    navigate(BOOKING_ROUTES.agenda);
+    notifications.warning(firstConflict.message, {
+      dedupeKey: 'public-booking-contact-email-conflict',
+    });
+    if (
+      firstConflict.blockIndex === 0
+      && firstConflict.code === 'EMAIL_BELONGS_TO_ACTIVE_USER'
+      && !canUseClienteHold
+    ) {
+      openAuthRequiredModal(firstConflict.email);
+    }
+    return true;
+  }, [
+    buildFieldErrorKey,
+    canUseClienteHold,
+    focusBookingField,
+    navigate,
+    notifications,
+    openAuthRequiredModal,
+  ]);
+
+  const validateContactsBeforeConfirm = useCallback(async () => {
+    const contactos = buildContactValidationPayload();
+    if (contactos.length === 0) return true;
+    try {
+      await validatePublicBookingContacts({ contactos });
+      return true;
+    } catch (err) {
+      if (handleContactValidationError(err)) return false;
+      notifications.warning(extractMessage(err), {
+        dedupeKey: 'public-booking-validate-contacts-before-confirm',
+      });
+      return false;
+    }
+  }, [buildContactValidationPayload, handleContactValidationError, notifications]);
+
   const goToConfirm = useCallback(async () => {
     if (holdSubmitting) return false;
     if (bookingMode === 'loading') {
@@ -2766,60 +3028,34 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       return false;
     }
     if (!allBlocksComplete) {
+      const firstInvalidContact = blocksToSubmitSummary.find((block) => !block?.contactResolved?.isValid);
+      const feedback = firstInvalidContact
+        ? getContactValidationFeedback(firstInvalidContact.contactResolved, firstInvalidContact.index)
+        : null;
+      if (feedback?.field) {
+        setFieldError(firstInvalidContact.index, feedback.field, feedback.message);
+        focusBookingField(firstInvalidContact.index, feedback.field);
+      }
       notifications.warning(bookingBlockingReason || 'Completa servicios, fecha y hora antes de continuar a resumen.', {
         dedupeKey: 'public-booking-confirm-requires-complete-blocks',
       });
       return false;
     }
-    if (!canUseClienteHold) {
-      const titularBlock = normalizeBookingBlock(bookingBlocks[0] || null, 0);
-      const titularContactState = resolveBlockContactState(titularBlock, 0);
-      const titularNombre = String(titularContactState.fullName || '').trim();
-      const titularEmail = String(titularContactState.email || '').trim().toLowerCase();
-      const titularTelefono = String(titularContactState.phone || '').trim();
-      try {
-        await validatePublicTitularForBooking({
-          titular: {
-            nombre: titularNombre,
-            email: titularEmail,
-            telefono: titularTelefono,
-          },
-        });
-      } catch (err) {
-        const apiError = err?.data?.error || err?.error || {};
-        const conflictCode = String(apiError?.code || '').trim().toUpperCase();
-        if (conflictCode === 'PUBLIC_CITAS_EMAIL_IN_USE' || conflictCode === 'EMAIL_BELONGS_TO_ACTIVE_USER') {
-          setFieldError(0, 'contactEmail', mapPublicBookingErrorMessage(conflictCode));
-          setActiveBlockIndex(0);
-          navigate(BOOKING_ROUTES.agenda);
-          notifications.warning(
-            `El correo del titular, ${titularEmail || 'correo no identificado'}, pertenece a un usuario activo. Debes iniciar sesión para continuar.`,
-            { dedupeKey: 'public-booking-email-registered-login-required-preconfirm' }
-          );
-          openAuthRequiredModal(titularEmail);
-          return false;
-        }
-        notifications.warning(extractMessage(err), {
-          dedupeKey: 'public-booking-validate-titular-before-confirm',
-        });
-        return false;
-      }
-    }
+    const contactsValid = await validateContactsBeforeConfirm();
+    if (!contactsValid) return false;
     navigate(BOOKING_ROUTES.confirm);
     return true;
   }, [
     allBlocksComplete,
+    blocksToSubmitSummary,
     bookingBlockingReason,
     bookingMode,
+    focusBookingField,
     holdSubmitting,
-    canUseClienteHold,
-    bookingBlocks,
-    resolveBlockContactState,
     navigate,
     notifications,
     setFieldError,
-    setActiveBlockIndex,
-    openAuthRequiredModal,
+    validateContactsBeforeConfirm,
   ]);
 
   const goToPayment = useCallback(() => {
@@ -3236,7 +3472,15 @@ const invalidHoldSelectionFingerprintRef = useRef('');
   const startCheckout = useCallback(async () => {
     if (paymentResult?.booking_confirmed) return true;
     if (!allBlocksComplete) {
-      notifications.warning('Completa servicios, fecha y hora en todos los bloques antes de continuar al pago.', {
+      const firstInvalidContact = blocksToSubmitSummary.find((block) => !block?.contactResolved?.isValid);
+      const feedback = firstInvalidContact
+        ? getContactValidationFeedback(firstInvalidContact.contactResolved, firstInvalidContact.index)
+        : null;
+      if (feedback?.field) {
+        setFieldError(firstInvalidContact.index, feedback.field, feedback.message);
+        setActiveBlockIndex(firstInvalidContact.index);
+      }
+      notifications.warning(bookingBlockingReason || 'Completa servicios, fecha y hora en todos los bloques antes de continuar al pago.', {
         dedupeKey: 'public-booking-checkout-requires-complete-blocks',
       });
       navigate(BOOKING_ROUTES.agenda);
@@ -3251,7 +3495,17 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     }
     navigate(BOOKING_ROUTES.payment);
     return true;
-  }, [allBlocksComplete, holdResult, navigate, notifications, paymentResult?.booking_confirmed]);
+  }, [
+    allBlocksComplete,
+    blocksToSubmitSummary,
+    bookingBlockingReason,
+    holdResult,
+    navigate,
+    notifications,
+    paymentResult?.booking_confirmed,
+    setActiveBlockIndex,
+    setFieldError,
+  ]);
 
   useEffect(() => {
     if (!location.pathname.startsWith(BOOKING_ROUTES.payment)) {
@@ -3430,6 +3684,8 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       paymentResult,
       bookingSuccessResult,
       pendingCompanionFocusId,
+      pendingFieldFocus,
+      consumePendingFieldFocus,
       holdSubmitting,
       isPastSlotForToday,
       maxCompanions,
@@ -3561,6 +3817,8 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       paymentResult,
       bookingSuccessResult,
       pendingCompanionFocusId,
+      pendingFieldFocus,
+      consumePendingFieldFocus,
       holdSubmitting,
       isPastSlotForToday,
       maxCompanions,
@@ -3694,6 +3952,42 @@ const invalidHoldSelectionFingerprintRef = useRef('');
               </Button>
               <Button type="button" onClick={goToLoginForBooking}>
                 Ir a iniciar sesión
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={cancelBookingModal.open}
+          onOpenChange={(open) => {
+            if (!open) closeCancelBookingModal();
+          }}
+        >
+          <DialogContent className="sm:max-w-md booking-cancel-modal">
+            <DialogHeader>
+              <DialogTitle>Cancelar agendamiento</DialogTitle>
+              <DialogDescription>
+                Se perderán los datos seleccionados y se liberará la reserva temporal si existe.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={closeCancelBookingModal}
+                disabled={cancelBookingProcessing}
+              >
+                Continuar agendando
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => {
+                  void confirmCancelBooking();
+                }}
+                disabled={cancelBookingProcessing || holdSubmitting}
+              >
+                {cancelBookingProcessing ? 'Cancelando...' : 'Cancelar agendamiento'}
               </Button>
             </DialogFooter>
           </DialogContent>
