@@ -53,7 +53,11 @@ export default function PublicBookingConfirmStep() {
   const totalToPay = hasBackendTotal ? Math.max(0, totalToPayApi) : totalServiciosNeto;
   const requiresOnlinePayment = Boolean(paymentRequired && totalToPay > 0);
   const totalLabel = paymentRequired ? 'Total a pagar' : 'Total a pagar en salón';
-  const showExtrasRow = Number.isFinite(extrasToPay) && extrasToPay > 0;
+  const safeCoveredByPlan = Math.max(0, Number(coveredByPlan || 0));
+  const safeExtrasToPay = Math.max(0, Number(extrasToPay || 0));
+  const hasPlanCoverage = safeCoveredByPlan > 0;
+  const hasSaldoToPay = hasPlanCoverage && safeExtrasToPay > 0;
+  const isFullyCoveredByPlan = hasPlanCoverage && safeExtrasToPay <= 0;
   const mustLoginForNoPaymentConfirmation = Boolean(!requiresOnlinePayment && !canUseClienteHold);
 
   const handleContinueAction = async () => {
@@ -189,16 +193,21 @@ export default function PublicBookingConfirmStep() {
             <span>-{formatCurrencyHnl(coveredByReward)}</span>
           </div>
         ) : null}
-        {coveredByPlan > 0 ? (
+        {hasPlanCoverage ? (
           <div className="citas-confirm-row">
             <span>Cubierto por tu plan</span>
-            <span>-{formatCurrencyHnl(coveredByPlan)}</span>
+            <span>-{formatCurrencyHnl(safeCoveredByPlan)}</span>
           </div>
         ) : null}
-        {showExtrasRow ? (
+        {hasSaldoToPay ? (
           <div className="citas-confirm-row">
-            <span>Extras a pagar</span>
-            <span>{formatCurrencyHnl(extrasToPay)}</span>
+            <span>Saldo a pagar</span>
+            <span>{formatCurrencyHnl(safeExtrasToPay)}</span>
+          </div>
+        ) : null}
+        {isFullyCoveredByPlan ? (
+          <div className="public-booking-payment-note mt-2">
+            <span>Cubierto completamente por tu plan.</span>
           </div>
         ) : null}
         <div className="citas-confirm-row">

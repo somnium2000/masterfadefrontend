@@ -147,6 +147,11 @@ export default function PublicBookingPaymentStep() {
     ?? holdTotalToPay
     ?? 0
   );
+  const safeCoveredByPlan = Math.max(0, Number(effectiveCoveredByPlan || 0));
+  const safeExtras = Math.max(0, Number(effectiveExtras || 0));
+  const hasPlanCoverage = safeCoveredByPlan > 0;
+  const hasSaldoToPay = hasPlanCoverage && safeExtras > 0;
+  const isFullyCoveredByPlan = hasPlanCoverage && safeExtras <= 0;
 
   const holdCountdownLabel = (() => {
     if (holdRemainingMs == null) return null;
@@ -281,14 +286,23 @@ export default function PublicBookingPaymentStep() {
             <span>Total servicios</span>
             <span>{formatCurrencyHnl(effectiveSubtotal)}</span>
           </div>
-          <div className="citas-confirm-row">
-            <span>Cubierto por tu plan</span>
-            <span>-{formatCurrencyHnl(effectiveCoveredByPlan)}</span>
-          </div>
-          <div className="citas-confirm-row">
-            <span>Extras a pagar</span>
-            <span>{formatCurrencyHnl(effectiveExtras)}</span>
-          </div>
+          {hasPlanCoverage ? (
+            <div className="citas-confirm-row">
+              <span>Cubierto por tu plan</span>
+              <span>-{formatCurrencyHnl(safeCoveredByPlan)}</span>
+            </div>
+          ) : null}
+          {hasSaldoToPay ? (
+            <div className="citas-confirm-row">
+              <span>Saldo a pagar</span>
+              <span>{formatCurrencyHnl(safeExtras)}</span>
+            </div>
+          ) : null}
+          {isFullyCoveredByPlan ? (
+            <div className="public-booking-payment-note mt-2">
+              <span>Cubierto completamente por tu plan.</span>
+            </div>
+          ) : null}
           <div className="citas-confirm-row">
             <span>Total a pagar</span>
             <span>{formatCurrencyHnl(effectiveTotalToPay)}</span>
