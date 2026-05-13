@@ -672,6 +672,7 @@ export default function useBookingAvailability({
     slotSuggestionsLoading,
     fetchAvailability,
     fetchSlots,
+    fetchSlotsForBarber,
     loadSlotSuggestions,
     invalidateAgendaCaches,
     resetAvailabilityViewState,

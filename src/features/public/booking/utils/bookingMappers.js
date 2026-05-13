@@ -6,7 +6,9 @@ import {
   buildFullName,
   normalizeEmail,
   normalizePersonName,
+  normalizePersonNameForValidation,
   normalizePromotionIds,
+  sanitizePersonNameInput,
   splitFullName,
 } from '../bookingUtils.js';
 
@@ -106,8 +108,14 @@ export function normalizeBookingBlock(block, index) {
   const promotionId = promotionIds[0] || '';
 
   const splitLegacyName = splitFullName(block?.contactName || '');
-  const contactFirstName = normalizePersonName(block?.contactFirstName || splitLegacyName.firstName || '');
-  const contactLastName = normalizePersonName(block?.contactLastName || splitLegacyName.lastName || '');
+  const hasContactFirstName = Object.prototype.hasOwnProperty.call(block || {}, 'contactFirstName');
+  const hasContactLastName = Object.prototype.hasOwnProperty.call(block || {}, 'contactLastName');
+  const contactFirstName = hasContactFirstName
+    ? sanitizePersonNameInput(block?.contactFirstName || '')
+    : normalizePersonNameForValidation(splitLegacyName.firstName);
+  const contactLastName = hasContactLastName
+    ? sanitizePersonNameInput(block?.contactLastName || '')
+    : normalizePersonNameForValidation(splitLegacyName.lastName);
   const contactName = buildFullName(contactFirstName, contactLastName) || normalizePersonName(block?.contactName || '');
   const resolvedAlias = contactName || String(block?.alias || '').trim() || fallbackAlias;
 
@@ -134,6 +142,8 @@ export function normalizeBookingBlock(block, index) {
     selectedDateTime: String(block?.selectedDateTime || '').trim(),
     contactFirstName,
     contactLastName,
+    contactFirstNameDirty: Boolean(block?.contactFirstNameDirty),
+    contactLastNameDirty: Boolean(block?.contactLastNameDirty),
     contactName,
     contactEmail: normalizeEmail(block?.contactEmail || ''),
     contactPhone: String(block?.contactPhone || '').trim(),
@@ -154,6 +164,8 @@ export function areBlocksEqual(left, right) {
     && left.selectedDateTime === right.selectedDateTime
     && left.contactFirstName === right.contactFirstName
     && left.contactLastName === right.contactLastName
+    && Boolean(left.contactFirstNameDirty) === Boolean(right.contactFirstNameDirty)
+    && Boolean(left.contactLastNameDirty) === Boolean(right.contactLastNameDirty)
     && left.contactName === right.contactName
     && left.contactEmail === right.contactEmail
     && left.contactPhone === right.contactPhone
@@ -176,6 +188,8 @@ export function createBookingBlock({ alias = '', idBarbero = '' } = {}) {
       selectedDateTime: '',
       contactFirstName: '',
       contactLastName: '',
+      contactFirstNameDirty: false,
+      contactLastNameDirty: false,
       contactName: '',
       contactEmail: '',
       contactPhone: '',

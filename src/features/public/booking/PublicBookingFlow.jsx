@@ -27,6 +27,7 @@ import {
 } from './constants/bookingDefaults.js';
 import { BOOKING_ROUTES } from './constants/bookingRoutes.js';
 import {
+  getBookingBlockOccupiedRange,
   rangesOverlap,
 } from './utils/bookingDates.js';
 import {
@@ -164,6 +165,7 @@ const holdSelectionFingerprintRef = useRef('');
 const holderProfileHydratedRef = useRef(false);
 const paymentAutoBootstrapAttemptRef = useRef('');
 const paymentReturnStatusCheckRef = useRef('');
+const invalidHoldSelectionFingerprintRef = useRef('');
   const [servicesCanScroll, setServicesCanScroll] = useState(false);
   const [servicesAtEnd, setServicesAtEnd] = useState(true);
 
@@ -226,8 +228,10 @@ const paymentReturnStatusCheckRef = useRef('');
         ? prev
         : [createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })];
       const currentTitular = normalizeBookingBlock(source[0], 0);
-      const nextFirstName = currentTitular.contactFirstName || titularState.profile.nombres || '';
-      const nextLastName = currentTitular.contactLastName || titularState.profile.apellidos || '';
+      const nextFirstName = currentTitular.contactFirstName
+        || (currentTitular.contactFirstNameDirty ? '' : titularState.profile.nombres || '');
+      const nextLastName = currentTitular.contactLastName
+        || (currentTitular.contactLastNameDirty ? '' : titularState.profile.apellidos || '');
       const nextEmail = currentTitular.contactEmail || titularState.profile.email || '';
       const nextPhone = currentTitular.contactPhone || titularState.profile.telefono_principal || '';
       const nextTitular = normalizeBookingBlock(
@@ -314,7 +318,7 @@ const paymentReturnStatusCheckRef = useRef('');
     [contextData?.parametros]
   );
   const simulationNoPayment = useMemo(
-    () => readBooleanParam(contextData?.parametros, 'simulacion_sin_pago', true),
+    () => readBooleanParam(contextData?.parametros, 'simulacion_sin_pago', false),
     [contextData?.parametros]
   );
   const holdDurationMin = useMemo(
@@ -634,6 +638,15 @@ const paymentReturnStatusCheckRef = useRef('');
     ]
   );
 
+  useEffect(() => {
+    if (
+      invalidHoldSelectionFingerprintRef.current
+      && invalidHoldSelectionFingerprintRef.current !== bookingHoldFingerprint
+    ) {
+      invalidHoldSelectionFingerprintRef.current = '';
+    }
+  }, [bookingHoldFingerprint]);
+
   const monthRange = useMemo(() => {
     const year = currentMonth.getFullYear();
     const month = currentMonth.getMonth();
@@ -670,6 +683,7 @@ const paymentReturnStatusCheckRef = useRef('');
     createPaymentIntentOnce,
     fetchPaymentStatusOnce,
     completeMockPaymentOnce,
+    completeSimulatorPaymentOnce,
     isCurrentPaymentGroup,
   } = useBookingPayment({
     currentGroupId: holdResult?.id_grupo_cita || '',
@@ -692,6 +706,7 @@ const paymentReturnStatusCheckRef = useRef('');
     resetAvailabilityData,
     abortAvailabilityRequests,
     clearSlotSuggestions,
+    fetchSlotsForBarber,
   } = useBookingAvailability({
     selectedBranchId,
     activeBlockBarberId,
@@ -800,8 +815,11 @@ const paymentReturnStatusCheckRef = useRef('');
 
     if (isTitular) {
       const fullName = joinedName || fallbackName;
-      if (!fullName) {
+      if (!firstName) {
         errors.contactFirstName = 'El nombre del titular es obligatorio.';
+      }
+      if (!lastName) {
+        errors.contactLastName = 'El apellido del titular es obligatorio.';
       }
       if (!isValidEmail(email)) {
         errors.contactEmail = 'Ingresa un correo válido del titular.';
@@ -1085,17 +1103,9 @@ const paymentReturnStatusCheckRef = useRef('');
   );
 
   const hasBlockingGroupConflict = useCallback((block) => {
-    if (!block?.idBarbero || !block?.selectedDate || !block?.selectedTime || Number(block?.duracion_bloque_min || 0) <= 0) {
+    const blockRange = getBookingBlockOccupiedRange(block);
+    if (!block?.idBarbero || !block?.selectedDate || !block?.selectedTime || !blockRange) {
       return false;
-    }
-    if (
-      block.index > 0
-      && bookingBlocksSummary[0]
-      && bookingBlocksSummary[0].idBarbero === block.idBarbero
-      && bookingBlocksSummary[0].selectedDate === block.selectedDate
-      && bookingBlocksSummary[0].selectedTime === block.selectedTime
-    ) {
-      return true;
     }
     return bookingBlocksSummary.some((candidate) =>
       candidate.id !== block.id
@@ -1103,9 +1113,9 @@ const paymentReturnStatusCheckRef = useRef('');
       && candidate.selectedDate === block.selectedDate
       && rangesOverlap(
         block.selectedTime,
-        block.duracion_bloque_min,
+        blockRange.occupiedDurationMin,
         candidate.selectedTime,
-        candidate.duracion_bloque_min
+        getBookingBlockOccupiedRange(candidate)?.occupiedDurationMin
       )
     );
   }, [bookingBlocksSummary]);
@@ -1120,7 +1130,10 @@ const paymentReturnStatusCheckRef = useRef('');
 
   const allBlocksComplete = useMemo(
     () => blocksToSubmitSummary.length > 0
-      && blocksToSubmitSummary.every((block) => block.isComplete && !hasBlockingGroupConflict(block)),
+      && blocksToSubmitSummary.every((block) =>
+        block.isComplete
+        && Boolean(getBookingBlockOccupiedRange(block))
+        && !hasBlockingGroupConflict(block)),
     [blocksToSubmitSummary, hasBlockingGroupConflict]
   );
   const bookingBlockingReason = useMemo(() => {
@@ -1167,6 +1180,13 @@ const paymentReturnStatusCheckRef = useRef('');
       return firstMissingTime.index === 0
         ? 'El titular no tiene horario seleccionado.'
         : `El acompañante ${firstMissingTime.index} no tiene horario seleccionado.`;
+    }
+
+    const firstMissingDuration = blocksToSubmitSummary.find((block) => !getBookingBlockOccupiedRange(block));
+    if (firstMissingDuration) {
+      return firstMissingDuration.index === 0
+        ? 'El titular no tiene duracion calculada.'
+        : `El acompaÃ±ante ${firstMissingDuration.index} no tiene duracion calculada.`;
     }
 
     const firstConflict = blocksToSubmitSummary.find((block) => hasBlockingGroupConflict(block));
@@ -1282,11 +1302,13 @@ const paymentReturnStatusCheckRef = useRef('');
 
   const findBlockCollision = useCallback((barberId, dateKey, timeKey, durationMinutes, ignoreIndex) => {
     if (!barberId || !dateKey || !timeKey || Number(durationMinutes || 0) <= 0) return null;
-    return bookingBlocksSummary.find((block) =>
-      block.index !== ignoreIndex
-      && block.idBarbero === barberId
-      && block.selectedDate === dateKey
-      && rangesOverlap(timeKey, durationMinutes, block.selectedTime, block.duracion_bloque_min)) || null;
+    return bookingBlocksSummary.find((block) => {
+      const blockRange = getBookingBlockOccupiedRange(block);
+      return block.index !== ignoreIndex
+        && block.idBarbero === barberId
+        && block.selectedDate === dateKey
+        && rangesOverlap(timeKey, durationMinutes, block.selectedTime, blockRange?.occupiedDurationMin);
+    }) || null;
   }, [bookingBlocksSummary]);
 
   const refreshPolledAgenda = useCallback(() => {
@@ -1344,6 +1366,65 @@ const paymentReturnStatusCheckRef = useRef('');
     notifications,
     clearPaymentState,
   ]);
+
+  const rejectInvalidScheduleBlock = useCallback((block) => {
+    const normalizedIndex = Number.isInteger(Number(block?.index))
+      ? Math.max(0, Number(block.index))
+      : (Number.isInteger(effectiveActiveBlockIndex) ? effectiveActiveBlockIndex : 0);
+    const label = String(
+      block?.alias
+      || (normalizedIndex === 0 ? BOOKING_HOLDER_ALIAS : `${BOOKING_COMPANION_ALIAS_PREFIX} ${normalizedIndex}`)
+    ).trim();
+
+    invalidHoldSelectionFingerprintRef.current = bookingHoldFingerprint;
+    clearSelectedTimes({ onlyIndex: normalizedIndex });
+    setSlotConflict(block?.selectedDate && block?.selectedTime && block?.idBarbero
+      ? {
+          dateKey: block.selectedDate,
+          timeKey: block.selectedTime,
+          barberId: block.idBarbero,
+          conflictingAlias: label,
+        }
+      : null);
+    notifications.warning(`Revisa el horario de ${label}. Selecciona una hora disponible.`, {
+      dedupeKey: 'public-booking-submit-invalid-block-schedule',
+    });
+    setActiveBlockIndex(normalizedIndex);
+    navigate(BOOKING_ROUTES.agenda, { replace: true });
+    return false;
+  }, [
+    bookingHoldFingerprint,
+    clearSelectedTimes,
+    effectiveActiveBlockIndex,
+    navigate,
+    notifications,
+  ]);
+
+  const isBlockSelectedSlotAvailable = useCallback(async (block) => {
+    const servicesCsvValue = Array.isArray(block?.selectedServiceIdsEffective)
+      ? block.selectedServiceIdsEffective.join(',')
+      : '';
+    const packageIdValue = String(block?.selectedPackage?.id_paquete || block?.packageId || '').trim();
+    const hasSelectionForLookup = Boolean(packageIdValue) || Boolean(servicesCsvValue);
+    if (!block?.idBarbero || !block?.selectedDate || !block?.selectedTime || !hasSelectionForLookup) {
+      return false;
+    }
+
+    try {
+      const blockSlots = await fetchSlotsForBarber({
+        barberId: block.idBarbero,
+        dateKey: block.selectedDate,
+        timeKey: block.selectedTime,
+        selectionTypeValue: block.selection_type || block.selectionType,
+        servicesCsvValue,
+        packageIdValue,
+      });
+      return Array.isArray(blockSlots)
+        && blockSlots.some((slot) => slot?.hora === block.selectedTime && slot?.disponible);
+    } catch {
+      return true;
+    }
+  }, [fetchSlotsForBarber]);
 
   usePublicAgendaPolling({
     barberId: activeBlockBarberId,
@@ -2250,6 +2331,10 @@ const paymentReturnStatusCheckRef = useRef('');
       return false;
     }
     const blocksToSubmit = blocksToSubmitSummary;
+    if (invalidHoldSelectionFingerprintRef.current === bookingHoldFingerprint) {
+      const fallbackBlock = blocksToSubmit[effectiveActiveBlockIndex] || blocksToSubmit[0] || bookingBlocksSummary[0] || null;
+      return rejectInvalidScheduleBlock(fallbackBlock);
+    }
     if (blocksToSubmit.length === 0) {
       notifications.warning('Completa servicios, fecha y hora en todos los bloques antes de confirmar.', {
         dedupeKey: 'public-booking-blocks-required',
@@ -2302,9 +2387,18 @@ const paymentReturnStatusCheckRef = useRef('');
     const titularEmail = titularContactState.email;
     const titularTelefono = titularContactState.phone;
     const titularMissingData = [];
-    if (!titularNombre) {
+    if (!titularContactState.firstName) {
       titularMissingData.push('nombre');
       nextFieldErrors[buildFieldErrorKey(0, 'contactFirstName')] = 'Ingresa el nombre del titular.';
+    }
+    if (!titularContactState.lastName) {
+      titularMissingData.push('apellido');
+      nextFieldErrors[buildFieldErrorKey(0, 'contactLastName')] = 'Ingresa el apellido del titular.';
+    }
+    if (!titularNombre) {
+      titularMissingData.push('nombre completo');
+      nextFieldErrors[buildFieldErrorKey(0, 'contactFirstName')] = nextFieldErrors[buildFieldErrorKey(0, 'contactFirstName')]
+        || 'Ingresa el nombre del titular.';
     }
     if (!titularEmail) {
       titularMissingData.push('correo');
@@ -2330,7 +2424,7 @@ const paymentReturnStatusCheckRef = useRef('');
     }
     for (const companion of blocksToSubmit.filter((block) => Number(block?.index) > 0)) {
       const companionContact = companion?.contactResolved || resolveBlockContactState(companion, companion.index);
-      if (!companionContact.fullName) {
+      if (!companionContact.firstName || !companionContact.lastName || !companionContact.fullName) {
         nextFieldErrors[buildFieldErrorKey(companion.index, 'contactFirstName')] = 'Completa nombre y apellido del acompanante.';
         nextFieldErrors[buildFieldErrorKey(companion.index, 'contactLastName')] = 'Completa nombre y apellido del acompanante.';
         notifications.warning('Cada acompañante debe tener nombre y apellido válidos para confirmar.', {
@@ -2360,6 +2454,10 @@ const paymentReturnStatusCheckRef = useRef('');
     const resolvedBarberByBlockId = new Map();
     let autoAssignedCompanion = false;
     for (const block of blocksToSubmit) {
+      const blockRange = getBookingBlockOccupiedRange(block);
+      if (!blockRange) {
+        return rejectInvalidScheduleBlock(block);
+      }
       if (isPastSlotForToday(block.selectedDate, block.selectedTime)) {
         notifications.warning('No puedes confirmar una cita en hora pasada para hoy.', {
           dedupeKey: 'public-booking-submit-past-time',
@@ -2368,42 +2466,28 @@ const paymentReturnStatusCheckRef = useRef('');
         navigate(BOOKING_ROUTES.agenda);
         return false;
       }
+      const selectedSlotAvailable = await isBlockSelectedSlotAvailable(block);
+      if (!selectedSlotAvailable) {
+        return rejectInvalidScheduleBlock(block);
+      }
       if (block.idBarbero) {
         const collisionKey = `${block.idBarbero}|${block.selectedDate}`;
         const previous = (selectedSlotMap.get(collisionKey) || []).find((candidate) =>
           rangesOverlap(
             block.selectedTime,
-            block.duracion_bloque_min,
+            blockRange.occupiedDurationMin,
             candidate.selectedTime,
-            candidate.duracion_bloque_min
+            getBookingBlockOccupiedRange(candidate)?.occupiedDurationMin
           )
         );
         if (previous) {
-          if (block.index > 0) {
-            resolvedBarberByBlockId.set(block.id, null);
-            autoAssignedCompanion = true;
-            continue;
-          }
           setSlotConflict({
             dateKey: block.selectedDate,
             timeKey: block.selectedTime,
             barberId: block.idBarbero,
             conflictingAlias: previous.alias || 'Integrante',
           });
-          notifications.warning('Hay integrantes con bloques que se solapan para el mismo barbero. Debes cambiar uno de ellos.', {
-            dedupeKey: 'public-booking-submit-duplicate-slot',
-          });
-          setActiveBlockIndex(block.index);
-          navigate(BOOKING_ROUTES.agenda);
-          await loadSlotSuggestions({
-            barberId: block.idBarbero,
-            dateKey: block.selectedDate,
-            timeKey: block.selectedTime,
-            selectionTypeValue: block.selection_type,
-            servicesCsvValue: Array.isArray(block.selectedServiceIdsEffective) ? block.selectedServiceIdsEffective.join(',') : '',
-            packageIdValue: block.selectedPackage?.id_paquete || '',
-          });
-          return false;
+          return rejectInvalidScheduleBlock(block);
         }
         const currentEntries = selectedSlotMap.get(collisionKey) || [];
         currentEntries.push(block);
@@ -2606,6 +2690,8 @@ const paymentReturnStatusCheckRef = useRef('');
           const conflictMessage = isSameBarberConflict
             ? `${affectedLabel} usa el mismo barbero en un horario que se cruza. Selecciona una hora posterior o cambia de barbero.`
             : `El horario seleccionado para ${affectedLabel} ya no está disponible.`;
+          invalidHoldSelectionFingerprintRef.current = bookingHoldFingerprint;
+          setActiveBlockIndex(affectedIndex);
           recoverToAgendaForReselection(
             conflictMessage,
             {
@@ -2630,19 +2716,21 @@ const paymentReturnStatusCheckRef = useRef('');
     bookingMode,
     bookingBlocks,
     bookingBlocksSummary,
+    bookingHoldFingerprint,
     blocksToSubmitSummary,
     createHold,
     effectiveActiveBlockIndex,
     canUseClienteHold,
     holdSubmitting,
     isPastSlotForToday,
-    loadSlotSuggestions,
+    isBlockSelectedSlotAvailable,
     navigate,
     notifications,
     openAuthRequiredModal,
     maxPromotionsPerBooking,
     requestProfilePersistDecision,
     recoverToAgendaForReselection,
+    rejectInvalidScheduleBlock,
     resolveBlockContactState,
     rewardBookingContext,
     rewardModeActive,
@@ -2913,6 +3001,7 @@ const paymentReturnStatusCheckRef = useRef('');
       }));
       setBookingSuccessResult({
         source: rewardApplied ? 'reward_no_payment' : 'membership_no_payment',
+        booking_confirmed: true,
         confirmation: payload,
         codigo_cita: codigoCita,
         citas_confirmadas: Array.isArray(payload?.citas_confirmadas)
@@ -3047,6 +3136,7 @@ const paymentReturnStatusCheckRef = useRef('');
           : '';
         setBookingSuccessResult({
           source: 'payment',
+          booking_confirmed: true,
           paymentResult: payload,
           codigo_cita: codigoCita,
           citas_confirmadas: citasConfirmadas,
@@ -3118,6 +3208,30 @@ const paymentReturnStatusCheckRef = useRef('');
       return false;
     }
   }, [bookingBlocks, completeMockPaymentOnce, holdResult?.id_grupo_cita, notifications, paymentIntent?.id_intent, refreshPaymentStatus, resolveBlockContactState]);
+
+  const completeSimulatorPayment = useCallback(async () => {
+    const groupId = String(holdResult?.id_grupo_cita || '').trim();
+    const intentId = String(paymentIntent?.id_intent || '').trim();
+    const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
+    const titularEmail = String(titularContact.email || '').trim().toLowerCase();
+    if (!groupId || !intentId || !isValidEmail(titularEmail)) return false;
+    try {
+      await completeSimulatorPaymentOnce({ groupId, intentId, titularEmail, status: 'success' });
+      const status = await refreshPaymentStatus({ retries: 2, retryDelayMs: 1500 });
+      return Boolean(status?.booking_confirmed);
+    } catch (err) {
+      notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-simulator-error' });
+      return false;
+    }
+  }, [bookingBlocks, completeSimulatorPaymentOnce, holdResult?.id_grupo_cita, notifications, paymentIntent?.id_intent, refreshPaymentStatus, resolveBlockContactState]);
+
+  const completePaymentSimulation = useCallback(async ({ provider } = {}) => {
+    const normalizedProvider = String(provider || '').trim().toLowerCase();
+    if (normalizedProvider === 'simulator') {
+      return completeSimulatorPayment();
+    }
+    return completeMockPayment();
+  }, [completeMockPayment, completeSimulatorPayment]);
 
   const startCheckout = useCallback(async () => {
     if (paymentResult?.booking_confirmed) return true;
@@ -3303,6 +3417,7 @@ const paymentReturnStatusCheckRef = useRef('');
       refreshPaymentStatus,
       checkingPaymentStatus,
       completeMockPayment,
+      completePaymentSimulation,
       startCheckout,
       holdDurationMin,
       holdExpiresAtIso,
@@ -3433,6 +3548,7 @@ const paymentReturnStatusCheckRef = useRef('');
       refreshPaymentStatus,
       checkingPaymentStatus,
       completeMockPayment,
+      completePaymentSimulation,
       startCheckout,
       holdDurationMin,
       holdExpiresAtIso,

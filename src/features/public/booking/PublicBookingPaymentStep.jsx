@@ -2,7 +2,7 @@ import { ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/button.jsx';
 import { usePublicBookingFlow } from './BookingFlowContext.jsx';
-import { formatCurrencyHnl } from './bookingUtils.js';
+import { formatCurrencyHnl, normalizeBookingPaymentUiState } from './bookingUtils.js';
 import BookingActions from './components/BookingActions.jsx';
 import BookingStepHeader from './components/BookingStepHeader.jsx';
 
@@ -11,38 +11,87 @@ function isLocalHostname(value) {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
 
-function canShowMockPaymentAction() {
-  const provider = String(
+function isQaHostname(value) {
+  return String(value || '').trim().toLowerCase() === 'qa.masterfadeapp.com';
+}
+
+function isProductionHostname(value) {
+  const hostname = String(value || '').trim().toLowerCase();
+  return hostname === 'masterfadeapp.com'
+    || hostname === 'www.masterfadeapp.com'
+    || hostname === 'api.masterfadeapp.com';
+}
+
+function readEnvFlag(value) {
+  return String(value || '').trim().toLowerCase() === 'true';
+}
+
+function normalizePaymentProvider(value) {
+  const provider = String(value || '').trim().toLowerCase();
+  return provider === 'payment-simulator' ? 'simulator' : provider;
+}
+
+function isProductionRuntime() {
+  if (import.meta.env.PROD) return true;
+  const mode = String(import.meta.env.MODE || '').trim().toLowerCase();
+  const runtime = String(
+    import.meta.env.VITE_ENTORNO
+    || import.meta.env.VITE_APP_ENV
+    || import.meta.env.VITE_RUNTIME_ENV
+    || import.meta.env.VITE_NODE_ENV
+    || ''
+  ).trim().toLowerCase();
+  return mode === 'production'
+    || mode === 'prod'
+    || runtime === 'production'
+    || runtime === 'prod';
+}
+
+let paymentSimulationDiagnosticLogged = false;
+
+function resolvePaymentSimulationAction() {
+  const hostname = typeof window !== 'undefined' ? window.location?.hostname : '';
+  const localHost = isLocalHostname(hostname);
+  const provider = normalizePaymentProvider(
     import.meta.env.VITE_PAYMENT_PROVIDER
     || import.meta.env.VITE_PAYMENT_PROVIDER_CODE
     || ''
-  ).trim().toLowerCase();
-  const explicitMock = String(import.meta.env.VITE_ENABLE_MOCK_PAYMENT || '').trim().toLowerCase() === 'true';
-  const providerAllowsMock = !provider || provider === 'mock';
-  const localHost = typeof window !== 'undefined' && isLocalHostname(window.location?.hostname);
-  return providerAllowsMock && (Boolean(import.meta.env.DEV) || localHost || explicitMock);
-}
+  );
+  const mockEnabled = readEnvFlag(import.meta.env.VITE_ENABLE_MOCK_PAYMENT);
+  const simulatorEnabled = readEnvFlag(import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR);
+  const qaSimulationEnabled = readEnvFlag(import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION);
 
-function normalizePaymentStatus(intent, result) {
-  const raw = String(
-    result?.estado_intent_codigo
-    || result?.status
-    || intent?.estado_intent_codigo
-    || 'pending'
-  ).trim().toLowerCase();
-  if (result?.booking_confirmed || ['confirmado', 'pagado', 'paid', 'capturado'].includes(raw)) return 'paid';
-  if (['pendiente_confirmacion', 'processing', 'procesando', 'confirmando'].includes(raw)) return 'processing';
-  if (['fallido', 'failed', 'rechazado'].includes(raw)) return 'failed';
-  if (['expirado', 'expired'].includes(raw)) return 'expired';
-  return 'pending';
-}
+  let action = { canShow: false, type: null, provider, reason: 'host_not_allowed' };
+  if (!provider) {
+    action = { canShow: false, type: null, provider, reason: 'provider_missing' };
+  } else if (isProductionHostname(hostname) || isProductionRuntime()) {
+    action = { canShow: false, type: null, provider, reason: 'production_blocked' };
+  } else if (localHost) {
+    action = provider === 'mock' && mockEnabled
+      ? { canShow: true, type: 'mock', provider, reason: 'local_mock_enabled' }
+      : { canShow: false, type: null, provider, reason: 'local_mock_not_configured' };
+  } else if (isQaHostname(hostname)) {
+    action = provider === 'simulator' && simulatorEnabled && qaSimulationEnabled
+      ? { canShow: true, type: 'simulator', provider, reason: 'qa_simulator_enabled' }
+      : { canShow: false, type: null, provider, reason: 'qa_simulator_not_configured' };
+  }
 
-function getPaymentStatusText(status) {
-  if (status === 'paid') return 'Pago confirmado';
-  if (status === 'processing') return 'Estamos confirmando tu pago';
-  if (status === 'failed') return 'El pago no pudo completarse';
-  if (status === 'expired') return 'La reserva temporal venció';
-  return 'Tu pago aún está pendiente';
+  if (import.meta.env.DEV && localHost && !paymentSimulationDiagnosticLogged) {
+    paymentSimulationDiagnosticLogged = true;
+    console.info('[payment-simulation]', {
+      provider,
+      mockEnabled,
+      simulatorEnabled,
+      qaSimulationEnabled,
+      hostname,
+      canShow: action.canShow,
+      reason: action.reason,
+      type: action.type,
+      mode: import.meta.env.MODE,
+    });
+  }
+
+  return action;
 }
 
 export default function PublicBookingPaymentStep() {
@@ -57,15 +106,18 @@ export default function PublicBookingPaymentStep() {
     paymentResult,
     refreshPaymentStatus,
     checkingPaymentStatus,
-    completeMockPayment,
+    completePaymentSimulation,
     holdPricing,
     holdTotalToPay,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
-  const showMockPaymentAction = canShowMockPaymentAction();
-  const paymentStatus = normalizePaymentStatus(paymentIntent, paymentResult);
-  const paymentStatusText = getPaymentStatusText(paymentStatus);
+  const paymentSimulationAction = resolvePaymentSimulationAction();
+  const paymentUiState = normalizeBookingPaymentUiState({
+    paymentIntent,
+    paymentResult,
+    holdTotalToPay,
+  });
 
   const fallbackSubtotal = useMemo(
     () => bookingBlocksSummary.reduce((total, block) => total + Number(block?.total_hnl || 0), 0),
@@ -123,7 +175,7 @@ export default function PublicBookingPaymentStep() {
     if (processingPayment) return;
     setProcessingPayment(true);
     try {
-      await completeMockPayment();
+      await completePaymentSimulation({ provider: paymentSimulationAction.type });
     } finally {
       setProcessingPayment(false);
     }
@@ -176,7 +228,7 @@ export default function PublicBookingPaymentStep() {
             <h4 className="citas-confirm-subtitle">Pasarela de pago</h4>
             <div className="public-booking-payment-note mt-2">
               <ShieldCheck size={14} />
-              <span>{paymentIntent?.id_intent ? paymentStatusText : 'El backend confirmará el pago cuando el proveedor notifique el webhook.'}</span>
+              <span>{paymentIntent?.id_intent ? paymentUiState.text : 'El backend confirmará el pago cuando el proveedor notifique el webhook.'}</span>
             </div>
             {!paymentIntent?.id_intent ? (
               <Button className="mt-3 gap-2" onClick={handleCreateIntent} disabled={loadingIntent || creatingPaymentIntent}>
@@ -185,7 +237,7 @@ export default function PublicBookingPaymentStep() {
               </Button>
             ) : (
               <div className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)] public-booking-payment-meta">
-                <p>Estado: {paymentStatusText}</p>
+                <p>Estado: {paymentUiState.text}</p>
                 <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || effectiveTotalToPay)}</p>
                 {paymentIntent.payment_url ? (
                   <a
@@ -207,7 +259,7 @@ export default function PublicBookingPaymentStep() {
                 {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
                 Verificar estado del pago
               </Button>
-              {showMockPaymentAction ? (
+              {paymentSimulationAction.canShow ? (
                 <Button onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
                   Simular pago exitoso

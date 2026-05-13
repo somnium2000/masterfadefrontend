@@ -21,6 +21,7 @@ export const HONDURAS_TIME_ZONE = 'America/Tegucigalpa';
 export const HONDURAS_UTC_OFFSET = '-06:00';
 
 export function extractMessage(err) {
+  if (err?.expectedUnauthenticated) return '';
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
 }
 
@@ -465,6 +466,10 @@ function collapseWhitespace(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function stripUnsupportedPersonNameChars(value) {
+  return String(value || '').replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s]/g, '');
+}
+
 function toTitleCaseToken(token) {
   return token
     .split(/([-'])/)
@@ -477,8 +482,23 @@ function toTitleCaseToken(token) {
     .join('');
 }
 
+export function sanitizePersonNameInput(value) {
+  return stripUnsupportedPersonNameChars(value)
+    .replace(/\s{2,}/g, ' ')
+    .slice(0, 20);
+}
+
+export function normalizePersonNameForValidation(value) {
+  const normalized = collapseWhitespace(sanitizePersonNameInput(value));
+  if (!normalized) return '';
+  return normalized
+    .split(' ')
+    .map((token) => toTitleCaseToken(token))
+    .join(' ');
+}
+
 export function normalizePersonName(value) {
-  const normalized = collapseWhitespace(value);
+  const normalized = collapseWhitespace(stripUnsupportedPersonNameChars(value));
   if (!normalized) return '';
   return normalized
     .split(' ')
@@ -522,8 +542,8 @@ export function splitFullName(fullName) {
 
 export function getTitularState(user) {
   const isAuthenticated = Boolean(String(user?.id_usuario || '').trim());
-  const nombres = normalizePersonName(user?.nombres || '');
-  const apellidos = normalizePersonName(user?.apellidos || '');
+  const nombres = normalizePersonNameForValidation(user?.nombres || '');
+  const apellidos = normalizePersonNameForValidation(user?.apellidos || '');
   const telefonoPrincipal = normalizePhone(user?.telefono_principal || '');
 
   const missingFields = [];
@@ -547,5 +567,111 @@ export function getTitularState(user) {
       email: normalizeEmail(user?.email || ''),
       telefono_principal: telefonoPrincipal.length >= 8 ? telefonoPrincipal : '',
     },
+  };
+}
+
+function firstUsableAmount(values) {
+  let fallback = 0;
+  for (const value of values) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) continue;
+    if (amount > 0) return amount;
+    fallback = amount;
+  }
+  return fallback;
+}
+
+export function normalizeBookingPaymentUiState({
+  paymentIntent = null,
+  paymentResult = null,
+  bookingSuccessResult = null,
+  holdTotalToPay = null,
+  totalToPay = null,
+} = {}) {
+  const effectivePaymentResult = (
+    bookingSuccessResult?.paymentResult
+    && typeof bookingSuccessResult.paymentResult === 'object'
+  )
+    ? bookingSuccessResult.paymentResult
+    : paymentResult;
+  const noPaymentSuccess = ['membership_no_payment', 'reward_no_payment'].includes(
+    String(bookingSuccessResult?.source || '').trim().toLowerCase()
+  );
+  const bookingConfirmed = noPaymentSuccess
+    || bookingSuccessResult?.booking_confirmed === true
+    || bookingSuccessResult?.paymentResult?.booking_confirmed === true
+    || paymentResult?.booking_confirmed === true;
+  const rawState = String(
+    effectivePaymentResult?.estado_intent_codigo
+    || effectivePaymentResult?.status
+    || paymentIntent?.estado_intent_codigo
+    || ''
+  ).trim().toLowerCase();
+  const amount = firstUsableAmount([
+    effectivePaymentResult?.total_pagado_hnl,
+    bookingSuccessResult?.total_pagado_hnl,
+    effectivePaymentResult?.total_hnl,
+    bookingSuccessResult?.total_hnl,
+    effectivePaymentResult?.monto_hnl,
+    bookingSuccessResult?.monto_hnl,
+    paymentIntent?.monto_hnl,
+    holdTotalToPay,
+    totalToPay,
+    0,
+  ]);
+
+  if (bookingConfirmed) {
+    return {
+      status: 'confirmed',
+      text: 'Reserva confirmada',
+      paymentLabel: noPaymentSuccess
+        ? (bookingSuccessResult?.estado_pago || 'Cubierto por plan')
+        : 'pagado',
+      totalPagadoHnl: amount,
+      bookingConfirmed: true,
+    };
+  }
+  if (['confirmado', 'pagado', 'paid', 'capturado', 'capturada'].includes(rawState)) {
+    return {
+      status: 'paid',
+      text: 'Pago confirmado',
+      paymentLabel: 'pagado',
+      totalPagadoHnl: amount,
+      bookingConfirmed: false,
+    };
+  }
+  if (['pendiente_confirmacion', 'processing', 'procesando', 'confirmando'].includes(rawState)) {
+    return {
+      status: 'processing',
+      text: 'Estamos confirmando tu pago',
+      paymentLabel: 'procesando',
+      totalPagadoHnl: amount,
+      bookingConfirmed: false,
+    };
+  }
+  if (['fallido', 'failed', 'rechazado'].includes(rawState)) {
+    return {
+      status: 'failed',
+      text: 'El pago no pudo completarse',
+      paymentLabel: 'fallido',
+      totalPagadoHnl: amount,
+      bookingConfirmed: false,
+    };
+  }
+  if (['expirado', 'expired'].includes(rawState)) {
+    return {
+      status: 'expired',
+      text: 'La reserva temporal vencio',
+      paymentLabel: 'expirado',
+      totalPagadoHnl: amount,
+      bookingConfirmed: false,
+    };
+  }
+  return {
+    status: 'pending',
+    text: 'Tu pago aun esta pendiente',
+    paymentLabel: rawState || 'pendiente',
+    totalPagadoHnl: amount,
+    bookingConfirmed: false,
   };
 }

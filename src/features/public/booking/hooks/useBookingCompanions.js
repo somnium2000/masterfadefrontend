@@ -12,6 +12,8 @@ import {
   buildFullName,
   normalizeEmail,
   normalizePersonName,
+  normalizePersonNameForValidation,
+  sanitizePersonNameInput,
   splitFullName,
   timeKeyToMinutes,
   toLocalDateTimeWithOffset,
@@ -232,16 +234,19 @@ export default function useBookingCompanions({
       normalizedPatch.contactEmail = normalizeEmail(normalizedPatch.contactEmail || '');
     }
     if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactFirstName')) {
-      normalizedPatch.contactFirstName = normalizePersonName(normalizedPatch.contactFirstName || '');
+      normalizedPatch.contactFirstName = sanitizePersonNameInput(normalizedPatch.contactFirstName || '');
+      normalizedPatch.contactFirstNameDirty = true;
     }
     if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactLastName')) {
-      normalizedPatch.contactLastName = normalizePersonName(normalizedPatch.contactLastName || '');
+      normalizedPatch.contactLastName = sanitizePersonNameInput(normalizedPatch.contactLastName || '');
+      normalizedPatch.contactLastNameDirty = true;
     }
     if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactName')) {
       const split = splitFullName(normalizedPatch.contactName || '');
-      normalizedPatch.contactFirstName = split.firstName;
-      normalizedPatch.contactLastName = split.lastName;
-      normalizedPatch.contactName = buildFullName(split.firstName, split.lastName) || normalizePersonName(normalizedPatch.contactName || '');
+      normalizedPatch.contactFirstName = normalizePersonNameForValidation(split.firstName);
+      normalizedPatch.contactLastName = normalizePersonNameForValidation(split.lastName);
+      normalizedPatch.contactName = buildFullName(normalizedPatch.contactFirstName, normalizedPatch.contactLastName)
+        || normalizePersonName(normalizedPatch.contactName || '');
     }
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => {
       const next = {

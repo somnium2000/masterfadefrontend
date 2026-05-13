@@ -8,22 +8,26 @@ import {
 } from '../publicBookingApi.js';
 
 function isFinalHoldState(hold) {
-  const state = String(
-    hold?.estado_grupo_codigo
-    || hold?.estado_pago_codigo
-    || hold?.estado_intent_codigo
-    || ''
-  ).trim().toLowerCase();
+  const finalStates = new Set([
+    'confirmado',
+    'confirmada',
+    'pagado',
+    'paid',
+    'capturado',
+    'capturada',
+    'consumido',
+    'completado',
+    'completada',
+  ]);
+  const states = [
+    hold?.estado_grupo_codigo,
+    hold?.estado_pago_codigo,
+    hold?.estado_intent_codigo,
+    hold?.estado_hold_codigo,
+  ].map((value) => String(value || '').trim().toLowerCase()).filter(Boolean);
   return hold?.booking_confirmed === true
     || hold?.confirmado === true
-    || state === 'confirmado'
-    || state === 'pagado'
-    || state === 'paid'
-    || state === 'capturado'
-    || state === 'capturada'
-    || state === 'confirmada'
-    || state === 'completado'
-    || state === 'completada';
+    || states.some((state) => finalStates.has(state));
 }
 
 export default function useBookingHold({

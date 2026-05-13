@@ -60,12 +60,6 @@ function toMinutes(timeKey) {
   return (hours * 60) + minutes;
 }
 
-function isThirtyMinuteStepSlot(slot) {
-  const totalMinutes = toMinutes(slot?.hora);
-  if (!Number.isFinite(totalMinutes)) return false;
-  return totalMinutes % 30 === 0;
-}
-
 function overlapByMinutes(leftStart, leftDuration, rightStart, rightDuration) {
   const leftMinutes = toMinutes(leftStart);
   const rightMinutes = toMinutes(rightStart);
@@ -595,15 +589,14 @@ export default function PublicBookingAgendaStep() {
         return leftMin - rightMin;
       });
 
-      const recommendedPool = [...curatedRecommended, ...fallbackUnique];
-      const recommended = recommendedPool.find((slot) => isThirtyMinuteStepSlot(slot)) || null;
-      const alternativesRaw = [
+      const recommendedPool = sortSlotsByTime([...curatedRecommended, ...fallbackUnique]);
+      const recommended = recommendedPool[0] || null;
+      const alternativesRaw = sortSlotsByTime([
         ...curatedAlternatives,
         ...(recommended ? fallbackUnique.filter((slot) => slot.hora !== recommended.hora) : fallbackUnique),
-      ];
+      ]);
       const alternatives = alternativesRaw
         .filter((slot) => slot && slot.hora !== recommended?.hora)
-        .filter((slot) => isThirtyMinuteStepSlot(slot))
         .slice(0, 3);
       const visibleSlots = [recommended, ...alternatives]
         .filter(Boolean)
@@ -862,6 +855,9 @@ export default function PublicBookingAgendaStep() {
                         id="booking-contact-first-name"
                         ref={contactNameInputRef}
                         type="text"
+                        inputMode="text"
+                        maxLength={20}
+                        autoComplete="given-name"
                         className={`mf-input ${activeFirstNameError ? 'is-invalid' : ''}`.trim()}
                         value={activeContactFirstName}
                         onChange={(event) => updateActiveBlockContact({ contactFirstName: event.target.value })}
@@ -878,6 +874,9 @@ export default function PublicBookingAgendaStep() {
                       <input
                         id="booking-contact-last-name"
                         type="text"
+                        inputMode="text"
+                        maxLength={20}
+                        autoComplete="family-name"
                         className={`mf-input ${activeLastNameError ? 'is-invalid' : ''}`.trim()}
                         value={activeContactLastName}
                         onChange={(event) => updateActiveBlockContact({ contactLastName: event.target.value })}

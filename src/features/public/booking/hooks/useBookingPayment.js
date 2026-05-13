@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   completePublicMockPayment,
+  completePublicSimulatorPayment,
   createPublicPaymentIntent,
   getPublicPaymentStatus,
 } from '../publicBookingApi.js';
@@ -79,6 +80,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
   const createIntentRef = useRef(null);
   const statusRequestRef = useRef(null);
   const paymentIntentRef = useRef(null);
+  const paymentStateSeqRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -128,7 +130,8 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     statusRequestRef.current = null;
     createIntentRef.current = null;
     paymentIntentRef.current = null;
-    currentGroupIdRef.current = safeText(currentGroupId);
+    paymentStateSeqRef.current += 1;
+    currentGroupIdRef.current = '';
     writeStoredPaymentContext(null);
     setPaymentIntentState(null);
     setPaymentResultState(null);
@@ -169,24 +172,30 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     }
 
     const promise = (async () => {
+      const requestSeq = paymentStateSeqRef.current;
       setCreatingPaymentIntent(true);
       const response = await createPublicPaymentIntent(payload);
       const intent = response?.data ?? response;
-      if (mountedRef.current && isCurrentPaymentGroup(normalizedGroupId)) {
-        const intentWithGroup = {
-          ...(intent && typeof intent === 'object' ? intent : {}),
-          id_grupo_cita: normalizedGroupId,
-        };
-        paymentIntentRef.current = intentWithGroup;
-        setPaymentIntentState(intentWithGroup);
-        writeStoredPaymentContext({
-          id_grupo_cita: normalizedGroupId,
-          id_intent: safeText(intentWithGroup.id_intent),
-          titular_email: normalizedEmail,
-          paymentIntent: intentWithGroup,
-        });
+      if (
+        !mountedRef.current
+        || paymentStateSeqRef.current !== requestSeq
+        || !isCurrentPaymentGroup(normalizedGroupId)
+      ) {
+        return null;
       }
-      return intent;
+      const intentWithGroup = {
+        ...(intent && typeof intent === 'object' ? intent : {}),
+        id_grupo_cita: normalizedGroupId,
+      };
+      paymentIntentRef.current = intentWithGroup;
+      setPaymentIntentState(intentWithGroup);
+      writeStoredPaymentContext({
+        id_grupo_cita: normalizedGroupId,
+        id_intent: safeText(intentWithGroup.id_intent),
+        titular_email: normalizedEmail,
+        paymentIntent: intentWithGroup,
+      });
+      return intentWithGroup;
     })();
 
     createIntentRef.current = { groupId: normalizedGroupId, promise };
@@ -277,6 +286,21 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     return true;
   }, [isCurrentPaymentGroup]);
 
+  const completeSimulatorPaymentOnce = useCallback(async ({ groupId, intentId, titularEmail, status = 'success' }) => {
+    const normalizedGroupId = safeText(groupId);
+    const normalizedIntentId = safeText(intentId);
+    const normalizedEmail = safeText(titularEmail).toLowerCase();
+    if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return false;
+    if (!isCurrentPaymentGroup(normalizedGroupId)) return false;
+    await completePublicSimulatorPayment({
+      id_grupo_cita: normalizedGroupId,
+      id_intent: normalizedIntentId,
+      titular_email: normalizedEmail,
+      status,
+    });
+    return true;
+  }, [isCurrentPaymentGroup]);
+
   return {
     paymentIntent: paymentIntentState,
     paymentResult: paymentResultState,
@@ -291,6 +315,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     createPaymentIntentOnce,
     fetchPaymentStatusOnce,
     completeMockPaymentOnce,
+    completeSimulatorPaymentOnce,
     isCurrentPaymentGroup,
   };
 }

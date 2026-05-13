@@ -127,6 +127,10 @@ export async function completePublicMockPayment(payload) {
   return http.post('/v1/public/pagos/mock-completar', payload);
 }
 
+export async function completePublicSimulatorPayment(payload) {
+  return http.post('/v1/public/pagos/simulator/event', payload);
+}
+
 // AM: Consulta de estado de membresía para propuesta automática de servicios cubiertos en booking autenticado.
 export async function getClienteMembershipEstado(options = {}) {
   return http.get('/v1/cliente/planes/estado', options);

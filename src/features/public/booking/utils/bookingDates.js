@@ -160,3 +160,32 @@ export function rangesOverlap(leftStart, leftDurationMin, rightStart, rightDurat
   const rightEnd = rightMinutes + safeRightDuration;
   return leftMinutes < rightEnd && rightMinutes < leftEnd;
 }
+
+export function getBookingBlockOccupiedRange(blockSummary) {
+  const startMinutes = timeKeyToMinutes(blockSummary?.selectedTime);
+  const visibleDurationMin = Math.max(
+    Number(
+      blockSummary?.duracion_servicios_min
+      ?? blockSummary?.duracion_visible_min
+      ?? 0
+    ),
+    0
+  );
+  const bufferMin = Math.max(Number(blockSummary?.buffer_total_min || 0), 0);
+  const explicitOccupiedDurationMin = Math.max(Number(blockSummary?.duracion_bloque_min || 0), 0);
+  const occupiedDurationMin = explicitOccupiedDurationMin > 0
+    ? explicitOccupiedDurationMin
+    : visibleDurationMin + bufferMin;
+
+  if (startMinutes == null || occupiedDurationMin <= 0) {
+    return null;
+  }
+
+  return {
+    startMinutes,
+    endMinutes: startMinutes + occupiedDurationMin,
+    visibleEndMinutes: startMinutes + visibleDurationMin,
+    bufferMin,
+    occupiedDurationMin,
+  };
+}

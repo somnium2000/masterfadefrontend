@@ -51,6 +51,13 @@ function shouldInvalidateSessionOn401(path, baseUrl) {
   return pathname.startsWith("/v1/");
 }
 
+function isExpectedPublicAuthMe401(path, baseUrl) {
+  const apiPathname = toPathname(path, baseUrl);
+  const pagePathname = typeof window !== "undefined" ? String(window.location?.pathname || "") : "";
+  return apiPathname === "/v1/auth/me"
+    && (pagePathname === "/agendar" || pagePathname.startsWith("/agendar/"));
+}
+
 function shouldSkipCsrfPrefetch(path, baseUrl) {
   const pathname = toPathname(path, baseUrl);
   if (!pathname) return false;
@@ -66,6 +73,7 @@ function shouldSkipCsrfPrefetch(path, baseUrl) {
     "/v1/public/citas/validar-titular",
     "/v1/public/pagos/crear-intent",
     "/v1/public/pagos/mock-completar",
+    "/v1/public/pagos/simulator/event",
   ]);
 
   return (
@@ -242,6 +250,9 @@ export async function request(path, options = {}) {
       const err = new Error(message);
       err.status = response.status;
       err.data = data;
+      if (response.status === 401 && isExpectedPublicAuthMe401(path, baseUrl)) {
+        err.expectedUnauthenticated = true;
+      }
       if (
         response.status === 401 &&
         !skipAuthInvalidation &&
