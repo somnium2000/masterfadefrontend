@@ -1114,38 +1114,6 @@ export default function PublicBookingAgendaStep() {
             </button>
           ) : null}
 
-          <div className="citas-services-summary-row mt-3">
-            {selectedPromotion ? (
-              <div className="public-booking-promo-summary">
-                <div className="public-booking-promo-summary-row">
-                  <span className="public-booking-promo-summary-label">Subtotal servicios:</span>
-                  <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalToPay)}</strong>
-                </div>
-                <div className="public-booking-promo-summary-row">
-                  <span className="public-booking-promo-summary-label">Promoción seleccionada:</span>
-                  <strong className="public-booking-promo-summary-value">{selectedPromotion.titulo || 'Promoción'}</strong>
-                </div>
-                {activeBlockNeedsFinalCalculation ? (
-                  <div className="public-booking-promo-summary-row">
-                    <span className="public-booking-promo-summary-label">Descuento estimado:</span>
-                    <strong className="public-booking-promo-summary-value">Aplicación final pendiente en pago.</strong>
-                  </div>
-                ) : (
-                  <div className="public-booking-promo-summary-row">
-                    <span className="public-booking-promo-summary-label">Descuento estimado:</span>
-                    <strong className="public-booking-promo-summary-value">-{formatCurrencyHnl(visibleEstimatedDiscount)}</strong>
-                  </div>
-                )}
-                <div className="public-booking-promo-summary-row public-booking-promo-summary-row-total">
-                  <span className="public-booking-promo-summary-label">Total estimado:</span>
-                  <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalEstimatedToPay)}</strong>
-                </div>
-                <small>El descuento será aplicado y confirmado en el pago final.</small>
-              </div>
-            ) : (
-              <span>Total servicios: {formatCurrencyHnl(totalToPay)}</span>
-            )}
-          </div>
         </motion.div>
 
         <motion.div

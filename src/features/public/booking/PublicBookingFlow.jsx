@@ -377,6 +377,12 @@ function normalizeBookingBlock(block, index) {
     ? Array.from(new Set(block.serviceIds.map((id) => String(id || '').trim()).filter(Boolean)))
     : [];
   const promotionId = String(block?.promotionId || '').trim();
+  const promotionRuleId = String(
+    block?.promotionRuleId
+    || block?.id_promocion_regla
+    || block?.selectedPromotion?.id_promocion_regla
+    || ''
+  ).trim();
 
   const splitLegacyName = splitFullName(block?.contactName || '');
   const contactFirstName = normalizePersonName(block?.contactFirstName || splitLegacyName.firstName || '');
@@ -401,6 +407,9 @@ function normalizeBookingBlock(block, index) {
     packageId: String(block?.packageId || '').trim(),
     serviceIds: nextServiceIds,
     promotionId,
+    promotionRuleId,
+    promocion_id: promotionId || null,
+    id_promocion_regla: promotionRuleId || null,
     selectedDate: String(block?.selectedDate || '').trim(),
     selectedTime: String(block?.selectedTime || '').trim(),
     contactFirstName,
@@ -419,6 +428,7 @@ function areBlocksEqual(left, right) {
     && left.selectionType === right.selectionType
     && left.packageId === right.packageId
     && left.promotionId === right.promotionId
+    && left.promotionRuleId === right.promotionRuleId
     && left.selectedDate === right.selectedDate
     && left.selectedTime === right.selectedTime
     && left.contactFirstName === right.contactFirstName
@@ -452,6 +462,9 @@ function createBookingBlock({ alias = '', idBarbero = '' } = {}) {
       packageId: '',
       serviceIds: [],
       promotionId: '',
+      promotionRuleId: '',
+      promocion_id: null,
+      id_promocion_regla: null,
       selectedDate: '',
       selectedTime: '',
       contactFirstName: '',
@@ -1585,6 +1598,11 @@ export default function PublicBookingFlow() {
           const nextPromotionId = validPromotionIds.has(block.promotionId)
             ? block.promotionId
             : '';
+          const nextPromotionRuleId = (
+            nextPromotionId && String(block?.promotionId || '').trim() === nextPromotionId
+          )
+            ? String(block?.promotionRuleId || '').trim()
+            : '';
 
           const nextPackage = nextPackageId
             ? nextPackages.find((pkg) => pkg?.id_paquete === nextPackageId) || null
@@ -1608,6 +1626,7 @@ export default function PublicBookingFlow() {
             && block.selectionType === normalizedSelectionType
             && block.packageId === nextPackageId
             && block.promotionId === nextPromotionId
+            && String(block?.promotionRuleId || '').trim() === nextPromotionRuleId
           ) {
             return block;
           }
@@ -1620,6 +1639,9 @@ export default function PublicBookingFlow() {
             packageId: nextPackageId,
             serviceIds: nextServiceIds,
             promotionId: nextPromotionId,
+            promotionRuleId: nextPromotionRuleId,
+            promocion_id: nextPromotionId || null,
+            id_promocion_regla: nextPromotionRuleId || null,
             selectedDate: '',
             selectedTime: '',
           };
@@ -2289,7 +2311,7 @@ export default function PublicBookingFlow() {
         const promotion = promotionsById.get(currentPromotionId);
         if (!promotion) {
           changed = true;
-          return { ...block, promotionId: '' };
+          return { ...block, promotionId: '', promotionRuleId: '', promocion_id: null, id_promocion_regla: null };
         }
         const evaluation = evaluatePromotionForBlock({
           block,
@@ -2299,7 +2321,7 @@ export default function PublicBookingFlow() {
         });
         if (evaluation.canSelect) return block;
         changed = true;
-        return { ...block, promotionId: '' };
+        return { ...block, promotionId: '', promotionRuleId: '', promocion_id: null, id_promocion_regla: null };
       });
       return changed ? nextBlocks : prev;
     });
@@ -2746,6 +2768,9 @@ export default function PublicBookingFlow() {
       updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
         ...currentBlock,
         promotionId: '',
+        promotionRuleId: '',
+        promocion_id: null,
+        id_promocion_regla: null,
       }));
       return;
     }
@@ -2769,9 +2794,14 @@ export default function PublicBookingFlow() {
 
     updateBlockAtIndex(effectiveActiveBlockIndex, (activeCurrentBlock) => {
       const currentPromotionId = String(activeCurrentBlock?.promotionId || '').trim();
+      const nextPromotionId = currentPromotionId === normalizedPromotionId ? '' : normalizedPromotionId;
+      const nextPromotionRuleId = nextPromotionId ? String(promotion?.id_promocion_regla || '').trim() : '';
       return {
         ...activeCurrentBlock,
-        promotionId: currentPromotionId === normalizedPromotionId ? '' : normalizedPromotionId,
+        promotionId: nextPromotionId,
+        promotionRuleId: nextPromotionRuleId,
+        promocion_id: nextPromotionId || null,
+        id_promocion_regla: nextPromotionRuleId || null,
       };
     });
   }, [
@@ -2789,6 +2819,9 @@ export default function PublicBookingFlow() {
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
       ...currentBlock,
       promotionId: '',
+      promotionRuleId: '',
+      promocion_id: null,
+      id_promocion_regla: null,
     }));
   }, [effectiveActiveBlockIndex, updateBlockAtIndex]);
 
@@ -3110,6 +3143,18 @@ export default function PublicBookingFlow() {
         return false;
       }
       const blockContactState = resolveBlockContactState(block, block.index);
+      const selectedPromotionId = String(
+        block?.promotionId
+        || block?.promocion_id
+        || block?.selectedPromotion?.id_promocion
+        || ''
+      ).trim() || null;
+      const selectedPromotionRuleId = String(
+        block?.promotionRuleId
+        || block?.id_promocion_regla
+        || block?.selectedPromotion?.id_promocion_regla
+        || ''
+      ).trim() || null;
       const integrantePayload = {
         orden_integrante: block.index + 1,
         alias: blockContactState.fullName || block.alias,
@@ -3122,6 +3167,8 @@ export default function PublicBookingFlow() {
         servicios: ['services', 'mixed'].includes(block.selection_type) ? block.selectedServices.map((service) => ({
           id_servicio: service.id_servicio,
         })) : [],
+        id_promocion: selectedPromotionId,
+        id_promocion_regla: selectedPromotionRuleId,
       };
       if (!canUseClienteHold) {
         integrantePayload.contacto = {

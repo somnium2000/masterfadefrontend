@@ -60,7 +60,8 @@ export default function CardsCarousel({
   compactControls = false,
   showHeaderTag = true,
   // Prop añadida por REPORTES_f
-  showViewBadge = true,
+  showViewBadge = true,
+  resetKey = null,
 }) {
   const reducedMotion = useReducedMotion();
   const [pageSize, setPageSize] = useState(() => resolvePageSize(pageSizeByViewport));
@@ -73,25 +74,40 @@ export default function CardsCarousel({
     return () => window.removeEventListener('resize', onResize);
   }, [pageSizeByViewport]);
 
-  const pages = useMemo(() => chunkItems(items, pageSize), [items, pageSize]);
-  const totalPages = pages.length;
+  const pages = useMemo(() => chunkItems(items, pageSize), [items, pageSize]);
+  const totalPages = pages.length;
 
   if (!Array.isArray(items) || items.length === 0) return null;
 
-  const safePageIndex = totalPages ? Math.min(pageIndex, totalPages - 1) : 0;
-  const activePage = pages[safePageIndex] || [];
-  const canMove = totalPages > 1;
+  const safePageIndex = totalPages ? Math.min(pageIndex, totalPages - 1) : 0;
+  const activePage = pages[safePageIndex] || [];
+  const canMove = totalPages > 1;
+  const isFirstPage = safePageIndex <= 0;
+  const isLastPage = safePageIndex >= (totalPages - 1);
 
-  const movePage = (nextDirection) => {
-    if (!canMove) return;
-    setDirection(nextDirection);
-    setPageIndex((prev) => {
-      const next = prev + nextDirection;
-      if (next < 0) return totalPages - 1;
-      if (next >= totalPages) return 0;
-      return next;
-    });
-  };
+  useEffect(() => {
+    if (!totalPages) {
+      if (pageIndex !== 0) setPageIndex(0);
+      return;
+    }
+    if (pageIndex > (totalPages - 1)) {
+      setPageIndex(totalPages - 1);
+    }
+  }, [pageIndex, totalPages]);
+
+  useEffect(() => {
+    setPageIndex(0);
+    setDirection(0);
+  }, [resetKey]);
+
+  const movePage = (nextDirection) => {
+    if (!canMove) return;
+    setDirection(nextDirection);
+    setPageIndex((prev) => {
+      if (nextDirection < 0) return Math.max(0, prev - 1);
+      return Math.min(totalPages - 1, prev + 1);
+    });
+  };
 
   return (
     <section
@@ -126,20 +142,22 @@ export default function CardsCarousel({
           ) : null}
           {canMove && (
             <div className="flex items-center gap-2">
-              <CarouselActionButton
-                label="Anterior"
-                onClick={() => movePage(-1)}
-                icon={<ChevronLeft size={15} strokeWidth={2.1} />}
+              <CarouselActionButton
+                label="Anterior"
+                onClick={() => movePage(-1)}
+                icon={<ChevronLeft size={15} strokeWidth={2.1} />}
+                disabled={isFirstPage}
                 // Integra la propiedad funcional de la rama dev
                 compact={compactControls}
-              />
-              <CarouselActionButton
-                label="Siguiente"
-                onClick={() => movePage(1)}
-                icon={<ChevronRight size={15} strokeWidth={2.1} />}
+              />
+              <CarouselActionButton
+                label="Siguiente"
+                onClick={() => movePage(1)}
+                icon={<ChevronRight size={15} strokeWidth={2.1} />}
+                disabled={isLastPage || totalPages <= 1}
                 // Integra la propiedad funcional de la rama dev
                 compact={compactControls}
-              />
+              />
             </div>
           )}
         </div>
