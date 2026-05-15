@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { Check, Clock3 } from 'lucide-react';
 import {
   formatTime12Hour,
@@ -8,33 +8,36 @@ import {
 } from './bookingUtils.js';
 import { withImageVersion } from '../../../lib/imageCache.js';
 
-export function BarberCard({
+export const BarberCard = memo(function BarberCard({
   barber,
-  isSelected,
   onSelect,
 }) {
   const displayName = String(barber?.nombre_completo || '').trim() || 'Barbero';
-  const aliasPublico = String(barber?.alias_publico || '').trim();
-  const aliasLabel = aliasPublico || 'Barbero';
+  const aliasPublico = String(barber?.alias_publico || '').trim() || displayName;
+  const resumenPublico = String(barber?.resumen_publico || '').trim();
   const [failedPhotoUrl, setFailedPhotoUrl] = useState('');
   const photoUrl = withImageVersion(
     String(barber?.foto_perfil_url || '').trim(),
     barber?.foto_perfil_updated_at
   );
   const hasPhoto = Boolean(photoUrl) && failedPhotoUrl !== photoUrl;
+  const barberId = String(barber?.id_empleado || '').trim();
+  const handleSelect = useCallback(() => {
+    onSelect?.(barberId);
+  }, [barberId, onSelect]);
 
   return (
     <button
       type="button"
-      className={`public-booking-barber-card ${isSelected ? 'is-selected' : ''}`}
-      onClick={onSelect}
-      aria-pressed={isSelected}
+      className="public-booking-barber-card"
+      onClick={handleSelect}
+      aria-label={`Seleccionar a ${aliasPublico}`}
     >
       <div className="public-booking-barber-card-media">
         {hasPhoto ? (
           <img
             src={photoUrl}
-            alt={displayName}
+            alt={aliasPublico}
             className="public-booking-barber-card-image"
             loading="lazy"
             onError={() => setFailedPhotoUrl(photoUrl)}
@@ -44,14 +47,14 @@ export function BarberCard({
         )}
       </div>
       <div className="public-booking-barber-card-body">
-        <p className="public-booking-barber-card-name">{displayName}</p>
-        <p className="public-booking-barber-card-alias">{aliasLabel}</p>
+        <p className="public-booking-barber-card-name">{aliasPublico}</p>
+        {resumenPublico ? <p className="public-booking-barber-card-summary">{resumenPublico}</p> : null}
       </div>
     </button>
   );
-}
+});
 
-export function ServiceCard({
+export const ServiceCard = memo(function ServiceCard({
   service,
   isSelected,
   onToggle,
@@ -61,9 +64,10 @@ export function ServiceCard({
   blockedLabel = '',
   coveredByPlan = false,
 }) {
+  const serviceId = String(service?.id_servicio || '').trim();
   const handleClick = () => {
     if (disabled || blocked) return;
-    onToggle?.();
+    onToggle?.(serviceId);
   };
   const helperLabel = blockedLabel || (coveredByPlan ? 'Cubierto por tu plan' : 'Incluido en paquete');
   const title = blockedReason || (coveredByPlan
@@ -95,16 +99,15 @@ export function ServiceCard({
       ) : null}
     </button>
   );
-}
+});
 
-export function DayButton({
+export const DayButton = memo(function DayButton({
   cell,
   minDateKey,
-  selectedDate,
+  isSelected = false,
   dayInfo,
   onSelect,
 }) {
-  const isSelected = selectedDate === cell.key;
   const isAvailable = Boolean(dayInfo?.disponible);
   const isPastDate = Boolean(minDateKey && cell.key < minDateKey);
   const isEnabled = cell.inMonth && isAvailable && !isPastDate;
@@ -128,17 +131,16 @@ export function DayButton({
       {cell.label}
     </button>
   );
-}
+});
 
-export function SlotButton({
+export const SlotButton = memo(function SlotButton({
   slot,
-  selectedTime,
+  isSelected = false,
   onSelect,
   disabled = false,
   variant = 'default',
   helperText = '',
 }) {
-  const isSelected = selectedTime === slot.hora;
   const classes = [
     'public-booking-time-block',
     variant === 'danger' ? 'is-blocked-danger' : '',
@@ -167,4 +169,4 @@ export function SlotButton({
       </span>
     </button>
   );
-}
+});

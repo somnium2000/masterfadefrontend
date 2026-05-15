@@ -1,25 +1,157 @@
 import { ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/button.jsx';
-import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
-import { formatCurrencyHnl } from './bookingUtils.js';
+import { usePublicBookingFlow } from './BookingFlowContext.jsx';
+import { formatCurrencyHnl, normalizeBookingPaymentUiState } from './bookingUtils.js';
+import BookingActions from './components/BookingActions.jsx';
+import BookingStepHeader from './components/BookingStepHeader.jsx';
+
+function isLocalHostname(value) {
+  const hostname = String(value || '').trim().toLowerCase();
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function isQaHostname(value) {
+  return String(value || '').trim().toLowerCase() === 'qa.masterfadeapp.com';
+}
+
+function isProductionHostname(value) {
+  const hostname = String(value || '').trim().toLowerCase();
+  return hostname === 'masterfadeapp.com'
+    || hostname === 'www.masterfadeapp.com'
+    || hostname === 'api.masterfadeapp.com';
+}
+
+function readEnvFlag(value) {
+  return String(value || '').trim().toLowerCase() === 'true';
+}
+
+function normalizePaymentProvider(value) {
+  const provider = String(value || '').trim().toLowerCase();
+  return provider === 'payment-simulator' ? 'simulator' : provider;
+}
+
+function isProductionRuntime() {
+  if (import.meta.env.PROD) return true;
+  const mode = String(import.meta.env.MODE || '').trim().toLowerCase();
+  const runtime = String(
+    import.meta.env.VITE_ENTORNO
+    || import.meta.env.VITE_APP_ENV
+    || import.meta.env.VITE_RUNTIME_ENV
+    || import.meta.env.VITE_NODE_ENV
+    || ''
+  ).trim().toLowerCase();
+  return mode === 'production'
+    || mode === 'prod'
+    || runtime === 'production'
+    || runtime === 'prod';
+}
+
+let paymentSimulationDiagnosticLogged = false;
+
+function resolvePaymentSimulationAction() {
+  const hostname = typeof window !== 'undefined' ? window.location?.hostname : '';
+  const localHost = isLocalHostname(hostname);
+  const provider = normalizePaymentProvider(
+    import.meta.env.VITE_PAYMENT_PROVIDER
+    || import.meta.env.VITE_PAYMENT_PROVIDER_CODE
+    || ''
+  );
+  const mockEnabled = readEnvFlag(import.meta.env.VITE_ENABLE_MOCK_PAYMENT);
+  const simulatorEnabled = readEnvFlag(import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR);
+  const qaSimulationEnabled = readEnvFlag(import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION);
+
+  let action = { canShow: false, type: null, provider, reason: 'host_not_allowed' };
+  if (!provider) {
+    action = { canShow: false, type: null, provider, reason: 'provider_missing' };
+  } else if (isProductionHostname(hostname) || isProductionRuntime()) {
+    action = { canShow: false, type: null, provider, reason: 'production_blocked' };
+  } else if (localHost) {
+    action = provider === 'mock' && mockEnabled
+      ? { canShow: true, type: 'mock', provider, reason: 'local_mock_enabled' }
+      : { canShow: false, type: null, provider, reason: 'local_mock_not_configured' };
+  } else if (isQaHostname(hostname)) {
+    action = provider === 'simulator' && simulatorEnabled && qaSimulationEnabled
+      ? { canShow: true, type: 'simulator', provider, reason: 'qa_simulator_enabled' }
+      : { canShow: false, type: null, provider, reason: 'qa_simulator_not_configured' };
+  }
+
+  if (import.meta.env.DEV && localHost && !paymentSimulationDiagnosticLogged) {
+    paymentSimulationDiagnosticLogged = true;
+    console.info('[payment-simulation]', {
+      provider,
+      mockEnabled,
+      simulatorEnabled,
+      qaSimulationEnabled,
+      hostname,
+      canShow: action.canShow,
+      reason: action.reason,
+      type: action.type,
+      mode: import.meta.env.MODE,
+    });
+  }
+
+  return action;
+}
 
 export default function PublicBookingPaymentStep() {
   const {
     bookingBlocksSummary,
     createPaymentIntentForHold,
+    creatingPaymentIntent,
     holdExpired,
     holdExpiresAtIso,
     holdRemainingMs,
     paymentIntent,
     paymentResult,
     refreshPaymentStatus,
-    completeMockPayment,
+    checkingPaymentStatus,
+    completePaymentSimulation,
     holdPricing,
     holdTotalToPay,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const paymentSimulationAction = resolvePaymentSimulationAction();
+  const paymentUiState = normalizeBookingPaymentUiState({
+    paymentIntent,
+    paymentResult,
+    holdTotalToPay,
+  });
+
+  const fallbackSubtotal = useMemo(
+    () => bookingBlocksSummary.reduce((total, block) => total + Number(block?.total_hnl || 0), 0),
+    [bookingBlocksSummary]
+  );
+
+  const fallbackCoveredByPlan = useMemo(
+    () =>
+      bookingBlocksSummary.reduce((total, block) => {
+        const services = Array.isArray(block?.selectedServices) ? block.selectedServices : [];
+        return total + services.reduce((lineTotal, service) => {
+          if (!service?.coveredByPlan) return lineTotal;
+          return lineTotal + Number(service?.precio_hnl || 0);
+        }, 0);
+      }, 0),
+    [bookingBlocksSummary]
+  );
+
+  const effectiveSubtotal = Number(holdPricing?.subtotal_hnl ?? fallbackSubtotal ?? 0);
+  const effectiveCoveredByPlan = Number(holdPricing?.cubierto_por_plan_hnl ?? fallbackCoveredByPlan ?? 0);
+  const effectiveExtras = Number(
+    holdPricing?.extras_a_pagar_hnl
+    ?? Math.max(0, effectiveSubtotal - effectiveCoveredByPlan)
+  );
+  const effectiveTotalToPay = Number(
+    holdPricing?.total_pagar_hnl
+    ?? holdTotalToPay
+    ?? 0
+  );
+  const safeCoveredByPlan = Math.max(0, Number(effectiveCoveredByPlan || 0));
+  const safeExtras = Math.max(0, Number(effectiveExtras || 0));
+  const hasPlanCoverage = safeCoveredByPlan > 0;
+  const hasSaldoToPay = hasPlanCoverage && safeExtras > 0;
+  const isFullyCoveredByPlan = hasPlanCoverage && safeExtras <= 0;
 
   const holdCountdownLabel = (() => {
     if (holdRemainingMs == null) return null;
@@ -30,7 +162,7 @@ export default function PublicBookingPaymentStep() {
   })();
 
   const handleCreateIntent = async () => {
-    if (loadingIntent) return;
+    if (loadingIntent || creatingPaymentIntent) return;
     setLoadingIntent(true);
     try {
       await createPaymentIntentForHold();
@@ -39,11 +171,16 @@ export default function PublicBookingPaymentStep() {
     }
   };
 
+  const handleVerifyPaymentStatus = async () => {
+    if (checkingPaymentStatus) return;
+    await refreshPaymentStatus();
+  };
+
   const handleMockPay = async () => {
     if (processingPayment) return;
     setProcessingPayment(true);
     try {
-      await completeMockPayment();
+      await completePaymentSimulation({ provider: paymentSimulationAction.type });
     } finally {
       setProcessingPayment(false);
     }
@@ -52,10 +189,13 @@ export default function PublicBookingPaymentStep() {
   return (
     <div className="citas-confirm-wrap public-booking-payment-wrap">
       <div className="citas-surface p-5">
-        <h3 className="citas-confirm-title">Pago seguro</h3>
-        <p className="citas-selected-date mt-2">
-          Completa los datos y finaliza el pago para confirmar la reserva.
-        </p>
+        <BookingStepHeader
+          title="Pago seguro"
+          subtitle="Completa los datos y finaliza el pago para confirmar la reserva."
+          headingLevel="h3"
+          titleClassName="citas-confirm-title"
+          subtitleClassName="citas-selected-date mt-2"
+        />
         {holdCountdownLabel ? (
           <div className={`public-booking-payment-note mt-3 ${holdExpired ? 'is-expired' : ''}`.trim()}>
             <ShieldCheck size={14} />
@@ -93,22 +233,20 @@ export default function PublicBookingPaymentStep() {
             <h4 className="citas-confirm-subtitle">Pasarela de pago</h4>
             <div className="public-booking-payment-note mt-2">
               <ShieldCheck size={14} />
-              <span>La pasarela se integra mediante proveedor desacoplado e idempotente.</span>
+              <span>{paymentIntent?.id_intent ? paymentUiState.text : 'El backend confirmará el pago cuando el proveedor notifique el webhook.'}</span>
             </div>
             {!paymentIntent?.id_intent ? (
-              <Button className="mt-3 gap-2" onClick={handleCreateIntent} disabled={loadingIntent}>
-                {loadingIntent ? <Loader2 size={16} className="animate-spin" /> : null}
+              <Button className="mt-3 gap-2" onClick={handleCreateIntent} disabled={loadingIntent || creatingPaymentIntent}>
+                {loadingIntent || creatingPaymentIntent ? <Loader2 size={16} className="animate-spin" /> : null}
                 Crear intento de pago
               </Button>
             ) : (
               <div className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)] public-booking-payment-meta">
-                <p>Estado: {paymentResult?.estado_intent_codigo || paymentIntent.estado_intent_codigo || 'pendiente'}</p>
-                <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || holdTotalToPay)}</p>
+                <p>Estado: {paymentUiState.text}</p>
+                <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || effectiveTotalToPay)}</p>
                 {paymentIntent.payment_url ? (
                   <a
                     href={paymentIntent.payment_url}
-                    target="_blank"
-                    rel="noreferrer"
                     className="inline-flex items-center gap-2 text-[var(--mf-accent)]"
                   >
                     Abrir checkout del proveedor
@@ -117,15 +255,22 @@ export default function PublicBookingPaymentStep() {
                 ) : null}
               </div>
             )}
-            <div className="public-booking-actions is-inline public-booking-payment-actions mt-4">
-              <Button variant="outline" onClick={() => refreshPaymentStatus()} disabled={!paymentIntent?.id_intent}>
-                Actualizar estado
+            <BookingActions inline className="public-booking-payment-actions mt-4">
+              <Button
+                variant="outline"
+                onClick={handleVerifyPaymentStatus}
+                disabled={!paymentIntent?.id_intent || checkingPaymentStatus}
+              >
+                {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
+                Verificar estado del pago
               </Button>
-              <Button onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
-                {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
-                Simular pago exitoso
-              </Button>
-            </div>
+              {paymentSimulationAction.canShow ? (
+                <Button onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
+                  {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
+                  Simular pago exitoso
+                </Button>
+              ) : null}
+            </BookingActions>
           </div>
         </div>
 
@@ -139,19 +284,28 @@ export default function PublicBookingPaymentStep() {
           ))}
           <div className="citas-confirm-row mt-3">
             <span>Total servicios</span>
-            <span>{formatCurrencyHnl(Number(holdPricing?.subtotal_hnl || 0))}</span>
+            <span>{formatCurrencyHnl(effectiveSubtotal)}</span>
           </div>
-          <div className="citas-confirm-row">
-            <span>Cubierto por tu plan</span>
-            <span>-{formatCurrencyHnl(Number(holdPricing?.cubierto_por_plan_hnl || 0))}</span>
-          </div>
-          <div className="citas-confirm-row">
-            <span>Extras a pagar</span>
-            <span>{formatCurrencyHnl(Number(holdPricing?.extras_a_pagar_hnl || holdTotalToPay || 0))}</span>
-          </div>
+          {hasPlanCoverage ? (
+            <div className="citas-confirm-row">
+              <span>Cubierto por tu plan</span>
+              <span>-{formatCurrencyHnl(safeCoveredByPlan)}</span>
+            </div>
+          ) : null}
+          {hasSaldoToPay ? (
+            <div className="citas-confirm-row">
+              <span>Saldo a pagar</span>
+              <span>{formatCurrencyHnl(safeExtras)}</span>
+            </div>
+          ) : null}
+          {isFullyCoveredByPlan ? (
+            <div className="public-booking-payment-note mt-2">
+              <span>Cubierto completamente por tu plan.</span>
+            </div>
+          ) : null}
           <div className="citas-confirm-row">
             <span>Total a pagar</span>
-            <span>{formatCurrencyHnl(Number(holdTotalToPay || 0))}</span>
+            <span>{formatCurrencyHnl(effectiveTotalToPay)}</span>
           </div>
         </div>
       </div>

@@ -16,11 +16,73 @@ const BARBER_GRADIENTS = [
 
 export const WEEK_DAYS = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
 export const MAX_COMPANIONS = 4;
+export const MAX_PROMOTIONS_PER_BOOKING = 5;
 export const HONDURAS_TIME_ZONE = 'America/Tegucigalpa';
 export const HONDURAS_UTC_OFFSET = '-06:00';
 
 export function extractMessage(err) {
+  if (err?.expectedUnauthenticated) return '';
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
+}
+
+const PUBLIC_BOOKING_ERROR_MESSAGES = {
+  EMAIL_BELONGS_TO_ACTIVE_USER: 'Este correo ya pertenece a una cuenta activa. Inicia sesión para continuar.',
+  PUBLIC_CITAS_EMAIL_IN_USE: 'Este correo ya pertenece a una cuenta activa. Inicia sesión para continuar.',
+  AUTHENTICATED_HOLDER_MISMATCH: 'La información del titular no coincide con la sesión activa.',
+  AUTHENTICATED_USER_CANNOT_BE_COMPANION: 'El titular de la sesión no puede agregarse como acompañante.',
+  BOOKING_AUTH_CONTEXT_INVALID: 'No fue posible validar la sesión para completar la reserva.',
+  MAX_COMPANIONS_EXCEEDED: 'Has superado el máximo de acompañantes permitido.',
+  EMPTY_BOOKING_SELECTION: 'Debes seleccionar al menos un servicio o paquete.',
+  DUPLICATED_SERVICE_SELECTION: 'Hay servicios seleccionados más de una vez.',
+  ONLY_ONE_PACKAGE_ALLOWED: 'Solo se permite un paquete por cita.',
+  PACKAGE_NOT_AVAILABLE: 'El paquete seleccionado no está disponible.',
+  SERVICE_ALREADY_INCLUDED_IN_PACKAGE: 'Uno de los servicios seleccionados ya está incluido en el paquete.',
+  MIXED_SELECTION_NOT_ALLOWED: 'La selección mixta no está disponible en este momento.',
+  MAX_PROMOTIONS_EXCEEDED: 'Has seleccionado más promociones de las permitidas.',
+  PROMOTION_NOT_APPLICABLE: 'La promoción seleccionada no aplica a esta reserva.',
+  PROMOTION_DUPLICATES_SELECTED_ITEM: 'La promoción duplica un servicio o paquete ya incluido.',
+  PROMOTION_NOT_STACKABLE: 'Estas promociones no pueden combinarse.',
+  PROMOTION_EXPIRED: 'La promoción seleccionada ya no está disponible.',
+  PROMOTION_NOT_ACTIVE: 'La promoción seleccionada no está activa actualmente.',
+  PROMOTION_BRANCH_NOT_ALLOWED: 'La promoción seleccionada no aplica en esta sucursal.',
+  PROMOTION_BARBER_NOT_ALLOWED: 'La promoción seleccionada no aplica para este barbero.',
+  PROMOTION_SCHEDULE_NOT_ALLOWED: 'La promoción seleccionada no aplica en este horario.',
+  BOOKING_PROMOTION_APPLICATION_FAILED: 'No fue posible aplicar una de las promociones seleccionadas.',
+  REDEEM_NOT_APPLICABLE: 'El canje seleccionado no aplica a esta reserva.',
+  REDEEM_CONTEXT_INVALID: 'No fue posible validar el canje seleccionado.',
+  REDEEM_TRANSACTION_NOT_FOUND: 'No fue posible validar el canje seleccionado.',
+  REDEEM_NOT_OWNED_BY_USER: 'El canje seleccionado no pertenece a tu sesión.',
+  REDEEM_EXPIRED: 'El canje seleccionado ya no está disponible.',
+  REDEEM_TRANSACTION_ALREADY_USED: 'El canje seleccionado ya fue utilizado.',
+  REDEEM_AMOUNT_INVALID: 'No fue posible calcular el beneficio del canje.',
+  REDEEM_APPLICATION_FAILED: 'No fue posible aplicar el canje seleccionado.',
+  BOOKING_REDEEM_CONSISTENCY_FAILED: 'No fue posible completar la reserva con el canje seleccionado.',
+  SLOT_NOT_AVAILABLE: 'La hora seleccionada ya no está disponible. Elige otra hora.',
+  BOOKING_RECEIPT_CREATION_FAILED: 'No fue posible generar el comprobante de la reserva.',
+  BOOKING_CREATION_FAILED: 'No fue posible completar la reserva. Intenta nuevamente.',
+};
+
+export function mapPublicBookingErrorMessage(code, fallbackMessage = '') {
+  const normalizedCode = String(code || '').trim().toUpperCase();
+  if (normalizedCode && PUBLIC_BOOKING_ERROR_MESSAGES[normalizedCode]) {
+    return PUBLIC_BOOKING_ERROR_MESSAGES[normalizedCode];
+  }
+  const safeFallback = String(fallbackMessage || '').trim();
+  if (safeFallback) return safeFallback;
+  return 'No fue posible completar la reserva. Intenta nuevamente.';
+}
+
+export function normalizePromotionIds(promotionIds, promotionId = '') {
+  const unique = new Set();
+  if (Array.isArray(promotionIds)) {
+    promotionIds.forEach((value) => {
+      const id = String(value || '').trim();
+      if (id) unique.add(id);
+    });
+  }
+  const legacy = String(promotionId || '').trim();
+  if (legacy) unique.add(legacy);
+  return [...unique];
 }
 
 export function toDateKey(date) {
@@ -396,12 +458,39 @@ export function toLocalDateTimeWithOffset(dateValue, timeValue) {
   return `${date}T${normalizedTime}${HONDURAS_UTC_OFFSET}`;
 }
 
+export function sanitizePhoneInput(rawValue) {
+  const cleaned = String(rawValue || '').replace(/[^\d+\s-]/g, '').slice(0, 24);
+  let hasPlus = false;
+  return cleaned
+    .split('')
+    .filter((char, index) => {
+      if (char !== '+') return true;
+      if (index === 0 && !hasPlus) {
+        hasPlus = true;
+        return true;
+      }
+      return false;
+    })
+    .join('');
+}
+
+export function countPhoneDigits(rawValue) {
+  return String(rawValue || '').replace(/\D/g, '').length;
+}
+
 export function normalizePhone(rawValue) {
-  return String(rawValue || '').replace(/[^\d+]/g, '').slice(0, 20);
+  const sanitized = sanitizePhoneInput(rawValue);
+  const hasLeadingPlus = sanitized.startsWith('+');
+  const digits = sanitized.replace(/\D/g, '').slice(0, hasLeadingPlus ? 19 : 20);
+  return `${hasLeadingPlus ? '+' : ''}${digits}`;
 }
 
 function collapseWhitespace(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function stripUnsupportedPersonNameChars(value) {
+  return String(value || '').replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s]/g, '');
 }
 
 function toTitleCaseToken(token) {
@@ -416,8 +505,23 @@ function toTitleCaseToken(token) {
     .join('');
 }
 
+export function sanitizePersonNameInput(value) {
+  return stripUnsupportedPersonNameChars(value)
+    .replace(/\s{2,}/g, ' ')
+    .slice(0, 20);
+}
+
+export function normalizePersonNameForValidation(value) {
+  const normalized = collapseWhitespace(sanitizePersonNameInput(value));
+  if (!normalized) return '';
+  return normalized
+    .split(' ')
+    .map((token) => toTitleCaseToken(token))
+    .join(' ');
+}
+
 export function normalizePersonName(value) {
-  const normalized = collapseWhitespace(value);
+  const normalized = collapseWhitespace(stripUnsupportedPersonNameChars(value));
   if (!normalized) return '';
   return normalized
     .split(' ')
@@ -461,15 +565,16 @@ export function splitFullName(fullName) {
 
 export function getTitularState(user) {
   const isAuthenticated = Boolean(String(user?.id_usuario || '').trim());
-  const nombres = normalizePersonName(user?.nombres || '');
-  const apellidos = normalizePersonName(user?.apellidos || '');
+  const nombres = normalizePersonNameForValidation(user?.nombres || '');
+  const apellidos = normalizePersonNameForValidation(user?.apellidos || '');
   const telefonoPrincipal = normalizePhone(user?.telefono_principal || '');
+  const telefonoPrincipalDigits = countPhoneDigits(telefonoPrincipal);
 
   const missingFields = [];
   if (isAuthenticated) {
     if (!nombres) missingFields.push('nombres');
     if (!apellidos) missingFields.push('apellidos');
-    if (telefonoPrincipal.length < 8) missingFields.push('telefono_principal');
+    if (telefonoPrincipalDigits < 8) missingFields.push('telefono_principal');
   }
 
   const hasFullProfile = isAuthenticated && missingFields.length === 0;
@@ -484,7 +589,113 @@ export function getTitularState(user) {
       nombres,
       apellidos,
       email: normalizeEmail(user?.email || ''),
-      telefono_principal: telefonoPrincipal.length >= 8 ? telefonoPrincipal : '',
+      telefono_principal: telefonoPrincipalDigits >= 8 ? telefonoPrincipal : '',
     },
+  };
+}
+
+function firstUsableAmount(values) {
+  let fallback = 0;
+  for (const value of values) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) continue;
+    if (amount > 0) return amount;
+    fallback = amount;
+  }
+  return fallback;
+}
+
+export function normalizeBookingPaymentUiState({
+  paymentIntent = null,
+  paymentResult = null,
+  bookingSuccessResult = null,
+  holdTotalToPay = null,
+  totalToPay = null,
+} = {}) {
+  const effectivePaymentResult = (
+    bookingSuccessResult?.paymentResult
+    && typeof bookingSuccessResult.paymentResult === 'object'
+  )
+    ? bookingSuccessResult.paymentResult
+    : paymentResult;
+  const noPaymentSuccess = ['membership_no_payment', 'reward_no_payment'].includes(
+    String(bookingSuccessResult?.source || '').trim().toLowerCase()
+  );
+  const bookingConfirmed = noPaymentSuccess
+    || bookingSuccessResult?.booking_confirmed === true
+    || bookingSuccessResult?.paymentResult?.booking_confirmed === true
+    || paymentResult?.booking_confirmed === true;
+  const rawState = String(
+    effectivePaymentResult?.estado_intent_codigo
+    || effectivePaymentResult?.status
+    || paymentIntent?.estado_intent_codigo
+    || ''
+  ).trim().toLowerCase();
+  const amount = firstUsableAmount([
+    effectivePaymentResult?.total_pagado_hnl,
+    bookingSuccessResult?.total_pagado_hnl,
+    effectivePaymentResult?.total_hnl,
+    bookingSuccessResult?.total_hnl,
+    effectivePaymentResult?.monto_hnl,
+    bookingSuccessResult?.monto_hnl,
+    paymentIntent?.monto_hnl,
+    holdTotalToPay,
+    totalToPay,
+    0,
+  ]);
+
+  if (bookingConfirmed) {
+    return {
+      status: 'confirmed',
+      text: 'Reserva confirmada',
+      paymentLabel: noPaymentSuccess
+        ? (bookingSuccessResult?.estado_pago || 'Cubierto por plan')
+        : 'pagado',
+      totalPagadoHnl: amount,
+      bookingConfirmed: true,
+    };
+  }
+  if (['confirmado', 'pagado', 'paid', 'capturado', 'capturada'].includes(rawState)) {
+    return {
+      status: 'paid',
+      text: 'Pago confirmado',
+      paymentLabel: 'pagado',
+      totalPagadoHnl: amount,
+      bookingConfirmed: false,
+    };
+  }
+  if (['pendiente_confirmacion', 'processing', 'procesando', 'confirmando'].includes(rawState)) {
+    return {
+      status: 'processing',
+      text: 'Estamos confirmando tu pago',
+      paymentLabel: 'procesando',
+      totalPagadoHnl: amount,
+      bookingConfirmed: false,
+    };
+  }
+  if (['fallido', 'failed', 'rechazado'].includes(rawState)) {
+    return {
+      status: 'failed',
+      text: 'El pago no pudo completarse',
+      paymentLabel: 'fallido',
+      totalPagadoHnl: amount,
+      bookingConfirmed: false,
+    };
+  }
+  if (['expirado', 'expired'].includes(rawState)) {
+    return {
+      status: 'expired',
+      text: 'La reserva temporal vencio',
+      paymentLabel: 'expirado',
+      totalPagadoHnl: amount,
+      bookingConfirmed: false,
+    };
+  }
+  return {
+    status: 'pending',
+    text: 'Tu pago aun esta pendiente',
+    paymentLabel: rawState || 'pendiente',
+    totalPagadoHnl: amount,
+    bookingConfirmed: false,
   };
 }

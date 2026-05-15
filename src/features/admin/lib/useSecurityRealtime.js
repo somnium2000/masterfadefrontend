@@ -165,7 +165,6 @@ export default function useSecurityRealtime({
     }
 
     reconnectFailuresRef.current = 0;
-    setIsUnavailable(false);
     connect();
 
     return () => {

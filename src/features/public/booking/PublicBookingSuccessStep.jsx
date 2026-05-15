@@ -1,7 +1,12 @@
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
-import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
-import { buildBookingShortCode, formatCurrencyHnl } from './bookingUtils.js';
+import { usePublicBookingFlow } from './BookingFlowContext.jsx';
+import BookingActions from './components/BookingActions.jsx';
+import {
+  buildBookingShortCode,
+  formatCurrencyHnl,
+  normalizeBookingPaymentUiState,
+} from './bookingUtils.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -44,43 +49,28 @@ function resolveBookingCodes({ bookingSuccessResult, paymentResult, holdResult }
   return Array.from(new Set(candidates.filter(Boolean)));
 }
 
-function resolvePaymentSummary({ bookingSuccessResult, paymentResult, totalToPay }) {
-  const isCoveredByPlan = bookingSuccessResult?.source === 'membership_no_payment'
-    || String(bookingSuccessResult?.estado_pago || '').trim().toLowerCase() === 'cubierto_por_plan';
-  if (isCoveredByPlan) {
-    return {
-      estadoPago: 'Cubierto por plan',
-      totalPagadoHnl: 0,
-    };
-  }
-
-  const successAmount = Number(bookingSuccessResult?.total_pagado_hnl);
-  const paymentAmount = Number(paymentResult?.monto_hnl ?? totalToPay ?? 0);
-  const totalPagadoHnl = Number.isFinite(successAmount)
-    ? successAmount
-    : (Number.isFinite(paymentAmount) ? paymentAmount : 0);
-
-  const estadoPago = String(
-    bookingSuccessResult?.estado_pago
-    || bookingSuccessResult?.paymentResult?.estado_intent_codigo
-    || paymentResult?.estado_intent_codigo
-    || 'pagado'
-  ).trim() || 'pagado';
-
-  return { estadoPago, totalPagadoHnl };
-}
-
 export default function PublicBookingSuccessStep() {
   const {
     bookingSuccessResult,
     bookingBlocksSummary,
+    checkingPaymentStatus,
     completeBookingFlow,
     holdResult,
+    paymentIntent,
     paymentResult,
+    refreshPaymentStatus,
+    holdTotalToPay,
     totalToPay,
   } = usePublicBookingFlow();
   const bookingCodes = resolveBookingCodes({ bookingSuccessResult, paymentResult, holdResult });
-  const paymentSummary = resolvePaymentSummary({ bookingSuccessResult, paymentResult, totalToPay });
+  const paymentUiState = normalizeBookingPaymentUiState({
+    paymentIntent,
+    paymentResult,
+    bookingSuccessResult,
+    holdTotalToPay,
+    totalToPay,
+  });
+  const isConfirmedUi = paymentUiState.status === 'confirmed' || paymentUiState.status === 'paid';
   const fallbackShortCode = buildBookingShortCode(holdResult?.id_grupo_cita || null, 5);
   const hasRealCode = bookingCodes.length > 0;
   const displayCodes = hasRealCode
@@ -89,32 +79,38 @@ export default function PublicBookingSuccessStep() {
 
   return (
     <div className="citas-confirm-wrap">
-      <div className="citas-surface p-5 public-booking-success">
+      <div className={`citas-surface p-5 ${isConfirmedUi ? 'public-booking-success' : ''}`.trim()}>
         <div className="public-booking-success-head">
           <CheckCircle2 size={20} />
-          <span>Pago confirmado y reserva cerrada</span>
+          <span>{paymentUiState.text}</span>
         </div>
 
-        <div className="public-booking-final-code mt-3">
-          Codigo de cita:{' '}
-          {displayCodes.length > 0 ? (
-            <strong>{displayCodes.join(', ')}</strong>
-          ) : (
-            <strong>En proceso de asignacion</strong>
-          )}
-        </div>
+        {isConfirmedUi ? (
+          <div className="public-booking-final-code mt-3">
+            Codigo de cita:{' '}
+            {displayCodes.length > 0 ? (
+              <strong>{displayCodes.join(', ')}</strong>
+            ) : (
+              <strong>En proceso de asignacion</strong>
+            )}
+          </div>
+        ) : (
+          <div className="public-booking-final-code mt-3">
+            <strong>El backend confirmará la reserva cuando el proveedor notifique el pago.</strong>
+          </div>
+        )}
 
         <div className="citas-confirm-row">
           <span>Estado de pago</span>
-          <span>{paymentSummary.estadoPago}</span>
+          <span>{paymentUiState.paymentLabel}</span>
         </div>
         <div className="citas-confirm-row">
           <span>Total pagado</span>
-          <span>{formatCurrencyHnl(paymentSummary.totalPagadoHnl)}</span>
+          <span>{formatCurrencyHnl(paymentUiState.totalPagadoHnl)}</span>
         </div>
 
         <div className="citas-confirm-services mt-4">
-          <h4 className="citas-confirm-subtitle">Citas confirmadas</h4>
+          <h4 className="citas-confirm-subtitle">{isConfirmedUi ? 'Citas confirmadas' : 'Resumen de citas'}</h4>
           {bookingBlocksSummary.map((block) => (
             <div key={block.id} className="citas-confirm-service-item">
               <span>{block.alias}</span>
@@ -123,9 +119,21 @@ export default function PublicBookingSuccessStep() {
           ))}
         </div>
 
-        <div className="public-booking-actions mt-4">
-          <Button onClick={completeBookingFlow}>Entendido</Button>
-        </div>
+        <BookingActions className="mt-4">
+          {!isConfirmedUi && paymentIntent?.id_intent ? (
+            <Button
+              variant="outline"
+              onClick={() => refreshPaymentStatus()}
+              disabled={checkingPaymentStatus}
+            >
+              {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
+              Verificar estado del pago
+            </Button>
+          ) : null}
+          {isConfirmedUi ? (
+            <Button onClick={completeBookingFlow}>Entendido</Button>
+          ) : null}
+        </BookingActions>
       </div>
     </div>
   );

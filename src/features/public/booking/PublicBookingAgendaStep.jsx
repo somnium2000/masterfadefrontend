@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
@@ -19,7 +19,7 @@ import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import { DayButton, ServiceCard, SlotButton } from './PublicBookingBlocks.jsx';
-import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
+import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import {
   WEEK_DAYS,
   buildFullName,
@@ -37,11 +37,6 @@ const SLOT_TIME_PERIODS = [
   { key: 'tarde', label: 'Tarde' },
   { key: 'noche', label: 'Noche' },
 ];
-const DEFAULT_EXPANDED_PERIODS = {
-  manana: false,
-  tarde: false,
-  noche: false,
-};
 
 function getSlotPeriodKey(timeKey) {
   const normalized = String(timeKey || '').trim();
@@ -167,16 +162,19 @@ function pushUniqueSlots(target, candidates, seen, selectedDate, isPastSlotForTo
   });
 }
 
-function BookingBlocksSummary({
+const BookingBlocksSummary = memo(function BookingBlocksSummary({
   bookingBlocksSummary,
   totalToPay,
   totalEstimatedPromotionDiscountHnl,
   totalEstimatedToPay,
 }) {
   const completedBlocks = bookingBlocksSummary.filter((block) => block.isComplete);
-  const hasAnyPromotionSelected = bookingBlocksSummary.some((block) => Boolean(block.selectedPromotion));
+  const hasAnyPromotionSelected = bookingBlocksSummary.some(
+    (block) => Array.isArray(block.promotionIds) && block.promotionIds.length > 0
+  );
   const hasAnyPendingTwoByOne = bookingBlocksSummary.some(
-    (block) => Boolean(block.selectedPromotion) && Boolean(block.promocion_requiere_calculo_final)
+    (block) => (Array.isArray(block.promotionIds) && block.promotionIds.length > 0)
+      && Boolean(block.promocion_requiere_calculo_final)
   );
   const safeEstimatedDiscount = Math.max(0, Number(totalEstimatedPromotionDiscountHnl || 0));
 
@@ -215,9 +213,11 @@ function BookingBlocksSummary({
               <div className="citas-selected-date">
                 {formatFriendlyDate(block.selectedDate)} - {formatTime12Hour(block.selectedTime)}
               </div>
-              {block.selectedPromotion ? (
+              {Array.isArray(block.selectedPromotions) && block.selectedPromotions.length > 0 ? (
                 <div className="citas-selected-date">
-                  Promoción seleccionada: {block.selectedPromotion.titulo || 'Promoción seleccionada'}
+                  Promociones: {block.selectedPromotions
+                    .map((promotion) => String(promotion?.titulo || '').trim() || 'Promoción')
+                    .join(', ')}
                 </div>
               ) : null}
             </article>
@@ -258,7 +258,7 @@ function BookingBlocksSummary({
       </div>
     </div>
   );
-}
+});
 
 export default function PublicBookingAgendaStep() {
   const {
@@ -267,8 +267,10 @@ export default function PublicBookingAgendaStep() {
     activeBlockIndex,
     addCompanionBlock,
     consumePendingCompanionFocus,
-    allBlocksComplete,
+    consumePendingFieldFocus,
     allowCompanions,
+    maxCompanions,
+    maxPromotionsPerBooking,
     availabilityError,
     availabilityLoading,
     availabilityMap,
@@ -284,6 +286,7 @@ export default function PublicBookingAgendaStep() {
     rewardBranchName,
     rewardBranchMismatch,
     cancelRewardRedemptionUsage,
+    cancelBookingFlow,
     removeCompanionBlock,
     canAddCompanionBlock,
     canGoPrevMonth,
@@ -295,6 +298,7 @@ export default function PublicBookingAgendaStep() {
     onSelectDay,
     onSelectTime,
     promotions,
+    promotionsLoadError,
     promotionsLoading,
     clearSelectedPromotion,
     selectSuggestedBarber,
@@ -302,8 +306,7 @@ export default function PublicBookingAgendaStep() {
     selectedDate,
     selectedPackage,
     selectedPackageId,
-    selectedPromotion,
-    selectedPromotionId,
+    selectedPromotionIds,
     selectedBranchId,
     selectPackage,
     selectedServicesDurationSum,
@@ -316,6 +319,7 @@ export default function PublicBookingAgendaStep() {
     packages,
     packagesLoading,
     pendingCompanionFocusId,
+    pendingFieldFocus,
     servicesAtEnd,
     servicesCanScroll,
     servicesLoading,
@@ -342,7 +346,6 @@ export default function PublicBookingAgendaStep() {
   } = usePublicBookingFlow();
 
   const calendarCells = useMemo(() => buildCalendarCells(currentMonth), [currentMonth]);
-  const canGoToConfirm = Boolean(allBlocksComplete);
 
   const selectedServiceIdsSet = useMemo(
     () => new Set((Array.isArray(selectedServices) ? selectedServices : []).map((service) => String(service?.id_servicio || '').trim()).filter(Boolean)),
@@ -397,6 +400,7 @@ export default function PublicBookingAgendaStep() {
   const slotsSectionRef = useRef(null);
   const contactCardRef = useRef(null);
   const contactNameInputRef = useRef(null);
+  const contactEmailInputRef = useRef(null);
 
   const activeContactFirstName = String(activeBlock?.contactFirstName || '');
   const activeContactLastName = String(activeBlock?.contactLastName || '');
@@ -416,10 +420,21 @@ export default function PublicBookingAgendaStep() {
   const isAuthenticatedTitular = Boolean(isTitularBlock && titularState?.isAuthenticated);
   const showTitularIdentityOnly = Boolean(isAuthenticatedTitular && titularState?.hasFullProfile);
 
-  const showFirstNameInput = !isTitularBlock || !isAuthenticatedTitular || titularMissingFields.has('nombres');
-  const showLastNameInput = !isTitularBlock || (isAuthenticatedTitular && titularMissingFields.has('apellidos'));
-  const showEmailInput = !isTitularBlock || !isAuthenticatedTitular;
-  const showPhoneInput = !isTitularBlock || !isAuthenticatedTitular || titularMissingFields.has('telefono_principal');
+  const showFirstNameInput = !isTitularBlock
+    || !isAuthenticatedTitular
+    || titularMissingFields.has('nombres')
+    || !activeContactFirstName;
+  const showLastNameInput = !isTitularBlock
+    || !isAuthenticatedTitular
+    || titularMissingFields.has('apellidos')
+    || !activeContactLastName;
+  const showEmailInput = !isTitularBlock
+    || !isAuthenticatedTitular
+    || !activeContactEmail;
+  const showPhoneInput = !isTitularBlock
+    || !isAuthenticatedTitular
+    || titularMissingFields.has('telefono_principal')
+    || !activeContactPhone;
 
   const titularDisplayName = buildFullName(titularState?.profile?.nombres, titularState?.profile?.apellidos)
     || String(activeBlockContactState?.fullName || '').trim();
@@ -445,6 +460,12 @@ export default function PublicBookingAgendaStep() {
     () => new Set(serviceIds),
     [serviceIds]
   );
+  const selectedPromotionIdsSet = useMemo(
+    () => new Set(Array.isArray(selectedPromotionIds) ? selectedPromotionIds : []),
+    [selectedPromotionIds]
+  );
+  const selectedPromotionCount = selectedPromotionIdsSet.size;
+  const canSelectMorePromotions = selectedPromotionCount < maxPromotionsPerBooking;
 
   const promotionsForCards = useMemo(() => {
     const list = Array.isArray(promotions) ? promotions : [];
@@ -460,14 +481,21 @@ export default function PublicBookingAgendaStep() {
       const benefitLabel = formatPromotionBenefitLabel(promotion);
       const vigencyLabel = formatPromotionVigencyLabel(promotion);
       const disabledByBranch = !selectedBranchId;
-      const disabledByContact = !canSelectServices;
-      const canSelect = !disabledByBranch && !disabledByContact && targetSelected;
+      const isSelected = selectedPromotionIdsSet.has(promotionId);
+      const disabledByReward = rewardModeActive;
+      const disabledByLimit = !isSelected && !canSelectMorePromotions;
+      const canSelect = isSelected
+        || (!disabledByBranch && !disabledByReward && !disabledByLimit && targetSelected);
 
       let disabledReason = '';
-      if (disabledByBranch) {
+      if (isSelected) {
+        disabledReason = '';
+      } else if (disabledByBranch) {
         disabledReason = 'Selecciona una sucursal para ver promociones aplicables.';
-      } else if (disabledByContact) {
-        disabledReason = contactNameRequiredMessage;
+      } else if (disabledByReward) {
+        disabledReason = 'El canje seleccionado no puede combinarse con promociones para esta reserva.';
+      } else if (disabledByLimit) {
+        disabledReason = `Puedes seleccionar hasta ${maxPromotionsPerBooking} promociones por reserva.`;
       } else if (!targetSelected) {
         disabledReason = `Requiere seleccionar ${targetLabel}`;
       }
@@ -480,18 +508,32 @@ export default function PublicBookingAgendaStep() {
         vigencyLabel,
         canSelect,
         disabledReason,
-        isSelected: selectedPromotionId === promotionId,
+        isSelected,
       };
     });
   }, [
-    canSelectServices,
-    contactNameRequiredMessage,
+    canSelectMorePromotions,
+    maxPromotionsPerBooking,
     promotions,
+    rewardModeActive,
     selectedBranchId,
     selectedPackageId,
-    selectedPromotionId,
+    selectedPromotionIdsSet,
     selectedServiceIdsForPromotionSet,
   ]);
+  const selectedPromotionsForBlock = useMemo(
+    () => promotionsForCards.filter((promotion) => promotion.isSelected),
+    [promotionsForCards]
+  );
+  const selectedPromotionTitles = useMemo(() => {
+    const promotionById = new Map(
+      promotionsForCards.map((promotion) => [promotion.promotionId, promotion])
+    );
+    return (Array.isArray(selectedPromotionIds) ? selectedPromotionIds : [])
+      .map((promotionId) => promotionById.get(promotionId))
+      .filter(Boolean)
+      .map((promotion) => String(promotion?.titulo || '').trim() || 'Promoción');
+  }, [promotionsForCards, selectedPromotionIds]);
 
   const activeBlockEstimatedDiscount = Math.max(
     0,
@@ -502,16 +544,6 @@ export default function PublicBookingAgendaStep() {
   const visibleEstimatedDiscount = Math.max(activeBlockEstimatedDiscount, safeEstimatedDiscountGlobal);
 
   const [preferredSlotPeriod, setPreferredSlotPeriod] = useState('manana');
-  const expansionScopeKey = `${activeBlock?.id || 'block'}|${selectedDate || ''}`;
-  const [expandedState, setExpandedState] = useState(() => ({
-    scopeKey: '',
-    periods: { ...DEFAULT_EXPANDED_PERIODS },
-  }));
-
-  const expandedPeriods = expandedState.scopeKey === expansionScopeKey
-    ? expandedState.periods
-    : DEFAULT_EXPANDED_PERIODS;
-
   const periodSlotModels = useMemo(() => {
     const baseByPeriod = {
       manana: [],
@@ -535,7 +567,6 @@ export default function PublicBookingAgendaStep() {
       const periodKey = period.key;
       const fallbackSlots = baseByPeriod[periodKey] || [];
       const curatedPeriod = slotsCurated?.[periodKey] || null;
-      const mergedSlots = [];
       const seen = new Set();
 
       const curatedRecommended = [];
@@ -545,15 +576,6 @@ export default function PublicBookingAgendaStep() {
       pushUniqueSlots(
         curatedAlternatives,
         Array.isArray(curatedPeriod?.alternatives) ? curatedPeriod.alternatives : [],
-        seen,
-        selectedDate,
-        isPastSlotForToday
-      );
-
-      const curatedOverflow = [];
-      pushUniqueSlots(
-        curatedOverflow,
-        Array.isArray(curatedPeriod?.overflow) ? curatedPeriod.overflow : [],
         seen,
         selectedDate,
         isPastSlotForToday
@@ -570,48 +592,30 @@ export default function PublicBookingAgendaStep() {
         return leftMin - rightMin;
       });
 
-      const recommended = curatedRecommended[0] || fallbackUnique[0] || null;
-      const alternativesPool = [
+      const recommendedPool = sortSlotsByTime([...curatedRecommended, ...fallbackUnique]);
+      const recommended = recommendedPool[0] || null;
+      const alternativesRaw = sortSlotsByTime([
         ...curatedAlternatives,
         ...(recommended ? fallbackUnique.filter((slot) => slot.hora !== recommended.hora) : fallbackUnique),
-      ];
-      const alternatives = alternativesPool.slice(0, 3);
-
-      const usedHours = new Set(
-        [recommended, ...alternatives]
-          .filter(Boolean)
-          .map((slot) => String(slot.hora || '').trim())
-      );
-
-      const overflow = [
-        ...curatedOverflow,
-        ...fallbackUnique,
-      ].filter((slot) => {
-        const hour = String(slot?.hora || '').trim();
-        if (!hour) return false;
-        if (usedHours.has(hour)) return false;
-        usedHours.add(hour);
-        return true;
-      });
-
-      mergedSlots.push(...[recommended, ...alternatives, ...overflow].filter(Boolean));
-      const isExpanded = Boolean(expandedPeriods?.[periodKey]);
+      ]);
+      const alternatives = alternativesRaw
+        .filter((slot) => slot && slot.hora !== recommended?.hora)
+        .slice(0, 3);
+      const visibleSlots = [recommended, ...alternatives]
+        .filter(Boolean)
+        .filter((slot, index, list) => list.findIndex((candidate) => candidate?.hora === slot?.hora) === index);
+      const total = visibleSlots.length;
 
       models[periodKey] = {
         recommended,
         alternatives,
-        overflow,
-        hasMore: overflow.length > 0,
-        isExpanded,
-        total: mergedSlots.length,
-        visibleSlots: isExpanded
-          ? [recommended, ...alternatives, ...overflow].filter(Boolean)
-          : [recommended, ...alternatives].filter(Boolean),
+        total,
+        visibleSlots,
       };
     });
 
     return models;
-  }, [expandedPeriods, isPastSlotForToday, selectedDate, slots, slotsCurated]);
+  }, [isPastSlotForToday, selectedDate, slots, slotsCurated]);
 
   const totalAvailableSlots = useMemo(
     () => SLOT_TIME_PERIODS.reduce((total, period) => total + Number(periodSlotModels?.[period.key]?.total || 0), 0),
@@ -627,9 +631,6 @@ export default function PublicBookingAgendaStep() {
   const activePeriodModel = periodSlotModels?.[activeSlotPeriod] || {
     recommended: null,
     alternatives: [],
-    overflow: [],
-    hasMore: false,
-    isExpanded: false,
     total: 0,
     visibleSlots: [],
   };
@@ -692,28 +693,63 @@ export default function PublicBookingAgendaStep() {
     slotsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [selectedDate]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!pendingCompanionFocusId) return;
     if (activeBlockIndex <= 0) return;
     if (!activeBlock?.id || activeBlock.id !== pendingCompanionFocusId) return;
 
     let cancelled = false;
+    let innerRafId = 0;
     const rafId = requestAnimationFrame(() => {
       if (cancelled) return;
-      contactCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      contactNameInputRef.current?.focus({ preventScroll: true });
-      consumePendingCompanionFocus(pendingCompanionFocusId);
+      innerRafId = requestAnimationFrame(() => {
+        if (cancelled) return;
+        contactCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        contactNameInputRef.current?.focus({ preventScroll: true });
+        consumePendingCompanionFocus(pendingCompanionFocusId);
+      });
     });
 
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafId);
+      if (innerRafId) cancelAnimationFrame(innerRafId);
     };
   }, [
     activeBlock?.id,
     activeBlockIndex,
     consumePendingCompanionFocus,
     pendingCompanionFocusId,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!pendingFieldFocus?.blockId || !pendingFieldFocus?.field) return;
+    if (!activeBlock?.id || activeBlock.id !== pendingFieldFocus.blockId) return;
+
+    let cancelled = false;
+    let innerRafId = 0;
+    const rafId = requestAnimationFrame(() => {
+      if (cancelled) return;
+      innerRafId = requestAnimationFrame(() => {
+        if (cancelled) return;
+        const focusTarget = pendingFieldFocus.field === 'contactEmail'
+          ? contactEmailInputRef.current
+          : contactNameInputRef.current;
+        contactCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        focusTarget?.focus({ preventScroll: true });
+        consumePendingFieldFocus(pendingFieldFocus.requestId);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+      if (innerRafId) cancelAnimationFrame(innerRafId);
+    };
+  }, [
+    activeBlock?.id,
+    consumePendingFieldFocus,
+    pendingFieldFocus,
   ]);
 
   if ((servicesLoading || packagesLoading) && services.length === 0 && packages.length === 0) {
@@ -857,6 +893,9 @@ export default function PublicBookingAgendaStep() {
                         id="booking-contact-first-name"
                         ref={contactNameInputRef}
                         type="text"
+                        inputMode="text"
+                        maxLength={20}
+                        autoComplete="given-name"
                         className={`mf-input ${activeFirstNameError ? 'is-invalid' : ''}`.trim()}
                         value={activeContactFirstName}
                         onChange={(event) => updateActiveBlockContact({ contactFirstName: event.target.value })}
@@ -873,6 +912,9 @@ export default function PublicBookingAgendaStep() {
                       <input
                         id="booking-contact-last-name"
                         type="text"
+                        inputMode="text"
+                        maxLength={20}
+                        autoComplete="family-name"
                         className={`mf-input ${activeLastNameError ? 'is-invalid' : ''}`.trim()}
                         value={activeContactLastName}
                         onChange={(event) => updateActiveBlockContact({ contactLastName: event.target.value })}
@@ -888,6 +930,7 @@ export default function PublicBookingAgendaStep() {
                       </label>
                       <input
                         id="booking-contact-email"
+                        ref={contactEmailInputRef}
                         type="email"
                         className={`mf-input ${activeEmailError ? 'is-invalid' : ''}`.trim()}
                         value={activeContactEmail}
@@ -905,6 +948,8 @@ export default function PublicBookingAgendaStep() {
                       <input
                         id="booking-contact-phone"
                         type="tel"
+                        inputMode="tel"
+                        maxLength={24}
                         className={`mf-input ${activePhoneError ? 'is-invalid' : ''}`.trim()}
                         value={activeContactPhone}
                         onChange={(event) => updateActiveBlockContact({ contactPhone: event.target.value })}
@@ -988,7 +1033,7 @@ export default function PublicBookingAgendaStep() {
                         blockedLabel={blockedLabel}
                         coveredByPlan={coveredByPlan || coveredByReward}
                         disabled={!canSelectServices}
-                        onToggle={() => toggleService(service.id_servicio)}
+                        onToggle={toggleService}
                       />
                     );
                   })()
@@ -1041,41 +1086,48 @@ export default function PublicBookingAgendaStep() {
               promotionsLoading && promotionsForCards.length === 0 ? (
                 <LoadingSpinner />
               ) : (
-                <div className="citas-services-grid public-booking-promotions-grid">
-                  {promotionsForCards.map((promotion) => (
-                    <button
-                      key={promotion.promotionId}
-                      type="button"
-                      className={`citas-service-card public-booking-promo-card ${promotion.isSelected ? 'is-selected' : ''} ${promotion.canSelect ? '' : 'is-disabled'}`.trim()}
-                      disabled={!promotion.canSelect}
-                      aria-pressed={promotion.isSelected}
-                      title={!promotion.canSelect ? promotion.disabledReason : undefined}
-                      onClick={() => selectPromotion(promotion.promotionId)}
-                    >
-                      <div className="public-booking-promo-head">
-                        <span className="public-booking-promo-badge">
-                          <Tag size={12} />
-                          PROMO
-                        </span>
-                        <span className="public-booking-promo-benefit">{promotion.benefitLabel}</span>
-                      </div>
-                      <div className="citas-service-name">{promotion.titulo || 'Promoción'}</div>
-                      {promotion.subtitulo ? (
-                        <p className="public-booking-promo-subtitle">{promotion.subtitulo}</p>
-                      ) : null}
-                      <p className="public-booking-promo-target">Aplica a: {promotion.targetLabel}</p>
-                      {promotion.vigencyLabel ? (
-                        <p className="public-booking-promo-vigency">Vigencia: {promotion.vigencyLabel}</p>
-                      ) : null}
-                      {!promotion.canSelect ? (
-                        <p className="public-booking-promo-requirement">{promotion.disabledReason}</p>
-                      ) : null}
-                      {promotion.isSelected ? (
-                        <p className="public-booking-promo-selected">Promoción seleccionada</p>
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div className="public-booking-actions is-inline mt-2">
+                    <p className="citas-selected-date">
+                      Promociones seleccionadas: {selectedPromotionCount}/{maxPromotionsPerBooking}
+                    </p>
+                  </div>
+                  <div className="citas-services-grid public-booking-promotions-grid">
+                    {promotionsForCards.map((promotion) => (
+                      <button
+                        key={promotion.promotionId}
+                        type="button"
+                        className={`citas-service-card public-booking-promo-card ${promotion.isSelected ? 'is-selected' : ''} ${promotion.canSelect ? '' : 'is-disabled'}`.trim()}
+                        disabled={!promotion.canSelect}
+                        aria-pressed={promotion.isSelected}
+                        title={!promotion.canSelect ? promotion.disabledReason : undefined}
+                        onClick={() => selectPromotion(promotion.promotionId)}
+                      >
+                        <div className="public-booking-promo-head">
+                          <span className="public-booking-promo-badge">
+                            <Tag size={12} />
+                            PROMO
+                          </span>
+                          <span className="public-booking-promo-benefit">{promotion.benefitLabel}</span>
+                        </div>
+                        <div className="citas-service-name">{promotion.titulo || 'Promoción'}</div>
+                        {promotion.subtitulo ? (
+                          <p className="public-booking-promo-subtitle">{promotion.subtitulo}</p>
+                        ) : null}
+                        <p className="public-booking-promo-target">Aplica a: {promotion.targetLabel}</p>
+                        {promotion.vigencyLabel ? (
+                          <p className="public-booking-promo-vigency">Vigencia: {promotion.vigencyLabel}</p>
+                        ) : null}
+                        {!promotion.canSelect ? (
+                          <p className="public-booking-promo-requirement">{promotion.disabledReason}</p>
+                        ) : null}
+                        {promotion.isSelected ? (
+                          <p className="public-booking-promo-selected">Promoción seleccionada</p>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                </>
               )
             ) : null}
 
@@ -1084,16 +1136,18 @@ export default function PublicBookingAgendaStep() {
             ) : null}
 
             {catalogTab === 'promotions' && !promotionsLoading && promotionsForCards.length === 0 ? (
-              <p className="citas-selected-date mt-2">No hay promociones disponibles para esta sucursal.</p>
+              <p className="citas-selected-date mt-2">
+                {promotionsLoadError || 'No hay promociones aplicables para esta selección.'}
+              </p>
             ) : null}
 
-            {catalogTab === 'promotions' && selectedPromotion ? (
+            {catalogTab === 'promotions' && selectedPromotionsForBlock.length > 0 ? (
               <div className="public-booking-actions is-inline mt-2">
                 <p className="citas-selected-date">
-                  Promoción seleccionada: {selectedPromotion.titulo || 'Promoción seleccionada'}
+                  Promociones activas: {selectedPromotionTitles.join(', ')}
                 </p>
                 <Button type="button" variant="outline" size="sm" onClick={clearSelectedPromotion}>
-                  Quitar promoción
+                  Quitar promociones
                 </Button>
               </div>
             ) : null}
@@ -1114,6 +1168,38 @@ export default function PublicBookingAgendaStep() {
             </button>
           ) : null}
 
+          <div className="citas-services-summary-row mt-3">
+            {selectedPromotionIds.length > 0 ? (
+              <div className="public-booking-promo-summary">
+                <div className="public-booking-promo-summary-row">
+                  <span className="public-booking-promo-summary-label">Subtotal servicios:</span>
+                  <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalToPay)}</strong>
+                </div>
+                <div className="public-booking-promo-summary-row">
+                  <span className="public-booking-promo-summary-label">Promociones seleccionadas:</span>
+                  <strong className="public-booking-promo-summary-value">{selectedPromotionIds.length}</strong>
+                </div>
+                {activeBlockNeedsFinalCalculation ? (
+                  <div className="public-booking-promo-summary-row">
+                    <span className="public-booking-promo-summary-label">Descuento estimado:</span>
+                    <strong className="public-booking-promo-summary-value">Aplicación final pendiente en pago.</strong>
+                  </div>
+                ) : (
+                  <div className="public-booking-promo-summary-row">
+                    <span className="public-booking-promo-summary-label">Descuento estimado:</span>
+                    <strong className="public-booking-promo-summary-value">-{formatCurrencyHnl(visibleEstimatedDiscount)}</strong>
+                  </div>
+                )}
+                <div className="public-booking-promo-summary-row public-booking-promo-summary-row-total">
+                  <span className="public-booking-promo-summary-label">Total estimado:</span>
+                  <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalEstimatedToPay)}</strong>
+                </div>
+                <small>El descuento será aplicado y confirmado en el pago final.</small>
+              </div>
+            ) : (
+              <span>Total servicios: {formatCurrencyHnl(totalToPay)}</span>
+            )}
+          </div>
         </motion.div>
 
         <motion.div
@@ -1171,8 +1257,8 @@ export default function PublicBookingAgendaStep() {
                       cell={cell}
                       dayInfo={availabilityMap[cell.key]}
                       minDateKey={minBookingDateKey}
-                      selectedDate={selectedDate}
-                      onSelect={(dateKey, enabled) => onSelectDay(dateKey, enabled)}
+                      isSelected={selectedDate === cell.key}
+                      onSelect={onSelectDay}
                     />
                   ))}
                 </div>
@@ -1283,7 +1369,7 @@ export default function PublicBookingAgendaStep() {
                                       <SlotButton
                                         key={`recommended-${activePeriodModel.recommended.hora}`}
                                         slot={activePeriodModel.recommended}
-                                        selectedTime={selectedTime}
+                                        isSelected={selectedTime === activePeriodModel.recommended.hora}
                                         onSelect={onSelectTime}
                                         disabled={restriction.disabled}
                                         variant={restriction.variant}
@@ -1303,51 +1389,7 @@ export default function PublicBookingAgendaStep() {
                                       <SlotButton
                                         key={`alternative-${slot.hora}`}
                                         slot={slot}
-                                        selectedTime={selectedTime}
-                                        onSelect={onSelectTime}
-                                        disabled={restriction.disabled}
-                                        variant={restriction.variant}
-                                        helperText={restriction.reason}
-                                      />
-                                    );
-                                  })}
-                                </section>
-                              ) : null}
-
-                              {activePeriodModel.hasMore && !activePeriodModel.isExpanded ? (
-                                <div className="public-booking-curated-more">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setExpandedState((prev) => {
-                                      const currentPeriods = prev.scopeKey === expansionScopeKey
-                                        ? prev.periods
-                                        : DEFAULT_EXPANDED_PERIODS;
-                                      return {
-                                        scopeKey: expansionScopeKey,
-                                        periods: {
-                                          ...currentPeriods,
-                                          [activeSlotPeriod]: true,
-                                        },
-                                      };
-                                    })}
-                                  >
-                                    Ver más horarios
-                                  </Button>
-                                </div>
-                              ) : null}
-
-                              {activePeriodModel.isExpanded && activePeriodModel.overflow.length > 0 ? (
-                                <section className="public-booking-curated-section">
-                                  <p className="public-booking-curated-title">Más horarios</p>
-                                  {activePeriodModel.overflow.map((slot) => {
-                                    const restriction = getSlotRestriction(slot);
-                                    return (
-                                      <SlotButton
-                                        key={`overflow-${slot.hora}`}
-                                        slot={slot}
-                                        selectedTime={selectedTime}
+                                        isSelected={selectedTime === slot.hora}
                                         onSelect={onSelectTime}
                                         disabled={restriction.disabled}
                                         variant={restriction.variant}
@@ -1395,11 +1437,11 @@ export default function PublicBookingAgendaStep() {
           transition={{ duration: 0.4, delay: 0.12, ease: LANDING_EASE }}
         >
           <Button
-            className="gap-2"
+            className="gap-2 public-booking-agenda-action-button"
             onClick={() => {
               void goToConfirm();
             }}
-            disabled={!canGoToConfirm || holdSubmitting}
+            disabled={holdSubmitting}
           >
             {holdSubmitting ? <Loader2 size={16} className="animate-spin" /> : null}
             {holdSubmitting ? 'Preparando resumen...' : 'Continuar a resumen'}
@@ -1408,14 +1450,14 @@ export default function PublicBookingAgendaStep() {
         </motion.div>
 
         <motion.div
-          className="public-booking-actions public-booking-agenda-secondary-cta"
+          className="public-booking-actions public-booking-agenda-secondary-cta flex-col"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.16, ease: LANDING_EASE }}
         >
           <Button
             variant="outline"
-            className="gap-2"
+            className="gap-2 public-booking-agenda-action-button"
             onClick={addCompanionBlock}
             disabled={!allowCompanions || !canAddCompanionBlock}
           >
@@ -1424,7 +1466,16 @@ export default function PublicBookingAgendaStep() {
               ? 'Acompañantes no habilitados'
               : canAddCompanionBlock
                 ? 'Añadir acompañante'
-                : 'Límite de 4 acompañantes alcanzado'}
+                : `Límite de ${maxCompanions} acompañantes alcanzado`}
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-2 public-booking-agenda-action-button"
+            onClick={() => {
+              void cancelBookingFlow('agenda');
+            }}
+          >
+            Cancelar
           </Button>
         </motion.div>
       </div>

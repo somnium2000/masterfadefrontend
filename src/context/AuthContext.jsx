@@ -8,29 +8,6 @@ import {
 import { supabase } from '../config/supabaseClient.js';
 
 const AuthContext = createContext(null);
-const PUBLIC_OPTIONAL_AUTH_ROUTES = new Set([
-  '/',
-  '/membresias-vip',
-  '/barberos',
-  '/promociones',
-  '/login',
-  '/registro',
-]);
-
-function readClientCookie(name) {
-  if (typeof document === 'undefined') return '';
-  const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = document.cookie.match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : '';
-}
-
-function isPublicOptionalAuthRoute(pathname) {
-  return PUBLIC_OPTIONAL_AUTH_ROUTES.has(String(pathname || '').trim());
-}
-
-function hasSessionHint() {
-  return Boolean(readClientCookie('mf_csrf'));
-}
 
 function normalizeRoles(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
@@ -98,11 +75,19 @@ function shouldHydrateForPath(pathname) {
   if (path.startsWith('/auth/callback')) return false;
   if (path.startsWith('/home')) return true;
   if (path.startsWith('/admin')) return true;
+  if (path === '/agendar' || path.startsWith('/agendar/')) return true;
   if (path === '/login' || path === '/register') return true;
   return false;
 }
 
+function isPublicBookingPath(pathname) {
+  const path = String(pathname || '').trim();
+  return path === '/agendar' || path.startsWith('/agendar/');
+}
+
 export function AuthProvider({ children }) {
+  const initialPathname = typeof window !== 'undefined' ? String(window.location?.pathname || '').trim() : '';
+  const shouldHydrateOnBoot = shouldHydrateForPath(initialPathname);
   const [token, setToken] = useState('');
   const [user, setUser] = useState(null);
   const [roles, setRoles] = useState([]);
@@ -110,8 +95,8 @@ export function AuthProvider({ children }) {
   const [empresaId, setEmpresaId] = useState(null);
   const [empleadoId, setEmpleadoId] = useState(null);
   const [clienteId, setClienteId] = useState(null);
-  const [isHydrating, setIsHydrating] = useState(true);
-  const [isHydrated, setIsHydrated] = useState(false);
+  const [isHydrating, setIsHydrating] = useState(shouldHydrateOnBoot);
+  const [isHydrated, setIsHydrated] = useState(!shouldHydrateOnBoot);
 
   const applyUserState = useCallback((nextUser) => {
     setUser(nextUser);
@@ -142,7 +127,10 @@ export function AuthProvider({ children }) {
     setIsHydrated(false);
 
     try {
-      const response = await http.get('/v1/auth/me');
+      const currentPathname = typeof window !== 'undefined' ? window.location?.pathname || '' : '';
+      const response = await http.get('/v1/auth/me', {
+        skipAuthInvalidation: isPublicBookingPath(currentPathname),
+      });
       const payload = response?.data || response;
 
       if (!response?.ok || !payload?.user) {
@@ -192,6 +180,8 @@ export function AuthProvider({ children }) {
         contrasena: password,
         remember: Boolean(remember),
         ...(replaceActiveSession ? { replace_active_session: true } : {}),
+      }, {
+        skipCsrf: true,
       });
 
       if (!response?.ok) {
@@ -246,17 +236,15 @@ export function AuthProvider({ children }) {
     const currentPathname = window.location?.pathname || '';
 
     if (currentPathname.startsWith('/auth/callback')) {
-      setIsHydrating(false);
-      setIsHydrated(true);
       return;
     }
     if (shouldHydrateForPath(currentPathname)) {
-      void hydrateSession();
-      return;
+      const timer = setTimeout(() => {
+        void hydrateSession();
+      }, 0);
+      return () => clearTimeout(timer);
     }
-
-    setIsHydrating(false);
-    setIsHydrated(true);
+    return undefined;
   }, [hydrateSession]);
 
   const value = useMemo(

@@ -51,6 +51,37 @@ function shouldInvalidateSessionOn401(path, baseUrl) {
   return pathname.startsWith("/v1/");
 }
 
+function isExpectedPublicAuthMe401(path, baseUrl) {
+  const apiPathname = toPathname(path, baseUrl);
+  const pagePathname = typeof window !== "undefined" ? String(window.location?.pathname || "") : "";
+  return apiPathname === "/v1/auth/me"
+    && (pagePathname === "/agendar" || pagePathname.startsWith("/agendar/"));
+}
+
+function shouldSkipCsrfPrefetch(path, baseUrl) {
+  const pathname = toPathname(path, baseUrl);
+  if (!pathname) return false;
+
+  const PUBLIC_MUTABLE_PATHS = new Set([
+    "/v1/auth/login",
+    "/v1/auth/register",
+    "/v1/auth/forgot-password",
+    "/v1/auth/exchange",
+    "/v1/auth/social/confirm",
+    "/v1/auth/csrf",
+    "/v1/public/citas/hold",
+    "/v1/public/citas/validar-titular",
+    "/v1/public/pagos/crear-intent",
+    "/v1/public/pagos/mock-completar",
+    "/v1/public/pagos/simulator/event",
+  ]);
+
+  return (
+    PUBLIC_MUTABLE_PATHS.has(pathname) ||
+    pathname.startsWith("/v1/public/citas/hold/")
+  );
+}
+
 async function parseResponse(response) {
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -62,6 +93,66 @@ async function parseResponse(response) {
 const inFlightControllers = new Set();
 let sessionInvalidated = false;
 let sessionInvalidationHandler = null;
+const CSRF_SESSION_KEY = "mf_cached_csrf_token";
+let inMemoryCsrfToken = "";
+let csrfFetchInFlight = null;
+
+function readStoredCsrfToken() {
+  if (inMemoryCsrfToken) return inMemoryCsrfToken;
+  if (typeof window === "undefined") return "";
+  try {
+    const cached = String(window.sessionStorage.getItem(CSRF_SESSION_KEY) || "").trim();
+    if (cached) {
+      inMemoryCsrfToken = cached;
+      return cached;
+    }
+  } catch {
+    // no-op
+  }
+  return "";
+}
+
+function cacheCsrfToken(token) {
+  const normalized = String(token || "").trim();
+  inMemoryCsrfToken = normalized;
+  if (typeof window === "undefined") return;
+  try {
+    if (normalized) {
+      window.sessionStorage.setItem(CSRF_SESSION_KEY, normalized);
+    } else {
+      window.sessionStorage.removeItem(CSRF_SESSION_KEY);
+    }
+  } catch {
+    // no-op
+  }
+}
+
+async function fetchCsrfTokenFromApi(baseUrl) {
+  if (csrfFetchInFlight) return csrfFetchInFlight;
+
+  const csrfUrl = joinUrl(baseUrl, "/v1/auth/csrf");
+  csrfFetchInFlight = (async () => {
+    const response = await fetch(csrfUrl, {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return "";
+    const data = await parseResponse(response);
+    const payload = data?.data || data;
+    const token = String(payload?.csrf_token || "").trim();
+    if (token) cacheCsrfToken(token);
+    return token;
+  })();
+
+  try {
+    return await csrfFetchInFlight;
+  } catch {
+    return "";
+  } finally {
+    csrfFetchInFlight = null;
+  }
+}
 
 export function isAbortError(err) {
   return (
@@ -87,6 +178,7 @@ function notifySessionInvalidation(reason) {
 
 export function resetSessionInvalidation() {
   sessionInvalidated = false;
+  cacheCsrfToken("");
 }
 
 export function registerSessionInvalidationHandler(handler) {
@@ -105,6 +197,7 @@ export async function request(path, options = {}) {
     headers = {},
     signal,
     skipAuthInvalidation = false,
+    skipCsrf = false,
   } = options;
 
   const baseUrl = import.meta.env.VITE_API_URL;
@@ -117,11 +210,14 @@ export async function request(path, options = {}) {
     finalHeaders["Content-Type"] = "application/json";
   }
 
-  if (isUnsafeMethod(method) && !finalHeaders["X-CSRF-Token"]) {
-    const csrfToken = readCookie("mf_csrf");
-    if (csrfToken) {
-      finalHeaders["X-CSRF-Token"] = csrfToken;
+  if (!skipCsrf && isUnsafeMethod(method) && !finalHeaders["X-CSRF-Token"]) {
+    let csrfToken = readCookie("mf_csrf") || readStoredCsrfToken();
+    if (!csrfToken) {
+      if (!shouldSkipCsrfPrefetch(path, baseUrl)) {
+        csrfToken = await fetchCsrfTokenFromApi(baseUrl);
+      }
     }
+    if (csrfToken) finalHeaders["X-CSRF-Token"] = csrfToken;
   }
 
   if (signal?.aborted) {
@@ -154,6 +250,9 @@ export async function request(path, options = {}) {
       const err = new Error(message);
       err.status = response.status;
       err.data = data;
+      if (response.status === 401 && isExpectedPublicAuthMe401(path, baseUrl)) {
+        err.expectedUnauthenticated = true;
+      }
       if (
         response.status === 401 &&
         !skipAuthInvalidation &&

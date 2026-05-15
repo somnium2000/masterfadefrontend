@@ -6,11 +6,27 @@ import ClienteProfileCompletionBanner from '../components/ClienteProfileCompleti
 import ClienteProfileEditModal from '../components/ClienteProfileEditModal.jsx';
 import ClienteCourtesyRouteSection from '../components/ClienteCourtesyRouteSection.jsx';
 import ClienteSummaryCards from '../components/ClienteSummaryCards.jsx';
+import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import { getClienteCitaDetalle, getClienteMe, listClienteCitas } from '../lib/clienteApi.js';
 
-function isUpcomingAppointment(cita) {
+function isUpcomingAppointment(cita, nowMs) {
   const date = new Date(cita?.inicio_at || 0);
-  return Number.isFinite(date.getTime()) && date.getTime() >= Date.now();
+  return Number.isFinite(date.getTime()) && date.getTime() >= nowMs;
+}
+
+function getDateInHonduras(isoValue = null) {
+  const date = isoValue ? new Date(isoValue) : new Date();
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Tegucigalpa',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+  return year && month && day ? `${year}-${month}-${day}` : '';
 }
 
 async function resolveFavoriteServices(citas = []) {
@@ -71,8 +87,10 @@ export default function ClienteDashboardPage() {
   const [citas, setCitas] = useState([]);
   const [favoriteServices, setFavoriteServices] = useState([]);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const canLoadDashboard = Boolean(isAuthenticated && isHydrated && !isHydrating  );
+  const todayHn = useMemo(() => getDateInHonduras(new Date(nowMs).toISOString()), [nowMs]);
 
   const loadDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!canLoadDashboard) return;
@@ -85,11 +103,12 @@ export default function ClienteDashboardPage() {
       ]);
 
       const nextCitas = Array.isArray(citasPayload?.citas) ? citasPayload.citas : [];
+      const todayCitas = nextCitas.filter((cita) => getDateInHonduras(cita?.inicio_at) === todayHn);
       setProfileData(mePayload);
-      setCitas(nextCitas);
+      setCitas(todayCitas);
 
       try {
-        const favorites = await resolveFavoriteServices(nextCitas);
+        const favorites = await resolveFavoriteServices(todayCitas);
         setFavoriteServices(favorites);
       } catch {
         setFavoriteServices([]);
@@ -108,19 +127,31 @@ export default function ClienteDashboardPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [canLoadDashboard, logout, navigate, notifyError, refreshClienteProfile]);
+  }, [canLoadDashboard, logout, navigate, notifyError, refreshClienteProfile, todayHn]);
 
   useEffect(() => {
     if (!canLoadDashboard) return;
     void loadDashboard();
   }, [canLoadDashboard, loadDashboard]);
 
+  useEffect(() => {
+    const clockId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 60000);
+
+    return () => {
+      window.clearInterval(clockId);
+    };
+  }, []);
+
   const profile = profileData?.cliente || null;
   const completion = profileData?.profile_completion || null;
+  const completionPercent = Math.max(0, Number(completion?.completion_percent || 0));
+  const isProfileComplete = Boolean(completion?.is_complete || completionPercent >= 100);
 
   const upcomingAppointments = useMemo(
-    () => citas.filter((item) => isUpcomingAppointment(item)),
-    [citas]
+    () => citas.filter((item) => isUpcomingAppointment(item, nowMs)),
+    [citas, nowMs]
   );
 
   const frequentBarbers = useMemo(() => {
@@ -135,6 +166,7 @@ export default function ClienteDashboardPage() {
       .sort((a, b) => b.total - a.total)
       .slice(0, 3);
   }, [citas]);
+  const shouldUseFavoriteServicesCarousel = favoriteServices.length > 2;
 
   function handleProfileSaved(payload) {
     setProfileData(payload);
@@ -164,7 +196,8 @@ export default function ClienteDashboardPage() {
       <ClienteSummaryCards
         upcomingAppointments={upcomingAppointments.length}
         totalAppointments={citas.length}
-        completionPercent={completion?.completion_percent || 0}
+        completionPercent={completionPercent}
+        hideProfileKpi={isProfileComplete}
         onNewAppointment={() => navigate('/agendar')}
         onOpenProfile={() => setProfileModalOpen(true)}
         hideRewardsHero
@@ -192,24 +225,50 @@ export default function ClienteDashboardPage() {
         </div>
 
         {favoriteServices.length ? (
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {favoriteServices.map((item) => (
-              <article
-                key={String(item.id_servicio || item.nombre_servicio)}
-                className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4"
-              >
-                <p className="text-sm font-semibold text-[var(--mf-text)]">{item.nombre_servicio}</p>
-                <p className="mt-2 text-xs text-[var(--mf-text-2)]">{item.total} reserva(s) histÃ³rica(s)</p>
-                <button
-                  type="button"
-                  onClick={() => navigate('/agendar')}
-                  className="mt-3 inline-flex h-8 items-center justify-center rounded-lg border border-[var(--mf-btn-border)] bg-[var(--mf-card)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)]"
+          shouldUseFavoriteServicesCarousel ? (
+            <div className="mt-4">
+              <CardsCarousel
+                items={favoriteServices}
+                getItemKey={(item) => String(item.id_servicio || item.nombre_servicio)}
+                pageSizeByViewport={{ mobile: 2, tablet: 2, desktop: 2 }}
+                gridClassName="grid grid-cols-1 gap-3 sm:grid-cols-2"
+                compactControls
+                showHeaderTag={false}
+                renderItem={(item) => (
+                  <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
+                    <p className="text-sm font-semibold text-[var(--mf-text)]">{item.nombre_servicio}</p>
+                    <p className="mt-2 text-xs text-[var(--mf-text-2)]">{item.total} reserva(s) histórica(s)</p>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/agendar')}
+                      className="mt-3 inline-flex h-8 items-center justify-center rounded-lg border border-[var(--mf-btn-border)] bg-[var(--mf-card)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)]"
+                    >
+                      Reservar
+                    </button>
+                  </article>
+                )}
+              />
+            </div>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {favoriteServices.map((item) => (
+                <article
+                  key={String(item.id_servicio || item.nombre_servicio)}
+                  className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4"
                 >
-                  Reservar
-                </button>
-              </article>
-            ))}
-          </div>
+                  <p className="text-sm font-semibold text-[var(--mf-text)]">{item.nombre_servicio}</p>
+                  <p className="mt-2 text-xs text-[var(--mf-text-2)]">{item.total} reserva(s) histórica(s)</p>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/agendar')}
+                    className="mt-3 inline-flex h-8 items-center justify-center rounded-lg border border-[var(--mf-btn-border)] bg-[var(--mf-card)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)]"
+                  >
+                    Reservar
+                  </button>
+                </article>
+              ))}
+            </div>
+          )
         ) : (
           <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
             {frequentBarbers.length ? (
@@ -235,4 +294,5 @@ export default function ClienteDashboardPage() {
     </div>
   );
 }
+
 

@@ -18,3 +18,15 @@ export async function createAdminClientePuntosAjuste(idCliente, payload) {
   return http.post(`${BASE}/clientes/${safeId}/ajuste`, payload);
 }
 
+export async function searchAdminClientesActivos(query, { limit = 10 } = {}) {
+  const safeQuery = String(query || '').trim();
+  const safeLimit = Number.isFinite(Number(limit)) ? Math.max(1, Math.min(20, Math.trunc(Number(limit)))) : 10;
+  if (safeQuery.length < 2) {
+    return { ok: true, data: { clientes: [] } };
+  }
+  const params = new URLSearchParams({
+    q: safeQuery,
+    limit: String(safeLimit),
+  });
+  return http.get(`${BASE}/clientes/buscar?${params.toString()}`);
+}
