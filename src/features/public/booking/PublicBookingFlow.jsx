@@ -1792,7 +1792,14 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         if (!currentPromotionIds.length) {
           if (!block?.promotionId && (!Array.isArray(block?.promotionIds) || block.promotionIds.length === 0)) return block;
           changed = true;
-          return { ...block, promotionId: '', promotionIds: [] };
+          return {
+            ...block,
+            promotionId: '',
+            promotionIds: [],
+            promotionRuleId: '',
+            promocion_id: null,
+            id_promocion_regla: null,
+          };
         }
         const validPromotionIds = currentPromotionIds.filter((promotionId) => {
           const promotion = promotionsById.get(promotionId);
@@ -1813,10 +1820,16 @@ const invalidHoldSelectionFingerprintRef = useRef('');
           return block;
         }
         changed = true;
+        const nextPromotionRuleId = nextPromotionId
+          ? String(promotionsById.get(nextPromotionId)?.id_promocion_regla || '').trim()
+          : '';
         return {
           ...block,
           promotionId: nextPromotionId,
           promotionIds: validPromotionIds,
+          promotionRuleId: nextPromotionRuleId,
+          promocion_id: nextPromotionId || null,
+          id_promocion_regla: nextPromotionRuleId || null,
         };
       });
       return changed ? nextBlocks : prev;
@@ -2262,7 +2275,10 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
         ...currentBlock,
         promotionId: '',
+        promotionRuleId: '',
         promotionIds: [],
+        promocion_id: null,
+        id_promocion_regla: null,
       }));
       return;
     }
@@ -2281,10 +2297,20 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         );
         const nextPromotionIds = normalizedCurrentPromotionIds
           .filter((promotionIdInBlock) => promotionIdInBlock !== normalizedPromotionId);
+        const nextPrimaryPromotionId = nextPromotionIds[0] || '';
+        const nextPrimaryPromotion = nextPrimaryPromotionId
+          ? promotionsById.get(nextPrimaryPromotionId) || null
+          : null;
+        const nextPromotionRuleId = nextPrimaryPromotionId
+          ? String(nextPrimaryPromotion?.id_promocion_regla || '').trim()
+          : '';
         return {
           ...activeCurrentBlock,
-          promotionId: nextPromotionIds[0] || '',
+          promotionId: nextPrimaryPromotionId,
           promotionIds: nextPromotionIds,
+          promotionRuleId: nextPromotionRuleId,
+          promocion_id: nextPrimaryPromotionId || null,
+          id_promocion_regla: nextPromotionRuleId || null,
         };
       });
       return;
@@ -2328,10 +2354,22 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       const nextPromotionIds = normalizedCurrentPromotionIds.includes(normalizedPromotionId)
         ? normalizedCurrentPromotionIds.filter((promotionIdInBlock) => promotionIdInBlock !== normalizedPromotionId)
         : [...normalizedCurrentPromotionIds, normalizedPromotionId];
+      const limitedPromotionIds = nextPromotionIds.slice(0, maxPromotionsPerBooking);
+      const nextPrimaryPromotionId = limitedPromotionIds[0] || '';
+      const nextPrimaryPromotion = nextPrimaryPromotionId
+        ? promotionsById.get(nextPrimaryPromotionId) || null
+        : null;
+      const nextPromotionRuleId = nextPrimaryPromotionId
+        ? String(nextPrimaryPromotion?.id_promocion_regla || '').trim()
+        : '';
       return {
         ...activeCurrentBlock,
-        promotionId: nextPromotionIds[0] || '',
-        promotionIds: nextPromotionIds.slice(0, maxPromotionsPerBooking),
+        promotionId: nextPrimaryPromotionId,
+        promotionIds: limitedPromotionIds,
+        promotionRuleId: nextPromotionRuleId,
+        promocion_id: nextPrimaryPromotionId || null,
+        id_promocion_regla: nextPromotionRuleId || null,
+      };
       };
     });
   }, [
@@ -2351,7 +2389,10 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
       ...currentBlock,
       promotionId: '',
+      promotionRuleId: '',
       promotionIds: [],
+      promocion_id: null,
+      id_promocion_regla: null,
     }));
   }, [effectiveActiveBlockIndex, updateBlockAtIndex]);
 
@@ -4025,5 +4066,3 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     </BookingLayout>
   );
 }
-
-

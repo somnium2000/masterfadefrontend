@@ -1,4 +1,4 @@
-﻿import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Waves } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { cn } from '../../lib/utils.js';
@@ -44,7 +44,7 @@ function CarouselActionButton({ onClick, icon, label, disabled = false, compact 
       {icon}
       <span className={cn('text-xs font-semibold uppercase tracking-[0.08em]', compact ? 'hidden lg:inline' : 'hidden sm:inline')}>
         {label}
-        </span>
+      </span>
     </button>
   );
 }
@@ -54,13 +54,12 @@ export default function CardsCarousel({
   renderItem,
   getItemKey,
   className = '',
-  // --- Props combinadas de tus nuevos cambios y la rama dev ---
   pageSizeByViewport,
   gridClassName = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3',
   compactControls = false,
   showHeaderTag = true,
-  // Prop añadida por REPORTES_f
   showViewBadge = true,
+  resetKey = null,
 }) {
   const reducedMotion = useReducedMotion();
   const [pageSize, setPageSize] = useState(() => resolvePageSize(pageSizeByViewport));
@@ -76,20 +75,35 @@ export default function CardsCarousel({
   const pages = useMemo(() => chunkItems(items, pageSize), [items, pageSize]);
   const totalPages = pages.length;
 
+  useEffect(() => {
+    if (!totalPages) {
+      if (pageIndex !== 0) setPageIndex(0);
+      return;
+    }
+    if (pageIndex > totalPages - 1) {
+      setPageIndex(totalPages - 1);
+    }
+  }, [pageIndex, totalPages]);
+
+  useEffect(() => {
+    setPageIndex(0);
+    setDirection(0);
+  }, [resetKey]);
+
   if (!Array.isArray(items) || items.length === 0) return null;
 
   const safePageIndex = totalPages ? Math.min(pageIndex, totalPages - 1) : 0;
   const activePage = pages[safePageIndex] || [];
   const canMove = totalPages > 1;
+  const isFirstPage = safePageIndex <= 0;
+  const isLastPage = safePageIndex >= totalPages - 1;
 
   const movePage = (nextDirection) => {
     if (!canMove) return;
     setDirection(nextDirection);
     setPageIndex((prev) => {
-      const next = prev + nextDirection;
-      if (next < 0) return totalPages - 1;
-      if (next >= totalPages) return 0;
-      return next;
+      if (nextDirection < 0) return Math.max(0, prev - 1);
+      return Math.min(totalPages - 1, prev + 1);
     });
   };
 
@@ -108,36 +122,34 @@ export default function CardsCarousel({
         <div className="absolute bottom-[-54px] left-1/3 h-36 w-36 rounded-full bg-white/8 blur-3xl" />
       </div>
 
-      {/* --- Integración de la sección Header con lógica combinada --- */}
-      {((showViewBadge || showHeaderTag) || canMove) ? (
+      {(showViewBadge || showHeaderTag || canMove) ? (
         <div
           className={cn(
             'relative z-10 mb-3 flex items-center gap-2',
-            // Adopta la lógica de justificación dinámica si cualquiera de las flags de Badge es verdadera
             (showViewBadge || showHeaderTag) ? 'justify-between' : 'justify-end'
           )}
         >
-          {/* Renderiza el Badge si cualquiera de las flags es verdadera */}
           {(showViewBadge || showHeaderTag) ? (
             <div className="inline-flex items-center gap-2 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">
               <Waves size={13} className="text-[var(--mf-accent)]" />
               <span>Vista Carrusel</span>
             </div>
           ) : null}
+
           {canMove && (
             <div className="flex items-center gap-2">
               <CarouselActionButton
                 label="Anterior"
                 onClick={() => movePage(-1)}
                 icon={<ChevronLeft size={15} strokeWidth={2.1} />}
-                // Integra la propiedad funcional de la rama dev
+                disabled={isFirstPage}
                 compact={compactControls}
               />
               <CarouselActionButton
                 label="Siguiente"
                 onClick={() => movePage(1)}
                 icon={<ChevronRight size={15} strokeWidth={2.1} />}
-                // Integra la propiedad funcional de la rama dev
+                disabled={isLastPage}
                 compact={compactControls}
               />
             </div>
@@ -154,12 +166,10 @@ export default function CardsCarousel({
             animate={reducedMotion ? undefined : { opacity: 1, x: 0 }}
             exit={reducedMotion ? undefined : { opacity: 0, x: direction >= 0 ? -22 : 22 }}
             transition={{ duration: 0.24, ease: 'easeOut' }}
-            // Integra gridClassName funcional de la rama dev
             className={gridClassName}
           >
             {activePage.map((item, index) => (
               <motion.div
-                // AM: Fallback robusto cuando una entidad no define id único explícito.
                 key={String(getItemKey?.(item) ?? `${safePageIndex}-${index}`)}
                 initial={reducedMotion ? false : { opacity: 0, y: 8 }}
                 animate={reducedMotion ? undefined : { opacity: 1, y: 0 }}

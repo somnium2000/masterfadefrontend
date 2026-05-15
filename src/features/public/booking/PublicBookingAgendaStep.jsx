@@ -1144,8 +1144,7 @@ export default function PublicBookingAgendaStep() {
             {catalogTab === 'promotions' && selectedPromotionsForBlock.length > 0 ? (
               <div className="public-booking-actions is-inline mt-2">
                 <p className="citas-selected-date">
-                  Promociones activas: {selectedPromotionTitles
-                    .join(', ')}
+                  Promociones activas: {selectedPromotionTitles.join(', ')}
                 </p>
                 <Button type="button" variant="outline" size="sm" onClick={clearSelectedPromotion}>
                   Quitar promociones
@@ -1400,7 +1399,6 @@ export default function PublicBookingAgendaStep() {
                                   })}
                                 </section>
                               ) : null}
-
                             </>
                           ) : (
                             <div className="public-booking-period-empty">
@@ -1464,11 +1462,11 @@ export default function PublicBookingAgendaStep() {
             disabled={!allowCompanions || !canAddCompanionBlock}
           >
             <Plus size={15} />
-              {!allowCompanions
-                ? 'Acompañantes no habilitados'
-                : canAddCompanionBlock
-                  ? 'Añadir acompañante'
-                  : `Límite de ${maxCompanions} acompañantes alcanzado`}
+            {!allowCompanions
+              ? 'Acompañantes no habilitados'
+              : canAddCompanionBlock
+                ? 'Añadir acompañante'
+                : `Límite de ${maxCompanions} acompañantes alcanzado`}
           </Button>
           <Button
             variant="outline"
