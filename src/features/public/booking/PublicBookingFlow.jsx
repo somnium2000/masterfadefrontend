@@ -2370,7 +2370,6 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         promocion_id: nextPrimaryPromotionId || null,
         id_promocion_regla: nextPromotionRuleId || null,
       };
-      };
     });
   }, [
     bookingBlocks,
