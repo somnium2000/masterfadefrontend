@@ -20,6 +20,23 @@ import {
   validatePublicBookingContacts,
 } from './publicBookingApi.js';
 import {
+  buildAuthenticatedHoldPayload,
+  buildConfirmWithoutPaymentPayload,
+  buildCreatePaymentIntentPayload,
+  buildPublicHoldPayload,
+} from './bookingPayloadBuilders.js';
+import {
+  resolveActiveBookingBlock,
+  resolveBookingTotals,
+  resolveConfirmWithoutPaymentState,
+  resolveHoldCountdownState,
+  resolveHoldPricing,
+  resolveHoldTotalToPay,
+  resolveItemsById,
+  resolveRequestedPromotionIds,
+  resolveSelectedPromotions,
+} from './bookingFlowSelectors.js';
+import {
   BOOKING_COMPANION_ALIAS_PREFIX,
   BOOKING_HOLDER_ALIAS,
   REWARD_BOOKING_CONTEXT_STORAGE_KEY,
@@ -75,6 +92,7 @@ import useBookingAvailability from './hooks/useBookingAvailability.js';
 import useBookingCompanions from './hooks/useBookingCompanions.js';
 import useBookingHold from './hooks/useBookingHold.js';
 import useBookingPayment from './hooks/useBookingPayment.js';
+import useBookingWizardNavigation from './hooks/useBookingWizardNavigation.js';
 import BookingLayout from './components/BookingLayout.jsx';
 import BookingErrorState from './components/BookingErrorState.jsx';
 import { PublicBookingProvider } from './BookingFlowContext.jsx';
@@ -315,11 +333,22 @@ const agendaAutoLoadKeyRef = useRef('');
     setProfileIncompleteState({ message, missingFields: uniqueMissing });
   }, []);
 
-  const effectiveActiveBlockIndex = bookingBlocks[activeBlockIndex]
-    ? activeBlockIndex
-    : 0;
-
-  const activeBlock = bookingBlocks[effectiveActiveBlockIndex] || null;
+  const activeBookingBlockState = useMemo(
+    () => resolveActiveBookingBlock({ bookingBlocks, activeBlockIndex }),
+    [activeBlockIndex, bookingBlocks]
+  );
+  const {
+    effectiveActiveBlockIndex,
+    activeBlock,
+    selectedBarberId,
+    activeBlockBarberId,
+    selectionType,
+    selectedPackageId,
+    serviceIds,
+    selectedDate,
+    selectedTime,
+    titularSelectedDate,
+  } = activeBookingBlockState;
   const pendingResumeContext = useMemo(() => {
     const searchParams = new URLSearchParams(location.search || '');
     const queryGroupId = String(searchParams.get('id_grupo_cita') || '').trim();
@@ -335,19 +364,6 @@ const agendaAutoLoadKeyRef = useRef('');
     };
   }, [location.search]);
   const isPendingPaymentResumeRoute = location.pathname.startsWith(BOOKING_ROUTES.payment) && Boolean(pendingResumeContext?.id_grupo_cita && pendingResumeContext?.id_intent);
-  const selectedBarberId = bookingBlocks[0]?.idBarbero || '';
-
-  const activeBlockBarberId = activeBlock?.idBarbero || '';
-  const selectionType = activeBlock?.selectionType || 'services';
-  const selectedPackageId = activeBlock?.packageId || '';
-  const serviceIds = useMemo(
-    () => (Array.isArray(activeBlock?.serviceIds) ? activeBlock.serviceIds : []),
-    [activeBlock]
-  );
-  const selectedDate = activeBlock?.selectedDate || '';
-  const selectedTime = activeBlock?.selectedTime || '';
-  const titularSelectedDate = bookingBlocks[0]?.selectedDate || '';
-
   const {
     contextLoading,
     contextError,
@@ -656,54 +672,31 @@ const agendaAutoLoadKeyRef = useRef('');
     [effectiveActiveBlockIndex, rewardLockedServiceIdsForTitular]
   );
 
-  const servicesById = useMemo(() => {
-    const map = new Map();
-    (Array.isArray(services) ? services : []).forEach((service) => {
-      const serviceId = String(service?.id_servicio || '').trim();
-      if (!serviceId) return;
-      map.set(serviceId, service);
-    });
-    return map;
-  }, [services]);
+  const servicesById = useMemo(
+    () => resolveItemsById(services, 'id_servicio'),
+    [services]
+  );
 
-  const packagesById = useMemo(() => {
-    const map = new Map();
-    (Array.isArray(packages) ? packages : []).forEach((pkg) => {
-      const packageId = String(pkg?.id_paquete || '').trim();
-      if (!packageId) return;
-      map.set(packageId, pkg);
-    });
-    return map;
-  }, [packages]);
+  const packagesById = useMemo(
+    () => resolveItemsById(packages, 'id_paquete'),
+    [packages]
+  );
 
-  const promotionsById = useMemo(() => {
-    const map = new Map();
-    (Array.isArray(promotions) ? promotions : []).forEach((promotion) => {
-      const promotionId = String(promotion?.id_promocion || '').trim();
-      if (!promotionId) return;
-      map.set(promotionId, promotion);
-    });
-    return map;
-  }, [promotions]);
+  const promotionsById = useMemo(
+    () => resolveItemsById(promotions, 'id_promocion'),
+    [promotions]
+  );
 
-  const selectedPromotionIds = useMemo(
-    () => normalizePromotionIds(activeBlock?.promotionIds, activeBlock?.promotionId),
-    [activeBlock?.promotionId, activeBlock?.promotionIds]
+  const selectedPromotionState = useMemo(
+    () => resolveSelectedPromotions({ activeBlock, promotionsById }),
+    [activeBlock, promotionsById]
   );
-  const selectedPromotionId = useMemo(
-    () => selectedPromotionIds[0] || '',
-    [selectedPromotionIds]
-  );
-  const selectedPromotion = useMemo(
-    () => promotionsById.get(selectedPromotionId) || null,
-    [promotionsById, selectedPromotionId]
-  );
-  const selectedPromotions = useMemo(
-    () => selectedPromotionIds
-      .map((promotionId) => promotionsById.get(promotionId) || null)
-      .filter(Boolean),
-    [promotionsById, selectedPromotionIds]
-  );
+  const {
+    selectedPromotionIds,
+    selectedPromotionId,
+    selectedPromotion,
+    selectedPromotions,
+  } = selectedPromotionState;
 
   const effectiveSelectionType = useMemo(() => {
     if (selectedPackage && selectedServices.length > 0) return 'mixed';
@@ -1182,64 +1175,27 @@ const agendaAutoLoadKeyRef = useRef('');
     [activeBlock, effectiveActiveBlockIndex, resolveBlockContactState]
   );
 
-  const totalToPay = useMemo(
-    () => bookingBlocksSummary.reduce((total, block) => total + Number(block.total_hnl || 0), 0),
+  const bookingTotals = useMemo(
+    () => resolveBookingTotals(bookingBlocksSummary),
     [bookingBlocksSummary]
   );
-
-  const totalEstimatedPromotionDiscountHnl = useMemo(
-    () => bookingBlocksSummary.reduce((total, block) => total + Number(block.promocion_descuento_estimado_hnl || 0), 0),
-    [bookingBlocksSummary]
-  );
-  const totalEstimatedToPay = useMemo(
-    () => Math.max(0, totalToPay - totalEstimatedPromotionDiscountHnl),
-    [totalEstimatedPromotionDiscountHnl, totalToPay]
-  );
+  const {
+    totalToPay,
+    totalEstimatedPromotionDiscountHnl,
+    totalEstimatedToPay,
+  } = bookingTotals;
   const bookingSelectionFingerprint = useMemo(
     () => buildBookingSelectionFingerprint(bookingBlocksSummary),
     [bookingBlocksSummary]
   );
 
-  const holdPricing = useMemo(() => {
-    if (!holdResult || typeof holdResult !== 'object') return null;
-
-    const subtotal = Number(holdResult?.subtotal_hnl ?? holdResult?.monto_total_hnl ?? 0);
-    const coveredByPlan = Number(
-      holdResult?.membresia?.cubierto_por_plan_hnl
-      ?? 0
-    );
-    const coveredByReward = Number(
-      holdResult?.recompensa?.cubierto_hnl
-      ?? 0
-    );
-    const coveredTotal = Number(
-      holdResult?.descuento_total_hnl
-      ?? (coveredByPlan + coveredByReward)
-    );
-    const total = Number(holdResult?.total_pagar_hnl ?? holdResult?.monto_pendiente_hnl ?? 0);
-    const extras = Number(
-      holdResult?.recompensa?.extras_a_pagar_hnl
-      ?? holdResult?.membresia?.extras_a_pagar_hnl
-      ?? holdResult?.monto_pendiente_hnl
-      ?? total
-    );
-
-    return {
-      source: 'hold',
-      subtotal_hnl: Number.isFinite(subtotal) ? subtotal : 0,
-      cubierto_por_plan_hnl: Number.isFinite(coveredByPlan) ? coveredByPlan : 0,
-      cubierto_por_recompensa_hnl: Number.isFinite(coveredByReward) ? coveredByReward : 0,
-      cubierto_total_hnl: Number.isFinite(coveredTotal) ? coveredTotal : 0,
-      extras_a_pagar_hnl: Number.isFinite(extras) ? extras : 0,
-      total_pagar_hnl: Number.isFinite(total) ? total : 0,
-      recompensa_aplicada: Boolean(holdResult?.recompensa?.aplicada),
-      recompensa_servicio_nombre: String(holdResult?.recompensa?.servicio_nombre || '').trim(),
-      recompensa_mensaje: String(holdResult?.recompensa?.mensaje || '').trim(),
-    };
-  }, [holdResult]);
+  const holdPricing = useMemo(
+    () => resolveHoldPricing(holdResult),
+    [holdResult]
+  );
   const holdTotalToPay = useMemo(
-    () => Number(holdPricing?.total_pagar_hnl ?? holdResult?.total_pagar_hnl ?? 0),
-    [holdPricing, holdResult?.total_pagar_hnl]
+    () => resolveHoldTotalToPay({ holdPricing, holdResult }),
+    [holdPricing, holdResult]
   );
   const holdMembership = useMemo(
     () => (holdResult?.membresia && typeof holdResult.membresia === 'object' ? holdResult.membresia : null),
@@ -1278,12 +1234,21 @@ const agendaAutoLoadKeyRef = useRef('');
     return '';
   }, [membershipAplicaEnCita, membershipBranchMismatch, membershipHasContext, membershipMotivoNoAplica]);
 
-  const canConfirmWithoutPayment = Boolean(
-    canUseClienteHold
-    && holdResult
-    && String(holdResult?.id_grupo_cita || '').trim()
-    && holdTotalToPay === 0
+  const canConfirmWithoutPayment = resolveConfirmWithoutPaymentState({
+    canUseClienteHold,
+    holdResult,
+    holdTotalToPay,
+  });
+
+  const holdCountdownState = useMemo(
+    () => resolveHoldCountdownState({ holdResult, paymentIntent, countdownNow }),
+    [countdownNow, holdResult, paymentIntent]
   );
+  const {
+    holdExpiresAtIso,
+    holdRemainingMs,
+    holdExpired,
+  } = holdCountdownState;
 
   const hasBlockingGroupConflict = useCallback((block) => {
     const blockRange = getBookingBlockOccupiedRange(block);
@@ -1383,19 +1348,6 @@ const agendaAutoLoadKeyRef = useRef('');
 
     return '';
   }, [blocksToSubmitSummary, hasBlockingGroupConflict]);
-  const holdExpiresAtIso = useMemo(() => {
-    if (holdResult?.expires_at) return holdResult.expires_at;
-    if (paymentIntent?.expires_at) return paymentIntent.expires_at;
-    return null;
-  }, [holdResult?.expires_at, paymentIntent?.expires_at]);
-  const holdRemainingMs = useMemo(() => {
-    if (!holdExpiresAtIso) return null;
-    const expiresAt = new Date(holdExpiresAtIso);
-    if (Number.isNaN(expiresAt.getTime())) return null;
-    return Math.max(expiresAt.getTime() - countdownNow, 0);
-  }, [holdExpiresAtIso, countdownNow]);
-  const holdExpired = holdRemainingMs != null && holdRemainingMs <= 0;
-
   const isPastSlotForToday = useCallback((dateKey, timeKey) => {
     if (!dateKey || !timeKey) return false;
     if (dateKey !== minBookingDateKey) return false;
@@ -1676,7 +1628,7 @@ const agendaAutoLoadKeyRef = useRef('');
     if (!branchList.some((branch) => branch.id_sucursal === rewardBranchId)) return;
     if (selectedBranchId === rewardBranchId) return;
     setSelectedBranchId(rewardBranchId);
-  }, [branchList, rewardBranchId, rewardModeActive, selectedBranchId]);
+  }, [branchList, rewardBranchId, rewardModeActive, selectedBranchId, setSelectedBranchId]);
 
   useEffect(() => {
     if (!rewardModeActive || !selectedBranchId || !selectedBarberId || !rewardServiceId) return;
@@ -1959,40 +1911,28 @@ const agendaAutoLoadKeyRef = useRef('');
     updateBlockAtIndex,
   ]);
 
-  useEffect(() => {
-    if (!location.pathname.startsWith(BOOKING_ROUTES.confirm)) return;
-    if (!selectedBranchId || !selectedBarberId) {
-      navigate(BOOKING_ROUTES.barbers, { replace: true });
-      return;
-    }
-    if (!allBlocksComplete) {
-      navigate(BOOKING_ROUTES.agenda, { replace: true });
-    }
-  }, [location.pathname, navigate, selectedBranchId, selectedBarberId, allBlocksComplete]);
-
-  useEffect(() => {
-    if (!location.pathname.startsWith(BOOKING_ROUTES.payment)) return;
-    if (!allBlocksComplete && !isPendingPaymentResumeRoute) {
-      navigate(BOOKING_ROUTES.agenda, { replace: true });
-      return;
-    }
-    if (paymentResult?.booking_confirmed) {
-      navigate(BOOKING_ROUTES.success, { replace: true });
-    }
-  }, [allBlocksComplete, isPendingPaymentResumeRoute, location.pathname, navigate, paymentResult?.booking_confirmed]);
-
-  useEffect(() => {
-    if (!location.pathname.startsWith(BOOKING_ROUTES.agenda)) return;
-    if (!selectedBranchId || !selectedBarberId) {
-      navigate(BOOKING_ROUTES.barbers, { replace: true });
-    }
-  }, [location.pathname, navigate, selectedBarberId, selectedBranchId]);
-
-  useEffect(() => {
-    if (paymentResult?.booking_confirmed && location.pathname !== BOOKING_ROUTES.success) {
-      navigate(BOOKING_ROUTES.success, { replace: true });
-    }
-  }, [location.pathname, navigate, paymentResult?.booking_confirmed]);
+  const {
+    rootRedirectPath,
+    showTopbarBackToBarberos,
+    homePath,
+    homeLabel,
+    showBranchDataErrorBanner,
+    goToAgenda,
+    goToBarberos,
+    goToPayment,
+  } = useBookingWizardNavigation({
+    location,
+    navigate,
+    bookingMode,
+    selectedBranchId,
+    selectedBarberId,
+    allBlocksComplete,
+    isPendingPaymentResumeRoute,
+    paymentConfirmed: paymentResult?.booking_confirmed === true,
+    holdResult,
+    availabilityError,
+    barbersLoading,
+  });
 
   useEffect(() => {
     if (!holdExpiresAtIso) return undefined;
@@ -2016,7 +1956,7 @@ const agendaAutoLoadKeyRef = useRef('');
       setSelectedBranchId(nextBranchId);
       navigate(BOOKING_ROUTES.barbers);
     },
-    [navigate, notifications, resetFlowForBranchChange, rewardBranchId, rewardModeActive, selectedBranchId]
+    [navigate, notifications, resetFlowForBranchChange, rewardBranchId, rewardModeActive, selectedBranchId, setSelectedBranchId]
   );
 
   const selectBarber = useCallback((barberId) => {
@@ -2033,20 +1973,6 @@ const agendaAutoLoadKeyRef = useRef('');
     }));
     navigate(BOOKING_ROUTES.agenda);
   }, [clearRequestState, navigate, updateBlockAtIndex]);
-
-  const goToAgenda = useCallback(() => {
-    if (!selectedBranchId || !selectedBarberId) return;
-    navigate(BOOKING_ROUTES.agenda);
-  }, [
-    selectedBranchId,
-    selectedBarberId,
-    navigate,
-  ]);
-
-  const goToBarberos = useCallback(() => {
-    if (holdResult) return;
-    navigate(BOOKING_ROUTES.barbers);
-  }, [holdResult, navigate]);
 
   const requestCancelBooking = useCallback((source = 'booking') => {
     if (cancelBookingProcessing) return false;
@@ -2108,6 +2034,7 @@ const agendaAutoLoadKeyRef = useRef('');
     paymentResult?.booking_confirmed,
     releaseHold,
     resetAvailabilityData,
+    setContextError,
   ]);
 
   const confirmCancelBooking = useCallback(async () => {
@@ -2630,11 +2557,7 @@ const agendaAutoLoadKeyRef = useRef('');
       navigate(BOOKING_ROUTES.agenda);
       return false;
     }
-    const requestedPromotionIds = new Set();
-    blocksToSubmit.forEach((block) => {
-      const blockPromotionIds = normalizePromotionIds(block?.promotionIds, block?.promotionId);
-      blockPromotionIds.forEach((id) => requestedPromotionIds.add(id));
-    });
+    const requestedPromotionIds = resolveRequestedPromotionIds(blocksToSubmit);
     if (rewardModeActive && requestedPromotionIds.size > 0) {
       notifications.warning(
         mapPublicBookingErrorMessage(
@@ -2839,34 +2762,25 @@ const agendaAutoLoadKeyRef = useRef('');
     }
 
     try {
-      const holdPayload = {
-        id_sucursal: selectedBranchId,
-        integrantes,
-      };
-      if (rewardModeActive && rewardBookingContext?.canje_context_token) {
-        holdPayload.canje_context_token = rewardBookingContext.canje_context_token;
-      }
-      if (canUseClienteHold) {
-        holdPayload.titular = {
-          nombres: titularState.missingFields.includes('nombres')
-            ? (normalizedTitularBlock.contactFirstName || null)
-            : null,
-          apellidos: titularState.missingFields.includes('apellidos')
-            ? (normalizedTitularBlock.contactLastName || null)
-            : null,
-          telefono: titularState.missingFields.includes('telefono_principal')
-            ? (normalizePhone(normalizedTitularBlock.contactPhone || '') || null)
-            : null,
-          guardar_nombres_apellidos: guardarNombresApellidos,
-          guardar_telefono: guardarTelefono,
-        };
-      } else {
-        holdPayload.titular = {
-          nombre: titularNombre,
-          email: titularEmail,
-          telefono: normalizePhone(titularTelefono),
-        };
-      }
+      const rewardContextToken = rewardModeActive ? rewardBookingContext?.canje_context_token : '';
+      const holdPayload = canUseClienteHold
+        ? buildAuthenticatedHoldPayload({
+          idSucursal: selectedBranchId,
+          integrantes,
+          titularState,
+          normalizedTitularBlock,
+          guardarNombresApellidos,
+          guardarTelefono,
+          rewardContextToken,
+        })
+        : buildPublicHoldPayload({
+          idSucursal: selectedBranchId,
+          integrantes,
+          titularNombre,
+          titularEmail,
+          titularTelefono,
+          rewardContextToken,
+        });
       const createdHold = await createHold(holdPayload);
       if (createdHold) {
         setProfileIncompleteState({ message: '', missingFields: [] });
@@ -3085,9 +2999,7 @@ const agendaAutoLoadKeyRef = useRef('');
     selectedBranchId,
     setFieldError,
     setProfileIncompleteFromBackend,
-    titularState.isAuthenticated,
-    titularState.hasFullProfile,
-    titularState.missingFields,
+    titularState,
     setProfileIncompleteState,
   ]);
 
@@ -3221,20 +3133,9 @@ const agendaAutoLoadKeyRef = useRef('');
     holdSubmitting,
     navigate,
     notifications,
-    canUseClienteHold,
     setFieldError,
-    titularState.isAuthenticated,
-    titularState.hasFullProfile,
-    titularState.missingFields,
-    setProfileIncompleteState,
     validateContactsBeforeConfirm,
   ]);
-
-  const goToPayment = useCallback(() => {
-    if (!allBlocksComplete) return;
-    if (paymentResult?.booking_confirmed) return;
-    navigate(BOOKING_ROUTES.payment);
-  }, [allBlocksComplete, navigate, paymentResult?.booking_confirmed]);
 
   const shouldRecoverFromPaymentError = useCallback((rawCode) => {
     const code = String(rawCode || '').trim().toUpperCase();
@@ -3264,7 +3165,7 @@ const agendaAutoLoadKeyRef = useRef('');
       });
       return null;
     }
-    if (Number(holdResult?.total_pagar_hnl || 0) <= 0) {
+    if (Number(holdResult?.total_pagar_hnl ?? holdResult?.total_hnl ?? 0) <= 0) {
       notifications.warning('Esta reserva no requiere pago. ConfÃ­rmala directamente.', {
         dedupeKey: 'public-booking-payment-not-required',
       });
@@ -3281,12 +3182,11 @@ const agendaAutoLoadKeyRef = useRef('');
       const payload = await createPaymentIntentOnce({
         groupId,
         titularEmail,
-        payload: {
-          id_grupo_cita: groupId,
-          titular_email: titularEmail,
-          nombre_apellido: String(titularContact.fullName || '').trim() || null,
-          telefono: normalizePhone(titularContact.phone || '') || null,
-        },
+        payload: buildCreatePaymentIntentPayload({
+          groupId,
+          titularEmail,
+          titularContact,
+        }),
       });
       if (payload?.expires_at) {
         setHoldResult((current) => (current ? { ...current, expires_at: payload.expires_at } : current));
@@ -3312,8 +3212,10 @@ const agendaAutoLoadKeyRef = useRef('');
     notifications,
     resolveBlockContactState,
     recoverToAgendaForReselection,
+    setHoldResult,
     shouldRecoverFromPaymentError,
     navigate,
+    holdResult?.total_hnl,
     holdResult?.total_pagar_hnl,
   ]);
 
@@ -3324,6 +3226,7 @@ const agendaAutoLoadKeyRef = useRef('');
     const totalToPay = Number(
       options?.totalPagarHnl
       ?? holdResult?.total_pagar_hnl
+      ?? holdResult?.total_hnl
       ?? 0
     );
     const rewardContextToken = String(
@@ -3367,9 +3270,7 @@ const agendaAutoLoadKeyRef = useRef('');
       return false;
     }
     try {
-      const confirmPayload = rewardContextToken
-        ? { canje_context_token: rewardContextToken }
-        : {};
+      const confirmPayload = buildConfirmWithoutPaymentPayload({ rewardContextToken });
       const response = await confirmHoldWithoutPaymentRequest(
         groupId,
         confirmPayload,
@@ -3462,7 +3363,17 @@ const agendaAutoLoadKeyRef = useRef('');
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
     }
-  }, [canUseClienteHold, confirmHoldWithoutPaymentRequest, holdPricing?.cubierto_por_plan_hnl, holdResult, navigate, notifications, rewardBookingContext]);
+  }, [
+    canUseClienteHold,
+    confirmHoldWithoutPaymentRequest,
+    holdPricing?.cubierto_por_plan_hnl,
+    holdResult,
+    navigate,
+    notifications,
+    rewardBookingContext,
+    setBookingSuccessResult,
+    setPaymentResult,
+  ]);
 
   const refreshPaymentStatus = useCallback(async (options = {}) => {
     const canCheckOnRoute = location.pathname.startsWith(BOOKING_ROUTES.payment)
@@ -3501,9 +3412,10 @@ const agendaAutoLoadKeyRef = useRef('');
         ).trim();
         if (rewardContextToken) {
           try {
-            const confirmResponse = await confirmHoldWithoutPaymentRequest(groupId, {
-              canje_context_token: rewardContextToken,
-            });
+            const confirmResponse = await confirmHoldWithoutPaymentRequest(
+              groupId,
+              buildConfirmWithoutPaymentPayload({ rewardContextToken })
+            );
             const confirmEnvelope = confirmResponse && typeof confirmResponse === 'object' ? confirmResponse : {};
             const confirmPayloadRaw = confirmEnvelope?.data && typeof confirmEnvelope.data === 'object'
               ? confirmEnvelope.data
@@ -3538,7 +3450,13 @@ const agendaAutoLoadKeyRef = useRef('');
       if (payload?.booking_confirmed) {
         const citasConfirmadas = extractConfirmedAppointments(payload);
         const codigoCita = extractBookingCode(payload);
-        const totalPagado = Number(payload?.monto_hnl ?? payload?.total_pagado_hnl ?? holdResult?.total_pagar_hnl ?? 0);
+        const totalPagado = Number(
+          payload?.monto_hnl
+          ?? payload?.total_pagado_hnl
+          ?? holdResult?.total_pagar_hnl
+          ?? holdResult?.total_hnl
+          ?? 0
+        );
         const rewardApplied = rewardFinalization?.aplicada === true || rewardFinalization?.ya_aplicada === true;
         const rewardMessage = rewardApplied
           ? String(rewardFinalization?.mensaje || 'Recompensa utilizada. Se descontaron 10 puntos de tu ruta.').trim()
@@ -3587,6 +3505,7 @@ const agendaAutoLoadKeyRef = useRef('');
     confirmHoldWithoutPaymentRequest,
     fetchPaymentStatusOnce,
     holdResult?.id_grupo_cita,
+    holdResult?.total_hnl,
     holdResult?.total_pagar_hnl,
     isCurrentPaymentGroup,
     location.pathname,
@@ -3597,6 +3516,8 @@ const agendaAutoLoadKeyRef = useRef('');
     rewardModeActive,
     resolveBlockContactState,
     recoverToAgendaForReselection,
+    setBookingSuccessResult,
+    setPaymentResult,
     restorePaymentContext,
     shouldRecoverFromPaymentError,
     shouldRetryPaymentStatus,
@@ -3659,7 +3580,7 @@ const agendaAutoLoadKeyRef = useRef('');
       navigate(BOOKING_ROUTES.agenda);
       return false;
     }
-    if (holdResult && Number(holdResult?.total_pagar_hnl || 0) === 0) {
+    if (holdResult && Number(holdResult?.total_pagar_hnl ?? holdResult?.total_hnl ?? 0) === 0) {
       notifications.warning('Tu reserva no requiere pago. Confirma la cita desde el resumen.', {
         dedupeKey: 'public-booking-checkout-hold-total-zero',
       });
@@ -3701,7 +3622,7 @@ const agendaAutoLoadKeyRef = useRef('');
         if (!ok || cancelled) return;
         return;
       }
-      if (Number(holdResult?.total_pagar_hnl || 0) <= 0) {
+      if (Number(holdResult?.total_pagar_hnl ?? holdResult?.total_hnl ?? 0) <= 0) {
         navigate(BOOKING_ROUTES.confirm, { replace: true });
         return;
       }
@@ -3718,6 +3639,7 @@ const agendaAutoLoadKeyRef = useRef('');
     bookingSelectionFingerprint,
     createPaymentIntentForHold,
     holdResult,
+    holdResult?.total_hnl,
     holdResult?.total_pagar_hnl,
     location.pathname,
     navigate,
@@ -3815,6 +3737,7 @@ const agendaAutoLoadKeyRef = useRef('');
       bookingBlocks,
       bookingBlocksSummary,
       bookingBlockingReason,
+      bookingMode,
       blockedServiceIds,
       membershipLockedServiceIdsForTitular,
       membershipBranchNotice,
@@ -3928,7 +3851,6 @@ const agendaAutoLoadKeyRef = useRef('');
       syncServicesScrollState,
       toggleService,
       clearSelectedPromotion,
-      bookingMode,
       totalEstimatedPromotionDiscountHnl,
       totalEstimatedToPay,
       totalToPay,
@@ -3958,6 +3880,7 @@ const agendaAutoLoadKeyRef = useRef('');
       bookingBlocks,
       bookingBlocksSummary,
       bookingBlockingReason,
+      bookingMode,
       blockedServiceIds,
       membershipLockedServiceIdsForTitular,
       membershipBranchNotice,
@@ -4078,22 +4001,12 @@ const agendaAutoLoadKeyRef = useRef('');
       selectBranch,
       fetchAvailability,
       fieldErrors,
-      setProfileIncompleteState,
     ]
   );
 
-  if (location.pathname === BOOKING_ROUTES.root) {
-    return <Navigate to={BOOKING_ROUTES.barbers} replace />;
+  if (rootRedirectPath) {
+    return <Navigate to={rootRedirectPath} replace />;
   }
-
-  const showTopbarBackToBarberos = location.pathname.startsWith(BOOKING_ROUTES.agenda);
-  const homePath = bookingMode === 'authenticated' ? BOOKING_ROUTES.customerHome : BOOKING_ROUTES.home;
-  const homeLabel = 'Inicio MasterFade';
-  const showBranchDataErrorBanner = Boolean(
-    location.pathname.startsWith(BOOKING_ROUTES.barbers)
-    && availabilityError
-    && !barbersLoading
-  );
 
   return (
     <BookingLayout

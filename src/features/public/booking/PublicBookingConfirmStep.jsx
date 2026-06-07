@@ -62,9 +62,10 @@ export default function PublicBookingConfirmStep() {
     holdPricing?.extras_a_pagar_hnl
     ?? holdResult?.extras_a_pagar_hnl
     ?? holdResult?.total_pagar_hnl
+    ?? holdResult?.total_hnl
     ?? 0
   );
-  const totalToPayApi = Number(holdPricing?.total_pagar_hnl ?? holdResult?.total_pagar_hnl ?? 0);
+  const totalToPayApi = Number(holdPricing?.total_pagar_hnl ?? holdResult?.total_pagar_hnl ?? holdResult?.total_hnl ?? 0);
   const subtotalMenosDescuento = Math.max(0, subtotalResolved - Math.max(0, descuento));
   const totalServiciosNeto = Math.max(0, subtotalMenosDescuento - coveredTotal);
   const hasBackendTotal = hasHoldReady && Number.isFinite(totalToPayApi);
@@ -93,6 +94,7 @@ export default function PublicBookingConfirmStep() {
       const backendTotalToPay = Number(
         currentHold?.total_pagar_hnl
         ?? currentHold?.monto_pendiente_hnl
+        ?? currentHold?.total_hnl
         ?? NaN
       );
       const resolvedTotalToPay = Number.isFinite(backendTotalToPay)

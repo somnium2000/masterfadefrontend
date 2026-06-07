@@ -18,8 +18,8 @@ import {
   splitFullName,
   timeKeyToMinutes,
   toLocalDateTimeWithOffset,
-  normalizePromotionIds,
 } from '../bookingUtils.js';
+import { buildBookingMemberPayload } from '../bookingPayloadBuilders.js';
 
 const LARGE_COMPANION_TIME_GAP_MINUTES = 60;
 
@@ -327,35 +327,15 @@ export default function useBookingCompanions({
         };
       }
       const blockContactState = resolveBlockContactState(block, block.index);
-      const blockPromotionIds = normalizePromotionIds(block?.promotionIds, block?.promotionId);
-      const integrantePayload = {
-        orden_integrante: block.index + 1,
-        alias: blockContactState.fullName || block.alias,
-        rol_integrante_codigo: block.index === 0 ? 'titular' : 'acompanante',
-        id_barbero: resolvedBarberByBlockId?.has(block.id)
-          ? resolvedBarberByBlockId.get(block.id)
-          : (block.idBarbero || null),
-        selection_type: block.selection_type,
-        id_paquete: ['package', 'mixed'].includes(block.selection_type) ? (block.selectedPackage?.id_paquete || null) : null,
-        fecha_inicio: fechaInicioNormalizada,
-        servicios: ['services', 'mixed'].includes(block.selection_type) ? block.selectedServices.map((service) => ({
-          id_servicio: service.id_servicio,
-        })) : [],
-      };
-      if (blockPromotionIds.length > 0) {
-        integrantePayload.promotionIds = blockPromotionIds;
-        integrantePayload.promotionId = blockPromotionIds[0] || null;
-      }
-      const shouldSendContact = bookingMode === 'public' || block.index > 0;
-      if (shouldSendContact) {
-        integrantePayload.contacto = {
-          nombre: String(blockContactState.fullName || block.alias || '').trim(),
-          nombres: String(blockContactState.firstName || '').trim() || null,
-          apellidos: String(blockContactState.lastName || '').trim() || null,
-          email: String(blockContactState.email || '').trim().toLowerCase() || null,
-          telefono: String(blockContactState.phone || '').trim() || null,
-        };
-      }
+      const hasResolvedBarber = resolvedBarberByBlockId?.has(block.id) === true;
+      const integrantePayload = buildBookingMemberPayload({
+        block,
+        blockContactState,
+        bookingMode,
+        fechaInicio: fechaInicioNormalizada,
+        hasResolvedBarber,
+        resolvedBarberId: hasResolvedBarber ? resolvedBarberByBlockId.get(block.id) : null,
+      });
       integrantes.push(integrantePayload);
     }
     return { ok: true, integrantes };

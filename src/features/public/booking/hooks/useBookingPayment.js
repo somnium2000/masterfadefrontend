@@ -5,6 +5,12 @@ import {
   createPublicPaymentIntent,
   getPublicPaymentStatus,
 } from '../publicBookingApi.js';
+import {
+  buildMockPaymentPayload,
+  buildPaymentContextPayload,
+  buildPaymentStatusParams,
+  buildSimulatorPaymentPayload,
+} from '../bookingPayloadBuilders.js';
 
 const PAYMENT_CONTEXT_STORAGE_KEY = 'masterfade.publicBookingPayment.v1';
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
@@ -201,12 +207,12 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
       };
       paymentIntentRef.current = intentWithGroup;
       setPaymentIntentState(intentWithGroup);
-      writeStoredPaymentContext({
-        id_grupo_cita: normalizedGroupId,
-        id_intent: safeText(intentWithGroup.id_intent),
-        titular_email: normalizedEmail,
+      writeStoredPaymentContext(buildPaymentContextPayload({
+        groupId: normalizedGroupId,
+        intentId: intentWithGroup.id_intent,
+        titularEmail: normalizedEmail,
         paymentIntent: intentWithGroup,
-      });
+      }));
       return intentWithGroup;
     })();
 
@@ -249,11 +255,11 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
       let lastPayload = null;
       const maxAttempts = Math.max(1, Math.min(4, Number(retries || 0) + 1));
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        const response = await getPublicPaymentStatus({
-          id_grupo_cita: normalizedGroupId,
-          id_intent: normalizedIntentId,
-          titular_email: normalizedEmail,
-        }, {
+        const response = await getPublicPaymentStatus(buildPaymentStatusParams({
+          groupId: normalizedGroupId,
+          intentId: normalizedIntentId,
+          titularEmail: normalizedEmail,
+        }), {
           signal: controller?.signal,
         });
         const payload = response?.data ?? response;
@@ -289,12 +295,11 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     const normalizedEmail = safeText(titularEmail).toLowerCase();
     if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return false;
     if (!isCurrentPaymentGroup(normalizedGroupId)) return false;
-    await completePublicMockPayment({
-      id_grupo_cita: normalizedGroupId,
-      id_intent: normalizedIntentId,
-      titular_email: normalizedEmail,
-      status: 'paid',
-    });
+    await completePublicMockPayment(buildMockPaymentPayload({
+      groupId: normalizedGroupId,
+      intentId: normalizedIntentId,
+      titularEmail: normalizedEmail,
+    }));
     return true;
   }, [isCurrentPaymentGroup]);
 
@@ -305,13 +310,13 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return false;
     if (!isCurrentPaymentGroup(normalizedGroupId)) return false;
     const amountForSimulation = readTodoPagoSimulationAmount();
-    const response = await completePublicSimulatorPayment({
-      id_grupo_cita: normalizedGroupId,
-      id_intent: normalizedIntentId,
-      titular_email: normalizedEmail,
+    const response = await completePublicSimulatorPayment(buildSimulatorPaymentPayload({
+      groupId: normalizedGroupId,
+      intentId: normalizedIntentId,
+      titularEmail: normalizedEmail,
       status,
-      ...(amountForSimulation ? { monto_prueba_hnl: amountForSimulation } : {}),
-    });
+      amountForSimulation,
+    }));
     const payload = response?.data ?? response;
     const normalizedStatus = safeText(payload?.normalized_status).toUpperCase();
     if (normalizedStatus && normalizedStatus !== 'PAID') {
