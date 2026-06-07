@@ -645,13 +645,20 @@ export function normalizeBookingPaymentUiState({
   ]);
 
   if (bookingConfirmed) {
+    const confirmedAmount = noPaymentSuccess
+      ? firstUsableAmount([
+        effectivePaymentResult?.total_pagado_hnl,
+        bookingSuccessResult?.total_pagado_hnl,
+        0,
+      ])
+      : amount;
     return {
       status: 'confirmed',
       text: 'Reserva confirmada',
       paymentLabel: noPaymentSuccess
         ? (bookingSuccessResult?.estado_pago || 'Cubierto por plan')
         : 'pagado',
-      totalPagadoHnl: amount,
+      totalPagadoHnl: confirmedAmount,
       bookingConfirmed: true,
     };
   }

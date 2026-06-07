@@ -1,4 +1,4 @@
-import {
+﻿import {
   useCallback,
   useEffect,
   useMemo,
@@ -82,6 +82,12 @@ import { PublicBookingProvider } from './BookingFlowContext.jsx';
 export { PublicBookingProvider, usePublicBookingFlow } from './BookingFlowContext.jsx';
 
 const CONTACT_ERROR_FIELD_ORDER = ['contactFirstName', 'contactLastName', 'contactEmail', 'contactPhone'];
+const PROFILE_FIELD_LABELS = Object.freeze({
+  nombres: 'Nombre',
+  apellidos: 'Apellido',
+  telefono_principal: 'TelÃ©fono',
+  correo_principal: 'Correo',
+});
 
 function getContactValidationFeedback(contactState, blockIndex) {
   const errors = contactState?.errors || {};
@@ -90,7 +96,7 @@ function getContactValidationFeedback(contactState, blockIndex) {
   const isTitular = Number(blockIndex || 0) === 0;
   const fallbackMessage = isTitular
     ? 'Completa los datos del titular.'
-    : 'Completa los datos del acompaÃ±ante.';
+    : 'Completa los datos del acompaÃƒÂ±ante.';
   return {
     field,
     message: String(errors[field] || '').trim() || fallbackMessage,
@@ -214,6 +220,27 @@ function persistRewardBookingContext(context) {
   window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, JSON.stringify(context));
 }
 
+function readPendingPaymentResumeContext() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem('mf_pending_payment_context_v1');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const groupId = String(parsed?.id_grupo_cita || '').trim();
+    const intentId = String(parsed?.id_intent || parsed?.payment_intent?.id_intent || '').trim();
+    const titularEmail = String(parsed?.titular_email || '').trim().toLowerCase();
+    if (!groupId || !intentId) return null;
+    return {
+      id_grupo_cita: groupId,
+      id_intent: intentId,
+      titular_email: titularEmail,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function PublicBookingFlow() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -250,6 +277,7 @@ export default function PublicBookingFlow() {
   const [profilePersistModal, setProfilePersistModal] = useState({ open: false, kind: '' });
   const [cancelBookingModal, setCancelBookingModal] = useState({ open: false, source: '' });
   const [cancelBookingProcessing, setCancelBookingProcessing] = useState(false);
+  const [profileIncompleteState, setProfileIncompleteState] = useState({ message: '', missingFields: [] });
 
   const [rewardBookingContext, setRewardBookingContext] = useState(() => readRewardBookingContext());
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
@@ -266,14 +294,47 @@ const holderProfileHydratedRef = useRef(false);
 const paymentAutoBootstrapAttemptRef = useRef('');
 const paymentReturnStatusCheckRef = useRef('');
 const invalidHoldSelectionFingerprintRef = useRef('');
+const agendaAutoLoadKeyRef = useRef('');
   const [servicesCanScroll, setServicesCanScroll] = useState(false);
   const [servicesAtEnd, setServicesAtEnd] = useState(true);
+
+  const goToClienteProfile = useCallback(() => {
+    navigate('/home/cliente/perfil');
+  }, [navigate]);
+
+  const setProfileIncompleteFromBackend = useCallback((errorEnvelope = {}) => {
+    const sourceMessage = String(errorEnvelope?.message || '').trim();
+    const message = sourceMessage || 'Completa tu perfil antes de agendar una cita.';
+    const rawMissing = Array.isArray(errorEnvelope?.details?.missing_fields)
+      ? errorEnvelope.details.missing_fields
+      : [];
+    const normalizedMissing = rawMissing
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter(Boolean);
+    const uniqueMissing = Array.from(new Set(normalizedMissing));
+    setProfileIncompleteState({ message, missingFields: uniqueMissing });
+  }, []);
 
   const effectiveActiveBlockIndex = bookingBlocks[activeBlockIndex]
     ? activeBlockIndex
     : 0;
 
   const activeBlock = bookingBlocks[effectiveActiveBlockIndex] || null;
+  const pendingResumeContext = useMemo(() => {
+    const searchParams = new URLSearchParams(location.search || '');
+    const queryGroupId = String(searchParams.get('id_grupo_cita') || '').trim();
+    const queryIntentId = String(searchParams.get('id_intent') || '').trim();
+    const stored = readPendingPaymentResumeContext();
+    const groupId = queryGroupId || String(stored?.id_grupo_cita || '').trim();
+    const intentId = queryIntentId || String(stored?.id_intent || '').trim();
+    if (!groupId || !intentId) return null;
+    return {
+      id_grupo_cita: groupId,
+      id_intent: intentId,
+      titular_email: String(stored?.titular_email || '').trim().toLowerCase(),
+    };
+  }, [location.search]);
+  const isPendingPaymentResumeRoute = location.pathname.startsWith(BOOKING_ROUTES.payment) && Boolean(pendingResumeContext?.id_grupo_cita && pendingResumeContext?.id_intent);
   const selectedBarberId = bookingBlocks[0]?.idBarbero || '';
 
   const activeBlockBarberId = activeBlock?.idBarbero || '';
@@ -478,7 +539,8 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         || membershipStateData?.estado_plan
         || ''
       ).trim().toLowerCase();
-      const isOperational = statusCode === 'activa' || statusCode === 'pendiente_renovacion';
+      // AM: FASE 2E - Operativa solo si estÃ¡ estrictamente activa, alineado con backend.
+      const isOperational = statusCode === 'activa';
       if (!isOperational) return;
       deduped.set(subscriptionId, plan);
     });
@@ -489,21 +551,6 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     () => membershipActivePlans.find((plan) => String(plan?.id_sucursal_contratada || '').trim() === selectedBranchId) || null,
     [membershipActivePlans, selectedBranchId]
   );
-  const hasOperationalMembership = membershipActivePlans.length > 0;
-  const activeMembershipPlanInOtherBranch = useMemo(
-    () => membershipActivePlans.find((plan) => String(plan?.id_sucursal_contratada || '').trim() !== selectedBranchId) || null,
-    [membershipActivePlans, selectedBranchId]
-  );
-  const activeMembershipOtherBranchName = useMemo(() => {
-    if (!activeMembershipPlanInOtherBranch) return '';
-    const otherBranchId = String(activeMembershipPlanInOtherBranch?.id_sucursal_contratada || '').trim();
-    if (!otherBranchId) return '';
-    return (
-      branchNameById.get(otherBranchId)
-      || String(activeMembershipPlanInOtherBranch?.sucursal_nombre || '').trim()
-      || 'tu sucursal de plan'
-    );
-  }, [activeMembershipPlanInOtherBranch, branchNameById]);
   const selectedBranchName = selectedBranch
     ? (String(selectedBranch?.nombre_sucursal || '').trim() || 'esta sucursal')
     : 'esta sucursal';
@@ -889,14 +936,14 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         errors.contactFirstName = errors.contactFirstName || 'Completa tus datos para continuar.';
       }
       if (!isValidEmail(effectiveEmail)) {
-        errors.contactEmail = 'No pudimos validar el correo de tu cuenta. Vuelve a iniciar sesión.';
+        errors.contactEmail = 'No pudimos validar el correo de tu cuenta. Vuelve a iniciar sesiÃ³n.';
       }
       if (needsPhone && !phoneRaw) {
-        errors.contactPhone = 'Ingresa un teléfono válido del titular. Debe tener al menos 8 dígitos.';
+        errors.contactPhone = 'Ingresa un telÃ©fono vÃ¡lido del titular. Debe tener al menos 8 dÃ­gitos.';
       } else if (needsPhone && !isValidOptionalPhone(phoneRaw)) {
         errors.contactPhone = hasLetters(phoneRaw)
-          ? 'El teléfono no admite letras.'
-          : 'Ingresa un teléfono válido del titular. Debe tener al menos 8 dígitos.';
+          ? 'El telÃ©fono no admite letras.'
+          : 'Ingresa un telÃ©fono vÃ¡lido del titular. Debe tener al menos 8 dÃ­gitos.';
       }
 
       return {
@@ -922,12 +969,12 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         errors.contactLastName = 'El apellido del titular es obligatorio.';
       }
       if (!isValidEmail(email)) {
-        errors.contactEmail = 'Ingresa un correo válido del titular.';
+        errors.contactEmail = 'Ingresa un correo vÃ¡lido del titular.';
       }
       if (!phoneRaw || !isValidOptionalPhone(phoneRaw)) {
         errors.contactPhone = phoneRaw && hasLetters(phoneRaw)
-          ? 'El teléfono no admite letras.'
-          : 'Ingresa un teléfono válido del titular. Debe tener al menos 8 dígitos.';
+          ? 'El telÃ©fono no admite letras.'
+          : 'Ingresa un telÃ©fono vÃ¡lido del titular. Debe tener al menos 8 dÃ­gitos.';
       }
       return {
         isTitular: true,
@@ -945,21 +992,21 @@ const invalidHoldSelectionFingerprintRef = useRef('');
 
     const fullName = joinedName || fallbackName;
     if (!firstName) {
-      errors.contactFirstName = 'El nombre del acompañante es obligatorio.';
+      errors.contactFirstName = 'El nombre del acompaÃ±ante es obligatorio.';
     }
     if (!lastName) {
-      errors.contactLastName = 'El apellido del acompañante es obligatorio.';
+      errors.contactLastName = 'El apellido del acompaÃ±ante es obligatorio.';
     }
     if (!fullName) {
-      errors.contactFirstName = errors.contactFirstName || 'Completa nombre y apellido del acompañante.';
+      errors.contactFirstName = errors.contactFirstName || 'Completa nombre y apellido del acompaÃ±ante.';
     }
     if (!isValidOptionalEmail(email)) {
-      errors.contactEmail = 'Si ingresas correo del acompañante, debe ser válido.';
+      errors.contactEmail = 'Si ingresas correo del acompaÃ±ante, debe ser vÃ¡lido.';
     }
     if (!isValidOptionalPhone(phoneRaw)) {
       errors.contactPhone = hasLetters(phoneRaw)
-        ? 'El teléfono del acompañante no admite letras.'
-        : 'Ingresa un teléfono válido del acompañante. Debe tener al menos 8 dígitos.';
+        ? 'El telÃ©fono del acompaÃ±ante no admite letras.'
+        : 'Ingresa un telÃ©fono vÃ¡lido del acompaÃ±ante. Debe tener al menos 8 dÃ­gitos.';
     }
 
     return {
@@ -1194,6 +1241,42 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     () => Number(holdPricing?.total_pagar_hnl ?? holdResult?.total_pagar_hnl ?? 0),
     [holdPricing, holdResult?.total_pagar_hnl]
   );
+  const holdMembership = useMemo(
+    () => (holdResult?.membresia && typeof holdResult.membresia === 'object' ? holdResult.membresia : null),
+    [holdResult?.membresia]
+  );
+  const membershipMotivoNoAplica = useMemo(
+    () => String(holdMembership?.motivo_no_aplica || '').trim().toUpperCase(),
+    [holdMembership?.motivo_no_aplica]
+  );
+  const membershipAplicaEnCita = holdMembership?.aplica_en_cita === true;
+  const membershipBranchMismatch = holdMembership?.branch_mismatch === true || membershipMotivoNoAplica === 'SUCURSAL_DIFERENTE';
+  const membershipHasContext = useMemo(() => {
+    if (!canUseClienteHold || !holdMembership) return false;
+    if (membershipAplicaEnCita) return true;
+    if (membershipBranchMismatch) return true;
+    if (membershipMotivoNoAplica === 'PLAN_NO_ACTIVO') return true;
+    return false;
+  }, [canUseClienteHold, holdMembership, membershipAplicaEnCita, membershipBranchMismatch, membershipMotivoNoAplica]);
+  const membershipCompanionsCovered = holdMembership?.acompanantes_cubiertos === true;
+  const membershipCompanionNotice = useMemo(() => {
+    const hasCompanions = Array.isArray(bookingBlocksSummary) && bookingBlocksSummary.length > 1;
+    if (!membershipHasContext || !hasCompanions || membershipCompanionsCovered) return '';
+    return 'La membresÃ­a aplica solo al titular. Los acompaÃ±antes se cobran como cita normal.';
+  }, [bookingBlocksSummary, membershipCompanionsCovered, membershipHasContext]);
+  const membershipUxMessage = useMemo(() => {
+    if (!membershipHasContext) return '';
+    if (membershipAplicaEnCita) {
+      return 'Tu membresÃ­a estÃ¡ activa. Los servicios incluidos para el titular se aplicarÃ¡n automÃ¡ticamente.';
+    }
+    if (membershipBranchMismatch) {
+      return 'Tu membresÃ­a estÃ¡ activa en otra sucursal. Para esta cita, el pago se realizarÃ¡ como una cita normal.';
+    }
+    if (membershipMotivoNoAplica === 'PLAN_NO_ACTIVO') {
+      return 'Tu membresÃ­a no estÃ¡ activa actualmente. Esta cita se pagarÃ¡ como una cita normal.';
+    }
+    return '';
+  }, [membershipAplicaEnCita, membershipBranchMismatch, membershipHasContext, membershipMotivoNoAplica]);
 
   const canConfirmWithoutPayment = Boolean(
     canUseClienteHold
@@ -1245,7 +1328,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     if (firstInvalidContact) {
       const label = firstInvalidContact.index === 0
         ? 'titular'
-        : `acompañante ${firstInvalidContact.index}`;
+        : `acompaÃ±ante ${firstInvalidContact.index}`;
       const feedback = getContactValidationFeedback(firstInvalidContact.contactResolved, firstInvalidContact.index);
       if (feedback?.message) return feedback.message;
       if (!firstInvalidContact?.contactResolved?.fullName) {
@@ -1260,42 +1343,42 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     if (firstMissingService) {
       return firstMissingService.index === 0
         ? 'El titular no tiene servicio o paquete seleccionado.'
-        : `El acompañante ${firstMissingService.index} no tiene servicio seleccionado.`;
+        : `El acompaÃ±ante ${firstMissingService.index} no tiene servicio seleccionado.`;
     }
 
     const firstMissingBarber = blocksToSubmitSummary.find((block) => !block?.idBarbero);
     if (firstMissingBarber) {
       return firstMissingBarber.index === 0
         ? 'El titular no tiene barbero seleccionado.'
-        : `El acompañante ${firstMissingBarber.index} no tiene barbero seleccionado.`;
+        : `El acompaÃ±ante ${firstMissingBarber.index} no tiene barbero seleccionado.`;
     }
 
     const firstMissingDate = blocksToSubmitSummary.find((block) => !block?.selectedDate);
     if (firstMissingDate) {
       return firstMissingDate.index === 0
         ? 'El titular no tiene fecha seleccionada.'
-        : `El acompañante ${firstMissingDate.index} no tiene fecha seleccionada.`;
+        : `El acompaÃ±ante ${firstMissingDate.index} no tiene fecha seleccionada.`;
     }
 
     const firstMissingTime = blocksToSubmitSummary.find((block) => !block?.selectedTime);
     if (firstMissingTime) {
       return firstMissingTime.index === 0
         ? 'El titular no tiene horario seleccionado.'
-        : `El acompañante ${firstMissingTime.index} no tiene horario seleccionado.`;
+        : `El acompaÃ±ante ${firstMissingTime.index} no tiene horario seleccionado.`;
     }
 
     const firstMissingDuration = blocksToSubmitSummary.find((block) => !getBookingBlockOccupiedRange(block));
     if (firstMissingDuration) {
       return firstMissingDuration.index === 0
         ? 'El titular no tiene duracion calculada.'
-        : `El acompaÃ±ante ${firstMissingDuration.index} no tiene duracion calculada.`;
+        : `El acompaÃƒÂ±ante ${firstMissingDuration.index} no tiene duracion calculada.`;
     }
 
     const firstConflict = blocksToSubmitSummary.find((block) => hasBlockingGroupConflict(block));
     if (firstConflict) {
       return firstConflict.index === 0
         ? 'El horario del titular se solapa con otro integrante.'
-        : `El horario del acompañante ${firstConflict.index} se solapa con otro integrante.`;
+        : `El horario del acompaÃ±ante ${firstConflict.index} se solapa con otro integrante.`;
     }
 
     return '';
@@ -1330,7 +1413,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     const key = buildFieldErrorKey(blockIndex, field);
     setFieldErrors((prev) => ({
       ...prev,
-      [key]: String(message || '').trim() || 'Dato inválido',
+      [key]: String(message || '').trim() || 'Dato invÃ¡lido',
     }));
   }, [buildFieldErrorKey]);
 
@@ -1474,7 +1557,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     abortAvailabilityRequests();
     invalidateAgendaCaches();
     notifications.warning(
-      String(message || 'El horario ya no está disponible. Selecciona una nueva hora para continuar.'),
+      String(message || 'El horario ya no estÃ¡ disponible. Selecciona una nueva hora para continuar.'),
       { dedupeKey }
     );
     navigate(BOOKING_ROUTES.agenda, { replace: true });
@@ -1664,7 +1747,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     if (availableServiceIdSet.has(rewardServiceId)) return;
     if (rewardUnavailableShownRef.current) return;
     rewardUnavailableShownRef.current = true;
-    notifications.warning('El servicio de recompensa no está disponible en esta sucursal. Elige la sucursal de tu canje o cancela el uso de recompensa.', {
+    notifications.warning('El servicio de recompensa no estÃ¡ disponible en esta sucursal. Elige la sucursal de tu canje o cancela el uso de recompensa.', {
       dedupeKey: 'public-booking-reward-service-unavailable',
     });
   }, [
@@ -1680,35 +1763,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
 
   useEffect(() => {
     if (!canUseClienteHold || !selectedBranchId || !selectedBarberId) return;
-    if (rewardModeActive) {
-      if (membershipBranchNotice || membershipBranchNoticeRef.current) {
-        setMembershipBranchNotice('');
-        membershipBranchNoticeRef.current = '';
-      }
-      return;
-    }
-
-    if (!activeMembershipPlan) {
-      if (hasOperationalMembership && activeMembershipOtherBranchName) {
-        const notice = `Tu plan activo pertenece a ${activeMembershipOtherBranchName}. Si agendas en ${selectedBranchName}, esta cita no será cubierta por tu plan y deberás pagar el total.`;
-        setMembershipBranchNotice(notice);
-        if (membershipBranchNoticeRef.current !== notice) {
-          notifications.info(notice, { dedupeKey: 'public-booking-membership-branch-mismatch' });
-          membershipBranchNoticeRef.current = notice;
-        }
-        return;
-      }
-      if (membershipBranchNotice || membershipBranchNoticeRef.current) {
-        setMembershipBranchNotice('');
-        membershipBranchNoticeRef.current = '';
-      }
-      return;
-    }
-
-    if (membershipBranchNotice) {
-      setMembershipBranchNotice('');
-      membershipBranchNoticeRef.current = '';
-    }
+    if (rewardModeActive || !activeMembershipPlan) return;
 
     if (membershipLockedServiceIdsForTitular.length === 0) return;
 
@@ -1745,16 +1800,43 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     });
   }, [
     activeMembershipPlan,
-    activeMembershipOtherBranchName,
     canUseClienteHold,
-    hasOperationalMembership,
-    membershipBranchNotice,
     membershipLockedServiceIdsForTitular,
     rewardModeActive,
-    notifications,
     selectedBarberId,
     selectedBranchId,
-    selectedBranchName,
+  ]);
+
+  useEffect(() => {
+    if (!location.pathname.startsWith(BOOKING_ROUTES.agenda)) return;
+    const hasSelectionForAgenda = Boolean(selectedPackageId) || effectiveSelectedServiceIdsForAgenda.length > 0;
+    if (!selectedBranchId || !activeBlockBarberId || !hasSelectionForAgenda) return;
+    const key = [
+      selectedBranchId,
+      activeBlockBarberId,
+      selectionCacheKey,
+      monthRange?.from || '',
+      monthRange?.to || '',
+      selectedDate || '',
+    ].join('|');
+    if (agendaAutoLoadKeyRef.current === key) return;
+    agendaAutoLoadKeyRef.current = key;
+    void fetchAvailability();
+    if (selectedDate) {
+      void fetchSlots();
+    }
+  }, [
+    activeBlockBarberId,
+    effectiveSelectedServiceIdsForAgenda.length,
+    fetchAvailability,
+    fetchSlots,
+    location.pathname,
+    monthRange?.from,
+    monthRange?.to,
+    selectedBranchId,
+    selectedDate,
+    selectedPackageId,
+    selectionCacheKey,
   ]);
 
   useEffect(() => {
@@ -1890,14 +1972,14 @@ const invalidHoldSelectionFingerprintRef = useRef('');
 
   useEffect(() => {
     if (!location.pathname.startsWith(BOOKING_ROUTES.payment)) return;
-    if (!allBlocksComplete) {
+    if (!allBlocksComplete && !isPendingPaymentResumeRoute) {
       navigate(BOOKING_ROUTES.agenda, { replace: true });
       return;
     }
     if (paymentResult?.booking_confirmed) {
       navigate(BOOKING_ROUTES.success, { replace: true });
     }
-  }, [allBlocksComplete, location.pathname, navigate, paymentResult?.booking_confirmed]);
+  }, [allBlocksComplete, isPendingPaymentResumeRoute, location.pathname, navigate, paymentResult?.booking_confirmed]);
 
   useEffect(() => {
     if (!location.pathname.startsWith(BOOKING_ROUTES.agenda)) return;
@@ -1925,7 +2007,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     (nextBranchId) => {
       if (!nextBranchId || nextBranchId === selectedBranchId) return;
       if (rewardModeActive && rewardBranchId && nextBranchId !== rewardBranchId) {
-        notifications.warning('Esta recompensa solo puede usarse en la sucursal donde se preparó el canje.', {
+        notifications.warning('Esta recompensa solo puede usarse en la sucursal donde se preparÃ³ el canje.', {
           dedupeKey: 'public-booking-reward-branch-mismatch',
         });
         return;
@@ -1992,7 +2074,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       try {
         await releaseHold();
       } catch {
-        notifications.warning('No se pudo liberar la reserva temporal en este momento, pero se canceló el flujo local.', {
+        notifications.warning('No se pudo liberar la reserva temporal en este momento, pero se cancelÃ³ el flujo local.', {
           dedupeKey: 'public-booking-release-hold-warning',
         });
       }
@@ -2082,8 +2164,9 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     clearHoldLocalState();
     clearPaymentState();
     resetFlowForBranchChange();
-    navigate(BOOKING_ROUTES.home, { replace: true });
-  }, [clearHoldLocalState, clearPaymentState, navigate, resetFlowForBranchChange]);
+    const target = canUseClienteHold ? '/home/cliente/citas' : BOOKING_ROUTES.home;
+    navigate(target, { replace: true });
+  }, [canUseClienteHold, clearHoldLocalState, clearPaymentState, navigate, resetFlowForBranchChange]);
 
   const closeAuthRequiredModal = useCallback(() => {
     setAuthRequiredModal({ open: false, email: '' });
@@ -2134,18 +2217,18 @@ const invalidHoldSelectionFingerprintRef = useRef('');
           ? (titularState.isAuthenticated
             ? 'Completa los datos faltantes del titular antes de elegir servicios.'
             : 'Completa el nombre del titular antes de elegir servicios.')
-          : 'Completa nombre y apellido del acompañante antes de elegir servicios.',
+          : 'Completa nombre y apellido del acompaÃ±ante antes de elegir servicios.',
         { dedupeKey: 'public-booking-contact-name-required' }
       );
       return;
     }
     if (blockedServiceIdSet.has(normalizedServiceId)) {
       if (rewardLockedServiceIdSet.has(normalizedServiceId)) {
-        notifications.info('Este servicio está marcado como recompensa cortesía y no se puede quitar.', {
+        notifications.info('Este servicio estÃ¡ marcado como recompensa cortesÃ­a y no se puede quitar.', {
           dedupeKey: `public-booking-reward-service-locked-${normalizedServiceId}`,
         });
       } else if (membershipLockedServiceIdSet.has(normalizedServiceId)) {
-        notifications.info('Este servicio está cubierto por tu plan y no se puede quitar.', {
+        notifications.info('Este servicio estÃ¡ cubierto por tu plan y no se puede quitar.', {
           dedupeKey: `public-booking-membership-service-locked-${normalizedServiceId}`,
         });
       } else {
@@ -2190,7 +2273,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
   const selectSelectionType = useCallback((nextType) => {
     const normalizedType = String(nextType || '').trim().toLowerCase() === 'package' ? 'package' : 'services';
     if (rewardModeActive && effectiveActiveBlockIndex === 0 && normalizedType === 'package') {
-      notifications.info('La recompensa cortesía se aplica sobre un servicio individual del titular.', {
+      notifications.info('La recompensa cortesÃ­a se aplica sobre un servicio individual del titular.', {
         dedupeKey: 'public-booking-reward-package-disabled',
       });
       return;
@@ -2216,7 +2299,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
 
   const selectPackage = useCallback((packageId) => {
     if (rewardModeActive && effectiveActiveBlockIndex === 0) {
-      notifications.info('La recompensa cortesía no puede combinarse con paquetes en esta fase.', {
+      notifications.info('La recompensa cortesÃ­a no puede combinarse con paquetes en esta fase.', {
         dedupeKey: 'public-booking-reward-package-select-disabled',
       });
       return;
@@ -2254,7 +2337,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
 
   const selectPromotion = useCallback((promotionId) => {
     if (!selectedBranchId) {
-      notifications.warning('Selecciona una sucursal antes de elegir una promoción.', {
+      notifications.warning('Selecciona una sucursal antes de elegir una promociÃ³n.', {
         dedupeKey: 'public-booking-promotion-branch-required',
       });
       return;
@@ -2322,7 +2405,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       packagesById,
     });
     if (!evaluation.canSelect) {
-      notifications.warning(evaluation.disabledReason || 'Esta promoción no aplica a la selección actual.', {
+      notifications.warning(evaluation.disabledReason || 'Esta promociÃ³n no aplica a la selecciÃ³n actual.', {
         dedupeKey: 'public-booking-promotion-target-required',
       });
       return;
@@ -2540,7 +2623,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     if (localSelectionConflict) {
       const firstConflictCode = String(localSelectionConflict.selectionConflicts[0]?.code || '').trim().toUpperCase();
       notifications.warning(
-        mapPublicBookingErrorMessage(firstConflictCode, 'Revisa la selección de servicios y paquete antes de continuar.'),
+        mapPublicBookingErrorMessage(firstConflictCode, 'Revisa la selecciÃ³n de servicios y paquete antes de continuar.'),
         { dedupeKey: `public-booking-local-selection-conflict-${firstConflictCode || 'unknown'}` }
       );
       setActiveBlockIndex(Math.max(0, Number(localSelectionConflict.index || 0)));
@@ -2631,7 +2714,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         if (feedback?.field) {
           nextFieldErrors[buildFieldErrorKey(companion.index, feedback.field)] = feedback.message;
         }
-        notifications.warning(feedback?.message || 'Completa los datos del acompaÃ±ante.', {
+        notifications.warning(feedback?.message || 'Completa los datos del acompaÃƒÂ±ante.', {
           dedupeKey: 'public-booking-companion-data-invalid-submit',
         });
         setActiveBlockIndex(companion.index);
@@ -2642,7 +2725,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       if (!companionContact.firstName || !companionContact.lastName || !companionContact.fullName) {
         nextFieldErrors[buildFieldErrorKey(companion.index, 'contactFirstName')] = 'Completa nombre y apellido del acompanante.';
         nextFieldErrors[buildFieldErrorKey(companion.index, 'contactLastName')] = 'Completa nombre y apellido del acompanante.';
-        notifications.warning('Cada acompañante debe tener nombre y apellido válidos para confirmar.', {
+        notifications.warning('Cada acompaÃ±ante debe tener nombre y apellido vÃ¡lidos para confirmar.', {
           dedupeKey: 'public-booking-companion-data-required-submit',
         });
         setActiveBlockIndex(companion.index);
@@ -2714,7 +2797,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       }
     }
     if (autoAssignedCompanion) {
-      notifications.info('Uno o más acompañantes serán asignados automáticamente con barbero disponible en ese horario.', {
+      notifications.info('Uno o mÃ¡s acompaÃ±antes serÃ¡n asignados automÃ¡ticamente con barbero disponible en ese horario.', {
         dedupeKey: 'public-booking-autoassign-companion-info',
       });
     }
@@ -2725,7 +2808,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     });
     if (!integrantesResult.ok) {
       if (integrantesResult.errorCode === 'COMPANION_DATE_MISMATCH') {
-        notifications.warning('Los acompaÃ±antes deben usar la misma fecha del titular.', {
+        notifications.warning('Los acompaÃƒÂ±antes deben usar la misma fecha del titular.', {
           dedupeKey: 'public-booking-companion-date-mismatch',
         });
       } else {
@@ -2784,7 +2867,11 @@ const invalidHoldSelectionFingerprintRef = useRef('');
           telefono: normalizePhone(titularTelefono),
         };
       }
-      return await createHold(holdPayload);
+      const createdHold = await createHold(holdPayload);
+      if (createdHold) {
+        setProfileIncompleteState({ message: '', missingFields: [] });
+      }
+      return createdHold;
     } catch (err) {
       const apiError = err?.data?.error || err?.error || {};
       const apiErrorDetails = apiError?.details || {};
@@ -2799,6 +2886,30 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       const affectedLabel = affectedIndex === 0
         ? 'titular'
         : (affectedSummaryBlock?.alias || `${BOOKING_COMPANION_ALIAS_PREFIX} ${affectedIndex}`);
+
+      if (conflictCode === 'CLIENT_PROFILE_INCOMPLETE') {
+        // AM: Fallback de contrato backend Fase 1A para perfil incompleto.
+        setProfileIncompleteFromBackend(apiError);
+        notifications.warning(String(apiError?.message || 'Completa tu perfil antes de agendar una cita.'), {
+          dedupeKey: 'public-booking-profile-incomplete-backend',
+        });
+        setActiveBlockIndex(0);
+        navigate(BOOKING_ROUTES.agenda);
+        return false;
+      }
+      if (conflictCode === 'REWARD_REDEEM_REQUIRED') {
+        // AM: Bloqueo funcional backend P0.2B para agenda normal cuando hay recompensa disponible.
+        const rewardMessage = String(
+          apiError?.message
+          || 'Tienes una cortesÃ­a disponible. Para continuar, debes canjear tu recompensa antes de agendar una cita normal.'
+        );
+        notifications.warning(rewardMessage, {
+          dedupeKey: 'public-booking-reward-redeem-required',
+        });
+        // AM: SeÃ±al mÃ­nima para abrir canje obligatorio al volver al dashboard cliente.
+        navigate('/home/cliente?accion=canjear');
+        return false;
+      }
 
       if (conflictCode === 'PUBLIC_CITAS_EMAIL_IN_USE' || conflictCode === 'EMAIL_BELONGS_TO_ACTIVE_USER') {
         const emailErrorIndex = resolveEmailConflictBlockIndex(apiErrorDetails);
@@ -2847,8 +2958,8 @@ const invalidHoldSelectionFingerprintRef = useRef('');
           : Math.max(1, emailErrorIndex);
         const emailLabel = normalizedEmail || 'correo no identificado';
         const conflictMessage = isTitularConflict
-          ? `El correo del titular, ${emailLabel}, pertenece a un usuario activo. Debes iniciar sesión para continuar.`
-          : `El correo del acompañante ${companionNumber}, ${emailLabel}, pertenece a un usuario activo. Debe iniciar sesión o usar otro correo.`;
+          ? `El correo del titular, ${emailLabel}, pertenece a un usuario activo. Debes iniciar sesiÃ³n para continuar.`
+          : `El correo del acompaÃ±ante ${companionNumber}, ${emailLabel}, pertenece a un usuario activo. Debe iniciar sesiÃ³n o usar otro correo.`;
         setFieldError(emailErrorIndex, 'contactEmail', mapPublicBookingErrorMessage(conflictCode));
         setActiveBlockIndex(emailErrorIndex);
         navigate(BOOKING_ROUTES.agenda);
@@ -2900,6 +3011,16 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         });
         navigate(BOOKING_ROUTES.agenda);
       } else if (err?.status === 409) {
+        if (conflictCode === 'CLIENT_PENDING_APPOINTMENT_EXISTS') {
+          notifications.warning(
+            'Tienes una reserva pendiente de pago. Completa o descarta esa reserva antes de agendar una nueva cita.',
+            { dedupeKey: 'public-booking-pending-appointment-exists' }
+          );
+          navigate('/home/cliente/citas', {
+            state: { openPendingPaymentModal: true },
+          });
+          return false;
+        }
         const isHoldConflict = conflictCode === 'PUBLIC_CITAS_HOLD_CONFLICT'
           || conflictCode === 'CITAS_HOLD_CONFLICT'
           || conflictCode === 'CITA_HOLD_CONFLICTO'
@@ -2914,7 +3035,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
           const isSameBarberConflict = conflictReason === 'AGENDA_INTERNAL_GROUP_CONFLICT';
           const conflictMessage = isSameBarberConflict
             ? `${affectedLabel} usa el mismo barbero en un horario que se cruza. Selecciona una hora posterior o cambia de barbero.`
-            : `El horario seleccionado para ${affectedLabel} ya no está disponible.`;
+            : `El horario seleccionado para ${affectedLabel} ya no estÃ¡ disponible.`;
           invalidHoldSelectionFingerprintRef.current = bookingHoldFingerprint;
           setActiveBlockIndex(affectedIndex);
           recoverToAgendaForReselection(
@@ -2963,8 +3084,11 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     selectedBarberId,
     selectedBranchId,
     setFieldError,
+    setProfileIncompleteFromBackend,
     titularState.isAuthenticated,
+    titularState.hasFullProfile,
     titularState.missingFields,
+    setProfileIncompleteState,
   ]);
 
   useEffect(() => {
@@ -3007,7 +3131,10 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     const rawConflicts = Array.isArray(apiError?.details?.conflicts)
       ? apiError.details.conflicts
       : [];
-    if (conflictCode !== 'PUBLIC_CITAS_CONTACT_EMAIL_CONFLICT' || rawConflicts.length === 0) {
+    if (
+      !['PUBLIC_CITAS_CONTACT_EMAIL_CONFLICT', 'PUBLIC_CITAS_CONTACT_DUPLICATE_CONFLICT'].includes(conflictCode)
+      || rawConflicts.length === 0
+    ) {
       return false;
     }
 
@@ -3094,7 +3221,12 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     holdSubmitting,
     navigate,
     notifications,
+    canUseClienteHold,
     setFieldError,
+    titularState.isAuthenticated,
+    titularState.hasFullProfile,
+    titularState.missingFields,
+    setProfileIncompleteState,
     validateContactsBeforeConfirm,
   ]);
 
@@ -3127,13 +3259,13 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
     const titularEmail = String(titularContact.email || '').trim().toLowerCase();
     if (!groupId) {
-      notifications.warning('Estamos reservando tu horario. Espera un momento e inténtalo nuevamente.', {
+      notifications.warning('Estamos reservando tu horario. Espera un momento e intÃ©ntalo nuevamente.', {
         dedupeKey: 'public-booking-hold-creating-for-payment',
       });
       return null;
     }
     if (Number(holdResult?.total_pagar_hnl || 0) <= 0) {
-      notifications.warning('Esta reserva no requiere pago. Confírmala directamente.', {
+      notifications.warning('Esta reserva no requiere pago. ConfÃ­rmala directamente.', {
         dedupeKey: 'public-booking-payment-not-required',
       });
       navigate(BOOKING_ROUTES.confirm);
@@ -3165,7 +3297,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       const errorCode = String(apiError?.code || '').trim().toUpperCase();
       if (err?.status === 409 && shouldRecoverFromPaymentError(errorCode)) {
         recoverToAgendaForReselection(
-          'El horario seleccionado dejó de estar disponible durante el pago. Elige una nueva hora para continuar.',
+          'El horario seleccionado dejÃ³ de estar disponible durante el pago. Elige una nueva hora para continuar.',
           { dedupeKey: 'public-booking-payment-recover-create-intent' }
         );
         return null;
@@ -3214,14 +3346,14 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       }, requestTimeoutMs);
     }
     if (!canUseClienteHold) {
-      notifications.warning('Debes iniciar sesión como cliente para confirmar sin pago.', {
+      notifications.warning('Debes iniciar sesiÃ³n como cliente para confirmar sin pago.', {
         dedupeKey: 'public-booking-confirm-no-payment-auth-required',
       });
       if (timeoutId) clearTimeout(timeoutId);
       return false;
     }
     if (!groupId) {
-      notifications.error('No encontramos una reserva válida para confirmar.', {
+      notifications.error('No encontramos una reserva vÃ¡lida para confirmar.', {
         dedupeKey: 'public-booking-confirm-no-payment-group-missing',
       });
       if (timeoutId) clearTimeout(timeoutId);
@@ -3287,6 +3419,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
           ? (rewardMessage || 'Recompensa utilizada')
           : 'cubierto_por_plan',
         total_pagado_hnl: 0,
+        cubierto_por_plan_hnl: Number(holdPricing?.cubierto_por_plan_hnl || 0),
         recompensa_utilizada: payload?.recompensa_utilizada || null,
         created_at: new Date().toISOString(),
       });
@@ -3317,7 +3450,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         return false;
       }
       if (err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('aborted')) {
-        notifications.error('La confirmación tardó demasiado. Intenta nuevamente.', {
+        notifications.error('La confirmaciÃ³n tardÃ³ demasiado. Intenta nuevamente.', {
           dedupeKey: 'public-booking-confirm-no-payment-timeout',
         });
         return false;
@@ -3329,7 +3462,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
     }
-  }, [canUseClienteHold, confirmHoldWithoutPaymentRequest, holdResult, navigate, notifications, rewardBookingContext]);
+  }, [canUseClienteHold, confirmHoldWithoutPaymentRequest, holdPricing?.cubierto_por_plan_hnl, holdResult, navigate, notifications, rewardBookingContext]);
 
   const refreshPaymentStatus = useCallback(async (options = {}) => {
     const canCheckOnRoute = location.pathname.startsWith(BOOKING_ROUTES.payment)
@@ -3389,7 +3522,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
           } catch (confirmError) {
             const errorCode = String(confirmError?.data?.error?.code || '').trim().toUpperCase();
             if (errorCode === 'POINTS_REDEEM_INSUFFICIENT_BALANCE_CONFIRM') {
-              notifications.error('No tienes saldo suficiente para aplicar la recompensa en la confirmación final.', {
+              notifications.error('No tienes saldo suficiente para aplicar la recompensa en la confirmaciÃ³n final.', {
                 dedupeKey: 'public-booking-reward-insufficient-after-payment',
               });
             } else {
@@ -3441,7 +3574,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       const errorCode = String(apiError?.code || '').trim().toUpperCase();
       if (shouldRecoverFromPaymentError(errorCode)) {
         recoverToAgendaForReselection(
-          'Tu reserva temporal ya no está disponible. Selecciona un nuevo horario para continuar.',
+          'Tu reserva temporal ya no estÃ¡ disponible. Selecciona un nuevo horario para continuar.',
           { dedupeKey: 'public-booking-payment-recover-status-error' }
         );
         return null;
@@ -3605,7 +3738,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       return;
     }
     recoverToAgendaForReselection(
-      'El tiempo de reserva expiró. Selecciona una nueva hora para continuar.',
+      'El tiempo de reserva expirÃ³. Selecciona una nueva hora para continuar.',
       { dedupeKey: 'public-booking-payment-recover-hold-expired' }
     );
   }, [
@@ -3685,6 +3818,16 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       blockedServiceIds,
       membershipLockedServiceIdsForTitular,
       membershipBranchNotice,
+      membershipHasContext,
+      membershipUxMessage,
+      membershipAplicaEnCita,
+      membershipBranchMismatch,
+      membershipMotivoNoAplica,
+      membershipCompanionsCovered,
+      membershipCompanionNotice,
+      profileIncompleteState,
+      profileFieldLabels: PROFILE_FIELD_LABELS,
+      goToClienteProfile,
       rewardModeActive,
       rewardServiceId,
       rewardServiceName,
@@ -3818,6 +3961,15 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       blockedServiceIds,
       membershipLockedServiceIdsForTitular,
       membershipBranchNotice,
+      membershipHasContext,
+      membershipUxMessage,
+      membershipAplicaEnCita,
+      membershipBranchMismatch,
+      membershipMotivoNoAplica,
+      membershipCompanionsCovered,
+      membershipCompanionNotice,
+      profileIncompleteState,
+      goToClienteProfile,
       rewardModeActive,
       rewardServiceId,
       rewardServiceName,
@@ -3926,6 +4078,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
       selectBranch,
       fetchAvailability,
       fieldErrors,
+      setProfileIncompleteState,
     ]
   );
 
@@ -3971,18 +4124,18 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         >
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Correo registrado: inicia sesión para agendar</DialogTitle>
+              <DialogTitle>Correo registrado: inicia sesiÃ³n para agendar</DialogTitle>
               <DialogDescription>
                 {authRequiredModal.email
                   ? `El correo ${authRequiredModal.email} ya pertenece a una cuenta activa en MasterFade.`
                   : 'Este correo ya pertenece a una cuenta activa en MasterFade.'}{' '}
-                Para proteger la identidad del titular y evitar suplantación, debes iniciar sesión antes de continuar.
+                Para proteger la identidad del titular y evitar suplantaciÃ³n, debes iniciar sesiÃ³n antes de continuar.
               </DialogDescription>
             </DialogHeader>
             <div className="citas-selected-date">
-              Qué hacer ahora:
+              QuÃ© hacer ahora:
               <br />
-              1. Inicia sesión con ese correo.
+              1. Inicia sesiÃ³n con ese correo.
               <br />
               2. Regresa al flujo de agendamiento.
             </div>
@@ -3991,7 +4144,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
                 Revisar datos
               </Button>
               <Button type="button" onClick={goToLoginForBooking}>
-                Ir a iniciar sesión
+                Ir a iniciar sesiÃ³n
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -4007,7 +4160,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
             <DialogHeader>
               <DialogTitle>Cancelar agendamiento</DialogTitle>
               <DialogDescription>
-                Se perderán los datos seleccionados y se liberará la reserva temporal si existe.
+                Se perderÃ¡n los datos seleccionados y se liberarÃ¡ la reserva temporal si existe.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -4041,11 +4194,11 @@ const invalidHoldSelectionFingerprintRef = useRef('');
         >
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>¿Deseas guardar estos datos en tu perfil?</DialogTitle>
+              <DialogTitle>Â¿Deseas guardar estos datos en tu perfil?</DialogTitle>
               <DialogDescription>
                 {profilePersistModal.kind === 'telefono'
-                  ? 'Para completar tu reserva necesitamos un número de contacto. Lo usaremos únicamente para comunicarnos contigo si ocurre algún imprevisto relacionado con tu cita. ¿Deseas guardarlo en tu perfil para futuras reservas?'
-                  : 'Para completar tu reserva necesitamos que tus datos estén correctos. Esto nos ayuda a identificar tu cita y comunicarnos contigo correctamente. ¿Deseas guardar estos datos en tu perfil?'}
+                  ? 'Para completar tu reserva necesitamos un nÃºmero de contacto. Lo usaremos Ãºnicamente para comunicarnos contigo si ocurre algÃºn imprevisto relacionado con tu cita. Â¿Deseas guardarlo en tu perfil para futuras reservas?'
+                  : 'Para completar tu reserva necesitamos que tus datos estÃ©n correctos. Esto nos ayuda a identificar tu cita y comunicarnos contigo correctamente. Â¿Deseas guardar estos datos en tu perfil?'}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -4057,7 +4210,7 @@ const invalidHoldSelectionFingerprintRef = useRef('');
                 Usar solo en esta reserva
               </Button>
               <Button type="button" onClick={() => resolveProfilePersistModal(true)}>
-                Sí, guardar en perfil
+                SÃ­, guardar en perfil
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -4065,3 +4218,4 @@ const invalidHoldSelectionFingerprintRef = useRef('');
     </BookingLayout>
   );
 }
+

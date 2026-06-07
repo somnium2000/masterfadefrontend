@@ -70,6 +70,7 @@ function shouldSkipCsrfPrefetch(path, baseUrl) {
     "/v1/auth/social/confirm",
     "/v1/auth/csrf",
     "/v1/public/citas/hold",
+    "/v1/public/citas/validar-contactos",
     "/v1/public/citas/validar-titular",
     "/v1/public/pagos/crear-intent",
     "/v1/public/pagos/mock-completar",

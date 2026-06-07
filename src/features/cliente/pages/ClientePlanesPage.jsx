@@ -46,14 +46,45 @@ const CATEGORY_ICONS = {
 
 const MEMBERSHIP_STATUS_LABELS = {
   activa: "Activa",
-  pendiente_renovacion: "Pendiente de renovacion",
+  pendiente_renovacion: "Pendiente de renovación",
   agotada: "Agotada",
   vencida: "Vencida",
   cancelada: "Cancelada",
   sin_plan_activo: "Sin plan activo",
 };
 
-const SAME_BRANCH_REPLACE_WARNING = "Al cambiar de plan perderas los servicios y cortesias restantes del plan actual en esta sucursal.";
+const SAME_BRANCH_REPLACE_WARNING = "Al cambiar de plan perderás los servicios y cortesías restantes del plan actual en esta sucursal.";
+const MEMBERSHIP_SIMULATION_SCENARIOS = [
+  { value: 1.00, label: "Aprobado (1.00)" },
+  { value: 1.05, label: "Rechazado (1.05)" },
+  { value: 1.23, label: "Tarjeta vencida (1.23)" },
+  { value: 1.56, label: "CVV incorrecto (1.56)" },
+  { value: 1.57, label: "Timeout (1.57)" },
+];
+
+function readEnvFlag(value, fallback = false) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+function shouldShowMembershipSimulator() {
+  if (import.meta.env.PROD) return false;
+  const provider = String(
+    import.meta.env.VITE_PAYMENT_PROVIDER
+    || import.meta.env.VITE_PAYMENT_PROVIDER_CODE
+    || ""
+  ).trim().toLowerCase();
+  if (provider !== "todopago" && provider !== "simulator") return false;
+  return readEnvFlag(import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR, false)
+    && readEnvFlag(import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION, false);
+}
+
+function isPlanOperationalForCoverage(planLike) {
+  return String(planLike?.estado_visible || "").trim().toLowerCase() === "activa";
+}
 
 function resolvePlanOfferId(plan) {
   if (!plan || typeof plan !== "object") return null;
@@ -87,6 +118,18 @@ function formatConsumptionDate(value) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+  });
+}
+
+function formatPlanAcquisitionDate(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleDateString("es-HN", {
+    timeZone: "America/Tegucigalpa",
+    year: "numeric",
+    month: "long",
+    day: "2-digit",
   });
 }
 
@@ -310,6 +353,10 @@ export default function ClientePlanesPage() {
   const [confirmDialogMode, setConfirmDialogMode] = useState("");
   const [pendingPlanSelection, setPendingPlanSelection] = useState(null);
   const [pendingCancelPlan, setPendingCancelPlan] = useState(null);
+  const [coverageInfoOpen, setCoverageInfoOpen] = useState(false);
+  const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(MEMBERSHIP_SIMULATION_SCENARIOS[0].value);
+  const plansSectionRef = useRef(null);
+  const showMembershipSimulator = shouldShowMembershipSimulator();
 
   const fetchPlans = useCallback(async (selectedBranchId) => {
     const safeBranchId = String(selectedBranchId || "").trim();
@@ -461,14 +508,16 @@ export default function ClientePlanesPage() {
     setPurchaseLoading(true);
     setPurchaseErrorMessage("");
     try {
-      await confirmMembershipPayment(paymentIntentId);
+      await confirmMembershipPayment(paymentIntentId, {
+        monto_prueba_hnl: showMembershipSimulator ? selectedSimulationAmount : undefined,
+      });
       setPurchaseCompleted(true);
       setPurchaseStep("success");
       await Promise.all([
         fetchMembershipState(),
         fetchPlans(branchId),
       ]);
-      notifySuccess("Pago confirmado. Tu suscripcion ya esta activa.");
+      notifySuccess("Pago confirmado. Tu suscripción ya está activa.");
     } catch (error) {
       setPurchaseErrorMessage(error?.data?.error?.message || "No se pudo confirmar el pago.");
     } finally {
@@ -482,6 +531,7 @@ export default function ClientePlanesPage() {
       id_suscripcion: String(plan.id_suscripcion),
       nombre_plan: plan?.nombre_plan || "Plan",
       sucursal_nombre: planBranchName || plan?.sucursal_nombre || "Sucursal",
+      inicio_at: plan?.inicio_at || null,
     });
     setConfirmDialogMode("cancel_plan");
     setConfirmDialogOpen(true);
@@ -538,6 +588,7 @@ export default function ClientePlanesPage() {
     [membershipState]
   );
   const activePlan = activePlans[0] || null;
+  const operationalCoverageActive = isPlanOperationalForCoverage(activePlan);
   const operationalHistory = useMemo(
     () => (Array.isArray(membershipState?.historial_consumos) ? membershipState.historial_consumos : []).filter(isOperationalMembershipConsumption),
     [membershipState?.historial_consumos]
@@ -555,13 +606,47 @@ export default function ClientePlanesPage() {
     branchId
     && activePlanByBranch.has(branchId)
   );
+  const membershipStateCode = String(membershipState?.estado_plan || "").trim().toLowerCase();
+  const isExpiredMembership = membershipStateCode === "vencida";
+  const lastPlan = membershipState?.ultimo_plan || null;
+  const expiredPlanBranchId = String(lastPlan?.id_sucursal_contratada || "").trim();
+  const expiredPlanId = String(lastPlan?.id_plan || "").trim();
+  const expiredBranchHasPlans = Boolean(branchId && plans.length > 0);
+  const expiredOriginalPlanStillAvailable = Boolean(
+    expiredPlanId
+    && plans.some((plan) => String(plan?.id_plan || "").trim() === expiredPlanId)
+  );
+
+  async function focusPlansForExpiredPlan() {
+    const targetBranchId = expiredPlanBranchId || branchId;
+    if (!targetBranchId) {
+      notifyWarning("Selecciona una sucursal para revisar planes disponibles.");
+      return;
+    }
+
+    if (targetBranchId !== branchId) {
+      setBranchId(targetBranchId);
+      setStoredClienteCatalogBranchId(targetBranchId);
+      setLoading(true);
+      try {
+        await fetchPlans(targetBranchId);
+      } catch (error) {
+        notifyError(error?.data?.error?.message || error?.message || "No se pudieron cargar los planes para la sucursal.");
+        return;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    plansSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <div className="space-y-5">
       <section className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Estado de membresia</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Estado de membresía</p>
             <h2 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)]">
               {membershipLoading
                 ? "Consultando plan..."
@@ -572,13 +657,22 @@ export default function ClientePlanesPage() {
                 ? "Estamos validando tu estado actual."
                 : activePlan
                   ? `Vigente hasta ${new Date(activePlan.fin_at).toLocaleDateString("es-HN", { timeZone: "America/Tegucigalpa" })}.`
-                  : "Adquiere un plan para desbloquear coberturas automaticas en tu agendamiento."}
+                  : "Adquiere un plan para desbloquear coberturas automáticas en tu agendamiento."}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <span className="inline-flex items-center gap-1 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs font-semibold text-[var(--mf-accent)]">
               <ShieldCheck size={13} />
-              {MEMBERSHIP_STATUS_LABELS[membershipState?.estado_plan] || "Sin plan"}
+              Suscripción: {MEMBERSHIP_STATUS_LABELS[membershipState?.estado_plan] || "Sin plan"}
+            </span>
+            <span className={[
+              "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold",
+              operationalCoverageActive
+                ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-200"
+                : "border-amber-300/30 bg-amber-500/10 text-amber-100",
+            ].join(" ")}>
+              <Shield size={13} />
+              Cobertura: {operationalCoverageActive ? "Operativo" : "No operativo para cobertura"}
             </span>
             <span className="inline-flex items-center gap-1 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs font-semibold text-[var(--mf-text-2)]">
               <WalletCards size={13} />
@@ -588,6 +682,9 @@ export default function ClientePlanesPage() {
               <Sparkles size={13} />
               Integrantes: {Number(membershipState?.masterpuntos?.integrante || 0)}
             </span>
+            <Button type="button" variant="outline" size="sm" className="min-h-[30px] px-3 text-xs" onClick={() => setCoverageInfoOpen(true)}>
+              Información
+            </Button>
           </div>
         </div>
 
@@ -607,13 +704,22 @@ export default function ClientePlanesPage() {
                   : (plan?.sucursal_nombre || "Sucursal");
                 const detailedServices = buildDetailedBenefits(plan, "servicio");
                 const detailedCourtesies = buildDetailedBenefits(plan, "cortesia");
+                const planOperational = isPlanOperationalForCoverage(plan);
                 return (
                   <article key={plan.id_suscripcion} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h3 className="text-base font-semibold text-[var(--mf-text)]">{plan?.nombre_plan || "Plan activo"}</h3>
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         <span className="inline-flex rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100">
-                          Estado: {MEMBERSHIP_STATUS_LABELS[plan?.estado_visible] || plan?.estado_visible || "Activa"}
+                          Suscripción: {MEMBERSHIP_STATUS_LABELS[plan?.estado_visible] || plan?.estado_visible || "Activa"}
+                        </span>
+                        <span className={[
+                          "inline-flex rounded-full border px-3 py-1 text-xs font-semibold",
+                          planOperational
+                            ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-200"
+                            : "border-amber-300/30 bg-amber-500/10 text-amber-100",
+                        ].join(" ")}>
+                          Cobertura: {planOperational ? "Operativo" : "No operativo para cobertura"}
                         </span>
                         <Button
                           type="button"
@@ -666,13 +772,13 @@ export default function ClientePlanesPage() {
                         </p>
                       </div>
                       <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesias restantes</p>
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesías restantes</p>
                         <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
                           {Number(plan?.remanentes?.totales?.cortesias_restantes || 0)}
                         </p>
                       </div>
                       <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesias incluidas</p>
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesías incluidas</p>
                         <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
                           {Number(plan?.remanentes?.totales?.cortesias_total || 0)}
                         </p>
@@ -697,7 +803,7 @@ export default function ClientePlanesPage() {
                       </div>
 
                       <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesias incluidas</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesías incluidas</p>
                         {detailedCourtesies.length ? (
                           <ul className="mt-2 space-y-2 text-sm">
                             {detailedCourtesies.map((item, idx) => (
@@ -709,7 +815,7 @@ export default function ClientePlanesPage() {
                               </li>
                             ))}
                           </ul>
-                        ) : <p className="mt-2 text-sm text-[var(--mf-text-2)]">Sin detalle por cortesia disponible.</p>}
+                        ) : <p className="mt-2 text-sm text-[var(--mf-text-2)]">Sin detalle por cortesía disponible.</p>}
                       </div>
                     </div>
                   </article>
@@ -728,7 +834,7 @@ export default function ClientePlanesPage() {
         {!membershipLoading && operationalHistory.length > 0 ? (
           <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
-              Ultimos consumos del plan
+              Últimos consumos del plan
             </p>
             <ul className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)]">
               {operationalHistory
@@ -736,7 +842,7 @@ export default function ClientePlanesPage() {
                 .map((entry) => (
                 <li key={entry.id_consumo} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
                   <span className="text-[var(--mf-text)]">
-                    {entry?.item_tipo === "cortesia" ? "Cortesia" : "Servicio"} - {entry.item_nombre}
+                    {entry?.item_tipo === "cortesia" ? "Cortesía" : "Servicio"} - {entry.item_nombre}
                   </span>
                   <div className="text-right text-xs text-[var(--mf-text-2)]">
                     <p>{formatConsumptionDate(entry.created_at)}</p>
@@ -748,14 +854,42 @@ export default function ClientePlanesPage() {
             </ul>
           </div>
         ) : null}
+
+        {!membershipLoading && isExpiredMembership ? (
+          <div className="mt-4 rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            <p className="font-semibold">Tu plan anterior ya venció y requiere renovación.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => void focusPlansForExpiredPlan()}>
+                Renovar este plan
+              </Button>
+              <Button type="button" size="sm" onClick={() => void focusPlansForExpiredPlan()}>
+                Ver otros planes
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </section>
 
-      <section className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-5">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Coleccion de membresias</p>
+      <section ref={plansSectionRef} className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-5">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Colección de membresías</p>
         <h1 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)] sm:text-3xl">Planes por sucursal</h1>
         <p className="mt-1 text-sm text-[var(--mf-text-2)]">
           Debes seleccionar una sucursal para ver y comprar planes disponibles.
         </p>
+        {showMembershipSimulator ? (
+          <div className="mt-4 w-full max-w-sm">
+            <label className="mf-label">Escenario simulator</label>
+            <select
+              className="mf-select"
+              value={String(selectedSimulationAmount)}
+              onChange={(event) => setSelectedSimulationAmount(Number(event.target.value || MEMBERSHIP_SIMULATION_SCENARIOS[0].value))}
+            >
+              {MEMBERSHIP_SIMULATION_SCENARIOS.map((scenario) => (
+                <option key={scenario.value} value={scenario.value}>{scenario.label}</option>
+              ))}
+            </select>
+          </div>
+        ) : null}
 
         <div className="mt-4 w-full max-w-sm">
           <label className="mf-label">Sucursal</label>
@@ -774,6 +908,13 @@ export default function ClientePlanesPage() {
           <div className="mt-4 rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
             <p className="inline-flex items-center gap-2 font-semibold"><AlertTriangle size={15} /> Advertencia de cambio de plan</p>
             <p className="mt-1">{SAME_BRANCH_REPLACE_WARNING}</p>
+          </div>
+        ) : null}
+
+        {!loading && isExpiredMembership && expiredBranchHasPlans && !expiredOriginalPlanStillAvailable ? (
+          <div className="mt-4 rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            <p className="font-semibold">El plan vencido ya no está disponible en esta sucursal.</p>
+            <p className="mt-1">Revisa otros planes disponibles para renovar tu cobertura.</p>
           </div>
         ) : null}
       </section>
@@ -855,10 +996,22 @@ export default function ClientePlanesPage() {
             <DialogTitle>{confirmDialogMode === "replace_plan" ? "Cambiar de plan" : "Cancelar plan"}</DialogTitle>
             <DialogDescription>
               {confirmDialogMode === "replace_plan"
-                ? "Al cambiar de plan perderas los servicios y cortesias restantes del plan actual en esta sucursal."
-                : `Cancelaras tu plan ${pendingCancelPlan?.nombre_plan || "seleccionado"} en ${pendingCancelPlan?.sucursal_nombre || "esta sucursal"}. Perderas los servicios y cortesias restantes de esta sucursal.`}
+                ? "Al cambiar de plan perderás los servicios y cortesías restantes del plan actual en esta sucursal."
+                : `Cancelarás tu plan ${pendingCancelPlan?.nombre_plan || "seleccionado"} en ${pendingCancelPlan?.sucursal_nombre || "esta sucursal"}.`}
             </DialogDescription>
           </DialogHeader>
+          {confirmDialogMode === "cancel_plan" ? (
+            <div className="space-y-2 rounded-xl border border-amber-300/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100">
+              <p>La cancelación es inmediata.</p>
+              <p>Perderás servicios, cortesías y remanentes disponibles.</p>
+              <p>Tu cita ya confirmada se conservará.</p>
+              <p>
+                {formatPlanAcquisitionDate(pendingCancelPlan?.inicio_at)
+                  ? `No podrás usar este plan adquirido en fecha ${formatPlanAcquisitionDate(pendingCancelPlan?.inicio_at)} para nuevas citas.`
+                  : "No podrás usar este plan para nuevas citas."}
+              </p>
+            </div>
+          ) : null}
           <DialogFooter>
             <Button
               type="button"
@@ -879,6 +1032,20 @@ export default function ClientePlanesPage() {
             >
               {confirmDialogMode === "cancel_plan" ? "Si, cancelar plan" : "Continuar"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={coverageInfoOpen} onOpenChange={setCoverageInfoOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Información de cobertura</DialogTitle>
+            <DialogDescription>
+              La membresía cubre solo al titular. Los acompañantes se cobran como cita normal. Los extras no incluidos se pagan aparte. Si agendas en otra sucursal, el pago se realiza como cita normal. Solo una membresía en estado activa aplica cobertura.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" onClick={() => setCoverageInfoOpen(false)}>Entendido</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

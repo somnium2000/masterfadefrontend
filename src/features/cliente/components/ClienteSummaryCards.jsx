@@ -3,6 +3,16 @@ import { useEffect } from 'react';
 import { CalendarDays, Coins, Gift, Sparkles, UserRound } from 'lucide-react';
 
 const MASTERPUNTOS_META = 10;
+function formatUpcomingDateTimeHn(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('es-HN', {
+    timeZone: 'America/Tegucigalpa',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
+}
 
 function KpiCard({ icon: Icon, label, value, helper, actionLabel, onAction, tone = 'default' }) {
   const toneClass = tone === 'success'
@@ -70,7 +80,7 @@ function MasterpuntoSlot({ index, progressSpring, reduceMotion }) {
 export default function ClienteSummaryCards({
   masterpuntos = 0,
   upcomingAppointments = 0,
-  totalAppointments = 0,
+  nextUpcomingAppointmentAt = null,
   completionPercent = 0,
   onNewAppointment,
   onOpenProfile,
@@ -83,6 +93,10 @@ export default function ClienteSummaryCards({
   const progressPercent = Math.max(0, Math.min(100, (progressPoints / MASTERPUNTOS_META) * 100));
   const safeCompletionPercent = Math.max(0, Number(completionPercent || 0));
   const profileCompleted = safeCompletionPercent >= 100;
+  const nextUpcomingLabel = formatUpcomingDateTimeHn(nextUpcomingAppointmentAt);
+  const upcomingHelperText = upcomingAppointments > 0
+    ? `Próxima cita: ${nextUpcomingLabel || 'por confirmar'}`
+    : 'No tienes citas próximas. Agenda tu próxima visita.';
   const progressValue = useMotionValue(progressPercent);
   const progressSpring = useSpring(progressValue, {
     stiffness: reduceMotion ? 1000 : 160,
@@ -102,7 +116,7 @@ export default function ClienteSummaryCards({
           icon={CalendarDays}
           label="Citas proximas"
           value={upcomingAppointments}
-          helper={`Total registradas: ${totalAppointments}`}
+          helper={upcomingHelperText}
           actionLabel="Agendar nueva"
           onAction={onNewAppointment}
           tone="accent"
@@ -204,7 +218,7 @@ export default function ClienteSummaryCards({
           icon={CalendarDays}
           label="Citas próximas"
           value={upcomingAppointments}
-          helper={`Total registradas: ${totalAppointments}`}
+          helper={upcomingHelperText}
           actionLabel="Agendar nueva"
           onAction={onNewAppointment}
           tone="accent"

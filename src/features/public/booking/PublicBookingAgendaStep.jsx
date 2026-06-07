@@ -279,7 +279,11 @@ export default function PublicBookingAgendaStep() {
     bookingBlocksSummary,
     blockedServiceIds,
     membershipLockedServiceIdsForTitular,
-    membershipBranchNotice,
+    membershipUxMessage,
+    membershipCompanionNotice,
+    profileIncompleteState,
+    profileFieldLabels,
+    goToClienteProfile,
     rewardModeActive,
     rewardServiceId,
     rewardServiceName,
@@ -418,7 +422,17 @@ export default function PublicBookingAgendaStep() {
   const isTitularBlock = activeBlockIndex === 0;
   const titularMissingFields = new Set(Array.isArray(titularState?.missingFields) ? titularState.missingFields : []);
   const isAuthenticatedTitular = Boolean(isTitularBlock && titularState?.isAuthenticated);
-  const showTitularIdentityOnly = Boolean(isAuthenticatedTitular && titularState?.hasFullProfile);
+  const showTitularIdentityOnly = Boolean(isAuthenticatedTitular);
+  const profileIncompleteMessage = String(profileIncompleteState?.message || '').trim();
+  const profileMissingLabels = useMemo(() => {
+    const source = Array.isArray(profileIncompleteState?.missingFields) ? profileIncompleteState.missingFields : [];
+    const labelsMap = profileFieldLabels && typeof profileFieldLabels === 'object'
+      ? profileFieldLabels
+      : {};
+    return source
+      .map((field) => String(labelsMap?.[field] || field || '').trim())
+      .filter(Boolean);
+  }, [profileFieldLabels, profileIncompleteState?.missingFields]);
 
   const showFirstNameInput = !isTitularBlock
     || !isAuthenticatedTitular
@@ -804,12 +818,15 @@ export default function PublicBookingAgendaStep() {
         </div>
       ) : null}
 
-      {membershipBranchNotice ? (
+      {membershipUxMessage ? (
         <div className="citas-surface p-4 border border-amber-400/35 bg-amber-500/10">
           <p className="inline-flex items-center gap-2 text-sm font-semibold text-amber-200">
             <AlertTriangle size={15} /> Aviso de cobertura de plan
           </p>
-          <p className="mt-2 text-sm text-amber-100">{membershipBranchNotice}</p>
+          <p className="mt-2 text-sm text-amber-100">{membershipUxMessage}</p>
+          {membershipCompanionNotice ? (
+            <p className="mt-2 text-sm text-amber-100">{membershipCompanionNotice}</p>
+          ) : null}
         </div>
       ) : null}
 
@@ -878,9 +895,33 @@ export default function PublicBookingAgendaStep() {
 
           <div className="public-booking-contact-card" ref={contactCardRef}>
             {showTitularIdentityOnly ? (
-              <p className="citas-selected-date">
-                Agendando como: <strong>{titularDisplayName || 'Titular autenticado'}</strong>
-              </p>
+              <div className="space-y-2">
+                <p className="citas-selected-date">
+                  Agendando como: <strong>{titularDisplayName || 'Titular autenticado'}</strong>
+                </p>
+                {titularState?.hasFullProfile ? (
+                  <p className="citas-selected-date">Agendarás esta cita con tu perfil de cliente.</p>
+                ) : (
+                  <>
+                    <p className="public-booking-field-error">
+                      {profileIncompleteMessage || 'Completa tu perfil antes de agendar una cita.'}
+                    </p>
+                    {profileMissingLabels.length > 0 ? (
+                      <p className="citas-selected-date">
+                        Campos faltantes: {profileMissingLabels.join(', ')}.
+                      </p>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={goToClienteProfile}
+                    >
+                      Completar perfil
+                    </Button>
+                  </>
+                )}
+              </div>
             ) : (
               <>
                 <div className="public-booking-form-grid">

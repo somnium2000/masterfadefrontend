@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Coins, Gift, Loader2, RefreshCw, Sparkles, Users, UserRound } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { Button } from '../../../components/ui/button.jsx';
-import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import {
   Dialog,
   DialogContent,
@@ -44,6 +43,10 @@ function normalizeSearchText(value) {
     .toLowerCase();
 }
 
+function isOperationalPlanState(value) {
+  return normalizeText(value).toLowerCase() === 'activa';
+}
+
 function formatCompactDate(value) {
   if (!value) return 'Sin fecha';
   const date = new Date(value);
@@ -63,15 +66,15 @@ function formatSignedPoints(value) {
 function resolveMovementOriginLabel(origin) {
   const normalized = normalizeText(origin).toLowerCase();
   if (normalized === 'titular') return 'Titular';
-  if (normalized === 'integrante') return 'Acompanante';
+  if (normalized === 'integrante') return 'Acompañante';
   return 'Sistema';
 }
 
 function resolveErrorMessage(error, fallbackMessage) {
   const status = Number(error?.status || 0);
-  if (status === 401) return 'Tu sesion expiro. Inicia sesion nuevamente.';
-  if (status === 403) return 'No tienes permisos para realizar esta accion.';
-  if (status === 409) return error?.data?.error?.message || error?.message || 'No fue posible completar la operacion por un conflicto de saldo.';
+  if (status === 401) return 'Tu sesión expiró. Inicia sesión nuevamente.';
+  if (status === 403) return 'No tienes permisos para realizar esta acción.';
+  if (status === 409) return error?.data?.error?.message || error?.message || 'No fue posible completar la operación por un conflicto de saldo.';
   return error?.data?.error?.message || error?.message || fallbackMessage;
 }
 
@@ -134,12 +137,15 @@ function dedupeRedeemServices(serviceOptions = [], hasActivePlan = false) {
 }
 
 function resolveHasActivePlanFromMembership(state) {
-  const status = normalizeText(state?.estado_plan).toLowerCase();
-  if (status && !['sin_plan_activo', 'vencida', 'cancelada', 'agotada'].includes(status)) {
-    return true;
+  if (isOperationalPlanState(state?.estado_plan)) return true;
+  if (isOperationalPlanState(state?.plan_activo?.estado_visible)) return true;
+  if (isOperationalPlanState(state?.plan_activo?.estado_suscripcion_codigo)) return true;
+  if (Array.isArray(state?.planes_activos)) {
+    return state.planes_activos.some((plan) => (
+      isOperationalPlanState(plan?.estado_visible) || isOperationalPlanState(plan?.estado_suscripcion_codigo)
+    ));
   }
-  if (Array.isArray(state?.planes_activos) && state.planes_activos.length > 0) return true;
-  return Boolean(state?.plan_activo);
+  return false;
 }
 
 function persistRewardBookingContext(payload) {
@@ -186,8 +192,8 @@ function normalizeSummary(payload) {
     : Math.max(0, toSafeInteger(explicitProgress, 0));
   const rewardsAvailable = Math.max(0, toSafeInteger(summarySource?.recompensas_disponibles ?? root?.recompensas_disponibles, 0));
   const canRedeem = Boolean(summarySource?.puede_canjear ?? root?.puede_canjear ?? totalBalance >= rewardTarget);
-  const hasActivePlanRaw = summarySource?.plan_activo ?? root?.plan_activo ?? summarySource?.tiene_plan_activo ?? root?.tiene_plan_activo;
-  const hasActivePlan = hasActivePlanRaw == null ? null : Boolean(hasActivePlanRaw);
+  const summaryPlanStatus = summarySource?.estado_plan ?? root?.estado_plan;
+  const hasActivePlan = summaryPlanStatus == null ? null : isOperationalPlanState(summaryPlanStatus);
 
   const remainingPoints = canRedeem ? 0 : Math.max(0, rewardTarget - progressCurrent);
   const movementSource = summarySource?.historial
@@ -252,9 +258,11 @@ function resolveContributionWidths(summary) {
 }
 
 export default function ClienteCourtesyRouteSection() {
+  const location = useLocation();
   const navigate = useNavigate();
   const notifications = useNotifications();
   const redeemNavigationLockRef = useRef(false);
+  const autoRedeemHandledRef = useRef(false);
   const rewardPreparedShownRef = useRef(false);
   const rewardDiscountInfoShownRef = useRef(false);
   const [summary, setSummary] = useState(null);
@@ -360,12 +368,33 @@ export default function ClienteCourtesyRouteSection() {
     }
   }, [resolveRedeemServices, summary]);
 
-  async function handleOpenRedeemModal() {
+  const handleOpenRedeemModal = useCallback(async () => {
     rewardPreparedShownRef.current = false;
     rewardDiscountInfoShownRef.current = false;
     setRedeemModalOpen(true);
     await loadRedeemContext();
-  }
+  }, [loadRedeemContext]);
+
+  useEffect(() => {
+    if (autoRedeemHandledRef.current) return;
+    const searchParams = new URLSearchParams(location.search || '');
+    const shouldAutoRedeem = normalizeText(searchParams.get('accion')).toLowerCase() === 'canjear';
+    if (!shouldAutoRedeem) return;
+    if (loadingSummary) return;
+    autoRedeemHandledRef.current = true;
+
+    if (summary?.canRedeem) {
+      // AM: Autoapertura segura solo cuando backend/summary confirma recompensa disponible.
+      void handleOpenRedeemModal();
+      notifications.info('Canjea tu recompensa para continuar con tu cita.', {
+        dedupeKey: 'cliente-auto-open-redeem',
+      });
+    }
+
+    searchParams.delete('accion');
+    const nextSearch = searchParams.toString();
+    navigate(`/home/cliente${nextSearch ? `?${nextSearch}` : ''}`, { replace: true });
+  }, [handleOpenRedeemModal, location.search, loadingSummary, navigate, notifications, summary?.canRedeem]);
 
   async function handleBranchChange(nextBranchId) {
     const safeBranchId = normalizeText(nextBranchId);
@@ -428,11 +457,14 @@ export default function ClienteCourtesyRouteSection() {
   }
 
   const canSubmitRedeem = Boolean(selectedServiceId && selectedBranchId && !redeemLoading && !redeemSubmitting);
-  const movementHistory = useMemo(
-    () => (Array.isArray(summary?.history) ? summary.history : []),
-    [summary?.history]
-  );
-  const shouldUseMovementCarousel = movementHistory.length > 4;
+  const movementHistory = useMemo(() => {
+    const source = Array.isArray(summary?.history) ? summary.history : [];
+    // AM: Inicio Cliente muestra solo trazabilidad reciente (últimos 5 movimientos).
+    return source
+      .slice()
+      .sort((left, right) => new Date(right?.created_at || 0).getTime() - new Date(left?.created_at || 0).getTime())
+      .slice(0, 5);
+  }, [summary?.history]);
 
   return (
     <section className="mf-glass-surface relative overflow-hidden rounded-[24px] border border-[var(--mf-nav-border)] p-4 sm:p-5">
@@ -445,7 +477,7 @@ export default function ClienteCourtesyRouteSection() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.17em] text-[var(--mf-accent)]">Superpuntos</p>
-            <h2 className="mf-font-display mt-1 text-2xl text-[var(--mf-text)] sm:text-[32px]">Ruta a tu Cortesia</h2>
+            <h2 className="mf-font-display mt-1 text-2xl text-[var(--mf-text)] sm:text-[32px]">Ruta a tu cortesía</h2>
           </div>
           <button
             type="button"
@@ -500,7 +532,7 @@ export default function ClienteCourtesyRouteSection() {
 
             <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_74%,transparent)] p-4">
               <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-text-2)]">
-                <span>Progreso hacia tu cortesia</span>
+                <span>Progreso hacia tu cortesía</span>
                 <span>{summary.progressCurrent}/{summary.rewardTarget}</span>
               </div>
 
@@ -524,14 +556,14 @@ export default function ClienteCourtesyRouteSection() {
                 </p>
                 <p className="inline-flex items-center gap-2 text-[var(--mf-text)]">
                   <Users size={14} className="text-[#4aa6ff]" />
-                  Puntos por acompanantes: <strong>{summary.companionPoints}</strong>
+                  Puntos por acompañantes: <strong>{summary.companionPoints}</strong>
                 </p>
               </div>
 
               <p className="mt-2 text-sm text-[var(--mf-text-2)]">
                 {summary.canRedeem
                   ? 'Ya puedes canjear tu recompensa.'
-                  : `Faltan ${summary.remainingPoints} puntos para tu cortesia.`}
+                  : `Faltan ${summary.remainingPoints} puntos para tu cortesía.`}
               </p>
 
               {summary.canRedeem ? (
@@ -547,63 +579,35 @@ export default function ClienteCourtesyRouteSection() {
               ) : null}
             </div>
 
-            <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">Ultimos movimientos</p>
+            <section className="mt-6 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">Últimos movimientos</p>
+              <p className="mt-1 text-xs text-[var(--mf-text-2)]">Revisa tus últimos 5 movimientos de puntos.</p>
               {movementHistory.length ? (
-                shouldUseMovementCarousel ? (
-                  <div className="mt-3">
-                    <CardsCarousel
-                      items={movementHistory}
-                      getItemKey={(movement) => movement.id}
-                      pageSizeByViewport={{ mobile: 4, tablet: 4, desktop: 4 }}
-                      gridClassName="grid grid-cols-1 gap-2"
-                      compactControls
-                      showHeaderTag={false}
-                      renderItem={(movement) => {
-                        const positive = movement.puntos >= 0;
-                        return (
-                          <article className="flex items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-[var(--mf-text)]">{movement.motivo}</p>
-                              <p className="truncate text-xs text-[var(--mf-text-2)]">
-                                {formatCompactDate(movement.created_at)} - {resolveMovementOriginLabel(movement.origen_punto_codigo)}
-                              </p>
-                            </div>
-                            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${positive ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>
-                              {formatSignedPoints(movement.puntos)}
-                            </span>
-                          </article>
-                        );
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="mt-3 space-y-2">
-                    {movementHistory.map((movement) => {
-                      const positive = movement.puntos >= 0;
-                      return (
-                        <article
-                          key={movement.id}
-                          className="flex items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2"
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-[var(--mf-text)]">{movement.motivo}</p>
-                            <p className="truncate text-xs text-[var(--mf-text-2)]">
-                              {formatCompactDate(movement.created_at)} - {resolveMovementOriginLabel(movement.origen_punto_codigo)}
-                            </p>
-                          </div>
-                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${positive ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>
-                            {formatSignedPoints(movement.puntos)}
-                          </span>
-                        </article>
-                      );
-                    })}
-                  </div>
-                )
+                <div className="mt-3 space-y-2">
+                  {movementHistory.map((movement) => {
+                    const positive = movement.puntos >= 0;
+                    return (
+                      <article
+                        key={movement.id}
+                        className="flex items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-[var(--mf-text)]">{movement.motivo}</p>
+                          <p className="truncate text-xs text-[var(--mf-text-2)]">
+                            {formatCompactDate(movement.created_at)} - {resolveMovementOriginLabel(movement.origen_punto_codigo)}
+                          </p>
+                        </div>
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${positive ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>
+                          {formatSignedPoints(movement.puntos)}
+                        </span>
+                      </article>
+                    );
+                  })}
+                </div>
               ) : (
-                <p className="mt-2 text-sm text-[var(--mf-text-2)]">Aun no hay movimientos de puntos.</p>
+                <p className="mt-2 text-sm text-[var(--mf-text-2)]">Aún no tienes movimientos. Tus puntos aparecerán aquí después de tus visitas.</p>
               )}
-            </div>
+            </section>
           </>
         ) : null}
       </div>
@@ -676,7 +680,7 @@ export default function ClienteCourtesyRouteSection() {
                 </div>
               ) : (
                 <p className="mt-2 text-sm text-[var(--mf-text-2)]">
-                  Aun no hay servicios disponibles para canje en esta fase.
+                  Aún no hay servicios disponibles para canje en esta fase.
                 </p>
               )}
             </div>

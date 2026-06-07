@@ -18,6 +18,25 @@ function normalizeResponsePayload(response) {
   return response?.data || response;
 }
 
+function readEnvFlag(value, fallback = false) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
+function shouldUseMembershipPaymentSimulator() {
+  const provider = String(
+    import.meta.env.VITE_PAYMENT_PROVIDER
+    || import.meta.env.VITE_PAYMENT_PROVIDER_CODE
+    || ''
+  ).trim().toLowerCase();
+  if (provider !== 'todopago' && provider !== 'simulator') return false;
+  return readEnvFlag(import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR, false)
+    && readEnvFlag(import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION, false);
+}
+
 function buildQuery(params = {}) {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -165,9 +184,23 @@ export async function createMembershipPaymentIntent(id_order) {
   return normalizeResponsePayload(response);
 }
 
-export async function confirmMembershipPayment(id_payment_intent) {
-  const response = await http.post(`${BASE}/planes/confirmar-pago`, { id_payment_intent });
-  return normalizeResponsePayload(response);
+export async function confirmMembershipPayment(id_payment_intent, options = {}) {
+  const endpoint = shouldUseMembershipPaymentSimulator()
+    ? `${BASE}/planes/simulator/event`
+    : `${BASE}/planes/confirmar-pago`;
+  const testAmount = Number(options?.monto_prueba_hnl);
+  const response = await http.post(endpoint, {
+    id_payment_intent,
+    ...(shouldUseMembershipPaymentSimulator() && Number.isFinite(testAmount) && testAmount > 0
+      ? { monto_prueba_hnl: testAmount }
+      : {}),
+  });
+  const payload = normalizeResponsePayload(response);
+  const normalizedStatus = String(payload?.normalized_status || '').trim().toUpperCase();
+  if (normalizedStatus && normalizedStatus !== 'PAID') {
+    throw new Error(String(payload?.message || 'El pago del plan no fue aprobado.'));
+  }
+  return payload;
 }
 
 export async function cancelClientePlan(payload = {}) {
@@ -191,6 +224,32 @@ export async function createClienteCitaHold(payload) {
 
 export async function getClienteCitaDetalle(idCita) {
   const response = await http.get(`${CITA_BASE}/${idCita}`);
+  return normalizeResponsePayload(response);
+}
+
+export async function getClienteCitaPendiente() {
+  const response = await http.get(`${CITA_BASE}/pendiente`);
+  const payload = normalizeResponsePayload(response);
+  return {
+    pendiente: payload?.pendiente ?? null,
+  };
+}
+
+export async function retomarClienteCitaPendiente(idGrupoCita) {
+  const safeGroupId = String(idGrupoCita || '').trim();
+  if (!safeGroupId) {
+    throw new Error('No se pudo identificar la reserva pendiente.');
+  }
+  const response = await http.post(`${CITA_BASE}/pendiente/${encodeURIComponent(safeGroupId)}/retomar`, {});
+  return normalizeResponsePayload(response);
+}
+
+export async function descartarClienteCitaPendiente(idGrupoCita) {
+  const safeGroupId = String(idGrupoCita || '').trim();
+  if (!safeGroupId) {
+    throw new Error('No se pudo identificar la reserva pendiente.');
+  }
+  const response = await http.post(`${CITA_BASE}/pendiente/${encodeURIComponent(safeGroupId)}/descartar`, {});
   return normalizeResponsePayload(response);
 }
 
