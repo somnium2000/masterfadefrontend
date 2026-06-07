@@ -6,6 +6,15 @@ import { formatCurrencyHnl, normalizeBookingPaymentUiState } from './bookingUtil
 import BookingActions from './components/BookingActions.jsx';
 import BookingStepHeader from './components/BookingStepHeader.jsx';
 
+const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
+const TODO_PAGO_SIMULATION_SCENARIOS = [
+  { value: '1.00', label: 'Aprobado (1.00)' },
+  { value: '1.05', label: 'Rechazado (1.05)' },
+  { value: '1.23', label: 'Tarjeta vencida (1.23)' },
+  { value: '1.56', label: 'CVV incorrecto (1.56)' },
+  { value: '1.57', label: 'Timeout (1.57)' },
+];
+
 function isLocalHostname(value) {
   const hostname = String(value || '').trim().toLowerCase();
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
@@ -47,8 +56,6 @@ function isProductionRuntime() {
     || runtime === 'prod';
 }
 
-let paymentSimulationDiagnosticLogged = false;
-
 function resolvePaymentSimulationAction() {
   const hostname = typeof window !== 'undefined' ? window.location?.hostname : '';
   const localHost = isLocalHostname(hostname);
@@ -67,28 +74,17 @@ function resolvePaymentSimulationAction() {
   } else if (isProductionHostname(hostname) || isProductionRuntime()) {
     action = { canShow: false, type: null, provider, reason: 'production_blocked' };
   } else if (localHost) {
-    action = provider === 'mock' && mockEnabled
-      ? { canShow: true, type: 'mock', provider, reason: 'local_mock_enabled' }
-      : { canShow: false, type: null, provider, reason: 'local_mock_not_configured' };
+    if (provider === 'mock' && mockEnabled) {
+      action = { canShow: true, type: 'mock', provider, reason: 'local_mock_enabled' };
+    } else if ((provider === 'todopago' || provider === 'simulator') && simulatorEnabled && qaSimulationEnabled) {
+      action = { canShow: true, type: 'simulator', provider, reason: 'local_todopago_simulator_enabled' };
+    } else {
+      action = { canShow: false, type: null, provider, reason: 'local_payment_simulation_not_configured' };
+    }
   } else if (isQaHostname(hostname)) {
-    action = provider === 'simulator' && simulatorEnabled && qaSimulationEnabled
+    action = (provider === 'simulator' || provider === 'todopago') && simulatorEnabled && qaSimulationEnabled
       ? { canShow: true, type: 'simulator', provider, reason: 'qa_simulator_enabled' }
       : { canShow: false, type: null, provider, reason: 'qa_simulator_not_configured' };
-  }
-
-  if (import.meta.env.DEV && localHost && !paymentSimulationDiagnosticLogged) {
-    paymentSimulationDiagnosticLogged = true;
-    console.info('[payment-simulation]', {
-      provider,
-      mockEnabled,
-      simulatorEnabled,
-      qaSimulationEnabled,
-      hostname,
-      canShow: action.canShow,
-      reason: action.reason,
-      type: action.type,
-      mode: import.meta.env.MODE,
-    });
   }
 
   return action;
@@ -109,9 +105,23 @@ export default function PublicBookingPaymentStep() {
     completePaymentSimulation,
     holdPricing,
     holdTotalToPay,
+    membershipHasContext,
+    membershipUxMessage,
+    membershipCompanionNotice,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(() => {
+    if (typeof window === 'undefined') return TODO_PAGO_SIMULATION_SCENARIOS[0].value;
+    try {
+      const stored = String(window.sessionStorage.getItem(TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY) || '').trim();
+      return TODO_PAGO_SIMULATION_SCENARIOS.some((scenario) => scenario.value === stored)
+        ? stored
+        : TODO_PAGO_SIMULATION_SCENARIOS[0].value;
+    } catch {
+      return TODO_PAGO_SIMULATION_SCENARIOS[0].value;
+    }
+  });
   const paymentSimulationAction = resolvePaymentSimulationAction();
   const paymentUiState = normalizeBookingPaymentUiState({
     paymentIntent,
@@ -180,6 +190,13 @@ export default function PublicBookingPaymentStep() {
     if (processingPayment) return;
     setProcessingPayment(true);
     try {
+      if (typeof window !== 'undefined') {
+        if (paymentSimulationAction.type === 'simulator') {
+          window.sessionStorage.setItem(TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY, selectedSimulationAmount);
+        } else {
+          window.sessionStorage.removeItem(TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY);
+        }
+      }
       await completePaymentSimulation({ provider: paymentSimulationAction.type });
     } finally {
       setProcessingPayment(false);
@@ -205,6 +222,18 @@ export default function PublicBookingPaymentStep() {
                 : `Reserva temporal activa: ${holdCountdownLabel} restantes`}
               {holdExpiresAtIso ? ' (contador real del hold en backend).' : ''}
             </span>
+          </div>
+        ) : null}
+        {membershipUxMessage ? (
+          <div className="public-booking-payment-note mt-3">
+            <ShieldCheck size={14} />
+            <span>{membershipUxMessage}</span>
+          </div>
+        ) : null}
+        {membershipCompanionNotice ? (
+          <div className="public-booking-payment-note mt-2">
+            <ShieldCheck size={14} />
+            <span>{membershipCompanionNotice}</span>
           </div>
         ) : null}
 
@@ -264,10 +293,28 @@ export default function PublicBookingPaymentStep() {
                 {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
                 Verificar estado del pago
               </Button>
+              {paymentSimulationAction.canShow && paymentSimulationAction.type === 'simulator' ? (
+                <div className="flex min-w-[220px] flex-col gap-1">
+                  <label className="mf-label text-left text-[11px]" htmlFor="booking-simulator-scenario">
+                    Escenario simulator
+                  </label>
+                  <select
+                    id="booking-simulator-scenario"
+                    className="mf-select"
+                    value={selectedSimulationAmount}
+                    onChange={(event) => setSelectedSimulationAmount(String(event.target.value || TODO_PAGO_SIMULATION_SCENARIOS[0].value))}
+                    disabled={processingPayment}
+                  >
+                    {TODO_PAGO_SIMULATION_SCENARIOS.map((scenario) => (
+                      <option key={scenario.value} value={scenario.value}>{scenario.label}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
               {paymentSimulationAction.canShow ? (
                 <Button onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
-                  Simular pago exitoso
+                  {paymentSimulationAction.type === 'simulator' ? 'Ejecutar simulator' : 'Simular pago exitoso'}
                 </Button>
               ) : null}
             </BookingActions>
@@ -283,18 +330,18 @@ export default function PublicBookingPaymentStep() {
             </div>
           ))}
           <div className="citas-confirm-row mt-3">
-            <span>Total servicios</span>
+            <span>{membershipHasContext ? 'Subtotal' : 'Total servicios'}</span>
             <span>{formatCurrencyHnl(effectiveSubtotal)}</span>
           </div>
           {hasPlanCoverage ? (
             <div className="citas-confirm-row">
-              <span>Cubierto por tu plan</span>
+              <span>{membershipHasContext ? 'Cubierto por tu membresía' : 'Cubierto por tu plan'}</span>
               <span>-{formatCurrencyHnl(safeCoveredByPlan)}</span>
             </div>
           ) : null}
           {hasSaldoToPay ? (
             <div className="citas-confirm-row">
-              <span>Saldo a pagar</span>
+              <span>{membershipHasContext ? 'Extras y acompañantes' : 'Saldo a pagar'}</span>
               <span>{formatCurrencyHnl(safeExtras)}</span>
             </div>
           ) : null}
@@ -304,7 +351,7 @@ export default function PublicBookingPaymentStep() {
             </div>
           ) : null}
           <div className="citas-confirm-row">
-            <span>Total a pagar</span>
+            <span>{membershipHasContext ? 'Total a pagar hoy' : 'Total a pagar'}</span>
             <span>{formatCurrencyHnl(effectiveTotalToPay)}</span>
           </div>
         </div>

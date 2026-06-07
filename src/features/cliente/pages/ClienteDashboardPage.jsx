@@ -8,31 +8,79 @@ import ClienteCourtesyRouteSection from '../components/ClienteCourtesyRouteSecti
 import ClienteSummaryCards from '../components/ClienteSummaryCards.jsx';
 import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import { getClienteCitaDetalle, getClienteMe, listClienteCitas } from '../lib/clienteApi.js';
+import { listPublicCatalogServices } from '../../public/lib/catalogApi.js';
 
-function isUpcomingAppointment(cita, nowMs) {
-  const date = new Date(cita?.inicio_at || 0);
-  return Number.isFinite(date.getTime()) && date.getTime() >= nowMs;
-}
+const UPCOMING_ALLOWED_STATUS = new Set(['confirmada']);
+const COMPLETED_APPOINTMENT_STATUS = new Set(['completada']);
 
-function getDateInHonduras(isoValue = null) {
+function getDateTimePartsInHonduras(isoValue = null) {
   const date = isoValue ? new Date(isoValue) : new Date();
-  if (Number.isNaN(date.getTime())) return '';
+  if (Number.isNaN(date.getTime())) return null;
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Tegucigalpa',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
   }).formatToParts(date);
-  const year = parts.find((part) => part.type === 'year')?.value;
-  const month = parts.find((part) => part.type === 'month')?.value;
-  const day = parts.find((part) => part.type === 'day')?.value;
-  return year && month && day ? `${year}-${month}-${day}` : '';
+  const year = Number(parts.find((part) => part.type === 'year')?.value || 0);
+  const month = Number(parts.find((part) => part.type === 'month')?.value || 0);
+  const day = Number(parts.find((part) => part.type === 'day')?.value || 0);
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value || 0);
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value || 0);
+  const second = Number(parts.find((part) => part.type === 'second')?.value || 0);
+  if (!year || !month || !day) return null;
+  return { year, month, day, hour, minute, second };
 }
 
-async function resolveFavoriteServices(citas = []) {
-  const source = Array.isArray(citas) ? citas.slice(0, 8) : [];
-  if (!source.length) return [];
+function compareDateTimeParts(left, right) {
+  if (!left || !right) return 0;
+  const leftKey = [left.year, left.month, left.day, left.hour, left.minute, left.second];
+  const rightKey = [right.year, right.month, right.day, right.hour, right.minute, right.second];
+  for (let index = 0; index < leftKey.length; index += 1) {
+    if (leftKey[index] > rightKey[index]) return 1;
+    if (leftKey[index] < rightKey[index]) return -1;
+  }
+  return 0;
+}
 
+function isUpcomingConfirmedAppointment(cita, nowMs) {
+  const status = String(cita?.estado_cita_codigo || '').trim().toLowerCase();
+  if (!UPCOMING_ALLOWED_STATUS.has(status)) return false;
+  const citaParts = getDateTimePartsInHonduras(cita?.inicio_at);
+  const nowParts = getDateTimePartsInHonduras(new Date(nowMs).toISOString());
+  if (!citaParts || !nowParts) return false;
+  return compareDateTimeParts(citaParts, nowParts) >= 0;
+}
+
+function normalizeRecommendedService(record = {}) {
+  const id = String(record?.id_servicio || '').trim();
+  const name = String(record?.nombre_servicio || '').trim();
+  if (!id || !name) return null;
+  return {
+    id_servicio: id,
+    nombre_servicio: name,
+    total: null,
+  };
+}
+
+async function resolveFavoriteServicesFromCompletedAppointments(citas = []) {
+  const completedAppointments = (Array.isArray(citas) ? citas : [])
+    .filter((cita) => COMPLETED_APPOINTMENT_STATUS.has(String(cita?.estado_cita_codigo || '').trim().toLowerCase()))
+    .sort((left, right) => new Date(right?.inicio_at || 0).getTime() - new Date(left?.inicio_at || 0).getTime());
+
+  if (completedAppointments.length < 2) {
+    return {
+      useRecommended: true,
+      favorites: [],
+    };
+  }
+
+  // AM: Top 3 se calcula sobre historial completado reciente para evitar llamadas excesivas.
+  const source = completedAppointments.slice(0, 20);
   const detailsResults = await Promise.allSettled(
     source
       .map((cita) => cita?.id_cita)
@@ -67,12 +115,34 @@ async function resolveFavoriteServices(citas = []) {
     });
   });
 
-  return [...frequencyMap.values()]
+  const favorites = [...frequencyMap.values()]
     .sort((a, b) => {
       if (b.total !== a.total) return b.total - a.total;
       return new Date(b.ultima_fecha || 0).getTime() - new Date(a.ultima_fecha || 0).getTime();
     })
-    .slice(0, 4);
+    .slice(0, 3);
+
+  if (!favorites.length) {
+    return {
+      useRecommended: true,
+      favorites: [],
+    };
+  }
+
+  return {
+    useRecommended: false,
+    favorites,
+  };
+}
+
+async function resolveRecommendedServices(idSucursal = '') {
+  const payload = await listPublicCatalogServices({ id_sucursal: idSucursal || undefined });
+  const services = Array.isArray(payload?.services) ? payload.services : [];
+  return services
+    .filter((service) => service?.activo !== false && service?.agendable !== false && service?.servicio_informativo !== true)
+    .map((service) => normalizeRecommendedService(service))
+    .filter(Boolean)
+    .slice(0, 3);
 }
 
 export default function ClienteDashboardPage() {
@@ -84,13 +154,13 @@ export default function ClienteDashboardPage() {
 
   const [loading, setLoading] = useState(true);
   const [profileData, setProfileData] = useState(null);
-  const [citas, setCitas] = useState([]);
+  const [allCitas, setAllCitas] = useState([]);
   const [favoriteServices, setFavoriteServices] = useState([]);
+  const [favoriteServicesMode, setFavoriteServicesMode] = useState('recommended');
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const canLoadDashboard = Boolean(isAuthenticated && isHydrated && !isHydrating  );
-  const todayHn = useMemo(() => getDateInHonduras(new Date(nowMs).toISOString()), [nowMs]);
+  const canLoadDashboard = Boolean(isAuthenticated && isHydrated && !isHydrating);
 
   const loadDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!canLoadDashboard) return;
@@ -103,15 +173,29 @@ export default function ClienteDashboardPage() {
       ]);
 
       const nextCitas = Array.isArray(citasPayload?.citas) ? citasPayload.citas : [];
-      const todayCitas = nextCitas.filter((cita) => getDateInHonduras(cita?.inicio_at) === todayHn);
       setProfileData(mePayload);
-      setCitas(todayCitas);
+      setAllCitas(nextCitas);
 
       try {
-        const favorites = await resolveFavoriteServices(todayCitas);
-        setFavoriteServices(favorites);
+        const favoritesResult = await resolveFavoriteServicesFromCompletedAppointments(nextCitas);
+        if (favoritesResult.useRecommended) {
+          const preferredBranchId = String(mePayload?.cliente?.id_sucursal_preferida || mePayload?.id_sucursal_preferida || '').trim();
+          const recommendedServices = await resolveRecommendedServices(preferredBranchId);
+          setFavoriteServices(recommendedServices);
+          setFavoriteServicesMode('recommended');
+        } else {
+          setFavoriteServices(favoritesResult.favorites);
+          setFavoriteServicesMode('favorites');
+        }
       } catch {
-        setFavoriteServices([]);
+        try {
+          const preferredBranchId = String(mePayload?.cliente?.id_sucursal_preferida || mePayload?.id_sucursal_preferida || '').trim();
+          const recommendedServices = await resolveRecommendedServices(preferredBranchId);
+          setFavoriteServices(recommendedServices);
+        } catch {
+          setFavoriteServices([]);
+        }
+        setFavoriteServicesMode('recommended');
       }
 
       if (refreshClienteProfile) {
@@ -127,7 +211,7 @@ export default function ClienteDashboardPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [canLoadDashboard, logout, navigate, notifyError, refreshClienteProfile, todayHn]);
+  }, [canLoadDashboard, logout, navigate, notifyError, refreshClienteProfile]);
 
   useEffect(() => {
     if (!canLoadDashboard) return;
@@ -149,23 +233,13 @@ export default function ClienteDashboardPage() {
   const completionPercent = Math.max(0, Number(completion?.completion_percent || 0));
   const isProfileComplete = Boolean(completion?.is_complete || completionPercent >= 100);
 
-  const upcomingAppointments = useMemo(
-    () => citas.filter((item) => isUpcomingAppointment(item, nowMs)),
-    [citas, nowMs]
-  );
+  const upcomingAppointments = useMemo(() => {
+    return allCitas
+      .filter((item) => isUpcomingConfirmedAppointment(item, nowMs))
+      .sort((left, right) => new Date(left?.inicio_at || 0).getTime() - new Date(right?.inicio_at || 0).getTime());
+  }, [allCitas, nowMs]);
+  const nextUpcomingAppointmentAt = upcomingAppointments[0]?.inicio_at || null;
 
-  const frequentBarbers = useMemo(() => {
-    const map = new Map();
-    citas.forEach((item) => {
-      const barberName = String(item?.nombre_barbero || '').trim();
-      if (!barberName) return;
-      map.set(barberName, Number(map.get(barberName) || 0) + 1);
-    });
-    return [...map.entries()]
-      .map(([nombre, total]) => ({ nombre, total }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 3);
-  }, [citas]);
   const shouldUseFavoriteServicesCarousel = favoriteServices.length > 2;
 
   function handleProfileSaved(payload) {
@@ -195,7 +269,8 @@ export default function ClienteDashboardPage() {
 
       <ClienteSummaryCards
         upcomingAppointments={upcomingAppointments.length}
-        totalAppointments={citas.length}
+        totalAppointments={allCitas.length}
+        nextUpcomingAppointmentAt={nextUpcomingAppointmentAt}
         completionPercent={completionPercent}
         hideProfileKpi={isProfileComplete}
         onNewAppointment={() => navigate('/agendar')}
@@ -212,7 +287,9 @@ export default function ClienteDashboardPage() {
       <section className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-4 sm:p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Servicios favoritos</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">
+              {favoriteServicesMode === 'favorites' ? 'Servicios favoritos' : 'Servicios recomendados'}
+            </p>
             <h2 className="mf-font-display mt-1 text-xl text-[var(--mf-text)]">Reserva más rápido</h2>
           </div>
           <button
@@ -237,7 +314,11 @@ export default function ClienteDashboardPage() {
                 renderItem={(item) => (
                   <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
                     <p className="text-sm font-semibold text-[var(--mf-text)]">{item.nombre_servicio}</p>
-                    <p className="mt-2 text-xs text-[var(--mf-text-2)]">{item.total} reserva(s) hist�rica(s)</p>
+                    <p className="mt-2 text-xs text-[var(--mf-text-2)]">
+                      {favoriteServicesMode === 'favorites'
+                        ? `${item.total} reserva(s) histórica(s)`
+                        : 'Servicio recomendado del catálogo.'}
+                    </p>
                     <button
                       type="button"
                       onClick={() => navigate('/agendar')}
@@ -257,7 +338,11 @@ export default function ClienteDashboardPage() {
                   className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4"
                 >
                   <p className="text-sm font-semibold text-[var(--mf-text)]">{item.nombre_servicio}</p>
-                  <p className="mt-2 text-xs text-[var(--mf-text-2)]">{item.total} reserva(s) hist�rica(s)</p>
+                  <p className="mt-2 text-xs text-[var(--mf-text-2)]">
+                    {favoriteServicesMode === 'favorites'
+                      ? `${item.total} reserva(s) histórica(s)`
+                      : 'Servicio recomendado del catálogo.'}
+                  </p>
                   <button
                     type="button"
                     onClick={() => navigate('/agendar')}
@@ -271,18 +356,14 @@ export default function ClienteDashboardPage() {
           )
         ) : (
           <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
-            {frequentBarbers.length ? (
-              <div>
-                <p className="font-semibold text-[var(--mf-text)]">Aún no hay suficiente detalle para favoritos por servicio.</p>
-                <p className="mt-1">
-                  Basado en actividad reciente, tus barberos más frecuentes son: {frequentBarbers.map((item) => `${item.nombre} (${item.total})`).join(', ')}.
-                </p>
-              </div>
-            ) : (
-              <p>Aún no hay historial suficiente para identificar favoritos. Cuando registres más citas, aparecerán aquí.</p>
-            )}
+            <p>Aún no hay historial suficiente. Te recomendamos estos servicios populares.</p>
           </div>
         )}
+        {favoriteServicesMode === 'recommended' && favoriteServices.length ? (
+          <p className="mt-3 text-sm text-[var(--mf-text-2)]">
+            Aún no hay historial suficiente. Te recomendamos estos servicios populares.
+          </p>
+        ) : null}
       </section>
 
       <ClienteProfileEditModal
@@ -294,5 +375,3 @@ export default function ClienteDashboardPage() {
     </div>
   );
 }
-
-

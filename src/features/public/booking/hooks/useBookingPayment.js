@@ -7,6 +7,7 @@ import {
 } from '../publicBookingApi.js';
 
 const PAYMENT_CONTEXT_STORAGE_KEY = 'masterfade.publicBookingPayment.v1';
+const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
 
 function safeText(value) {
   const normalized = String(value || '').trim();
@@ -66,6 +67,17 @@ function waitAbortable(ms, signal) {
       signal.addEventListener('abort', abort, { once: true });
     }
   });
+}
+
+function readTodoPagoSimulationAmount() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY);
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export default function useBookingPayment({ currentGroupId = '' } = {}) {
@@ -292,13 +304,20 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     const normalizedEmail = safeText(titularEmail).toLowerCase();
     if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return false;
     if (!isCurrentPaymentGroup(normalizedGroupId)) return false;
-    await completePublicSimulatorPayment({
+    const amountForSimulation = readTodoPagoSimulationAmount();
+    const response = await completePublicSimulatorPayment({
       id_grupo_cita: normalizedGroupId,
       id_intent: normalizedIntentId,
       titular_email: normalizedEmail,
       status,
+      ...(amountForSimulation ? { monto_prueba_hnl: amountForSimulation } : {}),
     });
-    return true;
+    const payload = response?.data ?? response;
+    const normalizedStatus = safeText(payload?.normalized_status).toUpperCase();
+    if (normalizedStatus && normalizedStatus !== 'PAID') {
+      throw new Error(safeText(payload?.message) || 'El pago no fue aprobado por el simulador.');
+    }
+    return payload || true;
   }, [isCurrentPaymentGroup]);
 
   return {

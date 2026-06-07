@@ -6,6 +6,8 @@ import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { http } from '../../../services/httpClient.js';
 
+const AUTH_SESSION_LIMIT_REACHED_CODE = 'AUTH_SESSION_LIMIT_REACHED';
+
 function isInvalidUserForAuth(errorLike) {
   const code = String(errorLike?.data?.error?.code || errorLike?.code || '').trim();
   const message = String(errorLike?.data?.error?.message || errorLike?.message || '').trim().toLowerCase();
@@ -82,12 +84,72 @@ export default function AuthCallbackPage() {
   const [error, setError] = useState('');
   const [showInvalidUserAuthBox, setShowInvalidUserAuthBox] = useState(false);
   const [pendingSocialConfirmation, setPendingSocialConfirmation] = useState(null);
+  const [sessionReplacementPrompt, setSessionReplacementPrompt] = useState(false);
   const [stepMessage, setStepMessage] = useState('Validando identidad con Google...');
   const exchangeStartedRef = useRef(false);
+  const supabaseTokenRef = useRef('');
   const callbackSignature = useMemo(
     () => `${window.location.pathname}|${window.location.search}|${window.location.hash}`,
     []
   );
+
+  const completeExchangeWithToken = async ({ token, replaceActiveSession = false }) => {
+    const exchangeResponse = await http.post('/v1/auth/exchange', {
+      supabase_token: token,
+      ...(replaceActiveSession ? { replace_active_session: true } : {}),
+    }, {
+      skipCsrf: true,
+    });
+
+    const payload = exchangeResponse?.data || exchangeResponse;
+    if (payload?.pending_social_confirmation) {
+      setPendingSocialConfirmation({
+        emailMasked: payload?.email_masked || null,
+        message:
+          payload?.message ||
+          'Revisa tu correo para confirmar la creacion de tu perfil en MasterFade.',
+      });
+      setShowInvalidUserAuthBox(false);
+      setError('');
+      setSessionReplacementPrompt(false);
+      setStepMessage('Confirmacion pendiente de correo...');
+      return { pendingSocialConfirmation: true };
+    }
+
+    if (!exchangeResponse?.ok || !payload?.session?.authenticated) {
+      throw new Error('Backend no pudo establecer sesion en auth exchange.');
+    }
+    return { ok: true };
+  };
+
+  const retryExchangeReplacingSession = async () => {
+    const token = String(supabaseTokenRef.current || '').trim();
+    if (!token) {
+      const msg = 'No se pudo recuperar la sesion social para reintentar. Inicia nuevamente con Google.';
+      setError(msg);
+      setSessionReplacementPrompt(false);
+      notifications.error(msg, { dedupeKey: 'auth-callback-replace-missing-token' });
+      return;
+    }
+
+    try {
+      setStepMessage('Cerrando sesion anterior y continuando...');
+      setError('');
+      setSessionReplacementPrompt(false);
+      const exchangeResult = await completeExchangeWithToken({ token, replaceActiveSession: true });
+      if (exchangeResult?.pendingSocialConfirmation) return;
+      const completed = await completeExchangeLogin();
+      if (!completed.ok) {
+        throw new Error(completed.message || 'No se pudo completar la sesion.');
+      }
+      notifications.success('Sesion iniciada con Google.', { dedupeKey: 'auth-callback-replace-success' });
+      navigate(safeNextPath || '/home', { replace: true });
+    } catch (exchangeError) {
+      const message = resolveCallbackErrorMessage(exchangeError);
+      setError(message);
+      notifications.error(message, { dedupeKey: 'auth-callback-replace-error' });
+    }
+  };
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -117,6 +179,7 @@ export default function AuthCallbackPage() {
         try {
           setPendingSocialConfirmation(null);
           setShowInvalidUserAuthBox(false);
+          setSessionReplacementPrompt(false);
           setError('');
           setStepMessage('Confirmando tu correo de seguridad...');
 
@@ -189,6 +252,7 @@ export default function AuthCallbackPage() {
           oauthHashErrorDescription ||
           'Google login no pudo completarse.';
         setShowInvalidUserAuthBox(false);
+        setSessionReplacementPrompt(false);
         setError(message);
         notifications.error(message, { dedupeKey: 'auth-callback-oauth-query-error' });
         if (supabase) {
@@ -227,34 +291,15 @@ export default function AuthCallbackPage() {
           hashAccessToken,
           hashRefreshToken,
         });
+        supabaseTokenRef.current = supabaseToken;
 
         setStepMessage('Verificando cuenta MasterFade...');
-        const exchangeResponse = await http.post('/v1/auth/exchange', {
-          supabase_token: supabaseToken,
-        }, {
-          skipCsrf: true,
-        });
-
-        const payload = exchangeResponse?.data || exchangeResponse;
-        if (payload?.pending_social_confirmation) {
-          setPendingSocialConfirmation({
-            emailMasked: payload?.email_masked || null,
-            message:
-              payload?.message ||
-              'Revisa tu correo para confirmar la creacion de tu perfil en MasterFade.',
-          });
-          setShowInvalidUserAuthBox(false);
-          setError('');
-          setStepMessage('Confirmacion pendiente de correo...');
-          notifications.info(payload?.message || 'Revisa tu correo para confirmar el acceso social.', {
+        const exchangeResult = await completeExchangeWithToken({ token: supabaseToken, replaceActiveSession: false });
+        if (exchangeResult?.pendingSocialConfirmation) {
+          notifications.info('Revisa tu correo para confirmar el acceso social.', {
             dedupeKey: 'auth-callback-social-confirm-pending',
           });
-          await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
           return;
-        }
-
-        if (!exchangeResponse?.ok || !payload?.session?.authenticated) {
-          throw new Error('Backend no pudo establecer sesion en auth exchange.');
         }
 
         setStepMessage('Preparando sesion segura...');
@@ -266,6 +311,15 @@ export default function AuthCallbackPage() {
         notifications.success('Sesion iniciada con Google.', { dedupeKey: 'auth-callback-success' });
         navigate(callbackNextPath || '/home', { replace: true });
       } catch (exchangeError) {
+        const conflictCode = String(exchangeError?.data?.error?.code || exchangeError?.code || '').trim().toUpperCase();
+        if (conflictCode === AUTH_SESSION_LIMIT_REACHED_CODE) {
+          setShowInvalidUserAuthBox(false);
+          setPendingSocialConfirmation(null);
+          setSessionReplacementPrompt(true);
+          setError('');
+          setStepMessage('Detectamos una sesion activa para esta cuenta.');
+          return;
+        }
 
         if (isInvalidUserForAuth(exchangeError)) {
           setShowInvalidUserAuthBox(true);
@@ -275,6 +329,7 @@ export default function AuthCallbackPage() {
         }
 
         setShowInvalidUserAuthBox(false);
+        setSessionReplacementPrompt(false);
           const message = resolveCallbackErrorMessage(exchangeError);
         setError(message);
         notifications.error(message, { dedupeKey: 'auth-callback-exchange-error' });
@@ -337,6 +392,19 @@ export default function AuthCallbackPage() {
             {pendingSocialConfirmation.emailMasked ? (
               <p className="mt-2 text-xs text-[var(--mf-text-2)]">Correo de seguridad enviado a: {pendingSocialConfirmation.emailMasked}</p>
             ) : null}
+          </div>
+        ) : null}
+        {!showInvalidUserAuthBox && !error && sessionReplacementPrompt ? (
+          <div className="mt-5 rounded-[14px] border border-[color:var(--mf-btn-border)] bg-[color:var(--mf-btn-bg)] px-4 py-3 text-left text-[13px] text-[var(--mf-text)]" role="alert" aria-live="assertive">
+            <p className="font-semibold uppercase tracking-[0.08em] text-[var(--mf-accent)]">SESION ACTIVA DETECTADA</p>
+            <p className="mt-1">Ya existe una sesion activa para esta cuenta.</p>
+            <button
+              type="button"
+              onClick={() => { void retryExchangeReplacingSession(); }}
+              className="mt-3 inline-flex w-full items-center justify-center rounded-[10px] border border-[var(--mf-accent)] px-3 py-2 text-xs font-semibold tracking-[0.08em] text-[var(--mf-text)] transition hover:bg-[rgba(212,176,104,0.12)]"
+            >
+              Cerrar sesión anterior y continuar
+            </button>
           </div>
         ) : null}
         {!showInvalidUserAuthBox && error ? (

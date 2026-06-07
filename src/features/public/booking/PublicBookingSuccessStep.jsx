@@ -71,6 +71,14 @@ export default function PublicBookingSuccessStep() {
     totalToPay,
   });
   const isConfirmedUi = paymentUiState.status === 'confirmed' || paymentUiState.status === 'paid';
+  const paymentLabelLower = String(paymentUiState.paymentLabel || '').trim().toLowerCase();
+  const coveredByPlanHnl = Number(
+    bookingSuccessResult?.cubierto_por_plan_hnl
+    ?? holdResult?.membresia?.cubierto_por_plan_hnl
+    ?? holdResult?.pricing?.cubierto_por_plan_hnl
+    ?? 0
+  );
+  const isCoveredByPlan = paymentLabelLower === 'cubierto_por_plan' || coveredByPlanHnl > 0;
   const fallbackShortCode = buildBookingShortCode(holdResult?.id_grupo_cita || null, 5);
   const hasRealCode = bookingCodes.length > 0;
   const displayCodes = hasRealCode
@@ -104,10 +112,23 @@ export default function PublicBookingSuccessStep() {
           <span>Estado de pago</span>
           <span>{paymentUiState.paymentLabel}</span>
         </div>
-        <div className="citas-confirm-row">
-          <span>Total pagado</span>
-          <span>{formatCurrencyHnl(paymentUiState.totalPagadoHnl)}</span>
-        </div>
+        {isCoveredByPlan ? (
+          <>
+            <div className="citas-confirm-row">
+              <span>Cubierto por tu plan</span>
+              <span>{formatCurrencyHnl(coveredByPlanHnl)}</span>
+            </div>
+            <div className="citas-confirm-row">
+              <span>Total pagado hoy</span>
+              <span>{formatCurrencyHnl(paymentUiState.totalPagadoHnl)}</span>
+            </div>
+          </>
+        ) : (
+          <div className="citas-confirm-row">
+            <span>Total pagado</span>
+            <span>{formatCurrencyHnl(paymentUiState.totalPagadoHnl)}</span>
+          </div>
+        )}
 
         <div className="citas-confirm-services mt-4">
           <h4 className="citas-confirm-subtitle">{isConfirmedUi ? 'Citas confirmadas' : 'Resumen de citas'}</h4>
