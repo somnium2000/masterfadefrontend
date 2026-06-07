@@ -1,4 +1,5 @@
 import { http } from '../../../services/httpClient.js';
+import { buildReleaseHoldPayload } from './bookingPayloadBuilders.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -91,7 +92,7 @@ export async function releasePublicCitaHold(idGrupoCita, releaseToken) {
     throw error;
   }
   return http.del(`/v1/public/citas/hold/${encodeURIComponent(groupId)}`, {
-    body: { release_token: token },
+    body: buildReleaseHoldPayload(token),
   });
 }
 
