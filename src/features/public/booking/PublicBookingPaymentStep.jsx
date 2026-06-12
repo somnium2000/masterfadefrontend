@@ -1,5 +1,5 @@
 import { ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/button.jsx';
 import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import { formatCurrencyHnl, normalizeBookingPaymentUiState } from './bookingUtils.js';
@@ -14,6 +14,70 @@ const TODO_PAGO_SIMULATION_SCENARIOS = [
   { value: '1.56', label: 'CVV incorrecto (1.56)' },
   { value: '1.57', label: 'Timeout (1.57)' },
 ];
+const INITIAL_PAYMENT_FORM = {
+  cardholderName: '',
+  receiptEmail: '',
+  phone: '',
+  cardNumber: '',
+  expiry: '',
+  cvv: '',
+};
+
+function normalizeDigits(value) {
+  return String(value || '').replace(/\D+/g, '');
+}
+
+function formatCardNumber(value) {
+  return normalizeDigits(value).slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
+}
+
+function maskCardNumber(value) {
+  const digits = normalizeDigits(value);
+  if (!digits) return '**** **** **** ****';
+  const visibleDigits = digits.slice(-4).padStart(4, '*');
+  return `**** **** **** ${visibleDigits}`;
+}
+
+function formatExpiry(value) {
+  const digits = normalizeDigits(value).slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+}
+
+function formatPhone(value) {
+  return normalizeDigits(value).slice(0, 15);
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
+function validatePaymentForm(form) {
+  const errors = {};
+  const expiryDigits = normalizeDigits(form.expiry);
+  const expiryMonth = Number(expiryDigits.slice(0, 2));
+
+  if (!String(form.cardholderName || '').trim()) {
+    errors.cardholderName = 'Ingresa el nombre del titular.';
+  }
+  if (!isValidEmail(form.receiptEmail)) {
+    errors.receiptEmail = 'Ingresa un correo valido para el comprobante.';
+  }
+  if (normalizeDigits(form.phone).length < 8) {
+    errors.phone = 'Ingresa un telefono valido.';
+  }
+  if (normalizeDigits(form.cardNumber).length < 13) {
+    errors.cardNumber = 'Ingresa un numero de tarjeta de prueba valido.';
+  }
+  if (expiryDigits.length !== 4 || Number.isNaN(expiryMonth) || expiryMonth < 1 || expiryMonth > 12) {
+    errors.expiry = 'Ingresa una fecha MM/AA valida.';
+  }
+  if (![3, 4].includes(normalizeDigits(form.cvv).length)) {
+    errors.cvv = 'Ingresa un CVV de 3 o 4 digitos.';
+  }
+
+  return errors;
+}
 
 function isLocalHostname(value) {
   const hostname = String(value || '').trim().toLowerCase();
@@ -93,8 +157,10 @@ function resolvePaymentSimulationAction() {
 export default function PublicBookingPaymentStep() {
   const {
     bookingBlocksSummary,
+    cancelBookingFlow,
     createPaymentIntentForHold,
     creatingPaymentIntent,
+    goToConfirm,
     holdExpired,
     holdExpiresAtIso,
     holdRemainingMs,
@@ -111,6 +177,8 @@ export default function PublicBookingPaymentStep() {
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [paymentForm, setPaymentForm] = useState(INITIAL_PAYMENT_FORM);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(() => {
     if (typeof window === 'undefined') return TODO_PAGO_SIMULATION_SCENARIOS[0].value;
     try {
@@ -128,6 +196,7 @@ export default function PublicBookingPaymentStep() {
     paymentResult,
     holdTotalToPay,
   });
+  const maskedCardLabel = useMemo(() => maskCardNumber(paymentForm.cardNumber), [paymentForm.cardNumber]);
 
   const fallbackSubtotal = useMemo(
     () => bookingBlocksSummary.reduce((total, block) => total + Number(block?.total_hnl || 0), 0),
@@ -171,6 +240,51 @@ export default function PublicBookingPaymentStep() {
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   })();
 
+  const resetSensitiveFields = () => {
+    setPaymentForm((current) => ({
+      ...current,
+      cardNumber: '',
+      expiry: '',
+      cvv: '',
+    }));
+    setFieldErrors((current) => {
+      if (!current.cardNumber && !current.expiry && !current.cvv) return current;
+      return {
+        ...current,
+        cardNumber: undefined,
+        expiry: undefined,
+        cvv: undefined,
+      };
+    });
+  };
+
+  const resetFormState = () => {
+    setPaymentForm(INITIAL_PAYMENT_FORM);
+    setFieldErrors({});
+  };
+
+  useEffect(() => {
+    if (paymentResult?.booking_confirmed) {
+      resetSensitiveFields();
+    }
+  }, [paymentResult?.booking_confirmed]);
+
+  const handleFieldChange = (field) => (event) => {
+    const rawValue = event.target.value;
+    let nextValue = rawValue;
+
+    if (field === 'cardNumber') nextValue = formatCardNumber(rawValue);
+    if (field === 'expiry') nextValue = formatExpiry(rawValue);
+    if (field === 'cvv') nextValue = normalizeDigits(rawValue).slice(0, 4);
+    if (field === 'phone') nextValue = formatPhone(rawValue);
+
+    setPaymentForm((current) => ({ ...current, [field]: nextValue }));
+    setFieldErrors((current) => {
+      if (!current[field]) return current;
+      return { ...current, [field]: undefined };
+    });
+  };
+
   const handleCreateIntent = async () => {
     if (loadingIntent || creatingPaymentIntent) return;
     setLoadingIntent(true);
@@ -188,6 +302,12 @@ export default function PublicBookingPaymentStep() {
 
   const handleMockPay = async () => {
     if (processingPayment) return;
+    const validationErrors = validatePaymentForm(paymentForm);
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
+      return;
+    }
+
     setProcessingPayment(true);
     try {
       if (typeof window !== 'undefined') {
@@ -198,27 +318,49 @@ export default function PublicBookingPaymentStep() {
         }
       }
       await completePaymentSimulation({ provider: paymentSimulationAction.type });
+      resetSensitiveFields();
     } finally {
       setProcessingPayment(false);
     }
   };
 
+  const handleReturnToConfirm = async () => {
+    resetSensitiveFields();
+    setFieldErrors({});
+    await goToConfirm();
+  };
+
+  const handleCancelFlow = async () => {
+    resetFormState();
+    await cancelBookingFlow('payment_step');
+  };
+
   return (
     <div className="citas-confirm-wrap public-booking-payment-wrap">
-      <div className="citas-surface p-5">
+      <div className="citas-surface p-3 sm:p-5">
         <BookingStepHeader
-          title="Pago seguro"
-          subtitle="Completa los datos y finaliza el pago para confirmar la reserva."
+          title="Pasarela de pago segura"
+          subtitle="Simula la experiencia MasterFade/TodoPago en entorno de prueba sin ejecutar un cobro real."
           headingLevel="h3"
           titleClassName="citas-confirm-title"
           subtitleClassName="citas-selected-date mt-2"
         />
+        <div className="mt-3 grid gap-2 sm:gap-3">
+          <div className="public-booking-payment-note">
+            <ShieldCheck size={14} />
+            <span>Entorno de prueba: esta pantalla solo simula la pasarela y no procesa cargos reales.</span>
+          </div>
+          <div className="public-booking-payment-note">
+            <ShieldCheck size={14} />
+            <span>MasterFade no guarda PAN ni CVV. Esos datos viven solo en este formulario local y se limpian al salir.</span>
+          </div>
+        </div>
         {holdCountdownLabel ? (
           <div className={`public-booking-payment-note mt-3 ${holdExpired ? 'is-expired' : ''}`.trim()}>
             <ShieldCheck size={14} />
             <span>
               {holdExpired
-                ? 'La reserva temporal expiró. Regresaremos a agenda para que elijas una nueva hora.'
+                ? 'La reserva temporal expiro. Regresaremos a agenda para que elijas una nueva hora.'
                 : `Reserva temporal activa: ${holdCountdownLabel} restantes`}
               {holdExpiresAtIso ? ' (contador real del hold en backend).' : ''}
             </span>
@@ -237,42 +379,132 @@ export default function PublicBookingPaymentStep() {
           </div>
         ) : null}
 
-        <div className="public-booking-form-grid public-booking-payment-grid mt-4">
+        <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
           <div className="public-booking-contact-card public-booking-payment-gateway-card">
-            <h4 className="citas-confirm-subtitle">Datos de facturación</h4>
+            <div className="w-full overflow-hidden rounded-2xl border border-[var(--mf-border)] bg-[linear-gradient(135deg,rgba(16,24,40,0.96),rgba(31,41,55,0.92))] p-3 text-white shadow-[0_14px_40px_rgba(15,23,42,0.28)] sm:p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] text-white/70 sm:text-[11px] sm:tracking-[0.28em]">
+                <span>MasterFade Pay</span>
+                <span>TodoPago test</span>
+              </div>
+              <div className="mt-6 break-words text-base font-semibold tracking-[0.16em] sm:mt-8 sm:text-xl sm:tracking-[0.28em]">
+                {maskedCardLabel}
+              </div>
+              <div className="mt-5 flex flex-col gap-3 sm:mt-6 sm:flex-row sm:items-end sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-white/60">Titular</p>
+                  <p className="mt-1 truncate text-sm font-medium text-white">
+                    {paymentForm.cardholderName.trim() || 'Nombre del titular'}
+                  </p>
+                </div>
+                <div className="text-left sm:text-right">
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-white/60">Expira</p>
+                  <p className="mt-1 text-sm font-medium text-white">{paymentForm.expiry || 'MM/AA'}</p>
+                </div>
+              </div>
+            </div>
+
+            <h4 className="citas-confirm-subtitle mt-4">Datos para la simulacion</h4>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-fullname">Nombre y apellido</label>
-              <input id="pay-fullname" className="mf-input" placeholder="Ej. Carlos Ramírez" autoComplete="name" />
+              <label className="mf-label" htmlFor="pay-cardholder-name">Nombre del titular</label>
+              <input
+                id="pay-cardholder-name"
+                className="mf-input"
+                placeholder="Ej. Carlos Ramirez"
+                autoComplete="cc-name"
+                value={paymentForm.cardholderName}
+                onChange={handleFieldChange('cardholderName')}
+              />
+              {fieldErrors.cardholderName ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.cardholderName}</p> : null}
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-dni">DNI</label>
-              <input id="pay-dni" className="mf-input" placeholder="Ej. 0801..." autoComplete="off" />
+              <label className="mf-label" htmlFor="pay-card-number">Numero de tarjeta</label>
+              <input
+                id="pay-card-number"
+                className="mf-input"
+                placeholder="4242 4242 4242 4242"
+                autoComplete="cc-number"
+                inputMode="numeric"
+                value={paymentForm.cardNumber}
+                onChange={handleFieldChange('cardNumber')}
+              />
+              {fieldErrors.cardNumber ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.cardNumber}</p> : null}
+            </div>
+            <div className="mt-2 grid gap-3 md:grid-cols-2">
+              <div className="public-booking-form-row">
+                <label className="mf-label" htmlFor="pay-expiry">Expiracion</label>
+                <input
+                  id="pay-expiry"
+                  className="mf-input"
+                  placeholder="MM/AA"
+                  autoComplete="cc-exp"
+                  inputMode="numeric"
+                  value={paymentForm.expiry}
+                  onChange={handleFieldChange('expiry')}
+                />
+                {fieldErrors.expiry ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.expiry}</p> : null}
+              </div>
+              <div className="public-booking-form-row">
+                <label className="mf-label" htmlFor="pay-cvv">CVV</label>
+                <input
+                  id="pay-cvv"
+                  className="mf-input"
+                  placeholder="123"
+                  autoComplete="cc-csc"
+                  inputMode="numeric"
+                  value={paymentForm.cvv}
+                  onChange={handleFieldChange('cvv')}
+                />
+                {fieldErrors.cvv ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.cvv}</p> : null}
+              </div>
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-phone">Teléfono</label>
-              <input id="pay-phone" className="mf-input" placeholder="Ej. +504 9999-9999" autoComplete="tel" />
+              <label className="mf-label" htmlFor="pay-receipt-email">Correo para comprobante</label>
+              <input
+                id="pay-receipt-email"
+                className="mf-input"
+                placeholder="cliente@correo.com"
+                autoComplete="email"
+                inputMode="email"
+                value={paymentForm.receiptEmail}
+                onChange={handleFieldChange('receiptEmail')}
+              />
+              {fieldErrors.receiptEmail ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.receiptEmail}</p> : null}
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-address">Dirección</label>
-              <input id="pay-address" className="mf-input" placeholder="Colonia, calle, referencia" autoComplete="street-address" />
+              <label className="mf-label" htmlFor="pay-phone">Telefono de contacto</label>
+              <input
+                id="pay-phone"
+                className="mf-input"
+                placeholder="99999999"
+                autoComplete="tel"
+                inputMode="tel"
+                value={paymentForm.phone}
+                onChange={handleFieldChange('phone')}
+              />
+              {fieldErrors.phone ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.phone}</p> : null}
+            </div>
+            <div className="mt-3 rounded-xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-3 text-xs leading-relaxed text-[var(--mf-text-2)]">
+              Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.
             </div>
           </div>
 
           <div className="public-booking-contact-card">
-            <h4 className="citas-confirm-subtitle">Pasarela de pago</h4>
+            <h4 className="citas-confirm-subtitle">Estado de la pasarela</h4>
             <div className="public-booking-payment-note mt-2">
               <ShieldCheck size={14} />
-              <span>{paymentIntent?.id_intent ? paymentUiState.text : 'El backend confirmará el pago cuando el proveedor notifique el webhook.'}</span>
+              <span>{paymentIntent?.id_intent ? paymentUiState.text : 'Primero crea el intento para habilitar la simulacion del checkout.'}</span>
             </div>
             {!paymentIntent?.id_intent ? (
-              <Button className="mt-3 gap-2" onClick={handleCreateIntent} disabled={loadingIntent || creatingPaymentIntent}>
+              <Button className="mt-3 w-full gap-2 sm:w-auto" onClick={handleCreateIntent} disabled={loadingIntent || creatingPaymentIntent}>
                 {loadingIntent || creatingPaymentIntent ? <Loader2 size={16} className="animate-spin" /> : null}
                 Crear intento de pago
               </Button>
             ) : (
-              <div className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)] public-booking-payment-meta">
+              <div className="mt-3 space-y-2 break-words text-sm leading-relaxed text-[var(--mf-text-2)] public-booking-payment-meta">
                 <p>Estado: {paymentUiState.text}</p>
                 <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || effectiveTotalToPay)}</p>
+                <p>Intent: {paymentIntent.id_intent}</p>
+                <p>Proveedor: {paymentSimulationAction.provider || 'no_configurado'}</p>
                 {paymentIntent.payment_url ? (
                   <a
                     href={paymentIntent.payment_url}
@@ -284,8 +516,9 @@ export default function PublicBookingPaymentStep() {
                 ) : null}
               </div>
             )}
-            <BookingActions inline className="public-booking-payment-actions mt-4">
+            <BookingActions inline className="public-booking-payment-actions mt-4 flex-col items-stretch gap-3 sm:flex-row sm:items-end">
               <Button
+                className="w-full sm:w-auto"
                 variant="outline"
                 onClick={handleVerifyPaymentStatus}
                 disabled={!paymentIntent?.id_intent || checkingPaymentStatus}
@@ -294,7 +527,7 @@ export default function PublicBookingPaymentStep() {
                 Verificar estado del pago
               </Button>
               {paymentSimulationAction.canShow && paymentSimulationAction.type === 'simulator' ? (
-                <div className="flex min-w-[220px] flex-col gap-1">
+                <div className="flex w-full min-w-0 flex-col gap-1 sm:min-w-[220px] sm:flex-1">
                   <label className="mf-label text-left text-[11px]" htmlFor="booking-simulator-scenario">
                     Escenario simulator
                   </label>
@@ -312,11 +545,19 @@ export default function PublicBookingPaymentStep() {
                 </div>
               ) : null}
               {paymentSimulationAction.canShow ? (
-                <Button onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
+                <Button className="w-full sm:w-auto" onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
                   {paymentSimulationAction.type === 'simulator' ? 'Ejecutar simulator' : 'Simular pago exitoso'}
                 </Button>
               ) : null}
+            </BookingActions>
+            <BookingActions inline className="public-booking-payment-actions mt-3 flex-col items-stretch gap-3 sm:flex-row">
+              <Button className="w-full sm:w-auto" variant="outline" onClick={handleReturnToConfirm} disabled={processingPayment || loadingIntent}>
+                Volver al resumen
+              </Button>
+              <Button className="w-full sm:w-auto" variant="ghost" onClick={handleCancelFlow} disabled={processingPayment || loadingIntent}>
+                Cancelar reserva
+              </Button>
             </BookingActions>
           </div>
         </div>
@@ -335,13 +576,13 @@ export default function PublicBookingPaymentStep() {
           </div>
           {hasPlanCoverage ? (
             <div className="citas-confirm-row">
-              <span>{membershipHasContext ? 'Cubierto por tu membresía' : 'Cubierto por tu plan'}</span>
+              <span>{membershipHasContext ? 'Cubierto por tu membresia' : 'Cubierto por tu plan'}</span>
               <span>-{formatCurrencyHnl(safeCoveredByPlan)}</span>
             </div>
           ) : null}
           {hasSaldoToPay ? (
             <div className="citas-confirm-row">
-              <span>{membershipHasContext ? 'Extras y acompañantes' : 'Saldo a pagar'}</span>
+              <span>{membershipHasContext ? 'Extras y acompanantes' : 'Saldo a pagar'}</span>
               <span>{formatCurrencyHnl(safeExtras)}</span>
             </div>
           ) : null}
