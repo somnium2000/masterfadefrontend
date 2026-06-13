@@ -40,22 +40,6 @@ function normalizePaymentProvider(value) {
   return provider === 'payment-simulator' ? 'simulator' : provider;
 }
 
-function isProductionRuntime() {
-  if (import.meta.env.PROD) return true;
-  const mode = String(import.meta.env.MODE || '').trim().toLowerCase();
-  const runtime = String(
-    import.meta.env.VITE_ENTORNO
-    || import.meta.env.VITE_APP_ENV
-    || import.meta.env.VITE_RUNTIME_ENV
-    || import.meta.env.VITE_NODE_ENV
-    || ''
-  ).trim().toLowerCase();
-  return mode === 'production'
-    || mode === 'prod'
-    || runtime === 'production'
-    || runtime === 'prod';
-}
-
 function resolvePaymentSimulationAction() {
   const hostname = typeof window !== 'undefined' ? window.location?.hostname : '';
   const localHost = isLocalHostname(hostname);
@@ -71,7 +55,7 @@ function resolvePaymentSimulationAction() {
   let action = { canShow: false, type: null, provider, reason: 'host_not_allowed' };
   if (!provider) {
     action = { canShow: false, type: null, provider, reason: 'provider_missing' };
-  } else if (isProductionHostname(hostname) || isProductionRuntime()) {
+  } else if (isProductionHostname(hostname)) {
     action = { canShow: false, type: null, provider, reason: 'production_blocked' };
   } else if (localHost) {
     if (provider === 'mock' && mockEnabled) {
