@@ -66,6 +66,14 @@ export async function putAdminCitasHorarios(idEmpleado, payload) {
   return http.put(`/v1/admin/citas/horarios/${encodeURIComponent(idEmpleado)}`, payload);
 }
 
+export async function getAdminCitasSucursalHorarios(idSucursal) {
+  return http.get(`/v1/admin/citas/sucursales/${encodeURIComponent(idSucursal)}/horarios`);
+}
+
+export async function putAdminCitasSucursalHorarios(idSucursal, payload) {
+  return http.put(`/v1/admin/citas/sucursales/${encodeURIComponent(idSucursal)}/horarios`, payload);
+}
+
 export async function listAdminCitasBloqueos(params = {}) {
   return http.get(`/v1/admin/citas/bloqueos${toQueryString(params)}`);
 }
