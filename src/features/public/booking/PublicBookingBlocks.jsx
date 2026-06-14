@@ -7,6 +7,7 @@ import {
   getServiceDurationLabel,
 } from './bookingUtils.js';
 import { withImageVersion } from '../../../lib/imageCache.js';
+import { hasRealDayAvailability } from './utils/bookingDates.js';
 
 export const BarberCard = memo(function BarberCard({
   barber,
@@ -108,7 +109,7 @@ export const DayButton = memo(function DayButton({
   dayInfo,
   onSelect,
 }) {
-  const isAvailable = Boolean(dayInfo?.disponible);
+  const isAvailable = hasRealDayAvailability(dayInfo);
   const isPastDate = Boolean(minDateKey && cell.key < minDateKey);
   const isEnabled = cell.inMonth && isAvailable && !isPastDate;
   const classes = [

@@ -7,6 +7,39 @@ export function buildDefaultSlots() {
   return [];
 }
 
+function getAvailabilityPeriodCount(value) {
+  if (Array.isArray(value)) return value.length;
+  if (value && typeof value === 'object') {
+    const total = Number(value.total ?? value.cantidad ?? value.count);
+    return Number.isFinite(total) ? Math.max(0, total) : null;
+  }
+  const total = Number(value);
+  return Number.isFinite(total) ? Math.max(0, total) : null;
+}
+
+export function hasRealDayAvailability(dayInfo) {
+  if (!dayInfo || dayInfo.disponible !== true) return false;
+
+  if (Array.isArray(dayInfo.slots) && !dayInfo.slots.some((slot) => slot?.disponible !== false)) {
+    return false;
+  }
+
+  const availableBarbers = Number(dayInfo.barberos_disponibles);
+  if (Number.isFinite(availableBarbers) && availableBarbers <= 0) return false;
+  if (!String(dayInfo.primer_horario_disponible || '').trim()) return false;
+
+  const periodSource = dayInfo.franjas && typeof dayInfo.franjas === 'object'
+    ? dayInfo.franjas
+    : dayInfo.resumen_franjas && typeof dayInfo.resumen_franjas === 'object'
+      ? dayInfo.resumen_franjas
+      : dayInfo;
+  const periodCounts = ['manana', 'mañana', 'tarde', 'noche']
+    .map((key) => getAvailabilityPeriodCount(periodSource?.[key]))
+    .filter((count) => count != null);
+
+  return periodCounts.length === 0 || periodCounts.reduce((total, count) => total + count, 0) > 0;
+}
+
 export function normalizeHourMinute(value) {
   const normalized = String(value || '').trim();
   const match = normalized.match(/^(\d{2}:\d{2})/);
