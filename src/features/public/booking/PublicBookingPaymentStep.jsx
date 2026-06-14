@@ -5,6 +5,7 @@ import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import { formatCurrencyHnl, normalizeBookingPaymentUiState } from './bookingUtils.js';
 import BookingActions from './components/BookingActions.jsx';
 import BookingStepHeader from './components/BookingStepHeader.jsx';
+import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
 const TODO_PAGO_SIMULATION_SCENARIOS = [
@@ -181,6 +182,8 @@ export default function PublicBookingPaymentStep() {
     holdTotalToPay,
   });
   const maskedCardLabel = useMemo(() => maskCardNumber(paymentForm.cardNumber), [paymentForm.cardNumber]);
+  const cardBrand = useMemo(() => detectCardBrand(paymentForm.cardNumber), [paymentForm.cardNumber]);
+  const cardBrandLabel = CARD_BRAND_LABELS[cardBrand];
 
   const fallbackSubtotal = useMemo(
     () => bookingBlocksSummary.reduce((total, block) => total + Number(block?.total_hnl || 0), 0),
@@ -368,7 +371,7 @@ export default function PublicBookingPaymentStep() {
             <div className="w-full overflow-hidden rounded-2xl border border-[var(--mf-border)] bg-[linear-gradient(135deg,rgba(16,24,40,0.96),rgba(31,41,55,0.92))] p-3 text-white shadow-[0_14px_40px_rgba(15,23,42,0.28)] sm:p-4">
               <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] text-white/70 sm:text-[11px] sm:tracking-[0.28em]">
                 <span>MasterFade Pay</span>
-                <span>TodoPago test</span>
+                <span>{cardBrand === 'unknown' ? 'TodoPago test' : `${cardBrandLabel} · TodoPago test`}</span>
               </div>
               <div className="mt-6 break-words text-base font-semibold tracking-[0.16em] sm:mt-8 sm:text-xl sm:tracking-[0.28em]">
                 {maskedCardLabel}
@@ -411,6 +414,11 @@ export default function PublicBookingPaymentStep() {
                 value={paymentForm.cardNumber}
                 onChange={handleFieldChange('cardNumber')}
               />
+              <div className="mt-2 flex">
+                <span className="inline-flex rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--mf-text-2)]">
+                  Tipo de tarjeta: <strong className="ml-1 font-semibold text-[var(--mf-accent)]">{cardBrandLabel}</strong>
+                </span>
+              </div>
               {fieldErrors.cardNumber ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.cardNumber}</p> : null}
             </div>
             <div className="mt-2 grid gap-3 md:grid-cols-2">
