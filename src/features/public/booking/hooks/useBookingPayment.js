@@ -171,19 +171,21 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     return stored;
   }, [isCurrentPaymentGroup]);
 
-  const createPaymentIntentOnce = useCallback(async ({ groupId, titularEmail, payload }) => {
+  const createPaymentIntentOnce = useCallback(async ({ groupId, titularEmail, payload, forceNew = false }) => {
     const normalizedGroupId = safeText(groupId);
     const normalizedEmail = safeText(titularEmail).toLowerCase();
     if (!normalizedGroupId) return null;
 
     const currentIntentGroupId = safeText(paymentIntentRef.current?.id_grupo_cita);
     const currentIntentId = safeText(paymentIntentRef.current?.id_intent);
-    if (currentIntentId && currentIntentGroupId === normalizedGroupId) {
+    if (!forceNew && currentIntentId && currentIntentGroupId === normalizedGroupId) {
       return paymentIntentRef.current;
     }
 
-    const restored = restorePaymentContext(normalizedGroupId);
-    if (restored?.id_intent) return restored.paymentIntent || paymentIntentRef.current;
+    if (!forceNew) {
+      const restored = restorePaymentContext(normalizedGroupId);
+      if (restored?.id_intent) return restored.paymentIntent || paymentIntentRef.current;
+    }
 
     if (createIntentRef.current?.groupId === normalizedGroupId) {
       return createIntentRef.current.promise;
@@ -207,6 +209,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
       };
       paymentIntentRef.current = intentWithGroup;
       setPaymentIntentState(intentWithGroup);
+      setPaymentResultState(null);
       writeStoredPaymentContext(buildPaymentContextPayload({
         groupId: normalizedGroupId,
         intentId: intentWithGroup.id_intent,

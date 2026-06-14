@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/button.jsx';
 import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import { formatCurrencyHnl, normalizeBookingPaymentUiState } from './bookingUtils.js';
-import BookingActions from './components/BookingActions.jsx';
 import BookingStepHeader from './components/BookingStepHeader.jsx';
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 
@@ -164,6 +163,7 @@ export default function PublicBookingPaymentStep() {
   const [processingPayment, setProcessingPayment] = useState(false);
   const [paymentForm, setPaymentForm] = useState(INITIAL_PAYMENT_FORM);
   const [fieldErrors, setFieldErrors] = useState({});
+  const [retryFeedback, setRetryFeedback] = useState('');
   const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(() => {
     if (typeof window === 'undefined') return TODO_PAGO_SIMULATION_SCENARIOS[0].value;
     try {
@@ -184,6 +184,7 @@ export default function PublicBookingPaymentStep() {
   const maskedCardLabel = useMemo(() => maskCardNumber(paymentForm.cardNumber), [paymentForm.cardNumber]);
   const cardBrand = useMemo(() => detectCardBrand(paymentForm.cardNumber), [paymentForm.cardNumber]);
   const cardBrandLabel = CARD_BRAND_LABELS[cardBrand];
+  const paymentFailed = paymentUiState.status === 'failed';
 
   const fallbackSubtotal = useMemo(
     () => bookingBlocksSummary.reduce((total, block) => total + Number(block?.total_hnl || 0), 0),
@@ -285,6 +286,24 @@ export default function PublicBookingPaymentStep() {
   const handleVerifyPaymentStatus = async () => {
     if (checkingPaymentStatus) return;
     await refreshPaymentStatus();
+  };
+
+  const handleRetryPayment = async () => {
+    if (loadingIntent || creatingPaymentIntent || holdExpired) return;
+    setLoadingIntent(true);
+    setRetryFeedback('');
+    try {
+      const result = await createPaymentIntentForHold({ forceNew: true });
+      if (result?.retry_error_code) {
+        setRetryFeedback(
+          result.retry_error_code === 'PAYMENT_RETRY_LIMIT_REACHED'
+            ? 'No pudimos procesar el pago despues de varios intentos. Puedes iniciar una nueva reserva o contactar a MasterFade.'
+            : (result.retry_error_message || 'No se pudo crear un nuevo intento de pago.')
+        );
+      }
+    } finally {
+      setLoadingIntent(false);
+    }
   };
 
   const handleMockPay = async () => {
@@ -508,49 +527,89 @@ export default function PublicBookingPaymentStep() {
                 ) : null}
               </div>
             )}
-            <BookingActions inline className="public-booking-payment-actions mt-4 flex-col items-stretch gap-3 sm:flex-row sm:items-end">
-              <Button
-                className="w-full sm:w-auto"
-                variant="outline"
-                onClick={handleVerifyPaymentStatus}
-                disabled={!paymentIntent?.id_intent || checkingPaymentStatus}
-              >
-                {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
-                Verificar estado del pago
-              </Button>
-              {paymentSimulationAction.canShow && paymentSimulationAction.type === 'simulator' ? (
-                <div className="flex w-full min-w-0 flex-col gap-1 sm:min-w-[220px] sm:flex-1">
-                  <label className="mf-label text-left text-[11px]" htmlFor="booking-simulator-scenario">
-                    Escenario simulator
-                  </label>
-                  <select
-                    id="booking-simulator-scenario"
-                    className="mf-select"
-                    value={selectedSimulationAmount}
-                    onChange={(event) => setSelectedSimulationAmount(String(event.target.value || TODO_PAGO_SIMULATION_SCENARIOS[0].value))}
-                    disabled={processingPayment}
+            <div className="public-booking-payment-action-stack mt-4">
+              {paymentFailed ? (
+                <div className="public-booking-payment-action-block public-booking-payment-retry-block">
+                  <p className="text-sm leading-relaxed text-[var(--mf-text-2)]">
+                    {paymentSimulationAction.canShow
+                      ? 'Este intento ya fue procesado. Crea un nuevo intento de prueba para probar otro escenario.'
+                      : 'No pudimos procesar tu pago. Puedes intentarlo nuevamente mientras tu reserva siga activa.'}
+                  </p>
+                  {retryFeedback ? <p className="text-sm text-[var(--mf-danger)]">{retryFeedback}</p> : null}
+                  <Button
+                    className="public-booking-payment-action-button"
+                    onClick={handleRetryPayment}
+                    disabled={holdExpired || loadingIntent || creatingPaymentIntent}
                   >
-                    {TODO_PAGO_SIMULATION_SCENARIOS.map((scenario) => (
-                      <option key={scenario.value} value={scenario.value}>{scenario.label}</option>
-                    ))}
-                  </select>
+                    {loadingIntent || creatingPaymentIntent ? <Loader2 size={16} className="animate-spin" /> : null}
+                    {paymentSimulationAction.canShow ? 'Nuevo intento de prueba' : 'Intentar nuevamente'}
+                  </Button>
                 </div>
               ) : null}
-              {paymentSimulationAction.canShow ? (
-                <Button className="w-full sm:w-auto" onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
-                  {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
-                  {paymentSimulationAction.type === 'simulator' ? 'Ejecutar simulator' : 'Simular pago exitoso'}
+
+              <div className="public-booking-payment-action-block">
+                <Button
+                  className="public-booking-payment-action-button"
+                  variant="outline"
+                  onClick={handleVerifyPaymentStatus}
+                  disabled={!paymentIntent?.id_intent || checkingPaymentStatus}
+                >
+                  {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
+                  Verificar estado
                 </Button>
+              </div>
+
+              {paymentSimulationAction.canShow && !paymentFailed ? (
+                <div className="public-booking-payment-action-block">
+                  {paymentSimulationAction.type === 'simulator' ? (
+                    <div className="public-booking-payment-simulator-field">
+                      <label className="mf-label text-left text-[11px]" htmlFor="booking-simulator-scenario">
+                        Escenario simulator
+                      </label>
+                      <select
+                        id="booking-simulator-scenario"
+                        className="mf-select public-booking-payment-simulator-select"
+                        value={selectedSimulationAmount}
+                        onChange={(event) => setSelectedSimulationAmount(String(event.target.value || TODO_PAGO_SIMULATION_SCENARIOS[0].value))}
+                        disabled={processingPayment}
+                      >
+                        {TODO_PAGO_SIMULATION_SCENARIOS.map((scenario) => (
+                          <option key={scenario.value} value={scenario.value}>{scenario.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+
+                  <Button
+                    className="public-booking-payment-action-button public-booking-payment-primary-action"
+                    onClick={handleMockPay}
+                    disabled={!paymentIntent?.id_intent || processingPayment}
+                  >
+                    {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
+                    {paymentSimulationAction.type === 'simulator' ? 'Ejecutar simulator' : 'Simular pago'}
+                  </Button>
+                </div>
               ) : null}
-            </BookingActions>
-            <BookingActions inline className="public-booking-payment-actions mt-3 flex-col items-stretch gap-3 sm:flex-row">
-              <Button className="w-full sm:w-auto" variant="outline" onClick={handleReturnToConfirm} disabled={processingPayment || loadingIntent}>
-                Volver al resumen
-              </Button>
-              <Button className="w-full sm:w-auto" variant="ghost" onClick={handleCancelFlow} disabled={processingPayment || loadingIntent}>
-                Cancelar reserva
-              </Button>
-            </BookingActions>
+
+              <div className="public-booking-payment-navigation-actions">
+                <Button
+                  className="public-booking-payment-action-button"
+                  variant="outline"
+                  onClick={handleReturnToConfirm}
+                  disabled={processingPayment || loadingIntent}
+                >
+                  Volver al resumen
+                </Button>
+                <Button
+                  className="public-booking-payment-action-button"
+                  variant="ghost"
+                  onClick={handleCancelFlow}
+                  disabled={processingPayment || loadingIntent}
+                >
+                  Cancelar reserva
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
 

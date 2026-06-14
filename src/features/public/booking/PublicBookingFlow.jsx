@@ -3175,7 +3175,7 @@ const agendaAutoLoadKeyRef = useRef('');
       || state === 'confirmando';
   }, []);
 
-  const createPaymentIntentForHold = useCallback(async () => {
+  const createPaymentIntentForHold = useCallback(async ({ forceNew = false } = {}) => {
     const groupId = String(holdResult?.id_grupo_cita || '').trim();
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
     const titularEmail = String(titularContact.email || '').trim().toLowerCase();
@@ -3202,6 +3202,7 @@ const agendaAutoLoadKeyRef = useRef('');
       const payload = await createPaymentIntentOnce({
         groupId,
         titularEmail,
+        forceNew,
         payload: buildCreatePaymentIntentPayload({
           groupId,
           titularEmail,
@@ -3221,6 +3222,12 @@ const agendaAutoLoadKeyRef = useRef('');
           { dedupeKey: 'public-booking-payment-recover-create-intent' }
         );
         return null;
+      }
+      if (forceNew) {
+        return {
+          retry_error_code: errorCode || 'PAYMENT_RETRY_ERROR',
+          retry_error_message: extractMessage(err),
+        };
       }
       notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-intent-error' });
       return null;
@@ -3496,7 +3503,7 @@ const agendaAutoLoadKeyRef = useRef('');
         });
       }
       const intentState = String(payload?.estado_intent_codigo || '').trim().toLowerCase();
-      if (!payload?.booking_confirmed && (intentState === 'expirado' || intentState === 'fallido')) {
+      if (!payload?.booking_confirmed && intentState === 'expirado') {
         recoverToAgendaForReselection(
           'No fue posible completar el pago con el horario reservado. Elige una nueva hora para continuar.',
           { dedupeKey: 'public-booking-payment-recover-status-terminal' }
