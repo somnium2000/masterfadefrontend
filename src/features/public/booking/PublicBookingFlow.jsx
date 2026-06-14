@@ -121,6 +121,15 @@ function getContactValidationFeedback(contactState, blockIndex) {
   };
 }
 
+function isPublicHoldRateLimitError(error, conflictCode = '') {
+  const normalizedCode = String(conflictCode || '').trim().toUpperCase();
+  if (error?.status === 429 || normalizedCode === 'TOO_MANY_REQUESTS') {
+    return true;
+  }
+  const message = extractMessage(error);
+  return /demasiadas solicitudes|too many requests|rate limit/i.test(String(message || '').trim());
+}
+
 function toSafeBlockIndex(value) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) return null;
@@ -2822,6 +2831,17 @@ const agendaAutoLoadKeyRef = useRef('');
         });
         // AM: SeÃ±al mÃ­nima para abrir canje obligatorio al volver al dashboard cliente.
         navigate('/home/cliente?accion=canjear');
+        return false;
+      }
+
+      if (isPublicHoldRateLimitError(err, conflictCode)) {
+        notifications.warning(
+          'Hemos recibido demasiados intentos de reserva en poco tiempo. Espera unos minutos y vuelve a intentar. Tu tarjeta no ha sido procesada.',
+          {
+            dedupeKey: 'public-booking-hold-rate-limit',
+          }
+        );
+        navigate(BOOKING_ROUTES.confirm);
         return false;
       }
 
