@@ -8,6 +8,7 @@ import {
   buildDefaultSlots,
   buildDynamicSlots,
   createEmptyCuratedSlots,
+  hasRealDayAvailability,
 } from '../utils/bookingDates.js';
 import { extractMessage } from '../bookingUtils.js';
 
@@ -221,7 +222,7 @@ export default function useBookingAvailability({
       if (
         !holdResult
         && selectedDate
-        && (selectedDate < minBookingDateKey || (shouldValidateSelectedDate && !cached[selectedDate]?.disponible))
+        && (selectedDate < minBookingDateKey || (shouldValidateSelectedDate && !hasRealDayAvailability(cached[selectedDate])))
         && typeof updateBlockAtIndex === 'function'
       ) {
         updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
@@ -283,7 +284,7 @@ export default function useBookingAvailability({
         if (
           !holdResult
           && selectedDate
-          && (selectedDate < minBookingDateKey || (shouldValidateSelectedDate && !nextMap[selectedDate]?.disponible))
+          && (selectedDate < minBookingDateKey || (shouldValidateSelectedDate && !hasRealDayAvailability(nextMap[selectedDate])))
           && typeof updateBlockAtIndex === 'function'
         ) {
           updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({

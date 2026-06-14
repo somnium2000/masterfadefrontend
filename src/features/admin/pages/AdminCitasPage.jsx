@@ -2235,8 +2235,8 @@ export default function AdminCitasPage() {
         </div>
 
         <div className="citas-config-rail" />
-        {['horario', 'restricciones'].includes(selectedConfigTab)
-          ? renderBarberChips({ firstNameOnly: selectedConfigTab === 'restricciones' })
+        {selectedConfigTab === 'restricciones'
+          ? renderBarberChips({ firstNameOnly: true })
           : null}
 
         {selectedConfigTab === 'horario' && renderHorarioTab()}
