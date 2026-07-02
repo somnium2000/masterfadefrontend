@@ -22,7 +22,18 @@ export const HONDURAS_UTC_OFFSET = '-06:00';
 
 export function extractMessage(err) {
   if (err?.expectedUnauthenticated) return '';
-  return err?.data?.error?.message || err?.message || 'Error desconocido.';
+  const code = err?.data?.error?.code || err?.code;
+  if (code) {
+    return mapPublicBookingErrorMessage(code, err?.data?.error?.message || err?.message || '');
+  }
+  const rawMessage = String(err?.message || '').trim();
+  if (err?.name === 'AbortError' || /timeout|aborted|abort/i.test(rawMessage)) {
+    return 'La solicitud tardo demasiado. Intenta nuevamente.';
+  }
+  if (/failed to fetch|network|load failed|fetch/i.test(rawMessage)) {
+    return 'No pudimos conectar con el servidor. Revisa tu conexion e intenta nuevamente.';
+  }
+  return rawMessage || 'Error desconocido.';
 }
 
 const PUBLIC_BOOKING_ERROR_MESSAGES = {
@@ -48,6 +59,7 @@ const PUBLIC_BOOKING_ERROR_MESSAGES = {
   PROMOTION_BARBER_NOT_ALLOWED: 'La promoción seleccionada no aplica para este barbero.',
   PROMOTION_SCHEDULE_NOT_ALLOWED: 'La promoción seleccionada no aplica en este horario.',
   BOOKING_PROMOTION_APPLICATION_FAILED: 'No fue posible aplicar una de las promociones seleccionadas.',
+  BOOKING_PROMOTION_ALLOCATION_MISMATCH: 'No fue posible aplicar una de las promociones seleccionadas.',
   REDEEM_NOT_APPLICABLE: 'El canje seleccionado no aplica a esta reserva.',
   REDEEM_CONTEXT_INVALID: 'No fue posible validar el canje seleccionado.',
   REDEEM_TRANSACTION_NOT_FOUND: 'No fue posible validar el canje seleccionado.',
@@ -58,6 +70,15 @@ const PUBLIC_BOOKING_ERROR_MESSAGES = {
   REDEEM_APPLICATION_FAILED: 'No fue posible aplicar el canje seleccionado.',
   BOOKING_REDEEM_CONSISTENCY_FAILED: 'No fue posible completar la reserva con el canje seleccionado.',
   SLOT_NOT_AVAILABLE: 'La hora seleccionada ya no está disponible. Elige otra hora.',
+  MF_SLOT_TAKEN: 'La hora seleccionada ya no está disponible. Elige otra hora.',
+  PUBLIC_CITAS_HOLD_CONFLICT: 'La hora seleccionada ya no está disponible. Elige otra hora.',
+  PAYMENT_HOLD_EXPIRED: 'La reserva temporal vencio. Vuelve a seleccionar horario.',
+  PAYMENT_SLOT_ALREADY_RELEASED: 'La reserva temporal ya no esta disponible. Vuelve a seleccionar horario.',
+  PAYMENT_AMOUNT_MISMATCH: 'El monto de pago ya no coincide con la reserva. Vuelve a revisar el resumen.',
+  BOOKING_IDEMPOTENCY_PAYLOAD_MISMATCH: 'Ya hay un intento de reserva en curso con datos diferentes. Revisa el resumen e intenta nuevamente.',
+  BOOKING_IDEMPOTENCY_INCOMPLETE: 'Estamos terminando de preparar tu reserva. Intenta nuevamente en unos segundos.',
+  DB_SCHEMA_OUTDATED: 'El servicio de reservas esta temporalmente en mantenimiento.',
+  PUBLIC_CITAS_HOLD_CREATE_ERROR: 'No fue posible preparar la reserva. Intenta nuevamente.',
   BOOKING_RECEIPT_CREATION_FAILED: 'No fue posible generar el comprobante de la reserva.',
   BOOKING_CREATION_FAILED: 'No fue posible completar la reserva. Intenta nuevamente.',
 };

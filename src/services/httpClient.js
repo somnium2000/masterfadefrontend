@@ -29,6 +29,25 @@ function isUnsafeMethod(method) {
   return ["POST", "PUT", "PATCH", "DELETE"].includes(normalized);
 }
 
+function isSafeMethod(method) {
+  return String(method || "GET").toUpperCase() === "GET";
+}
+
+function stableSerialize(value) {
+  if (value === undefined) return "undefined";
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((entry) => stableSerialize(entry)).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(value[key])}`).join(",")}}`;
+}
+
+function buildRequestKey(method, url, body) {
+  return [
+    String(method || "GET").toUpperCase(),
+    String(url || ""),
+    stableSerialize(body ?? null),
+  ].join(" ");
+}
+
 function toPathname(path, baseUrl) {
   const candidate = String(path || "").trim();
   if (!candidate) return "";
@@ -92,6 +111,9 @@ async function parseResponse(response) {
 }
 
 const inFlightControllers = new Set();
+const inFlightRequests = new Map();
+const safeResponseCache = new Map();
+const SAFE_RESPONSE_CACHE_TTL_MS = 10000;
 let sessionInvalidated = false;
 let sessionInvalidationHandler = null;
 const CSRF_SESSION_KEY = "mf_cached_csrf_token";
@@ -166,6 +188,7 @@ export function isAbortError(err) {
 export function abortInFlightRequests(reason = "request_aborted") {
   inFlightControllers.forEach((controller) => controller.abort(reason));
   inFlightControllers.clear();
+  inFlightRequests.clear();
 }
 
 function notifySessionInvalidation(reason) {
@@ -191,7 +214,7 @@ export function registerSessionInvalidationHandler(handler) {
   };
 }
 
-export async function request(path, options = {}) {
+export function request(path, options = {}) {
   const {
     method = "GET",
     body,
@@ -199,10 +222,24 @@ export async function request(path, options = {}) {
     signal,
     skipAuthInvalidation = false,
     skipCsrf = false,
+    dedupe = true,
+    cache = isSafeMethod(method),
+    cacheTtlMs = SAFE_RESPONSE_CACHE_TTL_MS,
   } = options;
 
   const baseUrl = import.meta.env.VITE_API_URL;
   const url = joinUrl(baseUrl, path);
+  const requestKey = buildRequestKey(method, url, body);
+  if (cache) {
+    const cached = safeResponseCache.get(requestKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.data;
+    if (cached) safeResponseCache.delete(requestKey);
+  }
+  if (dedupe && inFlightRequests.has(requestKey)) {
+    return inFlightRequests.get(requestKey);
+  }
+
+  const requestPromise = (async () => {
   const finalHeaders = { ...headers };
   const controller = new AbortController();
 
@@ -241,6 +278,17 @@ export async function request(path, options = {}) {
     });
 
     const data = await parseResponse(response);
+    if (data && typeof data === "object") {
+      Object.defineProperty(data, "__meta", {
+        value: {
+          status: response.status,
+          headers: response.headers,
+          url: response.url,
+        },
+        enumerable: false,
+        configurable: true,
+      });
+    }
 
     if (!response.ok) {
       const message =
@@ -251,6 +299,7 @@ export async function request(path, options = {}) {
       const err = new Error(message);
       err.status = response.status;
       err.data = data;
+      err.headers = response.headers;
       if (response.status === 401 && isExpectedPublicAuthMe401(path, baseUrl)) {
         err.expectedUnauthenticated = true;
       }
@@ -264,6 +313,12 @@ export async function request(path, options = {}) {
       throw err;
     }
 
+    if (cache) {
+      safeResponseCache.set(requestKey, {
+        data,
+        expiresAt: Date.now() + Math.max(0, Number(cacheTtlMs || 0)),
+      });
+    }
     return data;
   } finally {
     inFlightControllers.delete(controller);
@@ -271,6 +326,19 @@ export async function request(path, options = {}) {
       signal.removeEventListener("abort", forwardAbort);
     }
   }
+  })();
+
+  if (dedupe) {
+    inFlightRequests.set(requestKey, requestPromise);
+    const clearRequest = () => {
+      if (inFlightRequests.get(requestKey) === requestPromise) {
+        inFlightRequests.delete(requestKey);
+      }
+    };
+    requestPromise.then(clearRequest, clearRequest);
+  }
+
+  return requestPromise;
 }
 
 export const http = {

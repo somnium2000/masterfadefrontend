@@ -6,6 +6,11 @@ import {
   releaseClienteCitaHold,
   releasePublicCitaHold,
 } from '../publicBookingApi.js';
+import {
+  buildBookingHoldFingerprint,
+  resolveBookingHoldIdempotencyKey,
+  syncBookingHoldIdempotencyKey,
+} from '../bookingIdempotency.js';
 
 function isFinalHoldState(hold) {
   const finalStates = new Set([
@@ -111,11 +116,11 @@ export default function useBookingHold({
     }
   }, []);
 
-  const createHold = useCallback(async (payload) => {
+  const createHold = useCallback((payload) => {
     if (mode === 'loading') {
       const error = new Error('BOOKING_MODE_LOADING');
       if (mountedRef.current) setHoldError(error);
-      throw error;
+      return Promise.reject(error);
     }
 
     const currentFingerprint = latestSelectionFingerprintRef.current;
@@ -129,7 +134,7 @@ export default function useBookingHold({
       && !obsoleteRef.current
       && (!currentFingerprint || holdFingerprintRef.current === currentFingerprint);
     if (isSameSelection) {
-      return hold;
+      return Promise.resolve(hold);
     }
 
     if (existingGroupId) {
@@ -142,6 +147,18 @@ export default function useBookingHold({
     requestSeqRef.current = requestSeq;
     const requestFingerprint = currentFingerprint;
     const requestIsAuthenticated = Boolean(isAuthenticatedBooking);
+    const idempotencyFingerprint = buildBookingHoldFingerprint({
+      mode,
+      isAuthenticatedBooking: requestIsAuthenticated,
+      selectionFingerprint: requestFingerprint,
+      payload,
+    });
+    const idempotencyKey = resolveBookingHoldIdempotencyKey(idempotencyFingerprint);
+    const requestOptions = {
+      headers: {
+        'x-idempotency-key': idempotencyKey,
+      },
+    };
 
     if (mountedRef.current) {
       setCreatingHold(true);
@@ -150,17 +167,26 @@ export default function useBookingHold({
     const createPromise = (async () => {
       try {
         const response = requestIsAuthenticated
-          ? await createClienteCitaHold(payload)
-          : await createPublicCitaHold(payload);
+          ? await createClienteCitaHold(payload, requestOptions)
+          : await createPublicCitaHold(payload, requestOptions);
         const nextHold = response?.data ?? response;
+        const responseKey = String(
+          nextHold?.__meta?.headers?.get?.('x-idempotency-key')
+          || nextHold?.request_id
+          || idempotencyKey
+        ).trim();
+        const syncedKey = syncBookingHoldIdempotencyKey(idempotencyFingerprint, responseKey) || idempotencyKey;
+        const normalizedHold = nextHold && typeof nextHold === 'object'
+          ? { ...nextHold, request_id: nextHold.request_id || syncedKey }
+          : nextHold;
         if (!isCreateResponseCurrent(requestSeq, requestFingerprint)) {
-          await releaseStaleHoldBestEffort(nextHold, requestIsAuthenticated);
+          await releaseStaleHoldBestEffort(normalizedHold, requestIsAuthenticated);
           return null;
         }
-        setHold(nextHold);
+        setHold(normalizedHold);
         holdFingerprintRef.current = requestFingerprint;
         obsoleteRef.current = false;
-        return nextHold;
+        return normalizedHold;
       } catch (err) {
         if (!isCreateResponseCurrent(requestSeq, requestFingerprint)) {
           return null;

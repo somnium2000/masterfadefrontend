@@ -76,18 +76,18 @@ export default function CardsCarousel({
   const totalPages = pages.length;
 
   useEffect(() => {
-    if (!totalPages) {
-      if (pageIndex !== 0) setPageIndex(0);
-      return;
-    }
-    if (pageIndex > totalPages - 1) {
-      setPageIndex(totalPages - 1);
-    }
+    const nextPageIndex = totalPages ? Math.min(pageIndex, totalPages - 1) : 0;
+    if (nextPageIndex === pageIndex) return undefined;
+    const frameId = window.requestAnimationFrame(() => setPageIndex(nextPageIndex));
+    return () => window.cancelAnimationFrame(frameId);
   }, [pageIndex, totalPages]);
 
   useEffect(() => {
-    setPageIndex(0);
-    setDirection(0);
+    const frameId = window.requestAnimationFrame(() => {
+      setPageIndex(0);
+      setDirection(0);
+    });
+    return () => window.cancelAnimationFrame(frameId);
   }, [resetKey]);
 
   if (!Array.isArray(items) || items.length === 0) return null;

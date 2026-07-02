@@ -3,6 +3,18 @@ import { buildReleaseHoldPayload } from './bookingPayloadBuilders.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function unwrapResponseData(response) {
+  const data = response?.data ?? response;
+  if (data && typeof data === 'object' && response?.__meta) {
+    Object.defineProperty(data, '__meta', {
+      value: response.__meta,
+      enumerable: false,
+      configurable: true,
+    });
+  }
+  return data;
+}
+
 function toQueryString(params = {}) {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -54,8 +66,8 @@ export async function listPublicAgendaHorarios(params = {}, options = {}) {
   return http.get(`/v1/public/agenda/horarios${toQueryString(params)}`, options);
 }
 
-export async function createPublicCitaHold(payload) {
-  return http.post('/v1/public/citas/hold', payload);
+export async function createPublicCitaHold(payload, options = {}) {
+  return unwrapResponseData(await http.post('/v1/public/citas/hold', payload, options));
 }
 
 export async function validatePublicTitularForBooking(payload) {
@@ -96,8 +108,8 @@ export async function releasePublicCitaHold(idGrupoCita, releaseToken) {
   });
 }
 
-export async function createClienteCitaHold(payload) {
-  return http.post('/v1/citas/hold', payload);
+export async function createClienteCitaHold(payload, options = {}) {
+  return unwrapResponseData(await http.post('/v1/citas/hold', payload, options));
 }
 
 export async function releaseClienteCitaHold(idGrupoCita) {
