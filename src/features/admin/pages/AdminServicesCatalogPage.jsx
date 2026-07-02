@@ -12,6 +12,7 @@ import {
     updateAdminServicio,
     updateAdminServicioTarifa,
     createAdminServicioTarifa,
+    setAdminServicioEstado,
     deactivateAdminServicioTarifa,
     deactivateAdminServicioGlobal,
     getAdminServicioBarberos,
@@ -47,6 +48,9 @@ function extractMessage(err) {
     }
     if (err?.data?.error?.code === 'SERVICE_GLOBAL_DEACTIVATE_BLOCKED') {
         return 'No se puede desactivar globalmente este servicio porque tiene citas futuras activas asociadas.';
+    }
+    if (err?.data?.error?.code === 'CATALOG_SERVICE_PRICE_REQUIRED') {
+        return 'Configura una tarifa para una sucursal antes de reactivar este servicio.';
     }
     const apiMessage = err?.data?.error?.message;
     if (typeof apiMessage === 'string' && apiMessage.trim()) return apiMessage.trim();
@@ -415,6 +419,10 @@ function getBranchShortName(name) {
 
 function getSelectedBranchTariff(servicio, branchId) {
     return (Array.isArray(servicio?.tarifas) ? servicio.tarifas : []).find((tarifa) => tarifa?.id_sucursal === branchId) || null;
+}
+
+function getFirstServiceTariff(servicio) {
+    return (Array.isArray(servicio?.tarifas) ? servicio.tarifas : []).find((tarifa) => tarifa?.id_sucursal) || null;
 }
 
 function formatActiveBranchesCount(servicio) {
@@ -901,6 +909,38 @@ export default function AdminServicesCatalogPage() {
         setTariffDialogOpen(true);
     }
 
+    function openAgregarSucursal(servicio) {
+        if (!sucursal) {
+            notifications.error('Selecciona una sucursal para agregar este servicio.', {
+                dedupeKey: 'servicios-add-branch-no-scope',
+            });
+            return;
+        }
+
+        const fallbackTariff = getFirstServiceTariff(servicio);
+        const existingTariff = getSelectedBranchTariff(servicio, sucursal);
+        const targetTariff = existingTariff || {
+            id_sucursal: sucursal,
+            nombre_sucursal: branchNameById[sucursal] || 'Sucursal seleccionada',
+            precio_hnl: null,
+            duracion_min: fallbackTariff?.duracion_min ?? null,
+            buffer_min: fallbackTariff?.buffer_min ?? 5,
+            tarifa_activa: true,
+            servicio_informativo: fallbackTariff?.servicio_informativo ?? false,
+        };
+
+        setTariffTarget({ servicio, tarifa: targetTariff });
+        setTariffFormValues({
+            precio_hnl: targetTariff.precio_hnl == null ? '' : String(targetTariff.precio_hnl),
+            duracion_min: targetTariff.duracion_min == null ? '' : String(targetTariff.duracion_min),
+            buffer_min: targetTariff.buffer_min == null ? '5' : String(targetTariff.buffer_min),
+            activo: true,
+            servicio_informativo: Boolean(targetTariff.servicio_informativo),
+        });
+        setTariffFormError('');
+        setTariffDialogOpen(true);
+    }
+
     function handleTariffFormChange(field, value) {
         setTariffFormValues((prev) => ({ ...prev, [field]: value }));
     }
@@ -1002,6 +1042,33 @@ export default function AdminServicesCatalogPage() {
         }
     }
 
+    async function handleReactivateService(servicio) {
+        const serviceId = servicio?.id_servicio;
+        if (!serviceId) return;
+
+        const branchId = sucursal || getFirstServiceTariff(servicio)?.id_sucursal;
+        if (!branchId) {
+            notifications.error('Agrega o configura una sucursal antes de reactivar este servicio.', {
+                dedupeKey: 'servicios-reactivate-no-branch',
+            });
+            return;
+        }
+
+        try {
+            await setAdminServicioEstado(serviceId, {
+                activo: true,
+                id_sucursal: branchId,
+            });
+            notifications.success('Servicio reactivado.', { dedupeKey: 'servicios-reactivate-ok' });
+            emitCatalogSync('servicio-reactivated');
+            await fetchServicios();
+        } catch (err) {
+            if (err.status === 401) { navigate('/login'); return; }
+            if (err.status === 403) { navigate('/unauthorized'); return; }
+            notifications.error(extractMessage(err), { dedupeKey: 'servicios-reactivate-error' });
+        }
+    }
+
     // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const sinSucursal = !sucursal;
     // AM: El listado agrupado permite revisar/editar maestro en todas las sucursales; crear sigue requiriendo sucursal.
@@ -1038,6 +1105,10 @@ export default function AdminServicesCatalogPage() {
                                     <div className="min-w-0">
                                         <p className="text-sm font-semibold leading-tight text-[var(--mf-text)] break-words">{s.nombre_servicio}</p>
                                         {s.descripcion ? <p className="mt-0.5 text-xs leading-snug text-[var(--mf-text-2)] break-words">{s.descripcion}</p> : null}
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                            <ServiceStatusBadge activo={Boolean(s.activo)} />
+                                            {activeTariffs.length === 0 ? <span className="mf-badge mf-badge-muted">Sin sucursales activas</span> : null}
+                                        </div>
                                     </div>
                                 </div>
                                 {globalMode ? (
@@ -1082,15 +1153,27 @@ export default function AdminServicesCatalogPage() {
                                         <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" disabled={!resolveMutationBranchId(s)} onClick={() => openEditar(s)}>
                                             <Pencil size={15} /> Editar servicio global
                                         </Button>
-                                        <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" disabled={!s.activo} onClick={() => openGlobalDeactivate(s)}>
-                                            <ToggleLeft size={15} /> Desactivar globalmente
-                                        </Button>
+                                        {s.activo ? (
+                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openGlobalDeactivate(s)}>
+                                                <ToggleLeft size={15} /> Desactivar globalmente
+                                            </Button>
+                                        ) : (
+                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => handleReactivateService(s)}>
+                                                <ToggleRight size={15} /> Reactivar servicio
+                                            </Button>
+                                        )}
                                     </>
                                 ) : (
                                     <>
-                                        <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openTarifa(s, selectedTariff)}>
-                                            <Pencil size={15} /> Editar tarifa
-                                        </Button>
+                                        {selectedTariff?.tarifa_activa ? (
+                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openTarifa(s, selectedTariff)}>
+                                                <Pencil size={15} /> Editar tarifa
+                                            </Button>
+                                        ) : (
+                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openAgregarSucursal(s)}>
+                                                <Plus size={15} /> Agregar a esta sucursal
+                                            </Button>
+                                        )}
                                         {selectedTariff?.tarifa_activa ? (
                                             <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openRemoveBranch(s, selectedTariff)}>
                                                 <ToggleLeft size={15} /> Desactivar en esta sucursal
