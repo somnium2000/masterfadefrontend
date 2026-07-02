@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '../../../components/ui/button.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { usePublicBookingFlow } from './BookingFlowContext.jsx';
@@ -32,6 +32,7 @@ export default function PublicBookingConfirmStep() {
   } = usePublicBookingFlow();
   const notifications = useNotifications();
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const hasHoldReady = Boolean(holdResult && String(holdResult?.id_grupo_cita || '').trim());
 
   const subtotalFallback = bookingBlocksSummary.reduce(
@@ -82,7 +83,8 @@ export default function PublicBookingConfirmStep() {
   const mustLoginForNoPaymentConfirmation = Boolean(!requiresOnlinePayment && !canUseClienteHold);
 
   const handleContinueAction = async () => {
-    if (submitting) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       let currentHold = holdResult;
@@ -137,6 +139,7 @@ export default function PublicBookingConfirmStep() {
         });
       }
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
