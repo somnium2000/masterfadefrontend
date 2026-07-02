@@ -143,7 +143,6 @@ export default function RegisterPage() {
         confirmar_contrasena: passwordConfirm,
         acepta_terminos: true,
         consentimiento_marketing: consentimientoMarketing,
-        id_sucursal_origen: branchId || null,
       }, {
         skipCsrf: true,
       });
