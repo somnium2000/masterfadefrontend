@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  createClienteCitaHold,
-  confirmClienteCitaHoldWithoutPayment,
-  createPublicCitaHold,
-  releaseClienteCitaHold,
-  releasePublicCitaHold,
-} from '../publicBookingApi.js';
+import guestBookingAdapter from '../../../booking/adapters/guestBookingAdapter.js';
 import {
   buildBookingHoldFingerprint,
   resolveBookingHoldIdempotencyKey,
@@ -38,6 +32,7 @@ function isFinalHoldState(hold) {
 export default function useBookingHold({
   mode,
   isAuthenticatedBooking,
+  bookingAdapter,
   selectionFingerprint,
 } = {}) {
   const [hold, setHold] = useState(null);
@@ -49,12 +44,14 @@ export default function useBookingHold({
   const holdFingerprintRef = useRef('');
   const latestSelectionFingerprintRef = useRef('');
   const latestModeRef = useRef('');
+  const latestAdapterRef = useRef(bookingAdapter || guestBookingAdapter);
   const mountedRef = useRef(true);
   const obsoleteRef = useRef(false);
   const requestSeqRef = useRef(0);
 
   latestSelectionFingerprintRef.current = String(selectionFingerprint || '').trim();
   latestModeRef.current = String(mode || '').trim();
+  latestAdapterRef.current = bookingAdapter || guestBookingAdapter;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -73,21 +70,22 @@ export default function useBookingHold({
     && !obsoleteRef.current
   ), []);
 
-  const releaseRemoteHold = useCallback(async (targetHold, authenticatedForHold) => {
+  const releaseRemoteHold = useCallback(async (targetHold, authenticatedForHold, adapterOverride = null) => {
     const groupId = String(targetHold?.id_grupo_cita || '').trim();
     if (!groupId || isFinalHoldState(targetHold)) {
       return null;
     }
 
+    const adapter = adapterOverride || latestAdapterRef.current || guestBookingAdapter;
     const response = authenticatedForHold
-      ? await releaseClienteCitaHold(groupId)
-      : await releasePublicCitaHold(groupId, targetHold?.release_token);
+      ? await adapter.releaseHold(groupId)
+      : await adapter.releaseHold(groupId, targetHold?.release_token);
     return response?.data ?? response;
   }, []);
 
-  const releaseStaleHoldBestEffort = useCallback(async (targetHold, authenticatedForHold) => {
+  const releaseStaleHoldBestEffort = useCallback(async (targetHold, authenticatedForHold, adapterOverride = null) => {
     try {
-      await releaseRemoteHold(targetHold, authenticatedForHold);
+      await releaseRemoteHold(targetHold, authenticatedForHold, adapterOverride);
     } catch {
       // Best-effort cleanup: a stale response must not block the current flow.
     }
@@ -154,6 +152,7 @@ export default function useBookingHold({
       payload,
     });
     const idempotencyKey = resolveBookingHoldIdempotencyKey(idempotencyFingerprint);
+    const requestAdapter = latestAdapterRef.current || guestBookingAdapter;
     const requestOptions = {
       headers: {
         'x-idempotency-key': idempotencyKey,
@@ -166,9 +165,7 @@ export default function useBookingHold({
     }
     const createPromise = (async () => {
       try {
-        const response = requestIsAuthenticated
-          ? await createClienteCitaHold(payload, requestOptions)
-          : await createPublicCitaHold(payload, requestOptions);
+        const response = await requestAdapter.createHold(payload, requestOptions);
         const nextHold = response?.data ?? response;
         const responseKey = String(
           nextHold?.__meta?.headers?.get?.('x-idempotency-key')
@@ -180,7 +177,7 @@ export default function useBookingHold({
           ? { ...nextHold, request_id: nextHold.request_id || syncedKey }
           : nextHold;
         if (!isCreateResponseCurrent(requestSeq, requestFingerprint)) {
-          await releaseStaleHoldBestEffort(normalizedHold, requestIsAuthenticated);
+          await releaseStaleHoldBestEffort(normalizedHold, requestIsAuthenticated, requestAdapter);
           return null;
         }
         setHold(normalizedHold);
@@ -255,7 +252,11 @@ export default function useBookingHold({
   }, [clearHoldLocalState, hold, isAuthenticatedBooking, releaseRemoteHold]);
 
   const confirmHoldWithoutPayment = useCallback(async (groupId, payload = {}, options = {}) => {
-    const response = await confirmClienteCitaHoldWithoutPayment(groupId, payload, options);
+    const adapter = latestAdapterRef.current || guestBookingAdapter;
+    if (typeof adapter.confirmWithoutPayment !== 'function') {
+      throw new Error('BOOKING_CONFIRM_WITHOUT_PAYMENT_UNSUPPORTED');
+    }
+    const response = await adapter.confirmWithoutPayment(groupId, payload, options);
     return response;
   }, []);
 

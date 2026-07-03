@@ -20,10 +20,8 @@ import {
   validatePublicBookingContacts,
 } from './publicBookingApi.js';
 import {
-  buildAuthenticatedHoldPayload,
   buildConfirmWithoutPaymentPayload,
   buildCreatePaymentIntentPayload,
-  buildPublicHoldPayload,
 } from './bookingPayloadBuilders.js';
 import {
   resolveActiveBookingBlock,
@@ -87,6 +85,7 @@ import '../../admin/pages/AdminCitasPage.css';
 import './PublicBookingFlow.css';
 import usePublicAgendaPolling from './usePublicAgendaPolling.js';
 import useBookingMode from './hooks/useBookingMode.js';
+import resolveBookingAdapter from '../../booking/adapters/bookingAdapterResolver.js';
 import useBookingCatalogs from './hooks/useBookingCatalogs.js';
 import useBookingAvailability from './hooks/useBookingAvailability.js';
 import useBookingCompanions from './hooks/useBookingCompanions.js';
@@ -279,6 +278,22 @@ export default function PublicBookingFlow() {
     isAuthenticatedBooking: canUseClienteHold,
     titularFromSession: titularState,
   } = useBookingMode();
+  const bookingAdapter = useMemo(
+    () => resolveBookingAdapter({
+      mode: bookingMode,
+      actor: {
+        customerId: titularState?.profile?.id_cliente,
+        personId: titularState?.profile?.id_persona,
+        userId: titularState?.profile?.id_usuario,
+      },
+    }),
+    [
+      bookingMode,
+      titularState?.profile?.id_cliente,
+      titularState?.profile?.id_persona,
+      titularState?.profile?.id_usuario,
+    ]
+  );
 
   const [bookingBlocks, setBookingBlocks] = useState(() => [createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })]);
   const [activeBlockIndex, setActiveBlockIndex] = useState(0);
@@ -821,6 +836,7 @@ const agendaAutoLoadKeyRef = useRef('');
   } = useBookingHold({
     mode: bookingMode,
     isAuthenticatedBooking: canUseClienteHold,
+    bookingAdapter,
     selectionFingerprint: bookingHoldFingerprint,
   });
 
@@ -2814,8 +2830,7 @@ const agendaAutoLoadKeyRef = useRef('');
 
     try {
       const rewardContextToken = rewardModeActive ? rewardBookingContext?.canje_context_token : '';
-      const holdPayload = canUseClienteHold
-        ? buildAuthenticatedHoldPayload({
+      const holdPayload = bookingAdapter.buildHoldPayload({
           idSucursal: selectedBranchId,
           integrantes,
           titularState,
@@ -2823,14 +2838,9 @@ const agendaAutoLoadKeyRef = useRef('');
           guardarNombresApellidos,
           guardarTelefono,
           rewardContextToken,
-        })
-        : buildPublicHoldPayload({
-          idSucursal: selectedBranchId,
-          integrantes,
           titularNombre,
           titularEmail,
           titularTelefono,
-          rewardContextToken,
         });
       const createdHold = await createHold(holdPayload);
       if (createdHold) {
@@ -3035,6 +3045,7 @@ const agendaAutoLoadKeyRef = useRef('');
   }, [
     buildFieldErrorKey,
     buildIntegrantesPayload,
+    bookingAdapter,
     bookingMode,
     bookingBlocks,
     bookingBlocksSummary,

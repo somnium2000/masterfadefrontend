@@ -1,0 +1,97 @@
+// @vitest-environment jsdom
+
+import { renderHook, act } from '@testing-library/react';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import useBookingHold from '../../../public/booking/hooks/useBookingHold.js';
+import resolveBookingAdapter from '../../adapters/bookingAdapterResolver.js';
+import previewBookingAdapter from '../../adapters/previewBookingAdapter.js';
+
+const publicBookingApiMock = vi.hoisted(() => ({
+  createPublicCitaHold: vi.fn(),
+  createClienteCitaHold: vi.fn(),
+  releasePublicCitaHold: vi.fn(),
+  releaseClienteCitaHold: vi.fn(),
+  confirmClienteCitaHoldWithoutPayment: vi.fn(),
+}));
+
+vi.mock('../../../public/booking/publicBookingApi.js', () => publicBookingApiMock);
+
+beforeEach(() => {
+  window.sessionStorage.clear();
+  publicBookingApiMock.createPublicCitaHold.mockReset();
+  publicBookingApiMock.createClienteCitaHold.mockReset();
+  publicBookingApiMock.releasePublicCitaHold.mockReset();
+  publicBookingApiMock.releaseClienteCitaHold.mockReset();
+  publicBookingApiMock.confirmClienteCitaHoldWithoutPayment.mockReset();
+});
+
+describe('booking adapters integration', () => {
+  it('selects guest, customer and preview adapters by mode', () => {
+    expect(resolveBookingAdapter({ mode: 'public' }).actor.type).toBe('guest');
+    expect(resolveBookingAdapter({ mode: 'authenticated', actor: { customerId: 'c-1' } }).actor).toMatchObject({
+      type: 'customer',
+      customerId: 'c-1',
+    });
+    expect(resolveBookingAdapter({ mode: 'preview' })).toBe(previewBookingAdapter);
+  });
+
+  it('uses guestBookingAdapter for public hold creation', async () => {
+    publicBookingApiMock.createPublicCitaHold.mockResolvedValue({ data: { id_grupo_cita: 'public-group' } });
+    const adapter = resolveBookingAdapter({ mode: 'public' });
+    const { result } = renderHook(() => useBookingHold({
+      mode: 'public',
+      isAuthenticatedBooking: false,
+      bookingAdapter: adapter,
+      selectionFingerprint: 'public-selection',
+    }));
+
+    let hold;
+    await act(async () => {
+      hold = await result.current.createHold({ id_sucursal: 'branch-1' });
+    });
+
+    expect(hold.id_grupo_cita).toBe('public-group');
+    expect(publicBookingApiMock.createPublicCitaHold).toHaveBeenCalledTimes(1);
+    expect(publicBookingApiMock.createClienteCitaHold).not.toHaveBeenCalled();
+  });
+
+  it('uses customerBookingAdapter for authenticated hold creation', async () => {
+    publicBookingApiMock.createClienteCitaHold.mockResolvedValue({ data: { id_grupo_cita: 'customer-group' } });
+    const adapter = resolveBookingAdapter({ mode: 'authenticated', actor: { customerId: 'c-1' } });
+    const { result } = renderHook(() => useBookingHold({
+      mode: 'authenticated',
+      isAuthenticatedBooking: true,
+      bookingAdapter: adapter,
+      selectionFingerprint: 'customer-selection',
+    }));
+
+    let hold;
+    await act(async () => {
+      hold = await result.current.createHold({ id_sucursal: 'branch-1' });
+    });
+
+    expect(hold.id_grupo_cita).toBe('customer-group');
+    expect(publicBookingApiMock.createClienteCitaHold).toHaveBeenCalledTimes(1);
+    expect(publicBookingApiMock.createPublicCitaHold).not.toHaveBeenCalled();
+  });
+
+  it('uses previewBookingAdapter without backend write calls', async () => {
+    const adapter = resolveBookingAdapter({ mode: 'preview' });
+    const { result } = renderHook(() => useBookingHold({
+      mode: 'preview',
+      isAuthenticatedBooking: false,
+      bookingAdapter: adapter,
+      selectionFingerprint: 'preview-selection',
+    }));
+
+    let hold;
+    await act(async () => {
+      hold = await result.current.createHold({ totalHnl: 125, blocks: [{ orden_integrante: 1 }] });
+    });
+
+    expect(adapter.writesBackend).toBe(false);
+    expect(hold.groupStatus).toBe('simulado');
+    expect(publicBookingApiMock.createPublicCitaHold).not.toHaveBeenCalled();
+    expect(publicBookingApiMock.createClienteCitaHold).not.toHaveBeenCalled();
+  });
+});
