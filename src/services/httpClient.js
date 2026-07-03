@@ -230,12 +230,13 @@ export function request(path, options = {}) {
   const baseUrl = import.meta.env.VITE_API_URL;
   const url = joinUrl(baseUrl, path);
   const requestKey = buildRequestKey(method, url, body);
+  const canDedupe = Boolean(dedupe && !signal);
   if (cache) {
     const cached = safeResponseCache.get(requestKey);
     if (cached && cached.expiresAt > Date.now()) return cached.data;
     if (cached) safeResponseCache.delete(requestKey);
   }
-  if (dedupe && inFlightRequests.has(requestKey)) {
+  if (canDedupe && inFlightRequests.has(requestKey)) {
     return inFlightRequests.get(requestKey);
   }
 
@@ -328,7 +329,7 @@ export function request(path, options = {}) {
   }
   })();
 
-  if (dedupe) {
+  if (canDedupe) {
     inFlightRequests.set(requestKey, requestPromise);
     const clearRequest = () => {
       if (inFlightRequests.get(requestKey) === requestPromise) {

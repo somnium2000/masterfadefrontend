@@ -1,5 +1,6 @@
-import { Scissors } from 'lucide-react';
+import { AlertCircle, Building2, Scissors } from 'lucide-react';
 import EmptyState from '../../../components/data/EmptyState.jsx';
+import { Button } from '../../../components/ui/button.jsx';
 import { BarberCard } from './PublicBookingBlocks.jsx';
 import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import BookingStepHeader from './components/BookingStepHeader.jsx';
@@ -10,6 +11,9 @@ export default function PublicBookingBarberosStep() {
     barbersLoading,
     barbersRefreshing,
     branchList,
+    contextError,
+    contextLoading,
+    fetchContext,
     mode = 'public',
     selectedBranchId,
     selectBarber,
@@ -27,11 +31,28 @@ export default function PublicBookingBarberosStep() {
             : 'Este flujo esta disponible sin iniciar sesion y no comparte navbar o sidebar del panel interno.'}
         />
 
-        {barbersLoading && barbers.length === 0 ? (
+        {contextLoading ? (
           <div className="public-booking-form-row mt-4">
             <span className="mf-label">Sucursal</span>
             <div className="public-booking-skeleton public-booking-skeleton-select" aria-hidden="true" />
           </div>
+        ) : contextError ? (
+          <EmptyState
+            icon={AlertCircle}
+            title="No se pudo cargar el contexto"
+            description={contextError}
+            action={(
+              <Button type="button" variant="outline" onClick={fetchContext}>
+                Reintentar
+              </Button>
+            )}
+          />
+        ) : branchList.length === 0 ? (
+          <EmptyState
+            icon={Building2}
+            title="Sin sucursales activas"
+            description="No hay sucursales activas disponibles para agendar en este momento."
+          />
         ) : (
           <div className="public-booking-form-row mt-4">
             <label htmlFor="booking-branch" className="mf-label">
@@ -53,7 +74,7 @@ export default function PublicBookingBarberosStep() {
         )}
       </section>
 
-      {barbersLoading && barbers.length === 0 ? (
+      {selectedBranchId && barbersLoading && barbers.length === 0 ? (
         <div className="citas-surface p-5 public-booking-barberos-shell">
           <div className="public-booking-barber-grid" aria-hidden="true">
             {Array.from({ length: 6 }).map((_, index) => (
@@ -70,7 +91,7 @@ export default function PublicBookingBarberosStep() {
         </div>
       ) : null}
 
-      {!barbersLoading && barbers.length === 0 ? (
+      {!contextLoading && !contextError && selectedBranchId && !barbersLoading && barbers.length === 0 ? (
         <EmptyState
           icon={Scissors}
           title="Sin barberos disponibles"

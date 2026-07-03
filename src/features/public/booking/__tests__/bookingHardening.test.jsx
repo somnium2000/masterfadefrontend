@@ -8,18 +8,26 @@ import {
   resolveBookingHoldIdempotencyKey,
 } from '../bookingIdempotency.js';
 import { extractMessage, mapPublicBookingErrorMessage } from '../bookingUtils.js';
+import useBookingCatalogs from '../hooks/useBookingCatalogs.js';
 
 const HOLD_ID = '11111111-1111-4111-8111-111111111111';
 const REQUEST_ID = '22222222-2222-4222-8222-222222222222';
 const HEADER_REQUEST_ID = '33333333-3333-4333-8333-333333333333';
 
 const publicBookingApiMock = vi.hoisted(() => ({
+  getPublicBookingContext: vi.fn(),
+  listPublicAgendaBarberos: vi.fn(),
+  listPublicAgendaPromociones: vi.fn(),
+  listPublicCatalogPaquetes: vi.fn(),
+  listPublicCatalogServicios: vi.fn(),
   createPublicCitaHold: vi.fn(),
   createClienteCitaHold: vi.fn(),
   releaseClienteCitaHold: vi.fn(),
   releasePublicCitaHold: vi.fn(),
   confirmClienteCitaHoldWithoutPayment: vi.fn(),
 }));
+
+const SUYAPA_BRANCH_ID = '21355bf5-3ebc-4c7f-b16a-19e2ba2fe041';
 
 const bookingFlowMock = vi.hoisted(() => ({
   current: null,
@@ -49,6 +57,11 @@ beforeEach(() => {
   window.sessionStorage.clear();
   window.history.pushState({}, '', '/');
   publicBookingApiMock.createPublicCitaHold.mockReset();
+  publicBookingApiMock.getPublicBookingContext.mockReset();
+  publicBookingApiMock.listPublicAgendaBarberos.mockReset();
+  publicBookingApiMock.listPublicAgendaPromociones.mockReset();
+  publicBookingApiMock.listPublicCatalogPaquetes.mockReset();
+  publicBookingApiMock.listPublicCatalogServicios.mockReset();
   publicBookingApiMock.createClienteCitaHold.mockReset();
   publicBookingApiMock.releaseClienteCitaHold.mockReset();
   publicBookingApiMock.releasePublicCitaHold.mockReset();
@@ -96,6 +109,47 @@ describe('httpClient booking hardening', () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
+  test('AbortSignal independientes no comparten una promesa cancelada', async () => {
+    const pending = [];
+    globalThis.fetch = vi.fn((url, init = {}) => new Promise((resolve, reject) => {
+      const requestRecord = { url, init, resolve, reject };
+      const abort = () => {
+        const error = new DOMException('Aborted', 'AbortError');
+        reject(error);
+      };
+      init.signal?.addEventListener('abort', abort, { once: true });
+      pending.push(requestRecord);
+    }));
+    const { http } = await importHttpClientFresh();
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+
+    const first = http.get('/v1/public/citas/contexto', { signal: firstController.signal });
+    const second = http.get('/v1/public/citas/contexto', { signal: secondController.signal });
+
+    expect(first).not.toBe(second);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+
+    firstController.abort();
+    pending[1].resolve(jsonResponse({ ok: true, data: { sucursales: [{ id_sucursal: SUYAPA_BRANCH_ID }] } }));
+
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(second).resolves.toMatchObject({ ok: true });
+  });
+
+  test('limpia solicitudes in-flight despues de un aborto y permite un nuevo fetch', async () => {
+    const abortError = new DOMException('Aborted', 'AbortError');
+    globalThis.fetch = vi.fn()
+      .mockRejectedValueOnce(abortError)
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { retry: true } }));
+    const { http } = await importHttpClientFresh();
+
+    await expect(http.get('/v1/public/citas/contexto')).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(http.get('/v1/public/citas/contexto')).resolves.toMatchObject({ ok: true });
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
   test('cache corto se invalida por cambio de parametros', async () => {
     globalThis.fetch = vi.fn(async (url) => jsonResponse({
       ok: true,
@@ -108,6 +162,115 @@ describe('httpClient booking hardening', () => {
     await http.get('/v1/public/agenda/disponibilidad?fecha=2026-07-02');
 
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('booking catalogs StrictMode', () => {
+  const stableSetBookingBlocks = vi.fn();
+
+  function CatalogProbe() {
+    const catalogs = useBookingCatalogs({ setBookingBlocks: stableSetBookingBlocks });
+    return (
+      <div>
+        <div data-testid="selected-branch">{catalogs.selectedBranchId}</div>
+        <div data-testid="context-error">{catalogs.contextError}</div>
+        <ul>
+          {catalogs.branchList.map((branch) => (
+            <li key={branch.id_sucursal}>{branch.nombre_sucursal}</li>
+          ))}
+        </ul>
+        <ul>
+          {catalogs.barbers.map((barber) => (
+            <li key={barber.id_empleado}>{barber.nombre_completo}</li>
+          ))}
+        </ul>
+        {!catalogs.contextLoading && !catalogs.contextError && catalogs.selectedBranchId && !catalogs.barbersLoading && catalogs.barbers.length === 0 ? (
+          <span>Sin barberos disponibles</span>
+        ) : null}
+        {catalogs.contextError ? <button type="button" onClick={catalogs.fetchContext}>Reintentar</button> : null}
+      </div>
+    );
+  }
+
+  test('StrictMode recupera contexto y barberos despues de abortar el primer montaje', async () => {
+    let contextCall = 0;
+    publicBookingApiMock.getPublicBookingContext.mockImplementation(({ signal } = {}) => {
+      contextCall += 1;
+      if (contextCall === 1) {
+        return new Promise((resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        data: {
+          sucursales: [{ id_sucursal: SUYAPA_BRANCH_ID, nombre_sucursal: 'MasterFade Blvd. Suyapa' }],
+          parametros: {},
+        },
+      });
+    });
+    publicBookingApiMock.listPublicAgendaBarberos.mockResolvedValue({
+      ok: true,
+      data: {
+        barberos: [{
+          id_empleado: '33333333-3333-4333-8333-333333333333',
+          nombre_completo: 'Carlos Barber',
+        }],
+      },
+    });
+    publicBookingApiMock.listPublicCatalogServicios.mockResolvedValue({ ok: true, data: { servicios: [] } });
+    publicBookingApiMock.listPublicCatalogPaquetes.mockResolvedValue({ ok: true, data: { paquetes: [] } });
+    publicBookingApiMock.listPublicAgendaPromociones.mockResolvedValue({ ok: true, data: { promociones: [] } });
+
+    render(
+      <React.StrictMode>
+        <CatalogProbe />
+      </React.StrictMode>
+    );
+
+    await screen.findByText('MasterFade Blvd. Suyapa');
+    await screen.findByText('Carlos Barber');
+
+    expect(screen.getByTestId('selected-branch').textContent).toBe(SUYAPA_BRANCH_ID);
+    expect(publicBookingApiMock.listPublicAgendaBarberos).toHaveBeenCalledWith(
+      { id_sucursal: SUYAPA_BRANCH_ID },
+      expect.objectContaining({ dedupe: false, cache: false })
+    );
+    expect(screen.queryByText('Sin barberos disponibles')).toBeNull();
+  });
+
+  test('error real de contexto muestra error y accion de reintento sin falso vacio de barberos', async () => {
+    publicBookingApiMock.getPublicBookingContext.mockRejectedValue(new Error('No se pudo consultar el contexto'));
+
+    render(
+      <CatalogProbe />
+    );
+
+    await screen.findByText('No se pudo consultar el contexto');
+    expect(screen.getByRole('button', { name: /Reintentar/i })).toBeTruthy();
+    expect(screen.queryByText('Sin barberos disponibles')).toBeNull();
+    expect(publicBookingApiMock.listPublicAgendaBarberos).not.toHaveBeenCalled();
+  });
+
+  test('sucursal valida sin barberos muestra estado vacio solo despues de terminar la consulta', async () => {
+    publicBookingApiMock.getPublicBookingContext.mockResolvedValue({
+      ok: true,
+      data: {
+        sucursales: [{ id_sucursal: SUYAPA_BRANCH_ID, nombre_sucursal: 'MasterFade Blvd. Suyapa' }],
+        parametros: {},
+      },
+    });
+    publicBookingApiMock.listPublicAgendaBarberos.mockResolvedValue({ ok: true, data: { barberos: [] } });
+    publicBookingApiMock.listPublicCatalogServicios.mockResolvedValue({ ok: true, data: { servicios: [] } });
+    publicBookingApiMock.listPublicCatalogPaquetes.mockResolvedValue({ ok: true, data: { paquetes: [] } });
+    publicBookingApiMock.listPublicAgendaPromociones.mockResolvedValue({ ok: true, data: { promociones: [] } });
+
+    render(
+      <CatalogProbe />
+    );
+
+    await screen.findByText('MasterFade Blvd. Suyapa');
+    await screen.findByText('Sin barberos disponibles');
   });
 });
 

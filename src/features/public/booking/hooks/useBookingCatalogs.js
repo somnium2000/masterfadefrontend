@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  isAbortError,
+} from '../../../../services/httpClient.js';
+import {
   getClienteMembershipEstado,
   getPublicBookingContext,
   listPublicAgendaBarberos,
@@ -107,7 +110,11 @@ export default function useBookingCatalogs({
     setContextLoading(true);
     setContextError('');
     try {
-      const response = await getPublicBookingContext({ signal: controller.signal });
+      const response = await getPublicBookingContext({
+        signal: controller.signal,
+        dedupe: false,
+        cache: false,
+      });
       const payload = response?.data ?? response;
       const nextContext = {
         sucursales: Array.isArray(payload?.sucursales) ? payload.sucursales : [],
@@ -115,7 +122,7 @@ export default function useBookingCatalogs({
       };
       setContextData(nextContext);
     } catch (err) {
-      if (err?.name === 'AbortError') return;
+      if (isAbortError(err)) return;
       setContextError(extractMessage(err));
     } finally {
       if (contextAbortRef.current === controller) {
@@ -185,7 +192,7 @@ export default function useBookingCatalogs({
     try {
       const barbersResponse = await listPublicAgendaBarberos(
         { id_sucursal: selectedBranchId },
-        { signal: controller.signal }
+        { signal: controller.signal, dedupe: false, cache: false }
       );
       if (requestSeq !== branchDataRequestSeqRef.current) return;
 
@@ -205,14 +212,14 @@ export default function useBookingCatalogs({
         listPublicCatalogServicios({
           id_sucursal: selectedBranchId,
           id_barbero: scopedBarberId || undefined,
-        }, { signal: controller.signal }),
+        }, { signal: controller.signal, dedupe: false, cache: false }),
         listPublicCatalogPaquetes({
           id_sucursal: selectedBranchId,
           id_barbero: scopedBarberId || undefined,
-        }, { signal: controller.signal }),
+        }, { signal: controller.signal, dedupe: false, cache: false }),
         listPublicAgendaPromociones({
           id_sucursal: selectedBranchId,
-        }, { signal: controller.signal }),
+        }, { signal: controller.signal, dedupe: false, cache: false }),
       ]);
       if (requestSeq !== branchDataRequestSeqRef.current) return;
       if (controller.signal.aborted) return;
@@ -351,7 +358,7 @@ export default function useBookingCatalogs({
         });
       }
     } catch (err) {
-      if (err?.name === 'AbortError') return;
+      if (isAbortError(err)) return;
       if (requestSeq !== branchDataRequestSeqRef.current) return;
       const status = Number(err?.status || 0);
       const message = status >= 500

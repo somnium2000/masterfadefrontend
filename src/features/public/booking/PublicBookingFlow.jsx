@@ -103,7 +103,7 @@ const CONTACT_ERROR_FIELD_ORDER = ['contactFirstName', 'contactLastName', 'conta
 const PROFILE_FIELD_LABELS = Object.freeze({
   nombres: 'Nombre',
   apellidos: 'Apellido',
-  telefono_principal: 'TelÃ©fono',
+  telefono_principal: 'Teléfono',
   correo_principal: 'Correo',
 });
 
@@ -114,7 +114,7 @@ function getContactValidationFeedback(contactState, blockIndex) {
   const isTitular = Number(blockIndex || 0) === 0;
   const fallbackMessage = isTitular
     ? 'Completa los datos del titular.'
-    : 'Completa los datos del acompaÃƒÂ±ante.';
+    : 'Completa los datos del acompañante.';
   return {
     field,
     message: String(errors[field] || '').trim() || fallbackMessage,
@@ -564,7 +564,7 @@ const agendaAutoLoadKeyRef = useRef('');
         || membershipStateData?.estado_plan
         || ''
       ).trim().toLowerCase();
-      // AM: FASE 2E - Operativa solo si estÃ¡ estrictamente activa, alineado con backend.
+      // AM: FASE 2E - Operativa solo si está estrictamente activa, alineado con backend.
       const isOperational = statusCode === 'activa';
       if (!isOperational) return;
       deduped.set(subscriptionId, plan);
@@ -938,14 +938,14 @@ const agendaAutoLoadKeyRef = useRef('');
         errors.contactFirstName = errors.contactFirstName || 'Completa tus datos para continuar.';
       }
       if (!isValidEmail(effectiveEmail)) {
-        errors.contactEmail = 'No pudimos validar el correo de tu cuenta. Vuelve a iniciar sesiÃ³n.';
+        errors.contactEmail = 'No pudimos validar el correo de tu cuenta. Vuelve a iniciar sesión.';
       }
       if (needsPhone && !phoneRaw) {
-        errors.contactPhone = 'Ingresa un telÃ©fono vÃ¡lido del titular. Debe tener al menos 8 dÃ­gitos.';
+        errors.contactPhone = 'Ingresa un teléfono válido del titular. Debe tener al menos 8 dígitos.';
       } else if (needsPhone && !isValidOptionalPhone(phoneRaw)) {
         errors.contactPhone = hasLetters(phoneRaw)
-          ? 'El telÃ©fono no admite letras.'
-          : 'Ingresa un telÃ©fono vÃ¡lido del titular. Debe tener al menos 8 dÃ­gitos.';
+          ? 'El teléfono no admite letras.'
+          : 'Ingresa un teléfono válido del titular. Debe tener al menos 8 dígitos.';
       }
 
       return {
@@ -971,12 +971,12 @@ const agendaAutoLoadKeyRef = useRef('');
         errors.contactLastName = 'El apellido del titular es obligatorio.';
       }
       if (!isValidEmail(email)) {
-        errors.contactEmail = 'Ingresa un correo vÃ¡lido del titular.';
+        errors.contactEmail = 'Ingresa un correo válido del titular.';
       }
       if (!phoneRaw || !isValidOptionalPhone(phoneRaw)) {
         errors.contactPhone = phoneRaw && hasLetters(phoneRaw)
-          ? 'El telÃ©fono no admite letras.'
-          : 'Ingresa un telÃ©fono vÃ¡lido del titular. Debe tener al menos 8 dÃ­gitos.';
+          ? 'El teléfono no admite letras.'
+          : 'Ingresa un teléfono válido del titular. Debe tener al menos 8 dígitos.';
       }
       return {
         isTitular: true,
@@ -994,21 +994,21 @@ const agendaAutoLoadKeyRef = useRef('');
 
     const fullName = joinedName || fallbackName;
     if (!firstName) {
-      errors.contactFirstName = 'El nombre del acompaÃ±ante es obligatorio.';
+      errors.contactFirstName = 'El nombre del acompañante es obligatorio.';
     }
     if (!lastName) {
-      errors.contactLastName = 'El apellido del acompaÃ±ante es obligatorio.';
+      errors.contactLastName = 'El apellido del acompañante es obligatorio.';
     }
     if (!fullName) {
-      errors.contactFirstName = errors.contactFirstName || 'Completa nombre y apellido del acompaÃ±ante.';
+      errors.contactFirstName = errors.contactFirstName || 'Completa nombre y apellido del acompañante.';
     }
     if (!isValidOptionalEmail(email)) {
-      errors.contactEmail = 'Si ingresas correo del acompaÃ±ante, debe ser vÃ¡lido.';
+      errors.contactEmail = 'Si ingresas correo del acompañante, debe ser válido.';
     }
     if (!isValidOptionalPhone(phoneRaw)) {
       errors.contactPhone = hasLetters(phoneRaw)
-        ? 'El telÃ©fono del acompaÃ±ante no admite letras.'
-        : 'Ingresa un telÃ©fono vÃ¡lido del acompaÃ±ante. Debe tener al menos 8 dÃ­gitos.';
+        ? 'El teléfono del acompañante no admite letras.'
+        : 'Ingresa un teléfono válido del acompañante. Debe tener al menos 8 dígitos.';
     }
 
     return {
@@ -1227,18 +1227,18 @@ const agendaAutoLoadKeyRef = useRef('');
   const membershipCompanionNotice = useMemo(() => {
     const hasCompanions = Array.isArray(bookingBlocksSummary) && bookingBlocksSummary.length > 1;
     if (!membershipHasContext || !hasCompanions || membershipCompanionsCovered) return '';
-    return 'La membresÃ­a aplica solo al titular. Los acompaÃ±antes se cobran como cita normal.';
+    return 'La membresía aplica solo al titular. Los acompañantes se cobran como cita normal.';
   }, [bookingBlocksSummary, membershipCompanionsCovered, membershipHasContext]);
   const membershipUxMessage = useMemo(() => {
     if (!membershipHasContext) return '';
     if (membershipAplicaEnCita) {
-      return 'Tu membresÃ­a estÃ¡ activa. Los servicios incluidos para el titular se aplicarÃ¡n automÃ¡ticamente.';
+      return 'Tu membresía está activa. Los servicios incluidos para el titular se aplicarán automáticamente.';
     }
     if (membershipBranchMismatch) {
-      return 'Tu membresÃ­a estÃ¡ activa en otra sucursal. Para esta cita, el pago se realizarÃ¡ como una cita normal.';
+      return 'Tu membresía está activa en otra sucursal. Para esta cita, el pago se realizará como una cita normal.';
     }
     if (membershipMotivoNoAplica === 'PLAN_NO_ACTIVO') {
-      return 'Tu membresÃ­a no estÃ¡ activa actualmente. Esta cita se pagarÃ¡ como una cita normal.';
+      return 'Tu membresía no está activa actualmente. Esta cita se pagará como una cita normal.';
     }
     return '';
   }, [membershipAplicaEnCita, membershipBranchMismatch, membershipHasContext, membershipMotivoNoAplica]);
@@ -1302,7 +1302,7 @@ const agendaAutoLoadKeyRef = useRef('');
     if (firstInvalidContact) {
       const label = firstInvalidContact.index === 0
         ? 'titular'
-        : `acompaÃ±ante ${firstInvalidContact.index}`;
+        : `acompañante ${firstInvalidContact.index}`;
       const feedback = getContactValidationFeedback(firstInvalidContact.contactResolved, firstInvalidContact.index);
       if (feedback?.message) return feedback.message;
       if (!firstInvalidContact?.contactResolved?.fullName) {
@@ -1317,42 +1317,42 @@ const agendaAutoLoadKeyRef = useRef('');
     if (firstMissingService) {
       return firstMissingService.index === 0
         ? 'El titular no tiene servicio o paquete seleccionado.'
-        : `El acompaÃ±ante ${firstMissingService.index} no tiene servicio seleccionado.`;
+        : `El acompañante ${firstMissingService.index} no tiene servicio seleccionado.`;
     }
 
     const firstMissingBarber = blocksToSubmitSummary.find((block) => !block?.idBarbero);
     if (firstMissingBarber) {
       return firstMissingBarber.index === 0
         ? 'El titular no tiene barbero seleccionado.'
-        : `El acompaÃ±ante ${firstMissingBarber.index} no tiene barbero seleccionado.`;
+        : `El acompañante ${firstMissingBarber.index} no tiene barbero seleccionado.`;
     }
 
     const firstMissingDate = blocksToSubmitSummary.find((block) => !block?.selectedDate);
     if (firstMissingDate) {
       return firstMissingDate.index === 0
         ? 'El titular no tiene fecha seleccionada.'
-        : `El acompaÃ±ante ${firstMissingDate.index} no tiene fecha seleccionada.`;
+        : `El acompañante ${firstMissingDate.index} no tiene fecha seleccionada.`;
     }
 
     const firstMissingTime = blocksToSubmitSummary.find((block) => !block?.selectedTime);
     if (firstMissingTime) {
       return firstMissingTime.index === 0
         ? 'El titular no tiene horario seleccionado.'
-        : `El acompaÃ±ante ${firstMissingTime.index} no tiene horario seleccionado.`;
+        : `El acompañante ${firstMissingTime.index} no tiene horario seleccionado.`;
     }
 
     const firstMissingDuration = blocksToSubmitSummary.find((block) => !getBookingBlockOccupiedRange(block));
     if (firstMissingDuration) {
       return firstMissingDuration.index === 0
-        ? 'El titular no tiene duracion calculada.'
-        : `El acompaÃƒÂ±ante ${firstMissingDuration.index} no tiene duracion calculada.`;
+        ? 'El titular no tiene duración calculada.'
+        : `El acompañante ${firstMissingDuration.index} no tiene duración calculada.`;
     }
 
     const firstConflict = blocksToSubmitSummary.find((block) => hasBlockingGroupConflict(block));
     if (firstConflict) {
       return firstConflict.index === 0
         ? 'El horario del titular se solapa con otro integrante.'
-        : `El horario del acompaÃ±ante ${firstConflict.index} se solapa con otro integrante.`;
+        : `El horario del acompañante ${firstConflict.index} se solapa con otro integrante.`;
     }
 
     return '';
@@ -1374,7 +1374,7 @@ const agendaAutoLoadKeyRef = useRef('');
     const key = buildFieldErrorKey(blockIndex, field);
     setFieldErrors((prev) => ({
       ...prev,
-      [key]: String(message || '').trim() || 'Dato invÃ¡lido',
+      [key]: String(message || '').trim() || 'Dato inválido',
     }));
   }, [buildFieldErrorKey]);
 
@@ -1518,7 +1518,7 @@ const agendaAutoLoadKeyRef = useRef('');
     abortAvailabilityRequests();
     invalidateAgendaCaches();
     notifications.warning(
-      String(message || 'El horario ya no estÃ¡ disponible. Selecciona una nueva hora para continuar.'),
+      String(message || 'El horario ya no está disponible. Selecciona una nueva hora para continuar.'),
       { dedupeKey }
     );
     navigate(BOOKING_ROUTES.agenda, { replace: true });
@@ -1708,7 +1708,7 @@ const agendaAutoLoadKeyRef = useRef('');
     if (availableServiceIdSet.has(rewardServiceId)) return;
     if (rewardUnavailableShownRef.current) return;
     rewardUnavailableShownRef.current = true;
-    notifications.warning('El servicio de recompensa no estÃ¡ disponible en esta sucursal. Elige la sucursal de tu canje o cancela el uso de recompensa.', {
+    notifications.warning('El servicio de recompensa no está disponible en esta sucursal. Elige la sucursal de tu canje o cancela el uso de recompensa.', {
       dedupeKey: 'public-booking-reward-service-unavailable',
     });
   }, [
@@ -1956,7 +1956,7 @@ const agendaAutoLoadKeyRef = useRef('');
     (nextBranchId) => {
       if (!nextBranchId || nextBranchId === selectedBranchId) return;
       if (rewardModeActive && rewardBranchId && nextBranchId !== rewardBranchId) {
-        notifications.warning('Esta recompensa solo puede usarse en la sucursal donde se preparÃ³ el canje.', {
+        notifications.warning('Esta recompensa solo puede usarse en la sucursal donde se preparó el canje.', {
           dedupeKey: 'public-booking-reward-branch-mismatch',
         });
         return;
@@ -2009,7 +2009,7 @@ const agendaAutoLoadKeyRef = useRef('');
       try {
         await releaseHold();
       } catch {
-        notifications.warning('No se pudo liberar la reserva temporal en este momento, pero se cancelÃ³ el flujo local.', {
+        notifications.warning('No se pudo liberar la reserva temporal en este momento, pero se canceló el flujo local.', {
           dedupeKey: 'public-booking-release-hold-warning',
         });
       }
@@ -2153,18 +2153,18 @@ const agendaAutoLoadKeyRef = useRef('');
           ? (titularState.isAuthenticated
             ? 'Completa los datos faltantes del titular antes de elegir servicios.'
             : 'Completa el nombre del titular antes de elegir servicios.')
-          : 'Completa nombre y apellido del acompaÃ±ante antes de elegir servicios.',
+          : 'Completa nombre y apellido del acompañante antes de elegir servicios.',
         { dedupeKey: 'public-booking-contact-name-required' }
       );
       return;
     }
     if (blockedServiceIdSet.has(normalizedServiceId)) {
       if (rewardLockedServiceIdSet.has(normalizedServiceId)) {
-        notifications.info('Este servicio estÃ¡ marcado como recompensa cortesÃ­a y no se puede quitar.', {
+        notifications.info('Este servicio está marcado como recompensa cortesía y no se puede quitar.', {
           dedupeKey: `public-booking-reward-service-locked-${normalizedServiceId}`,
         });
       } else if (membershipLockedServiceIdSet.has(normalizedServiceId)) {
-        notifications.info('Este servicio estÃ¡ cubierto por tu plan y no se puede quitar.', {
+        notifications.info('Este servicio está cubierto por tu plan y no se puede quitar.', {
           dedupeKey: `public-booking-membership-service-locked-${normalizedServiceId}`,
         });
       } else {
@@ -2209,7 +2209,7 @@ const agendaAutoLoadKeyRef = useRef('');
   const selectSelectionType = useCallback((nextType) => {
     const normalizedType = String(nextType || '').trim().toLowerCase() === 'package' ? 'package' : 'services';
     if (rewardModeActive && effectiveActiveBlockIndex === 0 && normalizedType === 'package') {
-      notifications.info('La recompensa cortesÃ­a se aplica sobre un servicio individual del titular.', {
+      notifications.info('La recompensa cortesía se aplica sobre un servicio individual del titular.', {
         dedupeKey: 'public-booking-reward-package-disabled',
       });
       return;
@@ -2235,7 +2235,7 @@ const agendaAutoLoadKeyRef = useRef('');
 
   const selectPackage = useCallback((packageId) => {
     if (rewardModeActive && effectiveActiveBlockIndex === 0) {
-      notifications.info('La recompensa cortesÃ­a no puede combinarse con paquetes en esta fase.', {
+      notifications.info('La recompensa cortesía no puede combinarse con paquetes en esta fase.', {
         dedupeKey: 'public-booking-reward-package-select-disabled',
       });
       return;
@@ -2273,7 +2273,7 @@ const agendaAutoLoadKeyRef = useRef('');
 
   const selectPromotion = useCallback((promotionId) => {
     if (!selectedBranchId) {
-      notifications.warning('Selecciona una sucursal antes de elegir una promociÃ³n.', {
+      notifications.warning('Selecciona una sucursal antes de elegir una promoción.', {
         dedupeKey: 'public-booking-promotion-branch-required',
       });
       return;
@@ -2341,7 +2341,7 @@ const agendaAutoLoadKeyRef = useRef('');
       packagesById,
     });
     if (!evaluation.canSelect) {
-      notifications.warning(evaluation.disabledReason || 'Esta promociÃ³n no aplica a la selecciÃ³n actual.', {
+      notifications.warning(evaluation.disabledReason || 'Esta promoción no aplica a la selección actual.', {
         dedupeKey: 'public-booking-promotion-target-required',
       });
       return;
@@ -2559,7 +2559,7 @@ const agendaAutoLoadKeyRef = useRef('');
     if (localSelectionConflict) {
       const firstConflictCode = String(localSelectionConflict.selectionConflicts[0]?.code || '').trim().toUpperCase();
       notifications.warning(
-        mapPublicBookingErrorMessage(firstConflictCode, 'Revisa la selecciÃ³n de servicios y paquete antes de continuar.'),
+        mapPublicBookingErrorMessage(firstConflictCode, 'Revisa la selección de servicios y paquete antes de continuar.'),
         { dedupeKey: `public-booking-local-selection-conflict-${firstConflictCode || 'unknown'}` }
       );
       setActiveBlockIndex(Math.max(0, Number(localSelectionConflict.index || 0)));
@@ -2646,7 +2646,7 @@ const agendaAutoLoadKeyRef = useRef('');
         if (feedback?.field) {
           nextFieldErrors[buildFieldErrorKey(companion.index, feedback.field)] = feedback.message;
         }
-        notifications.warning(feedback?.message || 'Completa los datos del acompaÃƒÂ±ante.', {
+        notifications.warning(feedback?.message || 'Completa los datos del acompañante.', {
           dedupeKey: 'public-booking-companion-data-invalid-submit',
         });
         setActiveBlockIndex(companion.index);
@@ -2655,9 +2655,9 @@ const agendaAutoLoadKeyRef = useRef('');
         return false;
       }
       if (!companionContact.firstName || !companionContact.lastName || !companionContact.fullName) {
-        nextFieldErrors[buildFieldErrorKey(companion.index, 'contactFirstName')] = 'Completa nombre y apellido del acompanante.';
-        nextFieldErrors[buildFieldErrorKey(companion.index, 'contactLastName')] = 'Completa nombre y apellido del acompanante.';
-        notifications.warning('Cada acompaÃ±ante debe tener nombre y apellido vÃ¡lidos para confirmar.', {
+        nextFieldErrors[buildFieldErrorKey(companion.index, 'contactFirstName')] = 'Completa nombre y apellido del acompañante.';
+        nextFieldErrors[buildFieldErrorKey(companion.index, 'contactLastName')] = 'Completa nombre y apellido del acompañante.';
+        notifications.warning('Cada acompañante debe tener nombre y apellido válidos para confirmar.', {
           dedupeKey: 'public-booking-companion-data-required-submit',
         });
         setActiveBlockIndex(companion.index);
@@ -2729,7 +2729,7 @@ const agendaAutoLoadKeyRef = useRef('');
       }
     }
     if (autoAssignedCompanion) {
-      notifications.info('Uno o mÃ¡s acompaÃ±antes serÃ¡n asignados automÃ¡ticamente con barbero disponible en ese horario.', {
+      notifications.info('Uno o más acompañantes serán asignados automáticamente con barbero disponible en ese horario.', {
         dedupeKey: 'public-booking-autoassign-companion-info',
       });
     }
@@ -2740,7 +2740,7 @@ const agendaAutoLoadKeyRef = useRef('');
     });
     if (!integrantesResult.ok) {
       if (integrantesResult.errorCode === 'COMPANION_DATE_MISMATCH') {
-        notifications.warning('Los acompaÃƒÂ±antes deben usar la misma fecha del titular.', {
+        notifications.warning('Los acompañantes deben usar la misma fecha del titular.', {
           dedupeKey: 'public-booking-companion-date-mismatch',
         });
       } else {
@@ -2824,12 +2824,12 @@ const agendaAutoLoadKeyRef = useRef('');
         // AM: Bloqueo funcional backend P0.2B para agenda normal cuando hay recompensa disponible.
         const rewardMessage = String(
           apiError?.message
-          || 'Tienes una cortesÃ­a disponible. Para continuar, debes canjear tu recompensa antes de agendar una cita normal.'
+          || 'Tienes una cortesía disponible. Para continuar, debes canjear tu recompensa antes de agendar una cita normal.'
         );
         notifications.warning(rewardMessage, {
           dedupeKey: 'public-booking-reward-redeem-required',
         });
-        // AM: SeÃ±al mÃ­nima para abrir canje obligatorio al volver al dashboard cliente.
+        // AM: Señal mínima para abrir canje obligatorio al volver al dashboard cliente.
         navigate('/home/cliente?accion=canjear');
         return false;
       }
@@ -2892,8 +2892,8 @@ const agendaAutoLoadKeyRef = useRef('');
           : Math.max(1, emailErrorIndex);
         const emailLabel = normalizedEmail || 'correo no identificado';
         const conflictMessage = isTitularConflict
-          ? `El correo del titular, ${emailLabel}, pertenece a un usuario activo. Debes iniciar sesiÃ³n para continuar.`
-          : `El correo del acompaÃ±ante ${companionNumber}, ${emailLabel}, pertenece a un usuario activo. Debe iniciar sesiÃ³n o usar otro correo.`;
+          ? `El correo del titular, ${emailLabel}, pertenece a un usuario activo. Debes iniciar sesión para continuar.`
+          : `El correo del acompañante ${companionNumber}, ${emailLabel}, pertenece a un usuario activo. Debe iniciar sesión o usar otro correo.`;
         setFieldError(emailErrorIndex, 'contactEmail', mapPublicBookingErrorMessage(conflictCode));
         setActiveBlockIndex(emailErrorIndex);
         navigate(BOOKING_ROUTES.agenda);
@@ -2969,7 +2969,7 @@ const agendaAutoLoadKeyRef = useRef('');
           const isSameBarberConflict = conflictReason === 'AGENDA_INTERNAL_GROUP_CONFLICT';
           const conflictMessage = isSameBarberConflict
             ? `${affectedLabel} usa el mismo barbero en un horario que se cruza. Selecciona una hora posterior o cambia de barbero.`
-            : `El horario seleccionado para ${affectedLabel} ya no estÃ¡ disponible.`;
+            : `El horario seleccionado para ${affectedLabel} ya no está disponible.`;
           invalidHoldSelectionFingerprintRef.current = bookingHoldFingerprint;
           setActiveBlockIndex(affectedIndex);
           recoverToAgendaForReselection(
@@ -3180,13 +3180,13 @@ const agendaAutoLoadKeyRef = useRef('');
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
     const titularEmail = String(titularContact.email || '').trim().toLowerCase();
     if (!groupId) {
-      notifications.warning('Estamos reservando tu horario. Espera un momento e intÃ©ntalo nuevamente.', {
+      notifications.warning('Estamos reservando tu horario. Espera un momento e inténtalo nuevamente.', {
         dedupeKey: 'public-booking-hold-creating-for-payment',
       });
       return null;
     }
     if (Number(holdResult?.total_pagar_hnl ?? holdResult?.total_hnl ?? 0) <= 0) {
-      notifications.warning('Esta reserva no requiere pago. ConfÃ­rmala directamente.', {
+      notifications.warning('Esta reserva no requiere pago. Confírmala directamente.', {
         dedupeKey: 'public-booking-payment-not-required',
       });
       navigate(BOOKING_ROUTES.confirm);
@@ -3217,7 +3217,7 @@ const agendaAutoLoadKeyRef = useRef('');
       const errorCode = String(apiError?.code || '').trim().toUpperCase();
       if (err?.status === 409 && shouldRecoverFromPaymentError(errorCode)) {
         recoverToAgendaForReselection(
-          'El horario seleccionado dejÃ³ de estar disponible durante el pago. Elige una nueva hora para continuar.',
+          'El horario seleccionado dejó de estar disponible durante el pago. Elige una nueva hora para continuar.',
           { dedupeKey: 'public-booking-payment-recover-create-intent' }
         );
         return null;
@@ -3269,14 +3269,14 @@ const agendaAutoLoadKeyRef = useRef('');
       }, requestTimeoutMs);
     }
     if (!canUseClienteHold) {
-      notifications.warning('Debes iniciar sesiÃ³n como cliente para confirmar sin pago.', {
+      notifications.warning('Debes iniciar sesión como cliente para confirmar sin pago.', {
         dedupeKey: 'public-booking-confirm-no-payment-auth-required',
       });
       if (timeoutId) clearTimeout(timeoutId);
       return false;
     }
     if (!groupId) {
-      notifications.error('No encontramos una reserva vÃ¡lida para confirmar.', {
+      notifications.error('No encontramos una reserva válida para confirmar.', {
         dedupeKey: 'public-booking-confirm-no-payment-group-missing',
       });
       if (timeoutId) clearTimeout(timeoutId);
@@ -3371,7 +3371,7 @@ const agendaAutoLoadKeyRef = useRef('');
         return false;
       }
       if (err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('aborted')) {
-        notifications.error('La confirmaciÃ³n tardÃ³ demasiado. Intenta nuevamente.', {
+        notifications.error('La confirmación tardó demasiado. Intenta nuevamente.', {
           dedupeKey: 'public-booking-confirm-no-payment-timeout',
         });
         return false;
@@ -3454,7 +3454,7 @@ const agendaAutoLoadKeyRef = useRef('');
           } catch (confirmError) {
             const errorCode = String(confirmError?.data?.error?.code || '').trim().toUpperCase();
             if (errorCode === 'POINTS_REDEEM_INSUFFICIENT_BALANCE_CONFIRM') {
-              notifications.error('No tienes saldo suficiente para aplicar la recompensa en la confirmaciÃ³n final.', {
+              notifications.error('No tienes saldo suficiente para aplicar la recompensa en la confirmación final.', {
                 dedupeKey: 'public-booking-reward-insufficient-after-payment',
               });
             } else {
@@ -3512,7 +3512,7 @@ const agendaAutoLoadKeyRef = useRef('');
       const errorCode = String(apiError?.code || '').trim().toUpperCase();
       if (shouldRecoverFromPaymentError(errorCode)) {
         recoverToAgendaForReselection(
-          'Tu reserva temporal ya no estÃ¡ disponible. Selecciona un nuevo horario para continuar.',
+          'Tu reserva temporal ya no está disponible. Selecciona un nuevo horario para continuar.',
           { dedupeKey: 'public-booking-payment-recover-status-error' }
         );
         return null;
@@ -3680,7 +3680,7 @@ const agendaAutoLoadKeyRef = useRef('');
       return;
     }
     recoverToAgendaForReselection(
-      'El tiempo de reserva expirÃ³. Selecciona una nueva hora para continuar.',
+      'El tiempo de reserva expiró. Selecciona una nueva hora para continuar.',
       { dedupeKey: 'public-booking-payment-recover-hold-expired' }
     );
   }, [
@@ -3784,7 +3784,10 @@ const agendaAutoLoadKeyRef = useRef('');
       canUseClienteHold,
       canGoPrevMonth,
       contextData,
+      contextError,
+      contextLoading,
       currentMonth,
+      fetchContext,
       goToAgenda,
       goToBarberos,
       goToConfirm,
@@ -3926,7 +3929,10 @@ const agendaAutoLoadKeyRef = useRef('');
       canUseClienteHold,
       canGoPrevMonth,
       contextData,
+      contextError,
+      contextLoading,
       currentMonth,
+      fetchContext,
       goToAgenda,
       goToBarberos,
       goToConfirm,
@@ -4057,18 +4063,18 @@ const agendaAutoLoadKeyRef = useRef('');
         >
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Correo registrado: inicia sesiÃ³n para agendar</DialogTitle>
+              <DialogTitle>Correo registrado: inicia sesión para agendar</DialogTitle>
               <DialogDescription>
                 {authRequiredModal.email
                   ? `El correo ${authRequiredModal.email} ya pertenece a una cuenta activa en MasterFade.`
                   : 'Este correo ya pertenece a una cuenta activa en MasterFade.'}{' '}
-                Para proteger la identidad del titular y evitar suplantaciÃ³n, debes iniciar sesiÃ³n antes de continuar.
+                Para proteger la identidad del titular y evitar suplantación, debes iniciar sesión antes de continuar.
               </DialogDescription>
             </DialogHeader>
             <div className="citas-selected-date">
-              QuÃ© hacer ahora:
+              Qué hacer ahora:
               <br />
-              1. Inicia sesiÃ³n con ese correo.
+              1. Inicia sesión con ese correo.
               <br />
               2. Regresa al flujo de agendamiento.
             </div>
@@ -4077,7 +4083,7 @@ const agendaAutoLoadKeyRef = useRef('');
                 Revisar datos
               </Button>
               <Button type="button" onClick={goToLoginForBooking}>
-                Ir a iniciar sesiÃ³n
+                Ir a iniciar sesión
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -4093,7 +4099,7 @@ const agendaAutoLoadKeyRef = useRef('');
             <DialogHeader>
               <DialogTitle>Cancelar agendamiento</DialogTitle>
               <DialogDescription>
-                Se perderÃ¡n los datos seleccionados y se liberarÃ¡ la reserva temporal si existe.
+                Se perderán los datos seleccionados y se liberará la reserva temporal si existe.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -4127,11 +4133,11 @@ const agendaAutoLoadKeyRef = useRef('');
         >
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Â¿Deseas guardar estos datos en tu perfil?</DialogTitle>
+              <DialogTitle>¿Deseas guardar estos datos en tu perfil?</DialogTitle>
               <DialogDescription>
                 {profilePersistModal.kind === 'telefono'
-                  ? 'Para completar tu reserva necesitamos un nÃºmero de contacto. Lo usaremos Ãºnicamente para comunicarnos contigo si ocurre algÃºn imprevisto relacionado con tu cita. Â¿Deseas guardarlo en tu perfil para futuras reservas?'
-                  : 'Para completar tu reserva necesitamos que tus datos estÃ©n correctos. Esto nos ayuda a identificar tu cita y comunicarnos contigo correctamente. Â¿Deseas guardar estos datos en tu perfil?'}
+                  ? 'Para completar tu reserva necesitamos un número de contacto. Lo usaremos únicamente para comunicarnos contigo si ocurre algún imprevisto relacionado con tu cita. ¿Deseas guardarlo en tu perfil para futuras reservas?'
+                  : 'Para completar tu reserva necesitamos que tus datos estén correctos. Esto nos ayuda a identificar tu cita y comunicarnos contigo correctamente. ¿Deseas guardar estos datos en tu perfil?'}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -4143,7 +4149,7 @@ const agendaAutoLoadKeyRef = useRef('');
                 Usar solo en esta reserva
               </Button>
               <Button type="button" onClick={() => resolveProfilePersistModal(true)}>
-                SÃ­, guardar en perfil
+                Sí, guardar en perfil
               </Button>
             </DialogFooter>
           </DialogContent>
