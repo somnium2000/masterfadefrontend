@@ -5,10 +5,13 @@ import {
   Armchair,
   CalendarCheck2,
   CalendarClock,
+  CalendarPlus,
+  CheckCircle2,
   MapPin,
   Phone,
   Search,
   SlidersHorizontal,
+  UserPlus,
   X,
 } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
@@ -33,6 +36,9 @@ import {
   postAdminCitaReagendarEmergencia,
   postAdminCitasReagendarEmergenciaLote,
 } from '../lib/adminCitasApi.js';
+import { listAdminPersonasClientes } from '../lib/adminPersonasApi.js';
+import { listPublicCatalogServicios } from '../../public/booking/publicBookingApi.js';
+import createAdminBookingAdapter from '../../booking/adapters/adminBookingAdapter.js';
 import { buildTimeSlots } from '../../public/booking/bookingUtils.js';
 import { supabase } from '../../../config/supabaseClient.js';
 import { isAbortError } from '../../../services/httpClient.js';
@@ -47,6 +53,37 @@ const FILTER_DEFAULTS = {
 const LIVE_REFRESH_DEBOUNCE_MS = 180;
 const LIVE_REFRESH_POLL_MS = 8000;
 const AGENDAMIENTO_SELECTED_SUCURSAL_KEY = 'masterfade.admin.agendamiento.selectedSucursalId';
+const ADMIN_BOOKING_FORM_INITIAL = {
+  clientMode: 'existing',
+  selectedClientId: '',
+  clientSearch: '',
+  nombres: '',
+  apellidos: '',
+  telefono: '',
+  correo: '',
+  idBarbero: '',
+  fechaInicio: '',
+  serviceIds: [],
+  metodoPagoCodigo: 'sin_pago',
+  notas: '',
+  aplicarRecompensa: false,
+  canjeContextToken: '',
+  consentimientoConfirmado: false,
+  consentimientoMedio: 'presencial',
+  consentimientoObservacion: '',
+  promocionManualId: '',
+  promocionManualMotivo: '',
+  aplicarCortesia: false,
+  cortesiaTipo: 'total',
+  cortesiaValor: '100',
+  cortesiaMotivo: '',
+};
+const ADMIN_BOOKING_PAYMENT_OPTIONS = [
+  { value: 'sin_pago', label: 'Confirmar sin cobro inmediato' },
+  { value: 'efectivo', label: 'Efectivo pendiente en local' },
+  { value: 'enlace_pago', label: 'Enlace de pago pendiente' },
+  { value: 'tarjeta', label: 'Tarjeta en local' },
+];
 
 const STATE_LABELS = {
   en_espera: 'En espera',
@@ -158,6 +195,56 @@ function formatCurrencyHnl(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return 'L 0.00';
   return new Intl.NumberFormat('es-HN', { style: 'currency', currency: 'HNL' }).format(amount);
+}
+
+function makeIdempotencyKey() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const value = Math.trunc(Math.random() * 16);
+    const digit = char === 'x' ? value : ((value & 0x3) | 0x8);
+    return digit.toString(16);
+  });
+}
+
+function normalizeSearchText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function getClienteNombre(cliente) {
+  return String(
+    cliente?.nombre_completo
+    || [cliente?.nombres, cliente?.apellidos].filter(Boolean).join(' ')
+    || cliente?.nombre
+    || 'Cliente'
+  ).trim();
+}
+
+function getClienteSearchText(cliente) {
+  return normalizeSearchText([
+    getClienteNombre(cliente),
+    cliente?.telefono_principal,
+    cliente?.correo_principal,
+    cliente?.email,
+    cliente?.id_cliente,
+  ].filter(Boolean).join(' '));
+}
+
+function getServicioId(servicio) {
+  return String(servicio?.id_servicio || servicio?.id || '').trim();
+}
+
+function getCatalogServicioNombre(servicio) {
+  return String(servicio?.nombre_servicio || servicio?.nombre || 'Servicio').trim();
+}
+
+function getServicioPrecio(servicio) {
+  return Number(servicio?.precio_hnl ?? servicio?.precio_desde_hnl ?? servicio?.precio ?? 0) || 0;
 }
 
 function getSelectionTypeLabel(value) {
@@ -333,6 +420,18 @@ export default function AdminAgendamientoCitasPage() {
   const fetchInFlightRef = useRef(false);
   const liveRefreshTimeoutRef = useRef(null);
   const realtimeStatusRef = useRef('idle');
+  const adminBookingAdapter = useMemo(
+    () => createAdminBookingAdapter({ roles }),
+    [roles]
+  );
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantForm, setAssistantForm] = useState(ADMIN_BOOKING_FORM_INITIAL);
+  const [assistantClientes, setAssistantClientes] = useState([]);
+  const [assistantServicios, setAssistantServicios] = useState([]);
+  const [assistantCatalogLoading, setAssistantCatalogLoading] = useState(false);
+  const [assistantSaving, setAssistantSaving] = useState(false);
+  const [assistantError, setAssistantError] = useState('');
+  const [assistantResult, setAssistantResult] = useState(null);
 
   const sucursales = useMemo(
     () => (Array.isArray(context?.sucursales) ? context.sucursales : []),
@@ -341,6 +440,24 @@ export default function AdminAgendamientoCitasPage() {
   const barberos = useMemo(
     () => (Array.isArray(context?.barberos) ? context.barberos : []),
     [context?.barberos]
+  );
+  const assistantBarberos = useMemo(
+    () => barberos.filter((barbero) => !selectedSucursalId || barbero?.id_sucursal === selectedSucursalId),
+    [barberos, selectedSucursalId]
+  );
+  const assistantClientesFiltrados = useMemo(() => {
+    const query = normalizeSearchText(assistantForm.clientSearch);
+    const source = Array.isArray(assistantClientes) ? assistantClientes : [];
+    if (!query) return source.slice(0, 8);
+    return source.filter((cliente) => getClienteSearchText(cliente).includes(query)).slice(0, 8);
+  }, [assistantClientes, assistantForm.clientSearch]);
+  const assistantSelectedServices = useMemo(() => {
+    const selected = new Set(assistantForm.serviceIds);
+    return assistantServicios.filter((servicio) => selected.has(getServicioId(servicio)));
+  }, [assistantForm.serviceIds, assistantServicios]);
+  const assistantTotalHnl = useMemo(
+    () => assistantSelectedServices.reduce((sum, servicio) => sum + getServicioPrecio(servicio), 0),
+    [assistantSelectedServices]
   );
   const selectedSucursal = useMemo(
     () => sucursales.find((item) => item?.id_sucursal === selectedSucursalId) || null,
@@ -406,6 +523,44 @@ export default function AdminAgendamientoCitasPage() {
   }, [activeMobileContainer, mobileTabs]);
 
   useEffect(() => {
+    if (!assistantOpen) return;
+    let cancelled = false;
+    setAssistantCatalogLoading(true);
+    setAssistantError('');
+    Promise.all([
+      listAdminPersonasClientes(),
+      selectedSucursalId
+        ? listPublicCatalogServicios({ id_sucursal: selectedSucursalId })
+        : Promise.resolve({ data: { servicios: [] } }),
+    ])
+      .then(([clientesResponse, serviciosResponse]) => {
+        if (cancelled) return;
+        const clientesPayload = clientesResponse?.data ?? clientesResponse;
+        const serviciosPayload = serviciosResponse?.data ?? serviciosResponse;
+        setAssistantClientes(Array.isArray(clientesPayload?.clientes) ? clientesPayload.clientes : []);
+        setAssistantServicios(Array.isArray(serviciosPayload?.servicios) ? serviciosPayload.servicios : []);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err.status === 401) {
+          navigate('/login');
+          return;
+        }
+        if (err.status === 403) {
+          navigate('/unauthorized');
+          return;
+        }
+        setAssistantError(mapAdminCitasErrorMessage(err, 'No fue posible cargar clientes o servicios.'));
+      })
+      .finally(() => {
+        if (!cancelled) setAssistantCatalogLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [assistantOpen, navigate, selectedSucursalId]);
+
+  useEffect(() => {
     if (!sucursales.length) return;
     const allowedIds = new Set(sucursales.map((item) => item.id_sucursal));
     if (sucursales.length === 1) {
@@ -457,6 +612,10 @@ export default function AdminAgendamientoCitasPage() {
   const canManageEmergency = useMemo(() => {
     const roleList = Array.isArray(roles) ? roles : [];
     return roleList.includes('admin') || roleList.includes('super_admin');
+  }, [roles]);
+  const isSuperAdmin = useMemo(() => {
+    const roleList = Array.isArray(roles) ? roles : [];
+    return roleList.includes('super_admin');
   }, [roles]);
 
   const handleAuthError = useCallback((err) => {
@@ -631,6 +790,208 @@ export default function AdminAgendamientoCitasPage() {
       ...FILTER_DEFAULTS,
       idSucursal: selectedSucursalId || 'all',
     });
+  }
+
+  function openAssistantDialog() {
+    if (!selectedSucursalId) {
+      notifications.warning('Selecciona una sucursal antes de crear una cita asistida.', {
+        dedupeKey: 'admin-booking-branch-required',
+      });
+      return;
+    }
+    setAssistantForm(ADMIN_BOOKING_FORM_INITIAL);
+    setAssistantResult(null);
+    setAssistantError('');
+    setAssistantOpen(true);
+  }
+
+  function closeAssistantDialog() {
+    if (assistantSaving) return;
+    setAssistantOpen(false);
+  }
+
+  function updateAssistantForm(patch) {
+    setAssistantForm((prev) => ({ ...prev, ...patch }));
+  }
+
+  function toggleAssistantService(serviceId) {
+    const id = String(serviceId || '').trim();
+    if (!id) return;
+    setAssistantForm((prev) => {
+      const current = new Set(prev.serviceIds);
+      if (current.has(id)) current.delete(id);
+      else current.add(id);
+      return { ...prev, serviceIds: [...current] };
+    });
+  }
+
+  function selectAssistantCliente(cliente) {
+    updateAssistantForm({
+      selectedClientId: cliente?.id_cliente || '',
+      clientSearch: getClienteNombre(cliente),
+    });
+  }
+
+  async function submitAssistantBooking() {
+    if (!selectedSucursalId) {
+      notifications.warning('Selecciona una sucursal para crear la cita.', { dedupeKey: 'admin-booking-branch-required' });
+      return;
+    }
+    if (!assistantForm.fechaInicio) {
+      notifications.warning('Selecciona fecha y hora para la cita.', { dedupeKey: 'admin-booking-date-required' });
+      return;
+    }
+    if (!assistantForm.serviceIds.length) {
+      notifications.warning('Selecciona al menos un servicio.', { dedupeKey: 'admin-booking-services-required' });
+      return;
+    }
+    if (assistantForm.clientMode === 'existing' && !assistantForm.selectedClientId) {
+      notifications.warning('Selecciona un cliente existente o cambia a ficha nueva.', { dedupeKey: 'admin-booking-client-required' });
+      return;
+    }
+    if (assistantForm.clientMode === 'new' && (!assistantForm.nombres.trim() || !assistantForm.apellidos.trim() || !assistantForm.telefono.trim())) {
+      notifications.warning('Completa nombres, apellidos y telefono para la ficha nueva.', { dedupeKey: 'admin-booking-new-client-required' });
+      return;
+    }
+    if (assistantForm.aplicarRecompensa && !assistantForm.consentimientoConfirmado) {
+      notifications.warning('Confirma el consentimiento del cliente para aplicar recompensa.', { dedupeKey: 'admin-booking-reward-consent-required' });
+      return;
+    }
+    if (assistantForm.aplicarRecompensa && !assistantForm.consentimientoMedio) {
+      notifications.warning('Selecciona el medio de consentimiento de la recompensa.', { dedupeKey: 'admin-booking-reward-consent-method-required' });
+      return;
+    }
+    if (isSuperAdmin && assistantForm.promocionManualId && !assistantForm.promocionManualMotivo.trim()) {
+      notifications.warning('Ingresa el motivo para la promocion manual.', { dedupeKey: 'admin-booking-manual-promo-reason-required' });
+      return;
+    }
+    if (isSuperAdmin && assistantForm.aplicarCortesia && !assistantForm.cortesiaMotivo.trim()) {
+      notifications.warning('Ingresa el motivo de la cortesia.', { dedupeKey: 'admin-booking-courtesy-reason-required' });
+      return;
+    }
+
+    const fechaInicio = toIsoDateTime(assistantForm.fechaInicio);
+    if (!fechaInicio) {
+      notifications.warning('La fecha y hora seleccionada no es valida.', { dedupeKey: 'admin-booking-date-invalid' });
+      return;
+    }
+
+    const payload = {
+      id_sucursal: selectedSucursalId,
+      metodo_pago_codigo: assistantForm.metodoPagoCodigo,
+      notas: assistantForm.notas || null,
+      motivo: 'agendamiento_interno_asistido',
+      integrantes: [
+        {
+          orden_integrante: 1,
+          alias: 'Titular',
+          selection_type: 'services',
+          fecha_inicio: fechaInicio,
+          id_barbero: assistantForm.idBarbero || null,
+          servicios: assistantForm.serviceIds.map((idServicio) => ({ id_servicio: idServicio })),
+        },
+      ],
+    };
+    if (assistantForm.clientMode === 'existing') {
+      payload.id_cliente = assistantForm.selectedClientId;
+    } else {
+      payload.cliente_nuevo = {
+        nombres: assistantForm.nombres.trim(),
+        apellidos: assistantForm.apellidos.trim(),
+        telefono_principal: assistantForm.telefono.trim(),
+        correo_principal: assistantForm.correo.trim() || null,
+      };
+    }
+    if (assistantForm.aplicarRecompensa) {
+      payload.recompensa = {
+        aplicar: true,
+        canje_context_token: assistantForm.canjeContextToken.trim() || null,
+        consentimiento: {
+          confirmado: assistantForm.consentimientoConfirmado,
+          medio: assistantForm.consentimientoMedio,
+          observacion: assistantForm.consentimientoObservacion.trim() || null,
+        },
+      };
+    }
+    if (isSuperAdmin && assistantForm.promocionManualId.trim()) {
+      payload.promocion_manual_id = assistantForm.promocionManualId.trim();
+      payload.promocion_manual_motivo = assistantForm.promocionManualMotivo.trim();
+    }
+    if (isSuperAdmin && assistantForm.aplicarCortesia) {
+      payload.cortesia = {
+        aplicar: true,
+        tipo: assistantForm.cortesiaTipo,
+        valor: Number(assistantForm.cortesiaValor),
+        motivo: assistantForm.cortesiaMotivo.trim(),
+      };
+    }
+
+    setAssistantSaving(true);
+    setAssistantError('');
+    try {
+      const result = await adminBookingAdapter.createHold(payload, {
+        headers: { 'x-idempotency-key': makeIdempotencyKey() },
+        dedupe: false,
+      });
+      setAssistantResult(result);
+      notifications.success('Hold administrativo creado.', { dedupeKey: 'admin-booking-hold-created' });
+      void fetchCitas({ silent: true });
+    } catch (err) {
+      const message = mapAdminCitasErrorMessage(err, 'No se pudo crear la cita asistida.');
+      setAssistantError(message);
+      notifications.error(message, { dedupeKey: 'admin-booking-hold-error' });
+    } finally {
+      setAssistantSaving(false);
+    }
+  }
+
+  async function releaseAssistantHold() {
+    const groupId = assistantResult?.id_grupo_cita || assistantResult?.groupId;
+    if (!groupId) return;
+    setAssistantSaving(true);
+    setAssistantError('');
+    try {
+      const result = await adminBookingAdapter.releaseHold(groupId, { dedupe: false });
+      setAssistantResult((prev) => ({ ...prev, ...result }));
+      notifications.success('Hold administrativo liberado.', { dedupeKey: 'admin-booking-hold-released' });
+      void fetchCitas({ silent: true });
+    } catch (err) {
+      const message = mapAdminCitasErrorMessage(err, 'No se pudo liberar el hold.');
+      setAssistantError(message);
+      notifications.error(message, { dedupeKey: 'admin-booking-release-error' });
+    } finally {
+      setAssistantSaving(false);
+    }
+  }
+
+  async function confirmAssistantHold() {
+    const groupId = assistantResult?.id_grupo_cita || assistantResult?.groupId;
+    if (!groupId) return;
+    setAssistantSaving(true);
+    setAssistantError('');
+    try {
+      const result = assistantForm.metodoPagoCodigo === 'efectivo'
+        ? await adminBookingAdapter.confirmCashPending(groupId, { motivo: 'agendamiento_interno_asistido' }, { dedupe: false })
+        : await adminBookingAdapter.confirmWithoutPayment(groupId, {
+          metodo_pago_codigo: assistantForm.metodoPagoCodigo || 'sin_pago',
+          motivo: 'agendamiento_interno_asistido',
+          canje_context_token: assistantForm.canjeContextToken.trim() || null,
+          consentimiento: assistantForm.aplicarRecompensa ? {
+            confirmado: assistantForm.consentimientoConfirmado,
+            medio: assistantForm.consentimientoMedio,
+            referencia: assistantForm.consentimientoObservacion.trim() || null,
+          } : null,
+        }, { dedupe: false });
+      setAssistantResult((prev) => ({ ...prev, ...result }));
+      notifications.success('Hold administrativo confirmado.', { dedupeKey: 'admin-booking-hold-confirmed' });
+      void fetchCitas({ silent: true });
+    } catch (err) {
+      const message = mapAdminCitasErrorMessage(err, 'No se pudo confirmar el hold.');
+      setAssistantError(message);
+      notifications.error(message, { dedupeKey: 'admin-booking-confirm-error' });
+    } finally {
+      setAssistantSaving(false);
+    }
   }
 
   function openStatusDialog(cita, estadoDestino) {
@@ -1118,6 +1479,10 @@ export default function AdminAgendamientoCitasPage() {
           </div>
 
           <div className={`grid gap-2 ${canManageEmergency ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <Button type="button" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-sm font-semibold min-[390px]:text-base" onClick={openAssistantDialog}>
+              <CalendarPlus size={15} />
+              Nueva cita
+            </Button>
             <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-sm font-semibold min-[390px]:text-base" onClick={() => setFiltersOpen(true)}>
               <SlidersHorizontal size={15} />
               Filtros
@@ -1204,6 +1569,10 @@ export default function AdminAgendamientoCitasPage() {
               {activeFilterCount > 0 ? (
                 <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={clearAllFilters}>Limpiar</Button>
               ) : null}
+              <Button type="button" className="gap-2" onClick={openAssistantDialog}>
+                <CalendarPlus size={15} />
+                Nueva cita
+              </Button>
               {canManageEmergency ? (
                 <Button type="button" variant="outline" className="gap-2" onClick={() => setBatchDialogOpen(true)}>
                   <AlertTriangle size={14} />
@@ -1275,6 +1644,239 @@ export default function AdminAgendamientoCitasPage() {
           {renderContainer('en_atencion', citasEnAtencion, 'No hay citas en atención en este momento.')}
         </div>
       ) : null}
+
+      <Dialog open={assistantOpen} onOpenChange={(open) => (open ? openAssistantDialog() : closeAssistantDialog())}>
+        <DialogContent className="w-[calc(100vw-1rem)] max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Agendamiento interno asistido</DialogTitle>
+            <DialogDescription>Crea un hold real para la sucursal operativa seleccionada.</DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="space-y-4">
+              <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+                <p className="text-sm font-semibold text-[var(--mf-text)]">{selectedSucursal?.nombre_sucursal || 'Sucursal seleccionada'}</p>
+                <p className="mt-1 text-xs text-[var(--mf-text-2)]">El hold no confirma pago ni consume la reserva hasta el cierre administrativo.</p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button type="button" className={`rounded-lg border p-3 text-left transition-colors ${assistantForm.clientMode === 'existing' ? 'border-[var(--mf-accent)] bg-[var(--mf-btn-bg)]' : 'border-[var(--mf-nav-border)]'}`} onClick={() => updateAssistantForm({ clientMode: 'existing', selectedClientId: '', clientSearch: '' })}>
+                  <span className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--mf-text)]"><Search size={15} /> Cliente existente</span>
+                  <span className="mt-1 block text-xs text-[var(--mf-text-2)]">Buscar por nombre, telefono, correo o ID.</span>
+                </button>
+                <button type="button" className={`rounded-lg border p-3 text-left transition-colors ${assistantForm.clientMode === 'new' ? 'border-[var(--mf-accent)] bg-[var(--mf-btn-bg)]' : 'border-[var(--mf-nav-border)]'}`} onClick={() => updateAssistantForm({ clientMode: 'new', selectedClientId: '', clientSearch: '' })}>
+                  <span className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--mf-text)]"><UserPlus size={15} /> Ficha nueva</span>
+                  <span className="mt-1 block text-xs text-[var(--mf-text-2)]">Sin crear cuenta ni credenciales.</span>
+                </button>
+              </div>
+
+              {assistantForm.clientMode === 'existing' ? (
+                <div className="space-y-2">
+                  <Label className="mf-label">Buscar cliente</Label>
+                  <Input className="mf-input" value={assistantForm.clientSearch} onChange={(event) => updateAssistantForm({ clientSearch: event.target.value, selectedClientId: '' })} placeholder="Nombre, telefono o correo" />
+                  <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-[var(--mf-nav-border)] p-1">
+                    {assistantCatalogLoading ? <p className="px-2 py-3 text-sm text-[var(--mf-text-2)]">Cargando clientes...</p> : null}
+                    {!assistantCatalogLoading && assistantClientesFiltrados.length === 0 ? <p className="px-2 py-3 text-sm text-[var(--mf-text-2)]">No hay coincidencias.</p> : null}
+                    {assistantClientesFiltrados.map((cliente) => {
+                      const active = assistantForm.selectedClientId === cliente.id_cliente;
+                      return (
+                        <button key={cliente.id_cliente} type="button" className={`w-full rounded-md px-2 py-2 text-left text-sm transition-colors ${active ? 'bg-[var(--mf-accent)] text-[var(--mf-accent-text)]' : 'hover:bg-[var(--mf-btn-bg)]'}`} onClick={() => selectAssistantCliente(cliente)}>
+                          <span className="block font-semibold">{getClienteNombre(cliente)}</span>
+                          <span className="block text-xs opacity-80">{cliente.telefono_principal || '-'} · {cliente.correo_principal || 'Sin correo'}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label className="mf-label">Nombres *</Label>
+                    <Input className="mf-input mt-1" value={assistantForm.nombres} onChange={(event) => updateAssistantForm({ nombres: event.target.value })} />
+                  </div>
+                  <div>
+                    <Label className="mf-label">Apellidos *</Label>
+                    <Input className="mf-input mt-1" value={assistantForm.apellidos} onChange={(event) => updateAssistantForm({ apellidos: event.target.value })} />
+                  </div>
+                  <div>
+                    <Label className="mf-label">Telefono *</Label>
+                    <Input className="mf-input mt-1" value={assistantForm.telefono} onChange={(event) => updateAssistantForm({ telefono: event.target.value })} />
+                  </div>
+                  <div>
+                    <Label className="mf-label">Correo</Label>
+                    <Input className="mf-input mt-1" type="email" value={assistantForm.correo} onChange={(event) => updateAssistantForm({ correo: event.target.value })} />
+                  </div>
+                </div>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <Label className="mf-label">Fecha y hora *</Label>
+                  <Input type="datetime-local" className="mf-input mt-1" value={assistantForm.fechaInicio} onChange={(event) => updateAssistantForm({ fechaInicio: event.target.value })} />
+                </div>
+                <div>
+                  <Label className="mf-label">Barbero</Label>
+                  <select className="mf-select mt-1" value={assistantForm.idBarbero} onChange={(event) => updateAssistantForm({ idBarbero: event.target.value })}>
+                    <option value="">Autoasignar disponible</option>
+                    {assistantBarberos.map((barbero) => <option key={barbero.id_empleado} value={barbero.id_empleado}>{barbero.nombre_completo}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <Label className="mf-label">Servicios *</Label>
+                <div className="mt-2 grid max-h-56 gap-2 overflow-y-auto sm:grid-cols-2">
+                  {assistantCatalogLoading ? <p className="text-sm text-[var(--mf-text-2)]">Cargando servicios...</p> : null}
+                  {!assistantCatalogLoading && assistantServicios.length === 0 ? <p className="text-sm text-[var(--mf-text-2)]">No hay servicios publicados para esta sucursal.</p> : null}
+                  {assistantServicios.map((servicio) => {
+                    const serviceId = getServicioId(servicio);
+                    const checked = assistantForm.serviceIds.includes(serviceId);
+                    return (
+                      <button key={serviceId} type="button" className={`rounded-lg border px-3 py-2 text-left transition-colors ${checked ? 'border-[var(--mf-accent)] bg-[var(--mf-btn-bg)]' : 'border-[var(--mf-nav-border)] hover:bg-[var(--mf-btn-bg)]'}`} onClick={() => toggleAssistantService(serviceId)}>
+                        <span className="flex items-center justify-between gap-2 text-sm font-semibold text-[var(--mf-text)]">
+                          {getCatalogServicioNombre(servicio)}
+                          {checked ? <CheckCircle2 size={15} className="text-[var(--mf-accent)]" /> : null}
+                        </span>
+                        <span className="text-xs text-[var(--mf-text-2)]">{formatCurrencyHnl(getServicioPrecio(servicio))}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-lg border border-[var(--mf-nav-border)] p-3">
+                <p className="text-sm font-semibold text-[var(--mf-text)]">Beneficios</p>
+                <div className="rounded-md border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3 text-xs text-[var(--mf-text-2)]">
+                  <p>Promociones automaticas: el backend evalua vigencia, cupos, compatibilidad y limites.</p>
+                  <p>Membresia: se calcula para el cliente seleccionado y solo cubre lo permitido.</p>
+                </div>
+
+                <label className="flex items-start gap-2 text-sm text-[var(--mf-text)]">
+                  <input type="checkbox" className="mt-1" checked={assistantForm.aplicarRecompensa} onChange={(event) => updateAssistantForm({ aplicarRecompensa: event.target.checked })} />
+                  <span>Aplicar recompensa con consentimiento</span>
+                </label>
+                {assistantForm.aplicarRecompensa ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <Label className="mf-label">Token de canje</Label>
+                      <Input className="mf-input mt-1" value={assistantForm.canjeContextToken} onChange={(event) => updateAssistantForm({ canjeContextToken: event.target.value })} />
+                    </div>
+                    <div>
+                      <Label className="mf-label">Medio consentimiento *</Label>
+                      <select className="mf-select mt-1" value={assistantForm.consentimientoMedio} onChange={(event) => updateAssistantForm({ consentimientoMedio: event.target.value })}>
+                        <option value="presencial">Presencial</option>
+                        <option value="llamada">Llamada</option>
+                        <option value="whatsapp">WhatsApp</option>
+                        <option value="otro">Otro</option>
+                      </select>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-[var(--mf-text)]">
+                      <input type="checkbox" checked={assistantForm.consentimientoConfirmado} onChange={(event) => updateAssistantForm({ consentimientoConfirmado: event.target.checked })} />
+                      Consentimiento confirmado
+                    </label>
+                    <div>
+                      <Label className="mf-label">Observacion</Label>
+                      <Input className="mf-input mt-1" value={assistantForm.consentimientoObservacion} onChange={(event) => updateAssistantForm({ consentimientoObservacion: event.target.value })} />
+                    </div>
+                  </div>
+                ) : null}
+
+                {isSuperAdmin ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <Label className="mf-label">Promocion manual</Label>
+                      <Input className="mf-input mt-1" value={assistantForm.promocionManualId} onChange={(event) => updateAssistantForm({ promocionManualId: event.target.value })} placeholder="ID promocion o regla" />
+                    </div>
+                    <div>
+                      <Label className="mf-label">Motivo promocion manual</Label>
+                      <Input className="mf-input mt-1" value={assistantForm.promocionManualMotivo} onChange={(event) => updateAssistantForm({ promocionManualMotivo: event.target.value })} />
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-[var(--mf-text)]">
+                      <input type="checkbox" checked={assistantForm.aplicarCortesia} onChange={(event) => updateAssistantForm({ aplicarCortesia: event.target.checked })} />
+                      Cortesia excepcional
+                    </label>
+                    {assistantForm.aplicarCortesia ? (
+                      <div className="grid gap-3 sm:col-span-2 sm:grid-cols-3">
+                        <div>
+                          <Label className="mf-label">Tipo</Label>
+                          <select className="mf-select mt-1" value={assistantForm.cortesiaTipo} onChange={(event) => updateAssistantForm({ cortesiaTipo: event.target.value })}>
+                            <option value="total">Total</option>
+                            <option value="porcentaje">Porcentaje</option>
+                            <option value="monto">Monto</option>
+                          </select>
+                        </div>
+                        <div>
+                          <Label className="mf-label">Valor</Label>
+                          <Input className="mf-input mt-1" type="number" min="0" value={assistantForm.cortesiaValor} onChange={(event) => updateAssistantForm({ cortesiaValor: event.target.value })} />
+                        </div>
+                        <div>
+                          <Label className="mf-label">Motivo *</Label>
+                          <Input className="mf-input mt-1" value={assistantForm.cortesiaMotivo} onChange={(event) => updateAssistantForm({ cortesiaMotivo: event.target.value })} />
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <aside className="space-y-3 rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+              <div>
+                <Label className="mf-label">Metodo operativo</Label>
+                <select className="mf-select mt-1" value={assistantForm.metodoPagoCodigo} onChange={(event) => updateAssistantForm({ metodoPagoCodigo: event.target.value })}>
+                  {ADMIN_BOOKING_PAYMENT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <Label className="mf-label">Notas</Label>
+                <textarea className="mf-input mt-1 min-h-24 w-full resize-y" value={assistantForm.notas} onChange={(event) => updateAssistantForm({ notas: event.target.value })} />
+              </div>
+              <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-3">
+                <p className="text-xs uppercase tracking-[0.2em] text-[var(--mf-text-2)]">Total estimado</p>
+                <p className="mt-1 text-2xl font-semibold text-[var(--mf-text)]">{formatCurrencyHnl(assistantTotalHnl)}</p>
+                <p className="mt-1 text-xs text-[var(--mf-text-2)]">El backend recalcula y valida el total canonico.</p>
+              </div>
+              {assistantResult ? (
+                <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-3 text-sm">
+                  <p className="font-semibold text-[var(--mf-text)]">Resumen backend</p>
+                  <div className="mt-2 space-y-1 text-xs text-[var(--mf-text-2)]">
+                    <p>Subtotal: <span className="text-[var(--mf-text)]">{formatCurrencyHnl(assistantResult.subtotal_hnl)}</span></p>
+                    <p>Promocion: <span className="text-[var(--mf-text)]">{formatCurrencyHnl(assistantResult.descuento_promocion_hnl)}</span></p>
+                    <p>Membresia: <span className="text-[var(--mf-text)]">{formatCurrencyHnl(assistantResult.descuento_membresia_hnl)}</span></p>
+                    <p>Recompensa: <span className="text-[var(--mf-text)]">{formatCurrencyHnl(assistantResult.descuento_recompensa_hnl)}</span></p>
+                    <p>Cortesia: <span className="text-[var(--mf-text)]">{formatCurrencyHnl(assistantResult.descuento_cortesia_hnl)}</span></p>
+                    <p>Extras: <span className="text-[var(--mf-text)]">{formatCurrencyHnl(assistantResult.extras_a_pagar_hnl)}</span></p>
+                    <p>Total: <span className="text-[var(--mf-text)]">{formatCurrencyHnl(assistantResult.total_pagar_hnl)}</span></p>
+                  </div>
+                  {assistantResult.beneficios?.membresia?.detectada ? <p className="mt-2 text-xs text-[var(--mf-text-2)]">Membresia: {assistantResult.beneficios.membresia.aplicada ? 'aplicada' : assistantResult.beneficios.membresia.motivo_no_aplica || 'no aplicable'}</p> : null}
+                  {assistantResult.beneficios?.recompensa?.aplicada ? <p className="mt-1 text-xs text-[var(--mf-text-2)]">Recompensa: {assistantResult.beneficios.recompensa.servicio_nombre || 'aplicada'}</p> : null}
+                  {assistantResult.beneficios?.promociones?.aplicadas?.length ? <p className="mt-1 text-xs text-[var(--mf-text-2)]">Promociones: {assistantResult.beneficios.promociones.aplicadas.length}</p> : null}
+                </div>
+              ) : null}
+              {assistantError ? <ErrorBanner message={assistantError} /> : null}
+              {assistantResult ? (
+                <div className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+                  <p className="font-semibold">Hold creado</p>
+                  <p className="mt-1 text-xs">Grupo: {assistantResult.id_grupo_cita || assistantResult.groupId}</p>
+                  <p className="text-xs">Cita: {assistantResult.estado_cita_codigo || '-'} · Pago: {assistantResult.estado_pago_codigo || '-'}</p>
+                  <p className="text-xs">Hold: {assistantResult.estado_hold_codigo || assistantResult.estado_grupo_codigo || '-'}</p>
+                </div>
+              ) : null}
+            </aside>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeAssistantDialog} disabled={assistantSaving}>Cerrar</Button>
+            {assistantResult?.id_grupo_cita || assistantResult?.groupId ? (
+              <Button variant="outline" onClick={releaseAssistantHold} disabled={assistantSaving}>Liberar hold</Button>
+            ) : null}
+            {assistantResult?.id_grupo_cita || assistantResult?.groupId ? (
+              <Button variant="outline" onClick={confirmAssistantHold} disabled={assistantSaving}>Confirmar cierre</Button>
+            ) : null}
+            <Button onClick={submitAssistantBooking} disabled={assistantSaving || assistantCatalogLoading}>{assistantSaving ? 'Creando...' : 'Crear hold real'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
         <DialogContent className="sm:max-w-xl">

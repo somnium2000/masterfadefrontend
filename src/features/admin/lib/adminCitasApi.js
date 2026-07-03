@@ -34,6 +34,22 @@ export async function patchAdminCitaEstado(idCita, payload) {
   return http.patch(`/v1/admin/citas/${encodeURIComponent(idCita)}/estado`, payload);
 }
 
+export async function postAdminCitasHold(payload, options = {}) {
+  return http.post('/v1/admin/citas/hold', payload, options);
+}
+
+export async function deleteAdminCitasHold(idGrupoCita, options = {}) {
+  return http.del(`/v1/admin/citas/hold/${encodeURIComponent(idGrupoCita)}`, options);
+}
+
+export async function postAdminCitasHoldConfirmar(idGrupoCita, payload = {}, options = {}) {
+  return http.post(`/v1/admin/citas/hold/${encodeURIComponent(idGrupoCita)}/confirmar`, payload, options);
+}
+
+export async function postAdminCitasHoldPaymentLink(idGrupoCita, payload = {}, options = {}) {
+  return http.post(`/v1/admin/citas/hold/${encodeURIComponent(idGrupoCita)}/payment-link`, payload, options);
+}
+
 export async function postAdminCitaIniciarAtencion(idCita) {
   return http.post(`/v1/admin/citas/${encodeURIComponent(idCita)}/iniciar-atencion`, {});
 }
