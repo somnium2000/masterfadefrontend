@@ -1,15 +1,24 @@
 import { createContext, useContext } from 'react';
 
-export const PublicBookingContext = createContext(null);
+export const BookingFlowContext = createContext(null);
+export const PublicBookingContext = BookingFlowContext;
+
+export function BookingFlowProvider({ value, children }) {
+  return <BookingFlowContext.Provider value={value}>{children}</BookingFlowContext.Provider>;
+}
 
 export function PublicBookingProvider({ value, children }) {
-  return <PublicBookingContext.Provider value={value}>{children}</PublicBookingContext.Provider>;
+  return <BookingFlowProvider value={value}>{children}</BookingFlowProvider>;
+}
+
+export function useBookingFlow() {
+  const context = useContext(BookingFlowContext);
+  if (!context) {
+    throw new Error('useBookingFlow debe usarse dentro de BookingFlowProvider.');
+  }
+  return context;
 }
 
 export function usePublicBookingFlow() {
-  const context = useContext(PublicBookingContext);
-  if (!context) {
-    throw new Error('usePublicBookingFlow debe usarse dentro de PublicBookingFlow.');
-  }
-  return context;
+  return useBookingFlow();
 }

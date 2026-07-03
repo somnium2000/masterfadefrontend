@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useAuth } from '../../../../context/AuthContext.jsx';
 import { getTitularState } from '../bookingUtils.js';
 
-function resolveBookingMode({ isHydrating, isHydrated, isAuthenticated, roles }) {
+export function resolveBookingMode({ isHydrating, isHydrated, isAuthenticated, roles }) {
   if (isHydrating || !isHydrated) return 'loading';
   if (isAuthenticated && Array.isArray(roles) && roles.includes('cliente')) return 'authenticated';
   return 'public';

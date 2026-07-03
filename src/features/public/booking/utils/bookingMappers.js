@@ -150,6 +150,8 @@ export function normalizeBookingBlock(block, index) {
   };
 }
 
+export const normalizeSharedBookingBlock = normalizeBookingBlock;
+
 export function areBlocksEqual(left, right) {
   if (!left || !right) return false;
   return left.id === right.id
