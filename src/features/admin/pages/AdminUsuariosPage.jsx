@@ -58,6 +58,13 @@ const USER_FILTER_DEFAULTS = {
   rol: 'all',
   origen: 'all',
 };
+const PROTECTED_ROOT_EMAIL = 'somniumia2000@gmail.com';
+const PROTECTED_ROOT_MESSAGE = 'El usuario root protegido no puede ser bloqueado ni degradado.';
+const PROTECTED_ROOT_ERROR_CODES = new Set([
+  'ROOT_USER_PROTECTED',
+  'ROOT_ROLE_PROTECTED',
+  'ROOT_USER_PROTECTION_CHECK_FAILED',
+]);
 
 function quickFilterButtonClass(isActive) {
   // AM: Estado montado en botones rapidos para claridad operativa de filtros activos.
@@ -67,6 +74,11 @@ function quickFilterButtonClass(isActive) {
 }
 
 function extractMessage(err) {
+  const errorCode = String(err?.data?.error?.code || err?.code || '').trim();
+  if (PROTECTED_ROOT_ERROR_CODES.has(errorCode)) {
+    return PROTECTED_ROOT_MESSAGE;
+  }
+
   const rawMessage = String(err?.data?.error?.message || err?.message || '').trim();
   if (!rawMessage) return 'No se pudo completar la operacion de usuarios.';
   const lowered = rawMessage.toLowerCase();
@@ -92,6 +104,34 @@ function AccessBadge({ estadoAcceso }) {
   if (normalized === 'bloqueado' || normalized === 'inactivo') className = 'mf-badge mf-badge-red';
   if (normalized === 'pendiente_password') className = 'mf-badge mf-badge-gold';
   return <span className={className}>{ACCESS_LABELS[normalized] || 'Sin estado'}</span>;
+}
+
+function ProtectedRootBadge() {
+  return (
+    <span className="mf-badge mf-badge-gold" title={PROTECTED_ROOT_MESSAGE}>
+      Root protegido
+    </span>
+  );
+}
+
+function isProtectedRootUser(usuario) {
+  if (!usuario) return false;
+  if (usuario.is_protected === true || usuario.protected === true || usuario.es_protegido === true) {
+    return true;
+  }
+
+  // AM: Fallback temporal hasta que la API exponga is_protected desde app_protected_users.
+  const email = String(usuario?.correo_principal || usuario?.email || '').trim().toLowerCase();
+  return email === PROTECTED_ROOT_EMAIL;
+}
+
+function renderUserBadges(usuario) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <AccessBadge estadoAcceso={usuario?.estado_acceso} />
+      {isProtectedRootUser(usuario) ? <ProtectedRootBadge /> : null}
+    </div>
+  );
 }
 
 function buildRoleLabel(roles) {
@@ -315,8 +355,14 @@ export default function AdminUsuariosPage() {
     }
   }
 
-  async function handleResendSetup(idUsuario) {
+  async function handleResendSetup(usuario) {
+    const idUsuario = usuario?.id_usuario;
     if (!idUsuario || loadingUserId) return;
+    if (isProtectedRootUser(usuario)) {
+      notifications.error(PROTECTED_ROOT_MESSAGE, { dedupeKey: 'personas-usuarios-root-protected' });
+      return;
+    }
+
     await runUserAction(
       idUsuario,
       async (userId) => {
@@ -340,6 +386,11 @@ export default function AdminUsuariosPage() {
 
   async function handleToggleBlock(usuario) {
     const shouldActivate = isActivationState(usuario?.estado_acceso);
+    if (!shouldActivate && isProtectedRootUser(usuario)) {
+      notifications.error(PROTECTED_ROOT_MESSAGE, { dedupeKey: 'personas-usuarios-root-protected' });
+      return;
+    }
+
     setConfirmTarget({
       ...usuario,
       _action: shouldActivate ? 'activar' : 'bloquear',
@@ -350,6 +401,11 @@ export default function AdminUsuariosPage() {
     const usuario = confirmTarget;
     if (!usuario?.id_usuario) return;
     const shouldActivate = usuario?._action === 'activar';
+    if (!shouldActivate && isProtectedRootUser(usuario)) {
+      notifications.error(PROTECTED_ROOT_MESSAGE, { dedupeKey: 'personas-usuarios-root-protected' });
+      setConfirmTarget(null);
+      return;
+    }
 
     await runUserAction(
       usuario.id_usuario,
@@ -365,6 +421,9 @@ export default function AdminUsuariosPage() {
   function renderActions(usuario) {
     const loadingActions = loadingUserId === usuario.id_usuario;
     const shouldActivate = isActivationState(usuario.estado_acceso);
+    const protectedRoot = isProtectedRootUser(usuario);
+    const protectedActionDisabled = protectedRoot && !shouldActivate;
+    const protectedTitle = protectedActionDisabled ? PROTECTED_ROOT_MESSAGE : null;
     return (
       <div className="flex w-full flex-wrap items-center justify-start gap-2">
         <HoverActionButton
@@ -377,17 +436,17 @@ export default function AdminUsuariosPage() {
         <HoverActionButton
           icon={shouldActivate ? <CheckCircle2 size={14} strokeWidth={2} /> : <Ban size={14} strokeWidth={2} />}
           label={loadingActions ? 'Procesando...' : shouldActivate ? 'Activar' : 'Bloquear'}
-          title={shouldActivate ? 'Activar usuario' : 'Bloquear usuario'}
+          title={protectedTitle || (shouldActivate ? 'Activar usuario' : 'Bloquear usuario')}
           tone={shouldActivate ? 'success' : 'warning'}
-          disabled={loadingActions}
+          disabled={loadingActions || protectedActionDisabled}
           onClick={() => handleToggleBlock(usuario)}
         />
         <HoverActionButton
           icon={<RefreshCw size={14} strokeWidth={2} />}
           label={loadingActions ? 'Procesando...' : 'Mandar mensaje'}
-          title="Mandar mensaje para nueva contraseña"
-          disabled={loadingActions}
-          onClick={() => handleResendSetup(usuario.id_usuario)}
+          title={protectedRoot ? PROTECTED_ROOT_MESSAGE : 'Mandar mensaje para nueva contrasena'}
+          disabled={loadingActions || protectedRoot}
+          onClick={() => handleResendSetup(usuario)}
         />
       </div>
     );
@@ -495,7 +554,7 @@ export default function AdminUsuariosPage() {
               avatar={<ShieldCheck size={16} />}
               title={usuario.nombre_completo || 'Usuario'}
               subtitle={usuario.email || 'Sin correo'}
-              badge={<AccessBadge estadoAcceso={usuario.estado_acceso} />}
+              badge={renderUserBadges(usuario)}
               fields={[
                 { label: 'Roles', value: buildRoleLabel(usuario.roles) },
                 { label: 'Origen', value: usuario.origen || 'interno' },
@@ -525,7 +584,7 @@ export default function AdminUsuariosPage() {
                   <TableCell className="font-medium text-[var(--mf-text)]">{usuario.nombre_completo || 'Usuario'}</TableCell>
                   <TableCell className="text-[var(--mf-text-2)] text-sm">{usuario.email || 'Sin correo'}</TableCell>
                   <TableCell className="hidden md:table-cell text-sm">{buildRoleLabel(usuario.roles)}</TableCell>
-                  <TableCell className="text-center"><AccessBadge estadoAcceso={usuario.estado_acceso} /></TableCell>
+                  <TableCell className="text-center">{renderUserBadges(usuario)}</TableCell>
                   <TableCell className="text-center">{renderActions(usuario)}</TableCell>
                 </TableRow>
               ))}
@@ -573,7 +632,7 @@ export default function AdminUsuariosPage() {
                 icon: <Users size={16} />,
                 title: selectedUsuario.nombre_completo || '-',
                 subtitle: selectedUsuario.email || '-',
-                badge: <AccessBadge estadoAcceso={selectedUsuario.estado_acceso} />,
+                badge: renderUserBadges(selectedUsuario),
               }}
               sections={[
                 {
@@ -592,7 +651,7 @@ export default function AdminUsuariosPage() {
                   title: 'Estado y trazabilidad',
                   icon: <KeyRound size={14} />,
                   fields: [
-                    { label: 'Estado acceso', value: <AccessBadge estadoAcceso={selectedUsuario.estado_acceso} /> },
+                    { label: 'Estado acceso', value: renderUserBadges(selectedUsuario) },
                     { label: 'Credenciales completadas', value: selectedUsuario.credenciales_completadas_at ? new Date(selectedUsuario.credenciales_completadas_at).toLocaleString() : 'No' },
                     { label: 'Ultimo login', value: selectedUsuario.ultimo_login_at ? new Date(selectedUsuario.ultimo_login_at).toLocaleString() : 'Sin registro' },
                   ],

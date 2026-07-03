@@ -35,6 +35,7 @@ import {
   getClientePlanEstado,
 } from "../lib/clienteApi.js";
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
+import { CLIENT_LOCK_MESSAGE, CLIENT_PLAN_PURCHASE_ENABLED } from "../lib/clientFeatureFlags.js";
 
 const CATEGORY_ICONS = {
   1: Shield,
@@ -219,6 +220,8 @@ function PlanCard({
   onPurchase,
   loading = false,
   disabled = false,
+  purchaseEnabled = true,
+  lockLabel = "Proximamente...",
 }) {
   const benefits = Array.isArray(plan?.beneficios) ? plan.beneficios : [];
   const categoryLevel = normalizePlanCategory(plan?.categoria_nivel, 1);
@@ -316,10 +319,16 @@ function PlanCard({
         type="button"
         className="mt-5 w-full rounded-xl"
         onClick={() => onPurchase(plan)}
-        disabled={disabled || loading || !canPurchase}
-        title={missingBranchOffer ? "Este plan no tiene oferta valida para esta sucursal" : undefined}
+        disabled={disabled || loading || !canPurchase || !purchaseEnabled}
+        title={
+          !purchaseEnabled
+            ? "La adquisicion de planes estara disponible proximamente."
+            : missingBranchOffer
+              ? "Este plan no tiene oferta valida para esta sucursal"
+              : undefined
+        }
       >
-        {loading ? "Procesando..." : (canPurchase ? "Quiero este plan" : "Oferta pendiente")}
+        {loading ? "Procesando..." : (!purchaseEnabled ? lockLabel : (canPurchase ? "Quiero este plan" : "Oferta pendiente"))}
       </Button>
       {missingBranchOffer ? (
         <p className="mt-2 text-center text-xs text-amber-200">Este plan no tiene oferta valida para esta sucursal.</p>
@@ -433,7 +442,15 @@ export default function ClientePlanesPage() {
     setPurchaseModalOpen(false);
   }
 
+  function notifyPlanPurchaseLocked() {
+    notifyWarning("La adquisicion de planes estara disponible proximamente.");
+  }
+
   async function createOrderForPlanOffer(offerId) {
+    if (!CLIENT_PLAN_PURCHASE_ENABLED) {
+      notifyPlanPurchaseLocked();
+      return;
+    }
     setLoadingPlanOfferId(offerId);
     try {
       const orderResponse = await createMembershipOrder(offerId);
@@ -452,6 +469,10 @@ export default function ClientePlanesPage() {
   }
 
   async function handlePurchasePlan(plan) {
+    if (!CLIENT_PLAN_PURCHASE_ENABLED) {
+      notifyPlanPurchaseLocked();
+      return;
+    }
     if (!branchId) {
       notifyWarning("Selecciona una sucursal antes de comprar un plan.");
       return;
@@ -480,6 +501,10 @@ export default function ClientePlanesPage() {
   }
 
   async function handleContinueToPayment() {
+    if (!CLIENT_PLAN_PURCHASE_ENABLED) {
+      notifyPlanPurchaseLocked();
+      return;
+    }
     const orderId = String(purchaseOrderSummary?.id_order || "").trim();
     if (!orderId || purchaseLoading) return;
 
@@ -498,6 +523,10 @@ export default function ClientePlanesPage() {
   }
 
   async function handleConfirmPayment() {
+    if (!CLIENT_PLAN_PURCHASE_ENABLED) {
+      notifyPlanPurchaseLocked();
+      return;
+    }
     if (purchaseLoading || purchaseCompleted) return;
     const paymentIntentId = String(membershipPaymentIntent?.id_payment_intent || "").trim();
     if (!paymentIntentId) {
@@ -555,6 +584,13 @@ export default function ClientePlanesPage() {
 
   async function handleConfirmDialogContinue() {
     if (confirmDialogMode === "replace_plan") {
+      if (!CLIENT_PLAN_PURCHASE_ENABLED) {
+        setConfirmDialogOpen(false);
+        setConfirmDialogMode("");
+        setPendingPlanSelection(null);
+        notifyPlanPurchaseLocked();
+        return;
+      }
       const selectedOfferId = String(pendingPlanSelection?.offerId || "").trim();
       setConfirmDialogOpen(false);
       setConfirmDialogMode("");
@@ -950,6 +986,8 @@ export default function ClientePlanesPage() {
                   onPurchase={handlePurchasePlan}
                   loading={Boolean(planOfferId) && loadingPlanOfferId === planOfferId}
                   disabled={Boolean(loadingPlanOfferId && planOfferId && loadingPlanOfferId !== planOfferId)}
+                  purchaseEnabled={CLIENT_PLAN_PURCHASE_ENABLED}
+                  lockLabel={CLIENT_LOCK_MESSAGE}
                 />
               );
             }}

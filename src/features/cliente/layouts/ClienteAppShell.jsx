@@ -7,6 +7,7 @@ import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { getUserDisplayName, useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { getClienteMe } from '../lib/clienteApi.js';
+import { CLIENT_BOOKING_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
 
 const CLIENT_NAV_ITEMS = [
   { id: 'inicio', label: 'Inicio', path: '/home/cliente', icon: Home },
@@ -43,7 +44,8 @@ function resolveSectionTitle(pathname) {
 export default function ClienteAppShell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { error: notifyError } = useNotifications();
+  const notifications = useNotifications();
+  const { error: notifyError } = notifications;
   const { user, logout, isAuthenticated, isHydrated, isHydrating } = useAuth();
 
   const redirectedUnauthorizedRef = useRef(false);
@@ -98,6 +100,14 @@ export default function ClienteAppShell() {
 
   function handleNavigate(path) {
     navigate(path);
+  }
+
+  function handleNewAppointment() {
+    if (!CLIENT_BOOKING_ENABLED) {
+      notifications.info('Agendamiento proximamente disponible.', { dedupeKey: 'cliente-booking-disabled' });
+      return;
+    }
+    navigate('/agendar');
   }
 
   function handleLogout() {
@@ -189,11 +199,18 @@ export default function ClienteAppShell() {
               <div className="mt-auto space-y-3 pt-5">
                 <button
                   type="button"
-                  onClick={() => handleNavigate('/agendar')}
-                  className="mf-accent-gradient inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold shadow-[var(--mf-shadow-accent)]"
+                  onClick={handleNewAppointment}
+                  disabled={!CLIENT_BOOKING_ENABLED}
+                  title={CLIENT_BOOKING_ENABLED ? 'Nueva cita' : 'Agendamiento proximamente disponible'}
+                  className={[
+                    'inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold',
+                    CLIENT_BOOKING_ENABLED
+                      ? 'mf-accent-gradient shadow-[var(--mf-shadow-accent)]'
+                      : 'cursor-not-allowed border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)] opacity-80',
+                  ].join(' ')}
                 >
                   <Plus size={16} />
-                  Nueva cita
+                  {CLIENT_BOOKING_ENABLED ? 'Nueva cita' : CLIENT_LOCK_MESSAGE}
                 </button>
                 <button
                   type="button"

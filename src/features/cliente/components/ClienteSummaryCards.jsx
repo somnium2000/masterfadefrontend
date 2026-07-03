@@ -14,7 +14,7 @@ function formatUpcomingDateTimeHn(value) {
   }).format(date);
 }
 
-function KpiCard({ icon: Icon, label, value, helper, actionLabel, onAction, tone = 'default' }) {
+function KpiCard({ icon: Icon, label, value, helper, actionLabel, onAction, actionDisabled = false, actionTitle = '', tone = 'default' }) {
   const toneClass = tone === 'success'
     ? 'text-emerald-300'
     : tone === 'accent'
@@ -37,7 +37,14 @@ function KpiCard({ icon: Icon, label, value, helper, actionLabel, onAction, tone
         <button
           type="button"
           onClick={onAction}
-          className="mt-4 inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--mf-accent)] transition-colors hover:text-[var(--mf-accent-hover)]"
+          disabled={actionDisabled}
+          title={actionTitle || undefined}
+          className={[
+            'mt-4 inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.08em] transition-colors',
+            actionDisabled
+              ? 'cursor-not-allowed text-[var(--mf-text-2)] opacity-75'
+              : 'text-[var(--mf-accent)] hover:text-[var(--mf-accent-hover)]',
+          ].join(' ')}
         >
           {actionLabel}
         </button>
@@ -84,6 +91,9 @@ export default function ClienteSummaryCards({
   completionPercent = 0,
   onNewAppointment,
   onOpenProfile,
+  appointmentActionsEnabled = true,
+  appointmentActionLabel = 'Agendar nueva',
+  appointmentActionDisabledMessage = '',
   hideRewardsHero = false,
   hideProfileKpi = false,
 }) {
@@ -117,8 +127,10 @@ export default function ClienteSummaryCards({
           label="Citas proximas"
           value={upcomingAppointments}
           helper={upcomingHelperText}
-          actionLabel="Agendar nueva"
+          actionLabel={appointmentActionLabel}
           onAction={onNewAppointment}
+          actionDisabled={!appointmentActionsEnabled}
+          actionTitle={appointmentActionDisabledMessage}
           tone="accent"
         />
         {!hideProfileKpi ? (
@@ -205,10 +217,17 @@ export default function ClienteSummaryCards({
           <button
             type="button"
             onClick={onNewAppointment}
-            className="mf-accent-gradient mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold shadow-[var(--mf-shadow-accent)]"
+            disabled={!appointmentActionsEnabled}
+            title={appointmentActionDisabledMessage || undefined}
+            className={[
+              'mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold',
+              appointmentActionsEnabled
+                ? 'mf-accent-gradient shadow-[var(--mf-shadow-accent)]'
+                : 'cursor-not-allowed border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)] opacity-80',
+            ].join(' ')}
           >
             <Sparkles size={15} />
-            Sumar puntos con una cita
+            {appointmentActionsEnabled ? 'Sumar puntos con una cita' : appointmentActionLabel}
           </button>
         </div>
       </article>
@@ -219,8 +238,10 @@ export default function ClienteSummaryCards({
           label="Citas próximas"
           value={upcomingAppointments}
           helper={upcomingHelperText}
-          actionLabel="Agendar nueva"
+          actionLabel={appointmentActionLabel}
           onAction={onNewAppointment}
+          actionDisabled={!appointmentActionsEnabled}
+          actionTitle={appointmentActionDisabledMessage}
           tone="accent"
         />
         {!hideProfileKpi ? (

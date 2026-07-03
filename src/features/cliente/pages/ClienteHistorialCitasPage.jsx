@@ -17,6 +17,7 @@ import {
   listClienteCitas,
   retomarClienteCitaPendiente,
 } from '../lib/clienteApi.js';
+import { CLIENT_CITAS_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
 
 const PENDING_PAYMENT_CONTEXT_STORAGE_KEY = 'mf_pending_payment_context_v1';
 const BOOKING_PAYMENT_CONTEXT_STORAGE_KEY = 'masterfade.publicBookingPayment.v1';
@@ -216,7 +217,7 @@ export default function ClienteHistorialCitasPage() {
   const [pendingData, setPendingData] = useState(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
-  const canLoad = Boolean(isAuthenticated && isHydrated && !isHydrating);
+  const canLoad = Boolean(CLIENT_CITAS_ENABLED && isAuthenticated && isHydrated && !isHydrating);
 
   const loadCitas = useCallback(async () => {
     if (!canLoad) return;
@@ -394,6 +395,23 @@ export default function ClienteHistorialCitasPage() {
   const pendingServices = Array.isArray(pendingData?.citas)
     ? pendingData.citas.flatMap((item) => (Array.isArray(item?.servicios) ? item.servicios : []))
     : [];
+
+  if (!CLIENT_CITAS_ENABLED) {
+    return (
+      <section className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-6">
+        <div className="mx-auto max-w-2xl text-center">
+          <span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]">
+            <CalendarDays size={20} />
+          </span>
+          <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Citas MasterFade</p>
+          <h1 className="mf-font-display mt-2 text-3xl text-[var(--mf-text)]">{CLIENT_LOCK_MESSAGE}</h1>
+          <p className="mt-3 text-sm leading-6 text-[var(--mf-text-2)]">
+            Muy pronto podras consultar y gestionar tus reservas desde esta seccion.
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <>
