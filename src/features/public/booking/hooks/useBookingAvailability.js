@@ -51,6 +51,7 @@ export default function useBookingAvailability({
   availabilityError,
   setAvailabilityError,
   notifyError,
+  onSelectedSlotUnavailable,
 } = {}) {
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityMap, setAvailabilityMap] = useState({});
@@ -87,6 +88,39 @@ export default function useBookingAvailability({
     [safeSelectedServices]
   );
   const hasSelection = Boolean(selectedPackageId) || safeSelectedServices.length > 0;
+
+  const resolveAffectedDateRange = useCallback((scope = {}) => {
+    const from = String(scope.dateFrom || scope.fecha_desde || '').trim();
+    const to = String(scope.dateTo || scope.fecha_hasta || '').trim();
+    if (from && to) return { from, to };
+    if (from) return { from, to: from };
+    if (selectedDate) return { from: selectedDate, to: selectedDate };
+    return {
+      from: monthRange?.from || '',
+      to: monthRange?.to || monthRange?.from || '',
+    };
+  }, [monthRange?.from, monthRange?.to, selectedDate]);
+
+  const doesScopeAffectCurrentBarber = useCallback((scope = {}) => {
+    const eventBranchId = String(scope.branchId || scope.id_sucursal || '').trim();
+    if (!selectedBranchId || eventBranchId !== selectedBranchId) return false;
+    const eventBarberId = String(scope.barberId || scope.id_barbero || '').trim();
+    if (!activeBlockBarberId) return true;
+    if (!eventBarberId) return true;
+    return eventBarberId === activeBlockBarberId;
+  }, [activeBlockBarberId, selectedBranchId]);
+
+  const doesScopeIntersectSelectedSlot = useCallback((scope = {}) => {
+    if (!selectedDate || !selectedTime || !scope.startAt || !scope.endAt) return false;
+    const selectedStart = Date.parse(`${selectedDate}T${selectedTime}:00`);
+    const durationMs = Math.max(1, Number(slotMetrics.duracionTotalMin || 0)) * 60 * 1000;
+    if (!Number.isFinite(selectedStart)) return false;
+    const selectedEnd = selectedStart + durationMs;
+    const eventStart = Date.parse(scope.startAt);
+    const eventEnd = Date.parse(scope.endAt);
+    if (!Number.isFinite(eventStart) || !Number.isFinite(eventEnd)) return false;
+    return eventStart < selectedEnd && eventEnd > selectedStart;
+  }, [selectedDate, selectedTime, slotMetrics.duracionTotalMin]);
 
   const availabilityFingerprint = useMemo(
     () => [
@@ -464,6 +498,99 @@ export default function useBookingAvailability({
     updateBlockAtIndex,
   ]);
 
+  const fetchAvailabilityRange = useCallback(async ({ dateFrom, dateTo, signal } = {}) => {
+    if (!selectedBranchId || !hasSelection || !dateFrom) return null;
+    const requestSeq = availabilityRequestSeqRef.current + 1;
+    availabilityRequestSeqRef.current = requestSeq;
+    const response = await listPublicAgendaDisponibilidad(
+      {
+        id_sucursal: selectedBranchId,
+        id_barbero: activeBlockBarberId || undefined,
+        selection_type: effectiveSelectionType,
+        servicios: servicesCsv || undefined,
+        id_paquete: selectedPackageId || undefined,
+        fecha_desde: dateFrom,
+        fecha_hasta: dateTo || dateFrom,
+      },
+      { signal }
+    );
+    if (signal?.aborted || requestSeq !== availabilityRequestSeqRef.current) return null;
+    const payload = response?.data ?? response;
+    const list = Array.isArray(payload?.disponibilidad) ? payload.disponibilidad : [];
+    const partialMap = list.reduce((acc, item) => {
+      if (!item?.fecha) return acc;
+      acc[item.fecha] = item;
+      return acc;
+    }, {});
+    availabilityCacheRef.current.clear();
+    setAvailabilityMap((current) => ({ ...current, ...partialMap }));
+    return partialMap;
+  }, [
+    activeBlockBarberId,
+    effectiveSelectionType,
+    hasSelection,
+    selectedBranchId,
+    selectedPackageId,
+    servicesCsv,
+  ]);
+
+  const invalidateAvailabilityScope = useCallback(async (scope = {}) => {
+    if (!doesScopeAffectCurrentBarber(scope)) return { ignored: true };
+    const { from, to } = resolveAffectedDateRange(scope);
+    const controller = new AbortController();
+    availabilityAbortRef.current?.abort();
+    availabilityAbortRef.current = controller;
+    let availabilityResult = null;
+    try {
+      availabilityResult = await fetchAvailabilityRange({
+        dateFrom: from,
+        dateTo: to,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err?.name !== 'AbortError' && typeof setAvailabilityError === 'function') {
+        setAvailabilityError(extractMessage(err));
+      }
+    } finally {
+      if (availabilityAbortRef.current === controller) {
+        availabilityAbortRef.current = null;
+      }
+    }
+
+    const shouldRefreshSelectedDate = Boolean(selectedDate && from && to && selectedDate >= from && selectedDate <= to);
+    let slotsResult = null;
+    if (shouldRefreshSelectedDate) {
+      slotsCacheRef.current.clear();
+      slotsResult = await fetchSlots();
+      if (
+        doesScopeIntersectSelectedSlot(scope)
+        && selectedTime
+        && Array.isArray(slotsResult)
+        && !slotsResult.some((slot) => slot?.hora === selectedTime && slot?.disponible)
+      ) {
+        onSelectedSlotUnavailable?.();
+      }
+    }
+    return { ignored: false, availability: availabilityResult, slots: slotsResult };
+  }, [
+    doesScopeAffectCurrentBarber,
+    doesScopeIntersectSelectedSlot,
+    fetchAvailabilityRange,
+    fetchSlots,
+    onSelectedSlotUnavailable,
+    resolveAffectedDateRange,
+    selectedDate,
+    selectedTime,
+    setAvailabilityError,
+  ]);
+
+  const resyncAvailabilityScope = useCallback(async () => {
+    invalidateAgendaCaches();
+    const availabilityResult = await fetchAvailability();
+    const slotsResult = selectedDate ? await fetchSlots() : null;
+    return { availability: availabilityResult, slots: slotsResult };
+  }, [fetchAvailability, fetchSlots, invalidateAgendaCaches, selectedDate]);
+
   const fetchSlotsForBarber = useCallback(async ({
     barberId,
     dateKey,
@@ -674,7 +801,9 @@ export default function useBookingAvailability({
     fetchAvailability,
     fetchSlots,
     fetchSlotsForBarber,
+    invalidateAvailabilityScope,
     loadSlotSuggestions,
+    resyncAvailabilityScope,
     invalidateAgendaCaches,
     resetAvailabilityViewState,
     resetAvailabilityData,

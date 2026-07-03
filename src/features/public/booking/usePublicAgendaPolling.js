@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 const DEFAULT_PUBLIC_AGENDA_POLL_INTERVAL_MS = 45000;
+const SSE_CONNECTED_INTEGRITY_INTERVAL_MS = 300000;
 const MIN_PUBLIC_AGENDA_POLL_INTERVAL_MS = 15000;
 
 // Polling solo de disponibilidad de agenda; no consulta ni confirma pagos.
@@ -11,10 +12,12 @@ function normalizeIntervalMs(value) {
 }
 
 export default function usePublicAgendaPolling({
+  branchId,
   barberId,
   dateKey,
   enabled = true,
   intervalMs = DEFAULT_PUBLIC_AGENDA_POLL_INTERVAL_MS,
+  connectionState = 'disabled',
   onInvalidate,
 }) {
   const invalidateRef = useRef(onInvalidate);
@@ -24,15 +27,19 @@ export default function usePublicAgendaPolling({
   }, [onInvalidate]);
 
   useEffect(() => {
-    if (!enabled || !barberId || typeof window === 'undefined') return undefined;
+    if (!enabled || !branchId || typeof window === 'undefined') return undefined;
+    if (connectionState === 'connecting' || connectionState === 'reconnecting') return undefined;
 
-    const safeIntervalMs = normalizeIntervalMs(intervalMs);
+    const safeIntervalMs = connectionState === 'connected'
+      ? SSE_CONNECTED_INTEGRITY_INTERVAL_MS
+      : normalizeIntervalMs(intervalMs);
     let timeoutId = null;
     let stopped = false;
 
     const invalidate = (reason) => {
       invalidateRef.current?.({
         reason,
+        branchId,
         barberId,
         dateKey,
       });
@@ -68,5 +75,5 @@ export default function usePublicAgendaPolling({
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       }
     };
-  }, [barberId, dateKey, enabled, intervalMs]);
+  }, [barberId, branchId, connectionState, dateKey, enabled, intervalMs]);
 }

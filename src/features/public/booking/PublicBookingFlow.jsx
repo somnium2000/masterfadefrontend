@@ -92,6 +92,7 @@ import useBookingAvailability from './hooks/useBookingAvailability.js';
 import useBookingCompanions from './hooks/useBookingCompanions.js';
 import useBookingHold from './hooks/useBookingHold.js';
 import useBookingPayment from './hooks/useBookingPayment.js';
+import usePublicAgendaEvents, { parseAgendaSseEnabled } from './hooks/usePublicAgendaEvents.js';
 import useBookingWizardNavigation from './hooks/useBookingWizardNavigation.js';
 import BookingLayout from './components/BookingLayout.jsx';
 import BookingErrorState from './components/BookingErrorState.jsx';
@@ -309,6 +310,10 @@ export default function PublicBookingFlow() {
   const [rewardBookingContext, setRewardBookingContext] = useState(() => readRewardBookingContext());
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
   const [membershipBranchNotice, setMembershipBranchNotice] = useState('');
+  const agendaSseEnabled = useMemo(
+    () => parseAgendaSseEnabled(import.meta.env.VITE_AGENDA_SSE_ENABLED, true),
+    []
+  );
 
   const servicesScrollRef = useRef(null);
   const profilePersistResolveRef = useRef(null);
@@ -850,7 +855,9 @@ const agendaAutoLoadKeyRef = useRef('');
     fetchAvailability,
     fetchSlots,
     loadSlotSuggestions,
+    invalidateAvailabilityScope,
     invalidateAgendaCaches,
+    resyncAvailabilityScope,
     resetAvailabilityViewState: resetAvailabilityHookViewState,
     resetAvailabilityData,
     abortAvailabilityRequests,
@@ -875,6 +882,11 @@ const agendaAutoLoadKeyRef = useRef('');
     availabilityError,
     setAvailabilityError,
     notifyError,
+    onSelectedSlotUnavailable: () => {
+      notifications.warning('El horario seleccionado acaba de dejar de estar disponible. Selecciona otra hora para continuar.', {
+        dedupeKey: 'public-booking-agenda-sse-slot-lost',
+      });
+    },
   });
 
   const rawSelectedServicesDurationSum = useMemo(
@@ -1490,6 +1502,35 @@ const agendaAutoLoadKeyRef = useRef('');
     }
   }, [abortAvailabilityRequests, fetchAvailability, fetchSlots, invalidateAgendaCaches, selectedDate]);
 
+  const agendaRouteActive = location.pathname.startsWith(BOOKING_ROUTES.agenda);
+  const hasAgendaSelectionForRealtime = Boolean(selectedPackageId || selectedServiceIdsEffective.length > 0);
+  const handleAgendaAvailabilityChanged = useCallback((event) => {
+    if (!event || event.id_sucursal !== selectedBranchId) return;
+    void invalidateAvailabilityScope({
+      branchId: event.id_sucursal,
+      barberId: event.id_barbero,
+      dateFrom: event.fecha_desde,
+      dateTo: event.fecha_hasta,
+      startAt: event.inicio_at,
+      endAt: event.fin_at,
+      reason: event.reason,
+    });
+  }, [invalidateAvailabilityScope, selectedBranchId]);
+
+  const handleAgendaResyncRequired = useCallback(() => {
+    void resyncAvailabilityScope();
+  }, [resyncAvailabilityScope]);
+
+  const agendaEventsState = usePublicAgendaEvents({
+    enabled: agendaSseEnabled && hasAgendaSelectionForRealtime,
+    branchId: selectedBranchId,
+    routeActive: agendaRouteActive,
+    selectedBarberId: activeBlockBarberId,
+    selectionType,
+    onAvailabilityChanged: handleAgendaAvailabilityChanged,
+    onResyncRequired: handleAgendaResyncRequired,
+  });
+
   const clearSelectedTimes = useCallback((options = {}) => {
     const { onlyIndex = null } = options;
     setBookingBlocks((prev) => prev.map((block, index) => {
@@ -1597,14 +1638,15 @@ const agendaAutoLoadKeyRef = useRef('');
   }, [fetchSlotsForBarber]);
 
   usePublicAgendaPolling({
+    branchId: selectedBranchId,
     barberId: activeBlockBarberId,
     dateKey: selectedDate,
     enabled: Boolean(
       location.pathname.startsWith(BOOKING_ROUTES.agenda)
       && selectedBranchId
-      && activeBlockBarberId
       && (selectedPackageId || selectedServiceIdsEffective.length > 0)
     ),
+    connectionState: agendaEventsState.connectionState,
     onInvalidate: refreshPolledAgenda,
   });
 
