@@ -11,13 +11,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../../components/ui/dialog.jsx';
-import { listPublicCatalogBranches, listPublicCatalogServices } from '../../public/lib/catalogApi.js';
+import { listPublicCatalogBranches } from '../../public/lib/catalogApi.js';
 import {
   getClienteMe,
-  getClientePlanEstado,
   getClientePuntosResumen,
   redeemClientePuntosReward,
 } from '../lib/clienteApi.js';
+import { CLIENT_BOOKING_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
 
 const DEFAULT_REWARD_TARGET = 10;
 const REWARD_BOOKING_CONTEXT_STORAGE_KEY = 'mf_reward_redeem_context_v1';
@@ -34,13 +34,6 @@ function toSafeInteger(value, fallback = 0) {
 
 function normalizeText(value) {
   return String(value || '').trim();
-}
-
-function normalizeSearchText(value) {
-  return normalizeText(value)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
 }
 
 function isOperationalPlanState(value) {
@@ -109,45 +102,6 @@ function uniqueServices(records = []) {
   return Array.from(map.values());
 }
 
-function resolveRedeemServiceBucket(serviceName, hasActivePlan = false) {
-  const normalizedName = normalizeSearchText(serviceName);
-  if (!normalizedName) return null;
-
-  if (hasActivePlan) {
-    return normalizedName.includes('facial express') ? 'facial express' : null;
-  }
-
-  if (normalizedName.includes('corte de cabello')) return 'corte de cabello';
-  if (normalizedName.includes('corte de barba')) return 'corte de barba';
-  return null;
-}
-
-function dedupeRedeemServices(serviceOptions = [], hasActivePlan = false) {
-  const dedupedById = uniqueServices(serviceOptions);
-  const dedupedByBucket = new Map();
-
-  dedupedById.forEach((service) => {
-    const bucket = resolveRedeemServiceBucket(service?.nombre_servicio, hasActivePlan);
-    if (!bucket) return;
-    if (dedupedByBucket.has(bucket)) return;
-    dedupedByBucket.set(bucket, service);
-  });
-
-  return Array.from(dedupedByBucket.values());
-}
-
-function resolveHasActivePlanFromMembership(state) {
-  if (isOperationalPlanState(state?.estado_plan)) return true;
-  if (isOperationalPlanState(state?.plan_activo?.estado_visible)) return true;
-  if (isOperationalPlanState(state?.plan_activo?.estado_suscripcion_codigo)) return true;
-  if (Array.isArray(state?.planes_activos)) {
-    return state.planes_activos.some((plan) => (
-      isOperationalPlanState(plan?.estado_visible) || isOperationalPlanState(plan?.estado_suscripcion_codigo)
-    ));
-  }
-  return false;
-}
-
 function persistRewardBookingContext(payload) {
   if (typeof window === 'undefined') return;
   const canjeContextToken = normalizeText(payload?.canje_context_token || payload?.id_points_tx_canje || payload?.id_points_tx);
@@ -161,10 +115,6 @@ function persistRewardBookingContext(payload) {
   };
   if (!context.id_points_tx_canje || !context.id_servicio_canje || !context.id_sucursal) return;
   window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, JSON.stringify(context));
-}
-
-function filterServicesByPlan(serviceOptions = [], hasActivePlan = false) {
-  return dedupeRedeemServices(serviceOptions, hasActivePlan);
 }
 
 function normalizeMovementRecord(record = {}, index = 0) {
@@ -206,6 +156,8 @@ function normalizeSummary(payload) {
     : [];
 
   const serviceCandidates = uniqueServices([
+    ...(Array.isArray(summarySource?.servicios_redimibles) ? summarySource.servicios_redimibles : []),
+    ...(Array.isArray(root?.servicios_redimibles) ? root.servicios_redimibles : []),
     ...(Array.isArray(summarySource?.servicios_canjeables) ? summarySource.servicios_canjeables : []),
     ...(Array.isArray(root?.servicios_canjeables) ? root.servicios_canjeables : []),
     ...(Array.isArray(summarySource?.servicios_recompensa) ? summarySource.servicios_recompensa : []),
@@ -273,7 +225,6 @@ export default function ClienteCourtesyRouteSection() {
   const [redeemLoading, setRedeemLoading] = useState(false);
   const [redeemSubmitting, setRedeemSubmitting] = useState(false);
   const [redeemError, setRedeemError] = useState('');
-  const [planActiveForRedeem, setPlanActiveForRedeem] = useState(false);
   const [branchOptions, setBranchOptions] = useState([]);
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [serviceOptions, setServiceOptions] = useState([]);
@@ -306,17 +257,8 @@ export default function ClienteCourtesyRouteSection() {
     [summary]
   );
 
-  const resolveRedeemServices = useCallback(async ({ branchId, hasActivePlan, summaryServices }) => {
-    const localSummaryServices = filterServicesByPlan(summaryServices, hasActivePlan);
-    if (localSummaryServices.length > 0) {
-      return localSummaryServices;
-    }
-
-    if (!branchId) return [];
-    const catalogPayload = await listPublicCatalogServices({ id_sucursal: branchId });
-    const catalogServices = Array.isArray(catalogPayload?.services) ? catalogPayload.services : [];
-    const normalizedCatalogServices = uniqueServices(catalogServices);
-    return filterServicesByPlan(normalizedCatalogServices, hasActivePlan);
+  const resolveRedeemServices = useCallback(async ({ summaryServices }) => {
+    return uniqueServices(summaryServices);
   }, []);
 
   const loadRedeemContext = useCallback(async () => {
@@ -328,10 +270,9 @@ export default function ClienteCourtesyRouteSection() {
     setSelectedServiceId('');
 
     try {
-      const [branchesResult, meResult, planResult] = await Promise.allSettled([
+      const [branchesResult, meResult] = await Promise.allSettled([
         listPublicCatalogBranches(),
         getClienteMe(),
-        getClientePlanEstado(),
       ]);
 
       const branches = branchesResult.status === 'fulfilled'
@@ -346,16 +287,7 @@ export default function ClienteCourtesyRouteSection() {
       const preferredBranchId = normalizeText(summary?.preferredBranchId || mePreferredBranch || branches[0]?.id_sucursal);
       setSelectedBranchId(preferredBranchId);
 
-      const hasPlanFromSummary = summary?.hasActivePlan;
-      const hasPlanFromEndpoint = planResult.status === 'fulfilled'
-        ? resolveHasActivePlanFromMembership(planResult.value?.data || planResult.value || {})
-        : false;
-      const hasActivePlan = hasPlanFromSummary == null ? hasPlanFromEndpoint : Boolean(hasPlanFromSummary);
-      setPlanActiveForRedeem(hasActivePlan);
-
       const resolvedServices = await resolveRedeemServices({
-        branchId: preferredBranchId,
-        hasActivePlan,
         summaryServices: Array.isArray(summary?.serviceCandidates) ? summary.serviceCandidates : [],
       });
       setServiceOptions(resolvedServices);
@@ -403,8 +335,6 @@ export default function ClienteCourtesyRouteSection() {
     setRedeemLoading(true);
     try {
       const resolvedServices = await resolveRedeemServices({
-        branchId: safeBranchId,
-        hasActivePlan: planActiveForRedeem,
         summaryServices: Array.isArray(summary?.serviceCandidates) ? summary.serviceCandidates : [],
       });
       setServiceOptions(resolvedServices);
@@ -421,6 +351,10 @@ export default function ClienteCourtesyRouteSection() {
 
   async function handleRedeemReward() {
     if (!selectedServiceId || !selectedBranchId || redeemSubmitting || redeemNavigationLockRef.current) return;
+    if (!CLIENT_BOOKING_ENABLED) {
+      notifications.info('El agendamiento estara disponible proximamente.', { dedupeKey: 'cliente-booking-disabled' });
+      return;
+    }
     setRedeemSubmitting(true);
     setRedeemError('');
     try {
@@ -439,7 +373,7 @@ export default function ClienteCourtesyRouteSection() {
         rewardPreparedShownRef.current = true;
       }
       if (!rewardDiscountInfoShownRef.current) {
-        notifications.info('Tus 10 puntos se descontaran cuando confirmes la cita.', {
+        notifications.info('Tus puntos se descontaran cuando confirmes la cita.', {
           dedupeKey: 'cliente-reward-discount-info',
         });
         rewardDiscountInfoShownRef.current = true;
@@ -456,7 +390,8 @@ export default function ClienteCourtesyRouteSection() {
     }
   }
 
-  const canSubmitRedeem = Boolean(selectedServiceId && selectedBranchId && !redeemLoading && !redeemSubmitting);
+  const canSubmitRedeem = Boolean(CLIENT_BOOKING_ENABLED && selectedServiceId && selectedBranchId && !redeemLoading && !redeemSubmitting);
+  const hasRedeemableServices = Boolean(Array.isArray(summary?.serviceCandidates) && summary.serviceCandidates.length > 0);
   const movementHistory = useMemo(() => {
     const source = Array.isArray(summary?.history) ? summary.history : [];
     // AM: Inicio Cliente muestra solo trazabilidad reciente (últimos 5 movimientos).
@@ -567,15 +502,23 @@ export default function ClienteCourtesyRouteSection() {
               </p>
 
               {summary.canRedeem ? (
-                <Button
-                  type="button"
-                  className="mf-accent-gradient mt-4 h-10 rounded-xl px-4 text-sm font-semibold"
-                  onClick={() => void handleOpenRedeemModal()}
-                  disabled={redeemLoading || redeemSubmitting}
-                >
-                  <Sparkles size={14} className="mr-1.5" />
-                  Canjear mi recompensa
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    className="mf-accent-gradient mt-4 h-10 rounded-xl px-4 text-sm font-semibold"
+                    onClick={() => void handleOpenRedeemModal()}
+                    disabled={redeemLoading || redeemSubmitting || !hasRedeemableServices}
+                    title={hasRedeemableServices ? undefined : 'No hay servicios disponibles para canje en este momento.'}
+                  >
+                    <Sparkles size={14} className="mr-1.5" />
+                    Canjear mi recompensa
+                  </Button>
+                  {!hasRedeemableServices ? (
+                    <p className="mt-2 text-sm text-[var(--mf-text-2)]">
+                      No hay servicios disponibles para canje en este momento.
+                    </p>
+                  ) : null}
+                </>
               ) : null}
             </div>
 
@@ -617,17 +560,13 @@ export default function ClienteCourtesyRouteSection() {
           <DialogHeader>
             <DialogTitle>Canjear recompensa</DialogTitle>
             <DialogDescription>
-              Selecciona la sucursal y servicio para registrar tu canje de 10 puntos.
+              Selecciona la sucursal y servicio para preparar tu recompensa. Los puntos se descuentan al confirmar la cita.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">
             <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3 text-sm text-[var(--mf-text-2)]">
-              <p>
-                {planActiveForRedeem
-                  ? 'Plan activo detectado: solo puedes canjear Facial Express.'
-                  : 'Sin plan activo: puedes canjear Corte de Cabello o Corte de Barba.'}
-              </p>
+              <p>Los servicios disponibles para canje se cargan desde tu resumen de MasterPuntos.</p>
             </div>
 
             <div>
@@ -680,7 +619,7 @@ export default function ClienteCourtesyRouteSection() {
                 </div>
               ) : (
                 <p className="mt-2 text-sm text-[var(--mf-text-2)]">
-                  Aún no hay servicios disponibles para canje en esta fase.
+                  No hay servicios disponibles para canje en este momento.
                 </p>
               )}
             </div>
@@ -705,10 +644,11 @@ export default function ClienteCourtesyRouteSection() {
               type="button"
               onClick={() => void handleRedeemReward()}
               disabled={!canSubmitRedeem}
+              title={CLIENT_BOOKING_ENABLED ? undefined : 'El agendamiento estara disponible proximamente.'}
               className="gap-2"
             >
               {redeemSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
-              Confirmar canje
+              {CLIENT_BOOKING_ENABLED ? 'Confirmar canje' : CLIENT_LOCK_MESSAGE}
             </Button>
           </DialogFooter>
         </DialogContent>

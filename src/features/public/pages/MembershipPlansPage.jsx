@@ -23,6 +23,10 @@ import ThemeSwitcher from "../../../components/theme/ThemeSwitcher.jsx";
 import { useAuth } from "../../../context/AuthContext.jsx";
 import { useNotifications } from "../../../context/NotificationsContext.jsx";
 import { listPublicCatalogBranches, listPublicPlansByBranch } from "../lib/catalogApi.js";
+import {
+  VIP_MEMBERSHIPS_PURCHASE_ENABLED,
+  VIP_MEMBERSHIPS_PURCHASE_LOCK_MESSAGE,
+} from "../lib/vipMembershipFeatureFlags.js";
 import { subscribeCatalogSync } from "../../../lib/catalogSync.js";
 import { getPlanCategoryTheme, normalizePlanCategory } from "../../plans/lib/planCategoryTheme.js";
 import {
@@ -103,6 +107,8 @@ function PlanCard({
   ctaLabel = "Quiero este plan",
   disabled = false,
   loading = false,
+  purchaseLocked = false,
+  purchaseLockMessage = "Proximamente...",
 }) {
   const benefits = Array.isArray(plan?.beneficios) ? plan.beneficios : [];
   const serviceBenefits = benefits.filter((benefit) => String(benefit?.tipo || "").toLowerCase() !== "cortesia");
@@ -130,7 +136,7 @@ function PlanCard({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: categoryTheme.accentColor }}>
-            Categoria {categoryLevel} - {categoryTheme.label}
+            Categoria - {categoryTheme.label}
           </p>
           <h3 className="mf-font-display mt-2 text-[32px] leading-[0.9] text-[var(--mf-text)]">
             {plan.nombre_plan}
@@ -146,9 +152,6 @@ function PlanCard({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.13em]" style={{ borderColor: categoryTheme.badgeBorder, background: categoryTheme.badgeTone, color: categoryTheme.badgeColor }}>
-          Nivel {categoryLevel}
-        </span>
         {isSpotlight ? (
           <span className="inline-flex items-center rounded-full border border-[var(--mf-accent)]/40 bg-[var(--mf-accent)]/20 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-[var(--mf-accent)]">
             Mas alto
@@ -198,8 +201,8 @@ function PlanCard({
       <button
         type="button"
         onClick={() => onSelect(plan)}
-        disabled={disabled || loading || !canPurchase}
-        title={missingBranchOffer ? "Este plan no tiene oferta valida para esta sucursal" : undefined}
+        disabled={disabled || loading || purchaseLocked || !canPurchase}
+        title={purchaseLocked ? purchaseLockMessage : missingBranchOffer ? "Este plan no tiene oferta valida para esta sucursal" : undefined}
         className="mt-4 inline-flex h-11 items-center justify-center rounded-2xl border px-4 text-sm font-semibold transition-transform duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed"
         style={{
           background: categoryTheme.badgeTone,
@@ -208,7 +211,7 @@ function PlanCard({
           boxShadow: `inset 0 1px 0 rgba(255,255,255,0.08), ${categoryTheme.glow}`,
         }}
       >
-        {loading ? "Procesando..." : (canPurchase ? ctaLabel : "Oferta pendiente")}
+        {purchaseLocked ? purchaseLockMessage : loading ? "Procesando..." : (canPurchase ? ctaLabel : "Oferta pendiente")}
       </button>
       {missingBranchOffer ? (
         <p className="mt-2 text-center text-xs text-amber-200">Este plan no tiene oferta valida para esta sucursal.</p>
@@ -362,6 +365,8 @@ export default function MembershipPlansPage() {
   }
 
   async function handlePlanSelect(plan) {
+    if (!VIP_MEMBERSHIPS_PURCHASE_ENABLED) return;
+
     if (!selectedBranchId) {
       notifications.warning("Selecciona una sucursal antes de continuar.");
       return;
@@ -624,6 +629,8 @@ export default function MembershipPlansPage() {
                           ctaLabel={membershipCtaLabel}
                           loading={Boolean(planOfferId) && processingPlanOfferId === planOfferId}
                           disabled={Boolean(processingPlanOfferId && planOfferId && processingPlanOfferId !== planOfferId)}
+                          purchaseLocked={!VIP_MEMBERSHIPS_PURCHASE_ENABLED}
+                          purchaseLockMessage={VIP_MEMBERSHIPS_PURCHASE_LOCK_MESSAGE}
                         />
                       );
                     })}

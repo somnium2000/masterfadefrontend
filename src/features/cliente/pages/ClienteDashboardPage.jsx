@@ -9,6 +9,7 @@ import ClienteSummaryCards from '../components/ClienteSummaryCards.jsx';
 import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import { getClienteCitaDetalle, getClienteMe, listClienteCitas } from '../lib/clienteApi.js';
 import { listPublicCatalogServices } from '../../public/lib/catalogApi.js';
+import { CLIENT_BOOKING_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
 
 const UPCOMING_ALLOWED_STATUS = new Set(['confirmada']);
 const COMPLETED_APPOINTMENT_STATUS = new Set(['completada']);
@@ -147,7 +148,8 @@ async function resolveRecommendedServices(idSucursal = '') {
 
 export default function ClienteDashboardPage() {
   const navigate = useNavigate();
-  const { error: notifyError } = useNotifications();
+  const notifications = useNotifications();
+  const { error: notifyError } = notifications;
   const { isAuthenticated, isHydrated, isHydrating, logout } = useAuth();
   const outletContext = useOutletContext() || {};
   const { refreshClienteProfile } = outletContext;
@@ -249,6 +251,14 @@ export default function ClienteDashboardPage() {
     }
   }
 
+  function handleBookingAction() {
+    if (!CLIENT_BOOKING_ENABLED) {
+      notifications.info('El agendamiento estara disponible proximamente.', { dedupeKey: 'cliente-booking-disabled' });
+      return;
+    }
+    navigate('/agendar');
+  }
+
   if ((!canLoadDashboard && isHydrating) || loading) {
     return (
       <div className="space-y-4">
@@ -273,8 +283,11 @@ export default function ClienteDashboardPage() {
         nextUpcomingAppointmentAt={nextUpcomingAppointmentAt}
         completionPercent={completionPercent}
         hideProfileKpi={isProfileComplete}
-        onNewAppointment={() => navigate('/agendar')}
+        onNewAppointment={handleBookingAction}
         onOpenProfile={() => setProfileModalOpen(true)}
+        appointmentActionsEnabled={CLIENT_BOOKING_ENABLED}
+        appointmentActionLabel={CLIENT_BOOKING_ENABLED ? 'Agendar nueva' : CLIENT_LOCK_MESSAGE}
+        appointmentActionDisabledMessage="El agendamiento estara disponible proximamente."
         hideRewardsHero
       />
 
@@ -294,10 +307,14 @@ export default function ClienteDashboardPage() {
           </div>
           <button
             type="button"
-            onClick={() => navigate('/agendar')}
-            className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--mf-accent)]"
+            onClick={handleBookingAction}
+            title={CLIENT_BOOKING_ENABLED ? undefined : 'El agendamiento estara disponible proximamente.'}
+            className={[
+              'text-xs font-semibold uppercase tracking-[0.08em]',
+              CLIENT_BOOKING_ENABLED ? 'text-[var(--mf-accent)]' : 'text-[var(--mf-text-2)]',
+            ].join(' ')}
           >
-            Agendar
+            {CLIENT_BOOKING_ENABLED ? 'Agendar' : CLIENT_LOCK_MESSAGE}
           </button>
         </div>
 
@@ -321,10 +338,16 @@ export default function ClienteDashboardPage() {
                     </p>
                     <button
                       type="button"
-                      onClick={() => navigate('/agendar')}
-                      className="mt-3 inline-flex h-8 items-center justify-center rounded-lg border border-[var(--mf-btn-border)] bg-[var(--mf-card)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)]"
+                      onClick={handleBookingAction}
+                      title={CLIENT_BOOKING_ENABLED ? undefined : 'El agendamiento estara disponible proximamente.'}
+                      className={[
+                        'mt-3 inline-flex h-8 items-center justify-center rounded-lg border px-3 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors',
+                        CLIENT_BOOKING_ENABLED
+                          ? 'border-[var(--mf-btn-border)] bg-[var(--mf-card)] text-[var(--mf-text)] hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)]'
+                          : 'border-[var(--mf-nav-border)] bg-[var(--mf-card)] text-[var(--mf-text-2)]',
+                      ].join(' ')}
                     >
-                      Reservar
+                      {CLIENT_BOOKING_ENABLED ? 'Reservar' : CLIENT_LOCK_MESSAGE}
                     </button>
                   </article>
                 )}
@@ -345,10 +368,16 @@ export default function ClienteDashboardPage() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => navigate('/agendar')}
-                    className="mt-3 inline-flex h-8 items-center justify-center rounded-lg border border-[var(--mf-btn-border)] bg-[var(--mf-card)] px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)]"
+                    onClick={handleBookingAction}
+                    title={CLIENT_BOOKING_ENABLED ? undefined : 'El agendamiento estara disponible proximamente.'}
+                    className={[
+                      'mt-3 inline-flex h-8 items-center justify-center rounded-lg border px-3 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors',
+                      CLIENT_BOOKING_ENABLED
+                        ? 'border-[var(--mf-btn-border)] bg-[var(--mf-card)] text-[var(--mf-text)] hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)]'
+                        : 'border-[var(--mf-nav-border)] bg-[var(--mf-card)] text-[var(--mf-text-2)]',
+                    ].join(' ')}
                   >
-                    Reservar
+                    {CLIENT_BOOKING_ENABLED ? 'Reservar' : CLIENT_LOCK_MESSAGE}
                   </button>
                 </article>
               ))}
