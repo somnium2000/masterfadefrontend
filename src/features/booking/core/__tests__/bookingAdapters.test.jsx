@@ -3,6 +3,10 @@
 import { renderHook, act } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import useBookingHold from '../../../public/booking/hooks/useBookingHold.js';
+import {
+  resolveConfirmWithoutPaymentState,
+  resolveHoldPricing,
+} from '../../../public/booking/bookingFlowSelectors.js';
 import resolveBookingAdapter from '../../adapters/bookingAdapterResolver.js';
 import previewBookingAdapter from '../../adapters/previewBookingAdapter.js';
 
@@ -93,5 +97,43 @@ describe('booking adapters integration', () => {
     expect(hold.groupStatus).toBe('simulado');
     expect(publicBookingApiMock.createPublicCitaHold).not.toHaveBeenCalled();
     expect(publicBookingApiMock.createClienteCitaHold).not.toHaveBeenCalled();
+  });
+
+  it('keeps preview hold canonical aliases compatible with confirmation flow logic', async () => {
+    const hold = await previewBookingAdapter.createHold({
+      totalHnl: 225,
+      blocks: [{ orden_integrante: 1, alias: 'Titular' }],
+    });
+    const holdPricing = resolveHoldPricing(hold);
+
+    expect(hold.groupId).toBe(hold.id_grupo_cita);
+    expect(hold.totalPayableHnl).toBe(hold.total_pagar_hnl);
+    expect(hold.expiresAt).toBe(hold.expires_at);
+    expect(hold.blocks).toBe(hold.bloques);
+    expect(hold).toMatchObject({
+      request_id: hold.requestId,
+      estado_grupo_codigo: 'simulado',
+      subtotal_hnl: 225,
+      descuento_total_hnl: 0,
+      extras_a_pagar_hnl: 225,
+      monto_total_hnl: 225,
+      total_hnl: 225,
+    });
+    expect(hold.release_token).toBeUndefined();
+    expect(holdPricing).toMatchObject({
+      source: 'hold',
+      subtotal_hnl: 225,
+      total_pagar_hnl: 225,
+      extras_a_pagar_hnl: 225,
+    });
+    expect(resolveConfirmWithoutPaymentState({
+      canUseClienteHold: true,
+      holdResult: hold,
+      holdTotalToPay: 0,
+    })).toBe(true);
+    expect(publicBookingApiMock.createPublicCitaHold).not.toHaveBeenCalled();
+    expect(publicBookingApiMock.createClienteCitaHold).not.toHaveBeenCalled();
+    expect(publicBookingApiMock.releasePublicCitaHold).not.toHaveBeenCalled();
+    expect(publicBookingApiMock.releaseClienteCitaHold).not.toHaveBeenCalled();
   });
 });
