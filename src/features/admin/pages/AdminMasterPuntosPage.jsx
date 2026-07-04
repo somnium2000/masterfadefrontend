@@ -15,8 +15,10 @@ import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
   createAdminClientePuntosAjuste,
+  getAdminMasterPuntosRegalias,
   getAdminClientePuntosResumen,
   searchAdminClientesActivos,
+  updateAdminMasterPuntosRegalias,
 } from '../lib/adminMasterPuntosApi.js';
 
 const MIN_REASON_LENGTH = 5;
@@ -105,6 +107,35 @@ function normalizeMovementRecord(record = {}, index = 0) {
   };
 }
 
+function normalizeRewardConfigPayload(payload = {}) {
+  const root = payload?.data || payload || {};
+  const servicios = Array.isArray(root?.servicios_catalogo) ? root.servicios_catalogo : [];
+  const configuracion = root?.configuracion || {};
+  return {
+    regla: root?.regla || null,
+    serviciosCatalogo: servicios.map((service) => ({
+      id_servicio: normalizeText(service?.id_servicio),
+      nombre_servicio: normalizeText(service?.nombre_servicio || 'Servicio'),
+      grupo_catalogo: normalizeText(service?.grupo_catalogo || ''),
+      orden_visual: toSafeInteger(service?.orden_visual, 100),
+    })).filter((service) => service.id_servicio),
+    seleccion: {
+      sin_membresia: new Set(
+        (Array.isArray(configuracion?.sin_membresia) ? configuracion.sin_membresia : [])
+          .filter((item) => item?.habilitado !== false && item?.visible_cliente !== false)
+          .map((item) => normalizeText(item?.id_servicio))
+          .filter(Boolean)
+      ),
+      con_membresia: new Set(
+        (Array.isArray(configuracion?.con_membresia) ? configuracion.con_membresia : [])
+          .filter((item) => item?.habilitado !== false && item?.visible_cliente !== false)
+          .map((item) => normalizeText(item?.id_servicio))
+          .filter(Boolean)
+      ),
+    },
+  };
+}
+
 function normalizeSummary(payload) {
   const root = payload?.data || payload || {};
   const summarySource = root?.resumen || root?.summary || root;
@@ -163,6 +194,15 @@ export default function AdminMasterPuntosPage() {
   const [ajusteReason, setAjusteReason] = useState('');
   const [savingAdjustment, setSavingAdjustment] = useState(false);
   const [negativeConfirmOpen, setNegativeConfirmOpen] = useState(false);
+  const [rewardServices, setRewardServices] = useState([]);
+  const [rewardRule, setRewardRule] = useState(null);
+  const [rewardSelection, setRewardSelection] = useState({
+    sin_membresia: new Set(),
+    con_membresia: new Set(),
+  });
+  const [rewardConfigLoading, setRewardConfigLoading] = useState(false);
+  const [rewardConfigSaving, setRewardConfigSaving] = useState(false);
+  const [rewardConfigError, setRewardConfigError] = useState('');
 
   const canManagePoints = useMemo(() => {
     const roleList = Array.isArray(roles) ? roles.map((role) => normalizeText(role).toLowerCase()) : [];
@@ -207,6 +247,31 @@ export default function AdminMasterPuntosPage() {
     (currentHistoryPage + 1) * HISTORY_PAGE_SIZE
   );
   const hasHistoryPagination = history.length > HISTORY_PAGE_SIZE;
+
+  const loadRewardConfig = useCallback(async () => {
+    setRewardConfigLoading(true);
+    setRewardConfigError('');
+    try {
+      const response = await getAdminMasterPuntosRegalias();
+      const normalized = normalizeRewardConfigPayload(response?.data || response);
+      setRewardRule(normalized.regla);
+      setRewardServices(normalized.serviciosCatalogo);
+      setRewardSelection(normalized.seleccion);
+    } catch (error) {
+      const status = Number(error?.status || 0);
+      if (status === 401) {
+        navigate('/login', { replace: true });
+        return;
+      }
+      if (status === 403) {
+        navigate('/unauthorized', { replace: true });
+        return;
+      }
+      setRewardConfigError(resolveApiErrorMessage(error, 'No se pudo cargar la configuracion de servicios canjeables.'));
+    } finally {
+      setRewardConfigLoading(false);
+    }
+  }, [navigate]);
 
   const loadSummary = useCallback(async (idCliente, options = {}) => {
     const safeId = normalizeText(idCliente);
@@ -270,8 +335,9 @@ export default function AdminMasterPuntosPage() {
       navigate('/unauthorized', { replace: true });
       return undefined;
     }
+    void loadRewardConfig();
     return undefined;
-  }, [canManagePoints, navigate]);
+  }, [canManagePoints, loadRewardConfig, navigate]);
 
   useEffect(() => {
     if (!selectedClienteId) {
@@ -414,6 +480,54 @@ export default function AdminMasterPuntosPage() {
     setSearchingClientes(false);
   }
 
+  function toggleRewardService(condition, serviceId) {
+    const safeCondition = normalizeText(condition);
+    const safeServiceId = normalizeText(serviceId);
+    if (!safeServiceId || !['sin_membresia', 'con_membresia'].includes(safeCondition)) return;
+    setRewardSelection((current) => {
+      const nextSet = new Set(current?.[safeCondition] || []);
+      if (nextSet.has(safeServiceId)) {
+        nextSet.delete(safeServiceId);
+      } else {
+        nextSet.add(safeServiceId);
+      }
+      return {
+        sin_membresia: safeCondition === 'sin_membresia' ? nextSet : new Set(current?.sin_membresia || []),
+        con_membresia: safeCondition === 'con_membresia' ? nextSet : new Set(current?.con_membresia || []),
+      };
+    });
+  }
+
+  async function handleSaveRewardConfig() {
+    if (rewardConfigSaving) return;
+    setRewardConfigSaving(true);
+    setRewardConfigError('');
+    try {
+      const response = await updateAdminMasterPuntosRegalias({
+        sin_membresia: Array.from(rewardSelection.sin_membresia || []),
+        con_membresia: Array.from(rewardSelection.con_membresia || []),
+      });
+      const normalized = normalizeRewardConfigPayload(response?.data || response);
+      setRewardRule(normalized.regla);
+      setRewardServices(normalized.serviciosCatalogo);
+      setRewardSelection(normalized.seleccion);
+      notifications.success('Configuracion de servicios canjeables guardada.');
+    } catch (error) {
+      const status = Number(error?.status || 0);
+      if (status === 401) {
+        navigate('/login', { replace: true });
+        return;
+      }
+      if (status === 403) {
+        navigate('/unauthorized', { replace: true });
+        return;
+      }
+      setRewardConfigError(resolveApiErrorMessage(error, 'No se pudo guardar la configuracion de servicios canjeables.'));
+    } finally {
+      setRewardConfigSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-4 overflow-x-hidden px-2 pb-4 sm:px-4 sm:pb-6">
       <header className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)] p-4 sm:p-5">
@@ -423,6 +537,99 @@ export default function AdminMasterPuntosPage() {
           Consulta el resumen de puntos por cliente y aplica ajustes manuales con auditoria.
         </p>
       </header>
+
+      <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
+              Servicios canjeables con MasterPuntos
+            </p>
+            <p className="mt-1 text-sm text-[var(--mf-text-2)]">
+              Estos servicios apareceran en Ruta a tu cortesia segun si el cliente tiene membresia activa o no.
+            </p>
+            {rewardRule?.puntos_para_premio ? (
+              <p className="mt-1 text-xs text-[var(--mf-text-2)]">
+                Regla global activa: {rewardRule.puntos_para_premio} puntos por recompensa.
+              </p>
+            ) : null}
+          </div>
+          <Button
+            type="button"
+            onClick={handleSaveRewardConfig}
+            disabled={rewardConfigLoading || rewardConfigSaving}
+            className="w-full lg:w-auto"
+          >
+            {rewardConfigSaving ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin" />
+                Guardando...
+              </span>
+            ) : (
+              'Guardar configuracion'
+            )}
+          </Button>
+        </div>
+
+        {rewardConfigError ? (
+          <p className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+            {rewardConfigError}
+          </p>
+        ) : null}
+
+        <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {[
+            ['sin_membresia', 'Clientes sin membresia'],
+            ['con_membresia', 'Clientes con membresia'],
+          ].map(([condition, label]) => (
+            <article key={condition} className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-[var(--mf-text)]">{label}</p>
+                <span className="rounded-full border border-[var(--mf-nav-border)] px-2 py-1 text-xs text-[var(--mf-text-2)]">
+                  {rewardSelection?.[condition]?.size || 0} activos
+                </span>
+              </div>
+
+              {rewardConfigLoading ? (
+                <div className="mt-3 space-y-2">
+                  <div className="mf-skeleton h-9 rounded-lg" />
+                  <div className="mf-skeleton h-9 rounded-lg" />
+                  <div className="mf-skeleton h-9 rounded-lg" />
+                </div>
+              ) : rewardServices.length ? (
+                <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                  {rewardServices.map((service) => {
+                    const checked = rewardSelection?.[condition]?.has(service.id_servicio) || false;
+                    return (
+                      <label
+                        key={`${condition}_${service.id_servicio}`}
+                        className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--mf-nav-border)] px-3 py-2 text-sm transition-colors hover:border-[var(--mf-btn-border)]"
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 accent-[var(--mf-accent)]"
+                          checked={checked}
+                          disabled={rewardConfigSaving}
+                          onChange={() => toggleRewardService(condition, service.id_servicio)}
+                        />
+                        <span className="min-w-0">
+                          <span className="block truncate font-semibold text-[var(--mf-text)]">{service.nombre_servicio}</span>
+                          {service.grupo_catalogo ? (
+                            <span className="block truncate text-xs text-[var(--mf-text-2)]">{service.grupo_catalogo}</span>
+                          ) : null}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-3 rounded-lg border border-[var(--mf-nav-border)] px-3 py-2 text-sm text-[var(--mf-text-2)]">
+                  No hay servicios agendables disponibles para configurar.
+                </p>
+              )}
+            </article>
+          ))}
+        </div>
+      </section>
 
       <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[320px,1fr]">
         <article className="min-w-0 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">

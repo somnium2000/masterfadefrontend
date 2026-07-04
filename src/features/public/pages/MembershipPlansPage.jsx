@@ -45,13 +45,7 @@ const CATEGORY_ICONS = {
   5: Trophy,
 };
 
-const MEMBERSHIP_SIMULATION_SCENARIOS = [
-  { value: 1.00, label: "Aprobado (1.00)" },
-  { value: 1.05, label: "Rechazado (1.05)" },
-  { value: 1.23, label: "Tarjeta vencida (1.23)" },
-  { value: 1.56, label: "CVV incorrecto (1.56)" },
-  { value: 1.57, label: "Timeout (1.57)" },
-];
+const DEFAULT_MEMBERSHIP_SIMULATION_AMOUNT = 1.00;
 
 function readEnvFlag(value, fallback = false) {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -244,7 +238,6 @@ export default function MembershipPlansPage() {
   const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [purchaseErrorMessage, setPurchaseErrorMessage] = useState("");
   const [purchaseCompleted, setPurchaseCompleted] = useState(false);
-  const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(MEMBERSHIP_SIMULATION_SCENARIOS[0].value);
 
   const scrollRef = useRef(null);
   const showMembershipSimulator = shouldShowMembershipSimulator();
@@ -441,7 +434,7 @@ export default function MembershipPlansPage() {
     setPurchaseErrorMessage("");
     try {
       await confirmMembershipPayment(paymentIntentId, {
-        monto_prueba_hnl: showMembershipSimulator ? selectedSimulationAmount : undefined,
+        monto_prueba_hnl: showMembershipSimulator ? DEFAULT_MEMBERSHIP_SIMULATION_AMOUNT : undefined,
       });
       setPurchaseCompleted(true);
       setPurchaseStep("success");
@@ -496,20 +489,6 @@ export default function MembershipPlansPage() {
             <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--mf-text-2)]">
               Selecciona la sucursal donde usaras tu plan y completa tu compra en minutos.
             </p>
-            {showMembershipSimulator ? (
-              <div className="mt-4 w-full max-w-sm text-left">
-                <label className="mf-label">Escenario simulator</label>
-                <select
-                  className="mf-select"
-                  value={String(selectedSimulationAmount)}
-                  onChange={(event) => setSelectedSimulationAmount(Number(event.target.value || MEMBERSHIP_SIMULATION_SCENARIOS[0].value))}
-                >
-                  {MEMBERSHIP_SIMULATION_SCENARIOS.map((scenario) => (
-                    <option key={scenario.value} value={scenario.value}>{scenario.label}</option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
             {isClienteSession ? (
               <span className="mt-4 inline-flex items-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs font-semibold tracking-[0.08em] text-[var(--mf-accent)]">
                 {membershipLoading
