@@ -218,6 +218,15 @@ export default function PublicBookingPaymentStep() {
   const hasPlanCoverage = safeCoveredByPlan > 0;
   const hasSaldoToPay = hasPlanCoverage && safeExtras > 0;
   const isFullyCoveredByPlan = hasPlanCoverage && safeExtras <= 0;
+  const hasPackageSelection = bookingBlocksSummary.some((block) => (
+    block?.selection_type === 'package'
+    || block?.selection_type === 'mixed'
+    || block?.selectedPackage
+    || block?.packageId
+  ));
+  const subtotalLabel = membershipHasContext
+    ? 'Subtotal'
+    : (hasPackageSelection ? 'Total de la reserva' : 'Total servicios');
 
   const holdCountdownLabel = (() => {
     if (holdRemainingMs == null) return null;
@@ -563,7 +572,7 @@ export default function PublicBookingPaymentStep() {
             </div>
           ))}
           <div className="citas-confirm-row mt-3">
-            <span>{membershipHasContext ? 'Subtotal' : 'Total servicios'}</span>
+            <span>{subtotalLabel}</span>
             <span>{formatCurrencyHnl(effectiveSubtotal)}</span>
           </div>
           {hasPlanCoverage ? (

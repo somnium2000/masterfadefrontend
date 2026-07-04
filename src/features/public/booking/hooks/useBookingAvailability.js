@@ -462,8 +462,12 @@ export default function useBookingAvailability({
       } catch (err) {
         if (err?.name === 'AbortError' || controller.signal.aborted) return null;
         if (requestSeq !== slotsRequestSeqRef.current) return null;
+        const message = extractMessage(err);
+        if (typeof setAvailabilityError === 'function') {
+          setAvailabilityError(message);
+        }
         if (typeof notifyError === 'function') {
-          notifyError(extractMessage(err), { dedupeKey: 'public-booking-slots-error' });
+          notifyError(message, { dedupeKey: 'public-booking-slots-error' });
         }
         return null;
       } finally {
@@ -494,6 +498,7 @@ export default function useBookingAvailability({
     selectedPackageId,
     selectedTime,
     selectionCacheKey,
+    setAvailabilityError,
     servicesCsv,
     updateBlockAtIndex,
   ]);
