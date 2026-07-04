@@ -129,6 +129,42 @@ describe('usePublicAgendaEvents', () => {
     expect(states).toContain('connected');
   });
 
+  test('rerender con callbacks nuevos no recrea EventSource y usa refs actualizadas', () => {
+    const firstAvailabilityChanged = vi.fn();
+    const secondAvailabilityChanged = vi.fn();
+    const firstConnectionStateChange = vi.fn();
+    const secondConnectionStateChange = vi.fn();
+    const { rerender } = renderHook(({ onAvailabilityChanged, onConnectionStateChange }) => usePublicAgendaEvents({
+      enabled: true,
+      branchId: BRANCH_A,
+      routeActive: true,
+      onAvailabilityChanged,
+      onConnectionStateChange,
+    }), {
+      initialProps: {
+        onAvailabilityChanged: firstAvailabilityChanged,
+        onConnectionStateChange: firstConnectionStateChange,
+      },
+    });
+    const source = MockEventSource.instances[0];
+
+    rerender({
+      onAvailabilityChanged: secondAvailabilityChanged,
+      onConnectionStateChange: secondConnectionStateChange,
+    });
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    act(() => source.emitOpen());
+    act(() => {
+      source.emit('agenda.availability.changed', validEvent());
+      vi.advanceTimersByTime(180);
+    });
+    expect(firstAvailabilityChanged).not.toHaveBeenCalled();
+    expect(secondAvailabilityChanged).toHaveBeenCalledTimes(1);
+    expect(firstConnectionStateChange).not.toHaveBeenCalledWith('connected');
+    expect(secondConnectionStateChange).toHaveBeenCalledWith('connected');
+  });
+
   test('procesa evento valido, guarda solo id y agrupa con debounce', () => {
     const onAvailabilityChanged = vi.fn();
     const { result } = renderHook(() => usePublicAgendaEvents({
@@ -181,6 +217,25 @@ describe('usePublicAgendaEvents', () => {
     act(() => source.emit('agenda.resync.required', { reason: 'history_not_available' }));
     expect(onResyncRequired).toHaveBeenCalledWith({ reason: 'history_not_available', branchId: BRANCH_A });
     expect(window.sessionStorage.getItem(`masterfade:agenda-sse:last-event:${BRANCH_A}`)).toBeNull();
+  });
+
+  test('resync usa callback actualizado sin recrear EventSource', () => {
+    const firstResync = vi.fn();
+    const secondResync = vi.fn();
+    const { rerender } = renderHook(({ onResyncRequired }) => usePublicAgendaEvents({
+      enabled: true,
+      branchId: BRANCH_A,
+      routeActive: true,
+      onResyncRequired,
+    }), { initialProps: { onResyncRequired: firstResync } });
+    const source = MockEventSource.instances[0];
+
+    rerender({ onResyncRequired: secondResync });
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    act(() => source.emit('agenda.resync.required', { reason: 'history_not_available' }));
+    expect(firstResync).not.toHaveBeenCalled();
+    expect(secondResync).toHaveBeenCalledWith({ reason: 'history_not_available', branchId: BRANCH_A });
   });
 
   test('cleanup y cambio de sucursal cierran EventSource anterior sin procesar eventos tardios', () => {
