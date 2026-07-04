@@ -36,8 +36,8 @@ import {
   postAdminCitaReagendarEmergencia,
   postAdminCitasReagendarEmergenciaLote,
 } from '../lib/adminCitasApi.js';
+import { listAdminServicios } from '../lib/adminCatalogApi.js';
 import { listAdminPersonasClientes } from '../lib/adminPersonasApi.js';
-import { listPublicCatalogServicios } from '../../public/booking/publicBookingApi.js';
 import createAdminBookingAdapter from '../../booking/adapters/adminBookingAdapter.js';
 import { buildTimeSlots } from '../../public/booking/bookingUtils.js';
 import { supabase } from '../../../config/supabaseClient.js';
@@ -67,7 +67,6 @@ const ADMIN_BOOKING_FORM_INITIAL = {
   metodoPagoCodigo: 'sin_pago',
   notas: '',
   aplicarRecompensa: false,
-  canjeContextToken: '',
   consentimientoConfirmado: false,
   consentimientoMedio: 'presencial',
   consentimientoObservacion: '',
@@ -81,9 +80,9 @@ const ADMIN_BOOKING_FORM_INITIAL = {
 const ADMIN_BOOKING_PAYMENT_OPTIONS = [
   { value: 'sin_pago', label: 'Confirmar sin cobro inmediato' },
   { value: 'efectivo', label: 'Efectivo pendiente en local' },
-  { value: 'enlace_pago', label: 'Enlace de pago pendiente' },
-  { value: 'tarjeta', label: 'Tarjeta en local' },
 ];
+const CLIENT_SEARCH_MIN_LENGTH = 2;
+const CLIENT_SEARCH_DEBOUNCE_MS = 320;
 
 const STATE_LABELS = {
   en_espera: 'En espera',
@@ -208,14 +207,6 @@ function makeIdempotencyKey() {
   });
 }
 
-function normalizeSearchText(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
-}
-
 function getClienteNombre(cliente) {
   return String(
     cliente?.nombre_completo
@@ -223,16 +214,6 @@ function getClienteNombre(cliente) {
     || cliente?.nombre
     || 'Cliente'
   ).trim();
-}
-
-function getClienteSearchText(cliente) {
-  return normalizeSearchText([
-    getClienteNombre(cliente),
-    cliente?.telefono_principal,
-    cliente?.correo_principal,
-    cliente?.email,
-    cliente?.id_cliente,
-  ].filter(Boolean).join(' '));
 }
 
 function getServicioId(servicio) {
@@ -445,12 +426,10 @@ export default function AdminAgendamientoCitasPage() {
     () => barberos.filter((barbero) => !selectedSucursalId || barbero?.id_sucursal === selectedSucursalId),
     [barberos, selectedSucursalId]
   );
-  const assistantClientesFiltrados = useMemo(() => {
-    const query = normalizeSearchText(assistantForm.clientSearch);
-    const source = Array.isArray(assistantClientes) ? assistantClientes : [];
-    if (!query) return source.slice(0, 8);
-    return source.filter((cliente) => getClienteSearchText(cliente).includes(query)).slice(0, 8);
-  }, [assistantClientes, assistantForm.clientSearch]);
+  const assistantClientesResultados = useMemo(
+    () => (Array.isArray(assistantClientes) ? assistantClientes : []).slice(0, 8),
+    [assistantClientes]
+  );
   const assistantSelectedServices = useMemo(() => {
     const selected = new Set(assistantForm.serviceIds);
     return assistantServicios.filter((servicio) => selected.has(getServicioId(servicio)));
@@ -527,21 +506,18 @@ export default function AdminAgendamientoCitasPage() {
     let cancelled = false;
     setAssistantCatalogLoading(true);
     setAssistantError('');
-    Promise.all([
-      listAdminPersonasClientes(),
-      selectedSucursalId
-        ? listPublicCatalogServicios({ id_sucursal: selectedSucursalId })
-        : Promise.resolve({ data: { servicios: [] } }),
-    ])
-      .then(([clientesResponse, serviciosResponse]) => {
+    const controller = new AbortController();
+    (selectedSucursalId
+      ? listAdminServicios({ id_sucursal: selectedSucursalId }, { signal: controller.signal })
+      : Promise.resolve({ data: { servicios: [] } }))
+      .then((serviciosResponse) => {
         if (cancelled) return;
-        const clientesPayload = clientesResponse?.data ?? clientesResponse;
         const serviciosPayload = serviciosResponse?.data ?? serviciosResponse;
-        setAssistantClientes(Array.isArray(clientesPayload?.clientes) ? clientesPayload.clientes : []);
         setAssistantServicios(Array.isArray(serviciosPayload?.servicios) ? serviciosPayload.servicios : []);
       })
       .catch((err) => {
         if (cancelled) return;
+        if (isAbortError(err)) return;
         if (err.status === 401) {
           navigate('/login');
           return;
@@ -557,8 +533,35 @@ export default function AdminAgendamientoCitasPage() {
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [assistantOpen, navigate, selectedSucursalId]);
+
+  useEffect(() => {
+    if (!assistantOpen || assistantForm.clientMode !== 'existing') return undefined;
+    const query = assistantForm.clientSearch.trim();
+    if (query.length < CLIENT_SEARCH_MIN_LENGTH) {
+      setAssistantClientes([]);
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      listAdminPersonasClientes({ q: query, limit: 8, page: 1 }, { signal: controller.signal, dedupe: false, cache: false })
+        .then((response) => {
+          const payload = response?.data ?? response;
+          setAssistantClientes(Array.isArray(payload?.clientes) ? payload.clientes : []);
+        })
+        .catch((err) => {
+          if (isAbortError(err)) return;
+          setAssistantClientes([]);
+          setAssistantError(mapAdminCitasErrorMessage(err, 'No fue posible buscar clientes.'));
+        });
+    }, CLIENT_SEARCH_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [assistantForm.clientMode, assistantForm.clientSearch, assistantOpen]);
 
   useEffect(() => {
     if (!sucursales.length) return;
@@ -905,7 +908,6 @@ export default function AdminAgendamientoCitasPage() {
     if (assistantForm.aplicarRecompensa) {
       payload.recompensa = {
         aplicar: true,
-        canje_context_token: assistantForm.canjeContextToken.trim() || null,
         consentimiento: {
           confirmado: assistantForm.consentimientoConfirmado,
           medio: assistantForm.consentimientoMedio,
@@ -975,12 +977,6 @@ export default function AdminAgendamientoCitasPage() {
         : await adminBookingAdapter.confirmWithoutPayment(groupId, {
           metodo_pago_codigo: assistantForm.metodoPagoCodigo || 'sin_pago',
           motivo: 'agendamiento_interno_asistido',
-          canje_context_token: assistantForm.canjeContextToken.trim() || null,
-          consentimiento: assistantForm.aplicarRecompensa ? {
-            confirmado: assistantForm.consentimientoConfirmado,
-            medio: assistantForm.consentimientoMedio,
-            referencia: assistantForm.consentimientoObservacion.trim() || null,
-          } : null,
         }, { dedupe: false });
       setAssistantResult((prev) => ({ ...prev, ...result }));
       notifications.success('Hold administrativo confirmado.', { dedupeKey: 'admin-booking-hold-confirmed' });
@@ -1675,9 +1671,9 @@ export default function AdminAgendamientoCitasPage() {
                   <Label className="mf-label">Buscar cliente</Label>
                   <Input className="mf-input" value={assistantForm.clientSearch} onChange={(event) => updateAssistantForm({ clientSearch: event.target.value, selectedClientId: '' })} placeholder="Nombre, telefono o correo" />
                   <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-[var(--mf-nav-border)] p-1">
-                    {assistantCatalogLoading ? <p className="px-2 py-3 text-sm text-[var(--mf-text-2)]">Cargando clientes...</p> : null}
-                    {!assistantCatalogLoading && assistantClientesFiltrados.length === 0 ? <p className="px-2 py-3 text-sm text-[var(--mf-text-2)]">No hay coincidencias.</p> : null}
-                    {assistantClientesFiltrados.map((cliente) => {
+                    {assistantForm.clientSearch.trim().length < CLIENT_SEARCH_MIN_LENGTH ? <p className="px-2 py-3 text-sm text-[var(--mf-text-2)]">Ingresa al menos 2 caracteres.</p> : null}
+                    {assistantForm.clientSearch.trim().length >= CLIENT_SEARCH_MIN_LENGTH && assistantClientesResultados.length === 0 ? <p className="px-2 py-3 text-sm text-[var(--mf-text-2)]">No hay coincidencias.</p> : null}
+                    {assistantClientesResultados.map((cliente) => {
                       const active = assistantForm.selectedClientId === cliente.id_cliente;
                       return (
                         <button key={cliente.id_cliente} type="button" className={`w-full rounded-md px-2 py-2 text-left text-sm transition-colors ${active ? 'bg-[var(--mf-accent)] text-[var(--mf-accent-text)]' : 'hover:bg-[var(--mf-btn-bg)]'}`} onClick={() => selectAssistantCliente(cliente)}>
@@ -1757,10 +1753,6 @@ export default function AdminAgendamientoCitasPage() {
                 </label>
                 {assistantForm.aplicarRecompensa ? (
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <Label className="mf-label">Token de canje</Label>
-                      <Input className="mf-input mt-1" value={assistantForm.canjeContextToken} onChange={(event) => updateAssistantForm({ canjeContextToken: event.target.value })} />
-                    </div>
                     <div>
                       <Label className="mf-label">Medio consentimiento *</Label>
                       <select className="mf-select mt-1" value={assistantForm.consentimientoMedio} onChange={(event) => updateAssistantForm({ consentimientoMedio: event.target.value })}>

@@ -24,6 +24,23 @@ function withoutReleaseTokenOptions(options = {}) {
   };
 }
 
+function adminClosePayload(payload = {}, metodoPagoCodigo = 'sin_pago') {
+  const {
+    release_token: _releaseToken,
+    releaseToken: _releaseTokenCamel,
+    metodo_pago_codigo: _metodoPagoCodigo,
+    metodo: _metodo,
+    intencion: _intencion,
+    canje_context_token: _canjeContextToken,
+    id_points_tx_canje: _idPointsTxCanje,
+    recompensa: _recompensa,
+    membresia: _membresia,
+    cortesia: _cortesia,
+    ...rest
+  } = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  return { ...rest, metodo_pago_codigo: metodoPagoCodigo };
+}
+
 export function createAdminBookingAdapter(actor = {}) {
   const normalizedActor = normalizeBookingActor({ ...actor, type: 'admin', isAuthenticated: true });
   const rawRoles = Array.isArray(actor.roles) ? actor.roles : [actor.role].filter(Boolean);
@@ -34,12 +51,12 @@ export function createAdminBookingAdapter(actor = {}) {
     releaseHold: async (idGrupoCita, options = {}) => unwrapResponseData(await deleteAdminCitasHold(idGrupoCita, withoutReleaseTokenOptions(options))),
     confirmWithoutPayment: async (idGrupoCita, payload = {}, options = {}) => unwrapResponseData(await postAdminCitasHoldConfirmar(
       idGrupoCita,
-      { ...withoutReleaseToken(payload), metodo_pago_codigo: payload?.metodo_pago_codigo || 'sin_pago' },
+      adminClosePayload(payload, 'sin_pago'),
       options
     )),
     confirmCashPending: async (idGrupoCita, payload = {}, options = {}) => unwrapResponseData(await postAdminCitasHoldConfirmar(
       idGrupoCita,
-      { ...withoutReleaseToken(payload), metodo_pago_codigo: 'efectivo' },
+      adminClosePayload(payload, 'efectivo'),
       options
     )),
     createPaymentLink: async (idGrupoCita, payload = {}, options = {}) => unwrapResponseData(await postAdminCitasHoldPaymentLink(idGrupoCita, withoutReleaseToken(payload), options)),
@@ -51,7 +68,7 @@ export function createAdminBookingAdapter(actor = {}) {
     supportsManualPromotion: isSuperAdmin,
     supportsCourtesy: isSuperAdmin,
     supportsCashPending: true,
-    supportsPaymentLink: true,
+    supportsPaymentLink: false,
     writesBackend: true,
   });
 }

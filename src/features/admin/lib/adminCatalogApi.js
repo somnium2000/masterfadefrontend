@@ -17,11 +17,11 @@ function normalizeBranchId(value) {
  * Lista servicios del catálogo.
  * @param {{ id_sucursal?: string }} params
  */
-export async function listAdminServicios({ id_sucursal } = {}) {
+export async function listAdminServicios({ id_sucursal } = {}, options = {}) {
     // AM: Evita enviar placeholders o valores no UUID como id_sucursal.
     const branchId = normalizeBranchId(id_sucursal);
     const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
-    return http.get(`/v1/admin/catalog/servicios${query}`);
+    return http.get(`/v1/admin/catalog/servicios${query}`, options);
 }
 
 export async function listAdminServiciosAgrupados({ id_sucursal } = {}) {

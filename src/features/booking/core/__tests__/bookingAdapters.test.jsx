@@ -124,6 +124,7 @@ describe('booking adapters integration', () => {
     expect(adapter.supportsManualPromotion).toBe(false);
     expect(adapter.supportsCourtesy).toBe(false);
     expect(adapter.supportsCashPending).toBe(true);
+    expect(adapter.supportsPaymentLink).toBe(false);
     expect(hold.id_grupo_cita).toBe('admin-group');
     expect(adminCitasApiMock.postAdminCitasHold).toHaveBeenCalledWith(
       { id_sucursal: 'branch-1' },
@@ -160,7 +161,7 @@ describe('booking adapters integration', () => {
     expect(publicBookingApiMock.createPublicCitaHold).not.toHaveBeenCalled();
   });
 
-  it('uses explicit admin endpoints for release, cash pending and payment link', async () => {
+  it('uses explicit admin endpoints for release and cash pending while payment link is not operational', async () => {
     adminCitasApiMock.deleteAdminCitasHold.mockResolvedValue({ data: { liberado: true } });
     adminCitasApiMock.postAdminCitasHoldConfirmar.mockResolvedValue({ data: { confirmado: true } });
     adminCitasApiMock.postAdminCitasHoldPaymentLink.mockResolvedValue({ data: { id_intent: 'intent-1' } });
@@ -172,6 +173,7 @@ describe('booking adapters integration', () => {
 
     expect(adapter.supportsCourtesy).toBe(true);
     expect(adapter.supportsManualPromotion).toBe(true);
+    expect(adapter.supportsPaymentLink).toBe(false);
     expect(adminCitasApiMock.deleteAdminCitasHold).toHaveBeenCalledWith('group-1', {});
     expect(adminCitasApiMock.postAdminCitasHoldConfirmar).toHaveBeenCalledWith(
       'group-1',
@@ -181,6 +183,26 @@ describe('booking adapters integration', () => {
     expect(adminCitasApiMock.postAdminCitasHoldPaymentLink).toHaveBeenCalledWith('group-1', { canal: 'whatsapp' }, {});
     expect(publicBookingApiMock.releasePublicCitaHold).not.toHaveBeenCalled();
     expect(publicBookingApiMock.confirmClienteCitaHoldWithoutPayment).not.toHaveBeenCalled();
+  });
+
+  it('admin confirmation strips benefit claims and only sends pending close methods', async () => {
+    adminCitasApiMock.postAdminCitasHoldConfirmar.mockResolvedValue({ data: { confirmado: true } });
+    const adapter = resolveBookingAdapter({ mode: 'admin', actor: { role: 'admin' } });
+
+    await adapter.confirmWithoutPayment('group-1', {
+      metodo_pago_codigo: 'recompensa',
+      canje_context_token: 'editable-token',
+      recompensa: { aplicar: true },
+      membresia: { aplicar: true },
+      cortesia: { aplicar: true },
+      motivo: 'revision',
+    });
+
+    expect(adminCitasApiMock.postAdminCitasHoldConfirmar).toHaveBeenCalledWith(
+      'group-1',
+      { motivo: 'revision', metodo_pago_codigo: 'sin_pago' },
+      {}
+    );
   });
 
   it('does not send release_token through admin release or confirmation calls', async () => {

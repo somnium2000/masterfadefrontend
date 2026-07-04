@@ -2,6 +2,16 @@ import { http } from '../../../services/httpClient.js';
 
 const BASE = '/v1/admin/personas';
 
+function toQueryString(params = {}) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return query ? `?${query}` : '';
+}
+
 // AM: Cliente API central del modulo Personas (permisos segun cada ruta).
 export async function listAdminPersonas() {
   return http.get(BASE);
@@ -39,8 +49,8 @@ export async function activateAdminPersonaEmpleado(idEmpleado) {
   return http.patch(`${BASE}/empleados/${idEmpleado}/activar`);
 }
 
-export async function listAdminPersonasClientes() {
-  return http.get(`${BASE}/clientes`);
+export async function listAdminPersonasClientes(params = {}, options = {}) {
+  return http.get(`${BASE}/clientes${toQueryString(params)}`, options);
 }
 
 export async function getAdminPersonaCliente(idCliente) {
