@@ -1,4 +1,4 @@
-const ACTOR_TYPES = new Set(['guest', 'customer', 'preview']);
+const ACTOR_TYPES = new Set(['guest', 'customer', 'preview', 'admin']);
 const SELECTION_TYPES = new Set(['services', 'package', 'mixed']);
 
 function safeText(value) {
