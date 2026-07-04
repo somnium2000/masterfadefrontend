@@ -185,13 +185,28 @@ export default function usePublicAgendaEvents({
   const flushTimerRef = useRef(null);
   const fallbackTimerRef = useRef(null);
   const intentionalCloseRef = useRef(false);
+  const onAvailabilityChangedRef = useRef(onAvailabilityChanged);
+  const onResyncRequiredRef = useRef(onResyncRequired);
+  const onConnectionStateChangeRef = useRef(onConnectionStateChange);
 
   const shouldConnect = Boolean(enabled && routeActive && branchId && typeof window !== 'undefined');
 
+  useEffect(() => {
+    onAvailabilityChangedRef.current = onAvailabilityChanged;
+  }, [onAvailabilityChanged]);
+
+  useEffect(() => {
+    onResyncRequiredRef.current = onResyncRequired;
+  }, [onResyncRequired]);
+
+  useEffect(() => {
+    onConnectionStateChangeRef.current = onConnectionStateChange;
+  }, [onConnectionStateChange]);
+
   const setState = useCallback((nextState) => {
     setConnectionState(nextState);
-    onConnectionStateChange?.(nextState);
-  }, [onConnectionStateChange]);
+    onConnectionStateChangeRef.current?.(nextState);
+  }, []);
 
   const flushQueue = useCallback(() => {
     if (flushTimerRef.current) {
@@ -201,9 +216,9 @@ export default function usePublicAgendaEvents({
     const grouped = groupEvents(queueRef.current);
     queueRef.current = [];
     grouped.forEach((event) => {
-      onAvailabilityChanged?.(event);
+      onAvailabilityChangedRef.current?.(event);
     });
-  }, [onAvailabilityChanged]);
+  }, []);
 
   const enqueueEvent = useCallback((event) => {
     queueRef.current.push(event);
@@ -233,6 +248,10 @@ export default function usePublicAgendaEvents({
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     intentionalCloseRef.current = false;
+    if (sourceRef.current) {
+      sourceRef.current.close();
+      sourceRef.current = null;
+    }
     const restoredLastId = readLastEventId(branchId);
     lastProcessedRef.current = restoredLastId;
     deferStateUpdate(() => {
@@ -305,7 +324,7 @@ export default function usePublicAgendaEvents({
       clearLastEventId(branchId);
       lastProcessedRef.current = '';
       setLastEventId('');
-      onResyncRequired?.({ reason, branchId });
+      onResyncRequiredRef.current?.({ reason, branchId });
     });
 
     return () => {
@@ -318,13 +337,9 @@ export default function usePublicAgendaEvents({
       source.close();
       if (sourceRef.current === source) sourceRef.current = null;
     };
-  }, [
-    branchId,
-    enqueueEvent,
-    onResyncRequired,
-    setState,
-    shouldConnect,
-  ]);
+  // The EventSource lifecycle must only track connection identity. Callback freshness is handled through refs above.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchId, shouldConnect]);
 
   return useMemo(() => ({
     connectionState,

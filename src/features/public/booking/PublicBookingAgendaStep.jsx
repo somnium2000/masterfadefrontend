@@ -229,7 +229,7 @@ const BookingBlocksSummary = memo(function BookingBlocksSummary({
         {hasAnyPromotionSelected ? (
           <div className="public-booking-promo-summary">
             <div className="public-booking-promo-summary-row">
-              <span className="public-booking-promo-summary-label">Subtotal servicios:</span>
+              <span className="public-booking-promo-summary-label">Total de la reserva:</span>
               <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalToPay)}</strong>
             </div>
             {hasAnyPendingTwoByOne && safeEstimatedDiscount <= 0 ? (
@@ -253,7 +253,7 @@ const BookingBlocksSummary = memo(function BookingBlocksSummary({
             ) : null}
           </div>
         ) : (
-          <span>Total servicios: {formatCurrencyHnl(totalToPay)}</span>
+          <span>Total de la reserva: {formatCurrencyHnl(totalToPay)}</span>
         )}
       </div>
     </div>
@@ -377,6 +377,12 @@ export default function PublicBookingAgendaStep() {
     selectedPackage,
     selectedServiceIdsSet,
   ]);
+
+  const hasSelectedPackage = Boolean(selectedPackage || selectedPackageId);
+  const hasSelectedExtras = hasSelectedPackage && selectedServiceIdsSet.size > 0;
+  const totalSelectionLabel = hasSelectedPackage
+    ? (hasSelectedExtras ? 'Total de la reserva' : 'Total paquete')
+    : 'Total servicios';
 
   const hasValidSelectionForCalendar = selectedServicesCount > 0;
 
@@ -1238,7 +1244,7 @@ export default function PublicBookingAgendaStep() {
                 <small>El descuento será aplicado y confirmado en el pago final.</small>
               </div>
             ) : (
-              <span>Total servicios: {formatCurrencyHnl(totalToPay)}</span>
+              <span>{totalSelectionLabel}: {formatCurrencyHnl(totalToPay)}</span>
             )}
           </div>
         </motion.div>
@@ -1390,7 +1396,7 @@ export default function PublicBookingAgendaStep() {
                     </div>
 
                     <div className="public-booking-time-blocks-shell">
-                      {totalAvailableSlots === 0 ? (
+                      {availabilityError ? null : totalAvailableSlots === 0 ? (
                         <div className="public-booking-period-empty">
                           <p className="text-sm font-semibold text-[var(--mf-text)]">
                             No hay horarios disponibles para este día.

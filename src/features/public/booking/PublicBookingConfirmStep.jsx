@@ -39,6 +39,12 @@ export default function PublicBookingConfirmStep() {
     (acc, block) => acc + Number(block?.total_hnl || 0),
     0
   );
+  const hasPackageSelection = bookingBlocksSummary.some((block) => (
+    block?.selection_type === 'package'
+    || block?.selection_type === 'mixed'
+    || block?.selectedPackage
+    || block?.packageId
+  ));
   const subtotalApi = Number(holdPricing?.subtotal_hnl ?? holdResult?.subtotal_hnl ?? holdResult?.monto_total_hnl ?? 0);
   const subtotalResolved = Number.isFinite(subtotalApi) && subtotalApi > 0 ? subtotalApi : subtotalFallback;
   const descuento = Number(holdPricing?.descuento_total_hnl ?? holdResult?.descuento_total_hnl ?? 0);
@@ -215,7 +221,7 @@ export default function PublicBookingConfirmStep() {
         </div>
 
         <div className="citas-confirm-row mt-4">
-          <span>Total servicios</span>
+          <span>{hasPackageSelection ? 'Total de la reserva' : 'Total servicios'}</span>
           <span>{formatCurrencyHnl(subtotalResolved)}</span>
         </div>
         {hasRealDiscount ? (

@@ -859,6 +859,13 @@ const agendaAutoLoadKeyRef = useRef('');
     currentGroupId: holdResult?.id_grupo_cita || '',
   });
 
+  const handleSelectedSlotUnavailable = useCallback(() => {
+    notifications.warning(
+      'El horario seleccionado acaba de dejar de estar disponible. Selecciona otra hora para continuar.',
+      { dedupeKey: 'public-booking-agenda-sse-slot-lost' }
+    );
+  }, [notifications]);
+
   const {
     availabilityLoading,
     availabilityMap,
@@ -898,11 +905,7 @@ const agendaAutoLoadKeyRef = useRef('');
     availabilityError,
     setAvailabilityError,
     notifyError,
-    onSelectedSlotUnavailable: () => {
-      notifications.warning('El horario seleccionado acaba de dejar de estar disponible. Selecciona otra hora para continuar.', {
-        dedupeKey: 'public-booking-agenda-sse-slot-lost',
-      });
-    },
+    onSelectedSlotUnavailable: handleSelectedSlotUnavailable,
   });
 
   const rawSelectedServicesDurationSum = useMemo(
