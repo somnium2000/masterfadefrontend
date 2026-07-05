@@ -471,11 +471,6 @@ export default function PublicBookingAgendaStep() {
   const [catalogTab, setCatalogTab] = useState('services');
   const effectiveCatalogTab = rewardForTitularActive ? 'services' : catalogTab;
 
-  const activeBlockSummary = useMemo(
-    () => bookingBlocksSummary.find((block) => block.index === activeBlockIndex) || null,
-    [activeBlockIndex, bookingBlocksSummary]
-  );
-
   const selectedServiceIdsForPromotionSet = useMemo(
     () => new Set(serviceIds),
     [serviceIds]
@@ -554,14 +549,6 @@ export default function PublicBookingAgendaStep() {
       .filter(Boolean)
       .map((promotion) => String(promotion?.titulo || '').trim() || 'Promoción');
   }, [promotionsForCards, selectedPromotionIds]);
-
-  const activeBlockEstimatedDiscount = Math.max(
-    0,
-    Number(activeBlockSummary?.promocion_descuento_estimado_hnl || 0)
-  );
-  const activeBlockNeedsFinalCalculation = Boolean(activeBlockSummary?.promocion_requiere_calculo_final);
-  const safeEstimatedDiscountGlobal = Math.max(0, Number(totalEstimatedPromotionDiscountHnl || 0));
-  const visibleEstimatedDiscount = Math.max(activeBlockEstimatedDiscount, safeEstimatedDiscountGlobal);
 
   const [preferredSlotPeriod, setPreferredSlotPeriod] = useState('manana');
   const periodSlotModels = useMemo(() => {
@@ -1216,36 +1203,9 @@ export default function PublicBookingAgendaStep() {
           ) : null}
 
           <div className="citas-services-summary-row mt-3">
-            {selectedPromotionIds.length > 0 ? (
-              <div className="public-booking-promo-summary">
-                <div className="public-booking-promo-summary-row">
-                  <span className="public-booking-promo-summary-label">Subtotal servicios:</span>
-                  <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalToPay)}</strong>
-                </div>
-                <div className="public-booking-promo-summary-row">
-                  <span className="public-booking-promo-summary-label">Promociones seleccionadas:</span>
-                  <strong className="public-booking-promo-summary-value">{selectedPromotionIds.length}</strong>
-                </div>
-                {activeBlockNeedsFinalCalculation ? (
-                  <div className="public-booking-promo-summary-row">
-                    <span className="public-booking-promo-summary-label">Descuento estimado:</span>
-                    <strong className="public-booking-promo-summary-value">Aplicación final pendiente en pago.</strong>
-                  </div>
-                ) : (
-                  <div className="public-booking-promo-summary-row">
-                    <span className="public-booking-promo-summary-label">Descuento estimado:</span>
-                    <strong className="public-booking-promo-summary-value">-{formatCurrencyHnl(visibleEstimatedDiscount)}</strong>
-                  </div>
-                )}
-                <div className="public-booking-promo-summary-row public-booking-promo-summary-row-total">
-                  <span className="public-booking-promo-summary-label">Total estimado:</span>
-                  <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalEstimatedToPay)}</strong>
-                </div>
-                <small>El descuento será aplicado y confirmado en el pago final.</small>
-              </div>
-            ) : (
+            {selectedPromotionIds.length === 0 ? (
               <span>{totalSelectionLabel}: {formatCurrencyHnl(totalToPay)}</span>
-            )}
+            ) : null}
           </div>
         </motion.div>
 
