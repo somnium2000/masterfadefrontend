@@ -1,14 +1,11 @@
-import {
-  createContext,
+﻿import {
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import { ArrowLeft, House } from 'lucide-react';
-import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../../../components/ui/button.jsx';
 import {
   Dialog,
@@ -18,37 +15,61 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../../components/ui/dialog.jsx';
-import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
-import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
-import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
-import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import {
-  createClienteCitaHold,
-  confirmClienteCitaHoldWithoutPayment,
-  createPublicCitaHold,
-  createPublicPaymentIntent,
-  getPublicPaymentStatus,
-  completePublicMockPayment,
-  getClienteMembershipEstado,
-  getPublicBookingContext,
-  releasePublicCitaHold,
-  validatePublicTitularForBooking,
-  listPublicAgendaBarberos,
-  listPublicAgendaDisponibilidad,
-  listPublicAgendaHorarios,
-  listPublicAgendaPromociones,
-  listPublicCatalogPaquetes,
-  listPublicCatalogServicios,
+  validatePublicBookingContacts,
 } from './publicBookingApi.js';
 import {
+  buildConfirmWithoutPaymentPayload,
+  buildCreatePaymentIntentPayload,
+} from './bookingPayloadBuilders.js';
+import {
+  resolveActiveBookingBlock,
+  resolveBookingTotals,
+  resolveConfirmWithoutPaymentState,
+  resolveHoldCountdownState,
+  resolveHoldPricing,
+  resolveHoldTotalToPay,
+  resolveItemsById,
+  resolveRequestedPromotionIds,
+  resolveSelectedPromotions,
+} from './bookingFlowSelectors.js';
+import {
+  BOOKING_COMPANION_ALIAS_PREFIX,
+  BOOKING_HOLDER_ALIAS,
+  REWARD_BOOKING_CONTEXT_STORAGE_KEY,
+  SLOT_GRID_STEP_MINUTES,
+} from './constants/bookingDefaults.js';
+import { BOOKING_ROUTES } from './constants/bookingRoutes.js';
+import {
+  getBookingBlockOccupiedRange,
+  rangesOverlap,
+} from './utils/bookingDates.js';
+import {
+  areBlocksEqual,
+  areServiceIdsEqual,
+  createBookingBlock,
+  evaluatePromotionForBlock,
+  extractBookingCode,
+  extractConfirmedAppointments,
+  extractPlanIncludedServiceIds,
+  extractPlanRemainingServiceIds,
+  normalizeBookingBlock,
+} from './utils/bookingMappers.js';
+import { buildBookingSelectionFingerprint } from './utils/bookingPayloads.js';
+import {
+  hasLetters,
+  isValidEmail,
+  readBooleanParam,
+  readNumberParam,
+} from './utils/bookingValidators.js';
+import {
   buildFullName,
+  countPhoneDigits,
   MAX_COMPANIONS,
   MAX_PROMOTIONS_PER_BOOKING,
-  addMinutesToTimeKey,
   buildAppointmentSelectionSummary,
   extractMessage,
-  getTitularState,
   getCurrentTimeKeyInTimeZone,
   mapPublicBookingErrorMessage,
   getTodayDateKeyInTimeZone,
@@ -56,135 +77,137 @@ import {
   normalizePromotionIds,
   normalizePhone,
   normalizePersonName,
-  splitFullName,
-  timeKeyToMinutes,
   toDateKey,
   toLocalDateTimeWithOffset,
   toMonthStartFromDateKey,
 } from './bookingUtils.js';
 import '../../admin/pages/AdminCitasPage.css';
 import './PublicBookingFlow.css';
-import usePublicAgendaRealtime from './usePublicAgendaRealtime.js';
+import usePublicAgendaPolling from './usePublicAgendaPolling.js';
+import useBookingMode from './hooks/useBookingMode.js';
+import resolveBookingAdapter from '../../booking/adapters/bookingAdapterResolver.js';
+import useBookingCatalogs from './hooks/useBookingCatalogs.js';
+import useBookingAvailability from './hooks/useBookingAvailability.js';
+import useBookingCompanions from './hooks/useBookingCompanions.js';
+import useBookingHold from './hooks/useBookingHold.js';
+import useBookingPayment from './hooks/useBookingPayment.js';
+import usePublicAgendaEvents, { parseAgendaSseEnabled } from './hooks/usePublicAgendaEvents.js';
+import useBookingWizardNavigation from './hooks/useBookingWizardNavigation.js';
+import BookingLayout from './components/BookingLayout.jsx';
+import BookingErrorState from './components/BookingErrorState.jsx';
+import { PublicBookingProvider } from './BookingFlowContext.jsx';
 
-const EMPTY_CONTEXT = {
-  sucursales: [],
-  parametros: {},
-};
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const SLOT_GRID_STEP_MINUTES = 5;
-const REWARD_BOOKING_CONTEXT_STORAGE_KEY = 'mf_reward_redeem_context_v1';
+export { PublicBookingProvider, usePublicBookingFlow } from './BookingFlowContext.jsx';
 
-const PublicBookingContext = createContext(null);
+const CONTACT_ERROR_FIELD_ORDER = ['contactFirstName', 'contactLastName', 'contactEmail', 'contactPhone'];
+const PROFILE_FIELD_LABELS = Object.freeze({
+  nombres: 'Nombre',
+  apellidos: 'Apellido',
+  telefono_principal: 'Teléfono',
+  correo_principal: 'Correo',
+});
 
-export function PublicBookingProvider({ value, children }) {
-  return <PublicBookingContext.Provider value={value}>{children}</PublicBookingContext.Provider>;
-}
-
-function readBooleanParam(parametros, key, fallback) {
-  const value = parametros?.[key];
-  if (typeof value === 'boolean') return value;
-  if (value && typeof value === 'object' && typeof value.valor_booleano === 'boolean') {
-    return value.valor_booleano;
-  }
-  return fallback;
-}
-
-function readNumberParam(parametros, key, fallback) {
-  const value = parametros?.[key];
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (value && typeof value === 'object' && Number.isFinite(Number(value.valor_numero))) {
-    return Number(value.valor_numero);
-  }
-  return fallback;
-}
-
-function buildDefaultSlots() {
-  return [];
-}
-
-function normalizeHourMinute(value) {
-  const normalized = String(value || '').trim();
-  const match = normalized.match(/^(\d{2}:\d{2})/);
-  return match ? match[1] : null;
-}
-
-function toPromotionNumber(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function evaluatePromotionForBlock({ block, promotion, servicesById, packagesById }) {
-  if (!promotion) {
-    return {
-      canSelect: false,
-      isTargetSelected: false,
-      disabledReason: '',
-      targetName: '',
-      targetPrice: 0,
-      estimatedDiscount: 0,
-      requiresFinalCalculation: false,
-    };
-  }
-
-  const appliesTo = String(promotion?.aplica_a || '').trim().toLowerCase();
-  const mechanic = String(promotion?.mecanica || '').trim().toLowerCase();
-  const targetServiceId = String(promotion?.id_servicio_objetivo || '').trim();
-  const targetPackageId = String(promotion?.id_paquete_objetivo || '').trim();
-  const selectedServiceIds = Array.isArray(block?.serviceIds) ? block.serviceIds : [];
-  const selectedPackageId = String(block?.packageId || '').trim();
-  const targetService = targetServiceId ? servicesById.get(targetServiceId) || null : null;
-  const targetPackage = targetPackageId ? packagesById.get(targetPackageId) || null : null;
-
-  let isTargetSelected = false;
-  let targetName = '';
-  let targetPrice = 0;
-  if (appliesTo === 'servicio') {
-    isTargetSelected = Boolean(targetServiceId && selectedServiceIds.includes(targetServiceId));
-    targetName = String(targetService?.nombre_servicio || promotion?.servicio_objetivo_nombre || 'servicio').trim();
-    targetPrice = toPromotionNumber(targetService?.precio_hnl);
-  } else if (appliesTo === 'paquete') {
-    isTargetSelected = Boolean(targetPackageId && selectedPackageId && selectedPackageId === targetPackageId);
-    targetName = String(targetPackage?.nombre_paquete || promotion?.paquete_objetivo_nombre || 'paquete').trim();
-    targetPrice = toPromotionNumber(targetPackage?.precio_hnl);
-  }
-
-  const discountValue = toPromotionNumber(promotion?.valor_descuento);
-  let estimatedDiscount = 0;
-  let requiresFinalCalculation = false;
-  if (isTargetSelected) {
-    if (mechanic === 'porcentaje') {
-      estimatedDiscount = (targetPrice * discountValue) / 100;
-    } else if (mechanic === 'monto_fijo') {
-      estimatedDiscount = Math.min(targetPrice, discountValue);
-    } else if (mechanic === 'dos_por_uno') {
-      requiresFinalCalculation = true;
-      estimatedDiscount = 0;
-    }
-  }
-
-  const safeDiscount = Number.isFinite(estimatedDiscount) ? Math.max(0, Math.min(estimatedDiscount, targetPrice)) : 0;
-  const disabledReason = isTargetSelected
-    ? ''
-    : `Requiere seleccionar ${targetName || (appliesTo === 'paquete' ? 'el paquete objetivo' : 'el servicio objetivo')}`;
-
+function getContactValidationFeedback(contactState, blockIndex) {
+  const errors = contactState?.errors || {};
+  const field = CONTACT_ERROR_FIELD_ORDER.find((key) => String(errors?.[key] || '').trim());
+  if (!field) return null;
+  const isTitular = Number(blockIndex || 0) === 0;
+  const fallbackMessage = isTitular
+    ? 'Completa los datos del titular.'
+    : 'Completa los datos del acompañante.';
   return {
-    canSelect: isTargetSelected,
-    isTargetSelected,
-    disabledReason,
-    targetName,
-    targetPrice,
-    estimatedDiscount: safeDiscount,
-    requiresFinalCalculation,
+    field,
+    message: String(errors[field] || '').trim() || fallbackMessage,
   };
 }
 
-function isValidEmail(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  return EMAIL_PATTERN.test(normalized);
+function isPublicHoldRateLimitError(error, conflictCode = '') {
+  const normalizedCode = String(conflictCode || '').trim().toUpperCase();
+  if (error?.status === 429 || normalizedCode === 'TOO_MANY_REQUESTS') {
+    return true;
+  }
+  const message = extractMessage(error);
+  return /demasiadas solicitudes|too many requests|rate limit/i.test(String(message || '').trim());
 }
 
-function hasLetters(value) {
-  return /[A-Za-z]/.test(String(value || ''));
+function toSafeBlockIndex(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
+function resolveBookingDetailBlockIndex(details) {
+  const directIndex = toSafeBlockIndex(details?.blockIndex);
+  if (directIndex != null) return directIndex;
+
+  const field = String(details?.field || '').trim();
+  const fieldMatch = field.match(/integrantes\[(\d+)\]/i);
+  if (fieldMatch) {
+    const fieldIndex = toSafeBlockIndex(fieldMatch[1]);
+    if (fieldIndex != null) return fieldIndex;
+  }
+
+  const order = Number(details?.orden_integrante);
+  if (Number.isInteger(order) && order > 0) return order - 1;
+  return null;
+}
+
+function mapBookingDetailFieldToContactField(field) {
+  const normalizedField = String(field || '').trim().toLowerCase();
+  if (!normalizedField) return null;
+  if (normalizedField.includes('telefono') || normalizedField.includes('phone')) return 'contactPhone';
+  if (normalizedField.includes('email') || normalizedField.includes('correo')) return 'contactEmail';
+  if (normalizedField.includes('apellidos') || normalizedField.includes('last_name')) return 'contactLastName';
+  if (normalizedField.includes('nombres') || normalizedField.includes('first_name')) return 'contactFirstName';
+  if (normalizedField.includes('nombre')) return 'contactFirstName';
+  return null;
+}
+
+function resolveEmailConflictBlockIndex(details) {
+  const detailIndex = resolveBookingDetailBlockIndex(details);
+  if (detailIndex != null) return detailIndex;
+
+  const field = String(details?.field || '').trim().toLowerCase();
+  if (field.includes('titular.email')) return 0;
+  return null;
+}
+
+function buildActiveUserEmailFeedback({ details, blockIndex, bookingBlocksSummary, fallbackEmail = '' } = {}) {
+  const safeIndex = Math.max(0, Math.trunc(Number(blockIndex || 0)));
+  const detailRole = String(details?.rol_integrante_codigo || '').trim().toLowerCase();
+  const isTitular = detailRole ? detailRole === 'titular' : safeIndex === 0;
+  const summaryBlock = Array.isArray(bookingBlocksSummary) ? bookingBlocksSummary[safeIndex] : null;
+  const alias = String(
+    details?.alias
+    || summaryBlock?.alias
+    || (isTitular ? BOOKING_HOLDER_ALIAS : `${BOOKING_COMPANION_ALIAS_PREFIX} ${safeIndex}`)
+  ).trim();
+  const email = String(details?.email || fallbackEmail || '').trim().toLowerCase();
+  const message = isTitular
+    ? 'Este correo ya pertenece a una cuenta activa. Inicia sesi\u00f3n para continuar.'
+    : `El correo de ${alias || `${BOOKING_COMPANION_ALIAS_PREFIX} ${safeIndex}`} pertenece a una cuenta activa. Ese acompa\u00f1ante debe iniciar sesi\u00f3n o usar otro correo.`;
+
+  return {
+    alias,
+    email,
+    isTitular,
+    message,
+  };
+}
+
+function normalizeContactEmailConflict(rawConflict) {
+  const conflictIndex = resolveBookingDetailBlockIndex(rawConflict);
+  if (conflictIndex == null) return null;
+  const mappedField = mapBookingDetailFieldToContactField(rawConflict?.field || 'contactEmail') || 'contactEmail';
+  const message = String(rawConflict?.message || '').trim() || 'Corrige el correo para continuar.';
+  return {
+    blockIndex: conflictIndex,
+    field: mappedField,
+    message,
+    code: String(rawConflict?.code || '').trim().toUpperCase(),
+    email: String(rawConflict?.email || '').trim().toLowerCase(),
+    rol_integrante_codigo: String(rawConflict?.rol_integrante_codigo || '').trim().toLowerCase(),
+  };
 }
 
 function readRewardBookingContext() {
@@ -224,346 +247,25 @@ function persistRewardBookingContext(context) {
   window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, JSON.stringify(context));
 }
 
-function buildDynamicSlots({
-  horarios,
-  duracionTotalMin,
-}) {
-  const list = Array.isArray(horarios) ? horarios : [];
-  const fallbackVisibleDurationMinutes = Math.max(Number(duracionTotalMin || 0), 0);
-  return list
-    .map((slot) => mapDynamicSlot(slot, fallbackVisibleDurationMinutes))
-    .filter(Boolean)
-    .sort((left, right) => {
-      const leftMin = timeKeyToMinutes(left.hora) ?? 0;
-      const rightMin = timeKeyToMinutes(right.hora) ?? 0;
-      return leftMin - rightMin;
-    });
-}
-
-function mapDynamicSlot(slot, fallbackVisibleDurationMinutes = 0) {
-  const hora = normalizeHourMinute(slot?.hora);
-  if (!hora) return null;
-  const visibleDurationMinutes = Math.max(
-    Number(slot?.duracion_visible_min ?? fallbackVisibleDurationMinutes),
-    0
-  );
-  const horaFinVisible = normalizeHourMinute(slot?.hora_fin_visible)
-    || addMinutesToTimeKey(hora, visibleDurationMinutes)
-    || hora;
-  return {
-    hora,
-    horaFin: horaFinVisible,
-    disponible: Boolean(slot?.disponible ?? true),
-    duracionVisibleMin: visibleDurationMinutes,
-  };
-}
-
-function createEmptyCuratedSlots() {
-  return {
-    manana: {
-      recommended: null,
-      alternatives: [],
-      overflow: [],
-      has_more: false,
-      total: 0,
-    },
-    tarde: {
-      recommended: null,
-      alternatives: [],
-      overflow: [],
-      has_more: false,
-      total: 0,
-    },
-    noche: {
-      recommended: null,
-      alternatives: [],
-      overflow: [],
-      has_more: false,
-      total: 0,
-    },
-  };
-}
-
-function mapCuratedPeriod(rawPeriod, fallbackVisibleDurationMinutes) {
-  const recommended = mapDynamicSlot(rawPeriod?.recommended, fallbackVisibleDurationMinutes);
-  const alternatives = (Array.isArray(rawPeriod?.alternatives) ? rawPeriod.alternatives : [])
-    .map((slot) => mapDynamicSlot(slot, fallbackVisibleDurationMinutes))
-    .filter(Boolean);
-  const overflow = (Array.isArray(rawPeriod?.overflow) ? rawPeriod.overflow : [])
-    .map((slot) => mapDynamicSlot(slot, fallbackVisibleDurationMinutes))
-    .filter(Boolean);
-  const total = Number(rawPeriod?.total ?? (
-    (recommended ? 1 : 0) + alternatives.length + overflow.length
-  ));
-  return {
-    recommended,
-    alternatives,
-    overflow,
-    has_more: Boolean(rawPeriod?.has_more ?? overflow.length > 0),
-    total: Number.isFinite(total) ? total : 0,
-  };
-}
-
-function buildCuratedSlots({
-  horariosCurados,
-  horarios,
-  duracionTotalMin,
-}) {
-  const fallbackVisibleDurationMinutes = Math.max(Number(duracionTotalMin || 0), 0);
-  const safeCurated = horariosCurados && typeof horariosCurados === 'object'
-    ? horariosCurados
-    : null;
-
-  if (safeCurated) {
-    const base = createEmptyCuratedSlots();
-    Object.keys(base).forEach((periodKey) => {
-      base[periodKey] = mapCuratedPeriod(safeCurated?.[periodKey], fallbackVisibleDurationMinutes);
-    });
-    return base;
-  }
-
-  const mapped = buildDynamicSlots({ horarios, duracionTotalMin });
-  const grouped = {
-    manana: [],
-    tarde: [],
-    noche: [],
-  };
-  mapped.forEach((slot) => {
-    const minutes = timeKeyToMinutes(slot?.hora);
-    if (minutes == null) return;
-    if (minutes >= 6 * 60 && minutes < 12 * 60) {
-      grouped.manana.push(slot);
-      return;
-    }
-    if (minutes >= 12 * 60 && minutes < 18 * 60) {
-      grouped.tarde.push(slot);
-      return;
-    }
-    grouped.noche.push(slot);
-  });
-
-  const fallbackCurated = createEmptyCuratedSlots();
-  Object.keys(grouped).forEach((periodKey) => {
-    const ordered = grouped[periodKey];
-    const recommended = ordered[0] || null;
-    const alternatives = ordered.slice(1, 4);
-    const overflow = ordered.slice(4);
-    fallbackCurated[periodKey] = {
-      recommended,
-      alternatives,
-      overflow,
-      has_more: overflow.length > 0,
-      total: ordered.length,
+function readPendingPaymentResumeContext() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem('mf_pending_payment_context_v1');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const groupId = String(parsed?.id_grupo_cita || '').trim();
+    const intentId = String(parsed?.id_intent || parsed?.payment_intent?.id_intent || '').trim();
+    const titularEmail = String(parsed?.titular_email || '').trim().toLowerCase();
+    if (!groupId || !intentId) return null;
+    return {
+      id_grupo_cita: groupId,
+      id_intent: intentId,
+      titular_email: titularEmail,
     };
-  });
-  return fallbackCurated;
-}
-
-function createBlockId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
+  } catch {
+    return null;
   }
-  return `blk-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-}
-
-function areServiceIdsEqual(left, right) {
-  if (left === right) return true;
-  if (!Array.isArray(left) || !Array.isArray(right)) return false;
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return false;
-  }
-  return true;
-}
-
-function normalizeBookingBlock(block, index) {
-  const fallbackAlias = index === 0 ? 'Titular' : `Acompañante ${index}`;
-  const nextServiceIds = Array.isArray(block?.serviceIds)
-    ? Array.from(new Set(block.serviceIds.map((id) => String(id || '').trim()).filter(Boolean)))
-    : [];
-  const promotionIds = normalizePromotionIds(block?.promotionIds, block?.promotionId);
-  const promotionId = promotionIds[0] || '';
-
-  const splitLegacyName = splitFullName(block?.contactName || '');
-  const contactFirstName = normalizePersonName(block?.contactFirstName || splitLegacyName.firstName || '');
-  const contactLastName = normalizePersonName(block?.contactLastName || splitLegacyName.lastName || '');
-  const contactName = buildFullName(contactFirstName, contactLastName) || normalizePersonName(block?.contactName || '');
-  const resolvedAlias = contactName || String(block?.alias || '').trim() || fallbackAlias;
-
-  const hasPackage = Boolean(String(block?.packageId || '').trim());
-  const requestedType = String(block?.selectionType || '').trim().toLowerCase();
-  let normalizedSelectionType = 'services';
-  if (requestedType === 'mixed' || (hasPackage && nextServiceIds.length > 0)) {
-    normalizedSelectionType = 'mixed';
-  } else if (requestedType === 'package' || hasPackage) {
-    normalizedSelectionType = 'package';
-  }
-
-  return {
-    id: String(block?.id || '').trim() || createBlockId(),
-    alias: resolvedAlias,
-    idBarbero: String(block?.idBarbero || '').trim(),
-    selectionType: normalizedSelectionType,
-    packageId: String(block?.packageId || '').trim(),
-    serviceIds: nextServiceIds,
-    promotionId,
-    promotionIds,
-    selectedDate: String(block?.selectedDate || '').trim(),
-    selectedTime: String(block?.selectedTime || '').trim(),
-    selectedDateTime: String(block?.selectedDateTime || '').trim(),
-    contactFirstName,
-    contactLastName,
-    contactName,
-    contactEmail: normalizeEmail(block?.contactEmail || ''),
-    contactPhone: String(block?.contactPhone || '').trim(),
-  };
-}
-
-function areBlocksEqual(left, right) {
-  if (!left || !right) return false;
-  return left.id === right.id
-    && left.alias === right.alias
-    && left.idBarbero === right.idBarbero
-    && left.selectionType === right.selectionType
-    && left.packageId === right.packageId
-    && left.promotionId === right.promotionId
-    && areServiceIdsEqual(left.promotionIds, right.promotionIds)
-    && left.selectedDate === right.selectedDate
-    && left.selectedTime === right.selectedTime
-    && left.selectedDateTime === right.selectedDateTime
-    && left.contactFirstName === right.contactFirstName
-    && left.contactLastName === right.contactLastName
-    && left.contactName === right.contactName
-    && left.contactEmail === right.contactEmail
-    && left.contactPhone === right.contactPhone
-    && areServiceIdsEqual(left.serviceIds, right.serviceIds);
-}
-
-function rangesOverlap(leftStart, leftDurationMin, rightStart, rightDurationMin) {
-  const leftMinutes = timeKeyToMinutes(leftStart);
-  const rightMinutes = timeKeyToMinutes(rightStart);
-  const safeLeftDuration = Number(leftDurationMin || 0);
-  const safeRightDuration = Number(rightDurationMin || 0);
-  if (leftMinutes == null || rightMinutes == null || safeLeftDuration <= 0 || safeRightDuration <= 0) {
-    return false;
-  }
-  const leftEnd = leftMinutes + safeLeftDuration;
-  const rightEnd = rightMinutes + safeRightDuration;
-  return leftMinutes < rightEnd && rightMinutes < leftEnd;
-}
-
-function createBookingBlock({ alias = '', idBarbero = '' } = {}) {
-  return normalizeBookingBlock(
-    {
-      id: createBlockId(),
-      alias,
-      idBarbero,
-      selectionType: 'services',
-      packageId: '',
-      serviceIds: [],
-      promotionId: '',
-      promotionIds: [],
-      selectedDate: '',
-      selectedTime: '',
-      selectedDateTime: '',
-      contactFirstName: '',
-      contactLastName: '',
-      contactName: '',
-      contactEmail: '',
-      contactPhone: '',
-    },
-    alias === 'Titular' ? 0 : 1
-  );
-}
-
-function normalizeMembershipServiceId(value) {
-  return String(value || '').trim();
-}
-
-function getMembershipBenefitItems(planActivo) {
-  if (!planActivo || typeof planActivo !== 'object') return [];
-  const benefitSources = [
-    planActivo?.beneficios_snapshot,
-    planActivo?.plan_snapshot?.beneficios,
-    planActivo?.beneficios,
-  ];
-  for (const source of benefitSources) {
-    if (!source) continue;
-    if (Array.isArray(source)) return source;
-    if (Array.isArray(source?.items)) return source.items;
-    if (Array.isArray(source?.servicios) || Array.isArray(source?.cortesias)) {
-      return [
-        ...(Array.isArray(source?.servicios) ? source.servicios : []),
-        ...(Array.isArray(source?.cortesias) ? source.cortesias : []),
-      ];
-    }
-  }
-  return [];
-}
-
-function extractPlanIncludedServiceIds(planActivo) {
-  const items = getMembershipBenefitItems(planActivo);
-  return Array.from(
-    new Set(
-      items
-        .filter((item) => String(item?.tipo || '').trim().toLowerCase() === 'servicio')
-        .map((item) => normalizeMembershipServiceId(item?.id_servicio))
-        .filter(Boolean)
-    )
-  );
-}
-
-function extractPlanRemainingServiceIds(planActivo) {
-  const remanentes = Array.isArray(planActivo?.remanentes?.servicios)
-    ? planActivo.remanentes.servicios
-    : [];
-  return Array.from(
-    new Set(
-      remanentes
-        .filter((item) => Number(item?.restante || 0) > 0)
-        .map((item) => normalizeMembershipServiceId(item?.id_servicio))
-        .filter(Boolean)
-    )
-  );
-}
-
-function extractConfirmedAppointments(payload) {
-  const safePayload = payload && typeof payload === 'object' ? payload : {};
-  if (Array.isArray(safePayload?.citas_confirmadas)) return safePayload.citas_confirmadas;
-  if (Array.isArray(safePayload?.citas)) return safePayload.citas;
-  if (Array.isArray(safePayload?.data?.citas_confirmadas)) return safePayload.data.citas_confirmadas;
-  if (Array.isArray(safePayload?.data?.citas)) return safePayload.data.citas;
-  if (Array.isArray(safePayload?.confirmation?.citas_confirmadas)) return safePayload.confirmation.citas_confirmadas;
-  if (Array.isArray(safePayload?.confirmation?.citas)) return safePayload.confirmation.citas;
-  return [];
-}
-
-function extractBookingCode(payload) {
-  const safePayload = payload && typeof payload === 'object' ? payload : {};
-  const candidates = [
-    safePayload?.codigo_cita,
-    safePayload?.data?.codigo_cita,
-    safePayload?.confirmation?.codigo_cita,
-    safePayload?.confirmation?.data?.codigo_cita,
-  ];
-  for (const candidate of candidates) {
-    const normalized = String(candidate || '').trim();
-    if (normalized) return normalized;
-  }
-  const citasConfirmadas = extractConfirmedAppointments(safePayload);
-  for (const cita of citasConfirmadas) {
-    const normalized = String(cita?.codigo_cita || '').trim();
-    if (normalized) return normalized;
-  }
-  return '';
-}
-
-export function usePublicBookingFlow() {
-  const context = useContext(PublicBookingContext);
-  if (!context) {
-    throw new Error('usePublicBookingFlow debe usarse dentro de PublicBookingFlow.');
-  }
-  return context;
 }
 
 export default function PublicBookingFlow() {
@@ -571,33 +273,32 @@ export default function PublicBookingFlow() {
   const navigate = useNavigate();
   const notifications = useNotifications();
   const notifyError = notifications.error;
-  const { isAuthenticated, roles, user } = useAuth();
-  const canUseClienteHold = Boolean(isAuthenticated && Array.isArray(roles) && roles.includes('cliente'));
-  const titularState = useMemo(
-    () => getTitularState(canUseClienteHold ? user : null),
-    [canUseClienteHold, user]
+  const {
+    mode: bookingMode,
+    isAuthenticatedBooking: canUseClienteHold,
+    titularFromSession: titularState,
+  } = useBookingMode();
+  const bookingAdapter = useMemo(
+    () => resolveBookingAdapter({
+      mode: bookingMode,
+      actor: {
+        customerId: titularState?.profile?.id_cliente,
+        personId: titularState?.profile?.id_persona,
+        userId: titularState?.profile?.id_usuario,
+      },
+    }),
+    [
+      bookingMode,
+      titularState?.profile?.id_cliente,
+      titularState?.profile?.id_persona,
+      titularState?.profile?.id_usuario,
+    ]
   );
 
-  const [contextLoading, setContextLoading] = useState(false);
-  const [contextError, setContextError] = useState('');
-  const [contextData, setContextData] = useState(EMPTY_CONTEXT);
-
-  const [selectedBranchId, setSelectedBranchId] = useState('');
-  const [barbersLoading, setBarbersLoading] = useState(false);
-  const [barbersRefreshing, setBarbersRefreshing] = useState(false);
-  const [barbers, setBarbers] = useState([]);
-
-  const [servicesLoading, setServicesLoading] = useState(false);
-  const [services, setServices] = useState([]);
-  const [packagesLoading, setPackagesLoading] = useState(false);
-  const [packages, setPackages] = useState([]);
-  const [promotionsLoading, setPromotionsLoading] = useState(false);
-  const [promotions, setPromotions] = useState([]);
-  const [promotionsLoadError, setPromotionsLoadError] = useState('');
-
-  const [bookingBlocks, setBookingBlocks] = useState(() => [createBookingBlock({ alias: 'Titular' })]);
+  const [bookingBlocks, setBookingBlocks] = useState(() => [createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })]);
   const [activeBlockIndex, setActiveBlockIndex] = useState(0);
   const [pendingCompanionFocusId, setPendingCompanionFocusId] = useState('');
+  const [pendingFieldFocus, setPendingFieldFocus] = useState(null);
 
   const [minBookingDateKey] = useState(() => getTodayDateKeyInTimeZone());
   const minBookingMonth = useMemo(
@@ -613,72 +314,114 @@ export default function PublicBookingFlow() {
   });
 
   const [availabilityError, setAvailabilityError] = useState('');
-  const [availabilityLoading, setAvailabilityLoading] = useState(false);
-  const [availabilityMap, setAvailabilityMap] = useState({});
-  const [slotsLoading, setSlotsLoading] = useState(false);
-  const [slots, setSlots] = useState(() => buildDefaultSlots());
-  const [slotsCurated, setSlotsCurated] = useState(() => createEmptyCuratedSlots());
-  const [slotMetrics, setSlotMetrics] = useState({ duracionTotalMin: 0, bufferTotalMin: 0 });
   const [slotConflict, setSlotConflict] = useState(null);
-  const [slotSuggestions, setSlotSuggestions] = useState([]);
-  const [slotSuggestionsLoading, setSlotSuggestionsLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [authRequiredModal, setAuthRequiredModal] = useState({ open: false, email: '' });
   const [profilePersistModal, setProfilePersistModal] = useState({ open: false, kind: '' });
+  const [cancelBookingModal, setCancelBookingModal] = useState({ open: false, source: '' });
+  const [cancelBookingProcessing, setCancelBookingProcessing] = useState(false);
+  const [profileIncompleteState, setProfileIncompleteState] = useState({ message: '', missingFields: [] });
 
-  const [holdSubmitting, setHoldSubmitting] = useState(false);
-  const [holdResult, setHoldResult] = useState(null);
-  const [paymentIntent, setPaymentIntent] = useState(null);
-  const [paymentResult, setPaymentResult] = useState(null);
-  const [bookingSuccessResult, setBookingSuccessResult] = useState(null);
   const [rewardBookingContext, setRewardBookingContext] = useState(() => readRewardBookingContext());
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
-  const [membershipStateData, setMembershipStateData] = useState(null);
   const [membershipBranchNotice, setMembershipBranchNotice] = useState('');
+  const agendaSseEnabled = useMemo(
+    () => parseAgendaSseEnabled(import.meta.env.VITE_AGENDA_SSE_ENABLED, true),
+    []
+  );
 
-  const availabilityAbortRef = useRef(null);
-  const slotsAbortRef = useRef(null);
-  const branchDataRequestSeqRef = useRef(0);
-  const availabilityRequestSeqRef = useRef(0);
-  const slotsRequestSeqRef = useRef(0);
-  const slotSuggestionRequestSeqRef = useRef(0);
-  const availabilityCacheRef = useRef(new Map());
-  const slotsCacheRef = useRef(new Map());
   const servicesScrollRef = useRef(null);
   const profilePersistResolveRef = useRef(null);
-  const barbersCountRef = useRef(0);
-  const servicesCountRef = useRef(0);
-  const packagesCountRef = useRef(0);
-  const promotionsCountRef = useRef(0);
-  const selectedTimeRef = useRef('');
   const membershipBranchNoticeRef = useRef('');
   const rewardPreparedShownRef = useRef(false);
   const rewardUnavailableShownRef = useRef(false);
 const rewardDiscountInfoShownRef = useRef(false);
-const lastHoldFingerprintRef = useRef('');
+const holdSelectionFingerprintRef = useRef('');
 const holderProfileHydratedRef = useRef(false);
 const paymentAutoBootstrapAttemptRef = useRef('');
-const paymentStatusAbortRef = useRef(null);
+const paymentReturnStatusCheckRef = useRef('');
+const invalidHoldSelectionFingerprintRef = useRef('');
+const agendaAutoLoadKeyRef = useRef('');
   const [servicesCanScroll, setServicesCanScroll] = useState(false);
   const [servicesAtEnd, setServicesAtEnd] = useState(true);
 
-  const effectiveActiveBlockIndex = bookingBlocks[activeBlockIndex]
-    ? activeBlockIndex
-    : 0;
+  const goToClienteProfile = useCallback(() => {
+    navigate('/home/cliente/perfil');
+  }, [navigate]);
 
-  const activeBlock = bookingBlocks[effectiveActiveBlockIndex] || null;
-  const selectedBarberId = bookingBlocks[0]?.idBarbero || '';
+  const setProfileIncompleteFromBackend = useCallback((errorEnvelope = {}) => {
+    const sourceMessage = String(errorEnvelope?.message || '').trim();
+    const message = sourceMessage || 'Completa tu perfil antes de agendar una cita.';
+    const rawMissing = Array.isArray(errorEnvelope?.details?.missing_fields)
+      ? errorEnvelope.details.missing_fields
+      : [];
+    const normalizedMissing = rawMissing
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter(Boolean);
+    const uniqueMissing = Array.from(new Set(normalizedMissing));
+    setProfileIncompleteState({ message, missingFields: uniqueMissing });
+  }, []);
 
-  const activeBlockBarberId = activeBlock?.idBarbero || '';
-  const selectionType = activeBlock?.selectionType || 'services';
-  const selectedPackageId = activeBlock?.packageId || '';
-  const serviceIds = useMemo(
-    () => (Array.isArray(activeBlock?.serviceIds) ? activeBlock.serviceIds : []),
-    [activeBlock]
+  const activeBookingBlockState = useMemo(
+    () => resolveActiveBookingBlock({ bookingBlocks, activeBlockIndex }),
+    [activeBlockIndex, bookingBlocks]
   );
-  const selectedDate = activeBlock?.selectedDate || '';
-  const selectedTime = activeBlock?.selectedTime || '';
-  const titularSelectedDate = bookingBlocks[0]?.selectedDate || '';
+  const {
+    effectiveActiveBlockIndex,
+    activeBlock,
+    selectedBarberId,
+    activeBlockBarberId,
+    selectionType,
+    selectedPackageId,
+    serviceIds,
+    selectedDate,
+    selectedTime,
+    titularSelectedDate,
+  } = activeBookingBlockState;
+  const pendingResumeContext = useMemo(() => {
+    const searchParams = new URLSearchParams(location.search || '');
+    const queryGroupId = String(searchParams.get('id_grupo_cita') || '').trim();
+    const queryIntentId = String(searchParams.get('id_intent') || '').trim();
+    const stored = readPendingPaymentResumeContext();
+    const groupId = queryGroupId || String(stored?.id_grupo_cita || '').trim();
+    const intentId = queryIntentId || String(stored?.id_intent || '').trim();
+    if (!groupId || !intentId) return null;
+    return {
+      id_grupo_cita: groupId,
+      id_intent: intentId,
+      titular_email: String(stored?.titular_email || '').trim().toLowerCase(),
+    };
+  }, [location.search]);
+  const isPendingPaymentResumeRoute = location.pathname.startsWith(BOOKING_ROUTES.payment) && Boolean(pendingResumeContext?.id_grupo_cita && pendingResumeContext?.id_intent);
+  const {
+    contextLoading,
+    contextError,
+    setContextError,
+    contextData,
+    selectedBranchId,
+    setSelectedBranchId,
+    branchList,
+    barbersLoading,
+    barbersRefreshing,
+    barbers,
+    servicesLoading,
+    services,
+    packagesLoading,
+    packages,
+    promotionsLoading,
+    promotions,
+    promotionsLoadError,
+    membershipStateData,
+    fetchContext,
+    fetchBranchData,
+    abortBranchData,
+  } = useBookingCatalogs({
+    canUseClienteHold,
+    activeBlockBarberId,
+    setBookingBlocks,
+    setAvailabilityError,
+    notifyError,
+  });
 
   useEffect(() => {
     if (!titularState.isAuthenticated) {
@@ -689,10 +432,12 @@ const paymentStatusAbortRef = useRef(null);
     setBookingBlocks((prev) => {
       const source = Array.isArray(prev) && prev.length > 0
         ? prev
-        : [createBookingBlock({ alias: 'Titular' })];
+        : [createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })];
       const currentTitular = normalizeBookingBlock(source[0], 0);
-      const nextFirstName = currentTitular.contactFirstName || titularState.profile.nombres || '';
-      const nextLastName = currentTitular.contactLastName || titularState.profile.apellidos || '';
+      const nextFirstName = currentTitular.contactFirstName
+        || (currentTitular.contactFirstNameDirty ? '' : titularState.profile.nombres || '');
+      const nextLastName = currentTitular.contactLastName
+        || (currentTitular.contactLastNameDirty ? '' : titularState.profile.apellidos || '');
       const nextEmail = currentTitular.contactEmail || titularState.profile.email || '';
       const nextPhone = currentTitular.contactPhone || titularState.profile.telefono_principal || '';
       const nextTitular = normalizeBookingBlock(
@@ -718,6 +463,25 @@ const paymentStatusAbortRef = useRef(null);
     titularState.profile.nombres,
     titularState.profile.telefono_principal,
   ]);
+
+  const updateBlockAtIndex = useCallback((index, updater) => {
+    setBookingBlocks((prev) => {
+      if (!prev[index]) return prev;
+      const currentBlock = prev[index];
+      const nextRaw = typeof updater === 'function'
+        ? updater(currentBlock)
+        : { ...currentBlock, ...updater };
+      const nextBlock = normalizeBookingBlock(nextRaw, index);
+
+      if (areBlocksEqual(currentBlock, nextBlock)) {
+        return prev;
+      }
+
+      const nextBlocks = [...prev];
+      nextBlocks[index] = nextBlock;
+      return nextBlocks;
+    });
+  }, []);
 
   const canGoPrevMonth = useMemo(() => {
     const currentMonthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
@@ -760,7 +524,7 @@ const paymentStatusAbortRef = useRef(null);
     [contextData?.parametros]
   );
   const simulationNoPayment = useMemo(
-    () => readBooleanParam(contextData?.parametros, 'simulacion_sin_pago', true),
+    () => readBooleanParam(contextData?.parametros, 'simulacion_sin_pago', false),
     [contextData?.parametros]
   );
   const holdDurationMin = useMemo(
@@ -770,11 +534,6 @@ const paymentStatusAbortRef = useRef(null);
   const configuredPrepTime = useMemo(
     () => readNumberParam(contextData?.parametros, 'agenda_buffer_global_min', 0),
     [contextData?.parametros]
-  );
-
-  const branchList = useMemo(
-    () => (Array.isArray(contextData?.sucursales) ? contextData.sucursales : []),
-    [contextData?.sucursales]
   );
 
   const selectedBranch = useMemo(
@@ -799,26 +558,6 @@ const paymentStatusAbortRef = useRef(null);
     });
     return map;
   }, [barbers]);
-
-  useEffect(() => {
-    barbersCountRef.current = Array.isArray(barbers) ? barbers.length : 0;
-  }, [barbers]);
-
-  useEffect(() => {
-    servicesCountRef.current = Array.isArray(services) ? services.length : 0;
-  }, [services]);
-
-  useEffect(() => {
-    packagesCountRef.current = Array.isArray(packages) ? packages.length : 0;
-  }, [packages]);
-
-  useEffect(() => {
-    promotionsCountRef.current = Array.isArray(promotions) ? promotions.length : 0;
-  }, [promotions]);
-
-  useEffect(() => {
-    selectedTimeRef.current = selectedTime;
-  }, [selectedTime]);
 
   const selectedBarber = useMemo(
     () => barbersById.get(activeBlockBarberId) || null,
@@ -845,7 +584,8 @@ const paymentStatusAbortRef = useRef(null);
         || membershipStateData?.estado_plan
         || ''
       ).trim().toLowerCase();
-      const isOperational = statusCode === 'activa' || statusCode === 'pendiente_renovacion';
+      // AM: FASE 2E - Operativa solo si está estrictamente activa, alineado con backend.
+      const isOperational = statusCode === 'activa';
       if (!isOperational) return;
       deduped.set(subscriptionId, plan);
     });
@@ -856,21 +596,6 @@ const paymentStatusAbortRef = useRef(null);
     () => membershipActivePlans.find((plan) => String(plan?.id_sucursal_contratada || '').trim() === selectedBranchId) || null,
     [membershipActivePlans, selectedBranchId]
   );
-  const hasOperationalMembership = membershipActivePlans.length > 0;
-  const activeMembershipPlanInOtherBranch = useMemo(
-    () => membershipActivePlans.find((plan) => String(plan?.id_sucursal_contratada || '').trim() !== selectedBranchId) || null,
-    [membershipActivePlans, selectedBranchId]
-  );
-  const activeMembershipOtherBranchName = useMemo(() => {
-    if (!activeMembershipPlanInOtherBranch) return '';
-    const otherBranchId = String(activeMembershipPlanInOtherBranch?.id_sucursal_contratada || '').trim();
-    if (!otherBranchId) return '';
-    return (
-      branchNameById.get(otherBranchId)
-      || String(activeMembershipPlanInOtherBranch?.sucursal_nombre || '').trim()
-      || 'tu sucursal de plan'
-    );
-  }, [activeMembershipPlanInOtherBranch, branchNameById]);
   const selectedBranchName = selectedBranch
     ? (String(selectedBranch?.nombre_sucursal || '').trim() || 'esta sucursal')
     : 'esta sucursal';
@@ -933,12 +658,13 @@ const paymentStatusAbortRef = useRef(null);
   const selectedServiceIdsEffective = activeSelectionSummary.selectedServiceIdsEffective;
 
   const activeBlockMembershipServiceIdsForAgenda = useMemo(
-    () => (
-      effectiveActiveBlockIndex === 0
-        ? [...membershipLockedServiceIdsForTitular, ...rewardLockedServiceIdsForTitular]
-        : []
-    ),
-    [effectiveActiveBlockIndex, membershipLockedServiceIdsForTitular, rewardLockedServiceIdsForTitular]
+    () => {
+      if (effectiveActiveBlockIndex !== 0) return [];
+      const includedSet = new Set(activeSelectionSummary.includedServiceIdsFromPackage || []);
+      return [...membershipLockedServiceIdsForTitular, ...rewardLockedServiceIdsForTitular]
+        .filter((serviceId) => !includedSet.has(String(serviceId || '').trim()));
+    },
+    [activeSelectionSummary.includedServiceIdsFromPackage, effectiveActiveBlockIndex, membershipLockedServiceIdsForTitular, rewardLockedServiceIdsForTitular]
   );
   const effectiveSelectedServiceIdsForAgenda = useMemo(
     () => Array.from(new Set([
@@ -975,60 +701,212 @@ const paymentStatusAbortRef = useRef(null);
     [effectiveActiveBlockIndex, rewardLockedServiceIdsForTitular]
   );
 
-  const servicesById = useMemo(() => {
-    const map = new Map();
-    (Array.isArray(services) ? services : []).forEach((service) => {
-      const serviceId = String(service?.id_servicio || '').trim();
-      if (!serviceId) return;
-      map.set(serviceId, service);
-    });
-    return map;
-  }, [services]);
+  const servicesById = useMemo(
+    () => resolveItemsById(services, 'id_servicio'),
+    [services]
+  );
 
-  const packagesById = useMemo(() => {
-    const map = new Map();
-    (Array.isArray(packages) ? packages : []).forEach((pkg) => {
-      const packageId = String(pkg?.id_paquete || '').trim();
-      if (!packageId) return;
-      map.set(packageId, pkg);
-    });
-    return map;
-  }, [packages]);
+  const packagesById = useMemo(
+    () => resolveItemsById(packages, 'id_paquete'),
+    [packages]
+  );
 
-  const promotionsById = useMemo(() => {
-    const map = new Map();
-    (Array.isArray(promotions) ? promotions : []).forEach((promotion) => {
-      const promotionId = String(promotion?.id_promocion || '').trim();
-      if (!promotionId) return;
-      map.set(promotionId, promotion);
-    });
-    return map;
-  }, [promotions]);
+  const promotionsById = useMemo(
+    () => resolveItemsById(promotions, 'id_promocion'),
+    [promotions]
+  );
 
-  const selectedPromotionIds = useMemo(
-    () => normalizePromotionIds(activeBlock?.promotionIds, activeBlock?.promotionId),
-    [activeBlock?.promotionId, activeBlock?.promotionIds]
+  const selectedPromotionState = useMemo(
+    () => resolveSelectedPromotions({ activeBlock, promotionsById }),
+    [activeBlock, promotionsById]
   );
-  const selectedPromotionId = useMemo(
-    () => selectedPromotionIds[0] || '',
-    [selectedPromotionIds]
-  );
-  const selectedPromotion = useMemo(
-    () => promotionsById.get(selectedPromotionId) || null,
-    [promotionsById, selectedPromotionId]
-  );
-  const selectedPromotions = useMemo(
-    () => selectedPromotionIds
-      .map((promotionId) => promotionsById.get(promotionId) || null)
-      .filter(Boolean),
-    [promotionsById, selectedPromotionIds]
-  );
+  const {
+    selectedPromotionIds,
+    selectedPromotionId,
+    selectedPromotion,
+    selectedPromotions,
+  } = selectedPromotionState;
 
   const effectiveSelectionType = useMemo(() => {
     if (selectedPackage && selectedServices.length > 0) return 'mixed';
     if (selectedPackage) return 'package';
     return 'services';
   }, [selectedPackage, selectedServices.length]);
+
+  const selectionCacheKey = useMemo(
+    () => `type:${effectiveSelectionType}|package:${selectedPackageId || ''}|services:${effectiveSelectedServiceIdsForAgenda.join(',')}`,
+    [effectiveSelectionType, selectedPackageId, effectiveSelectedServiceIdsForAgenda]
+  );
+
+  const bookingAvailabilityFingerprint = useMemo(
+    () => JSON.stringify(
+      bookingBlocks.map((block, index) => {
+        const normalized = normalizeBookingBlock(block, index);
+        return {
+          id: normalized.id,
+          idBarbero: normalized.idBarbero,
+          selectionType: normalized.selectionType,
+          packageId: normalized.packageId,
+          serviceIds: normalized.serviceIds,
+          selectedDate: normalized.selectedDate,
+          selectedTime: normalized.selectedTime,
+          selectedDateTime: normalized.selectedDateTime,
+        };
+      })
+    ),
+    [bookingBlocks]
+  );
+
+  const bookingHoldFingerprint = useMemo(
+    () => JSON.stringify({
+      selectedBranchId,
+      canUseClienteHold,
+      titularAutenticado: canUseClienteHold
+        ? {
+            email: normalizeEmail(titularState.profile.email),
+            missingFields: [...titularState.missingFields].sort(),
+            nombres: titularState.profile.nombres,
+            apellidos: titularState.profile.apellidos,
+            telefono: normalizePhone(titularState.profile.telefono_principal),
+          }
+        : null,
+      rewardContextToken: String(
+        rewardBookingContext?.canje_context_token
+        || rewardBookingContext?.id_points_tx_canje
+        || ''
+      ).trim(),
+      blocks: bookingBlocks.map((block, index) => {
+        const normalized = normalizeBookingBlock(block, index);
+        return {
+          id: normalized.id,
+          idBarbero: normalized.idBarbero,
+          selectionType: normalized.selectionType,
+          packageId: normalized.packageId,
+          serviceIds: [...normalized.serviceIds].sort(),
+          promotionIds: normalizePromotionIds(normalized.promotionIds, normalized.promotionId).sort(),
+          selectedDate: normalized.selectedDate,
+          selectedTime: normalized.selectedTime,
+          selectedDateTime: normalized.selectedDateTime,
+          contactFirstName: normalized.contactFirstName,
+          contactLastName: normalized.contactLastName,
+          contactEmail: normalizeEmail(normalized.contactEmail),
+          contactPhone: normalizePhone(normalized.contactPhone),
+        };
+      }),
+    }),
+    [
+      bookingBlocks,
+      canUseClienteHold,
+      rewardBookingContext,
+      selectedBranchId,
+      titularState.missingFields,
+      titularState.profile.apellidos,
+      titularState.profile.email,
+      titularState.profile.nombres,
+      titularState.profile.telefono_principal,
+    ]
+  );
+
+  useEffect(() => {
+    if (
+      invalidHoldSelectionFingerprintRef.current
+      && invalidHoldSelectionFingerprintRef.current !== bookingHoldFingerprint
+    ) {
+      invalidHoldSelectionFingerprintRef.current = '';
+    }
+  }, [bookingHoldFingerprint]);
+
+  const monthRange = useMemo(() => {
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    const from = toDateKey(new Date(year, month, 1));
+    const to = toDateKey(new Date(year, month + 1, 0));
+    return { from, to };
+  }, [currentMonth]);
+
+  const {
+    hold: holdResult,
+    setHold: setHoldResult,
+    creatingHold: holdSubmitting,
+    createHold,
+    releaseHold,
+    confirmHoldWithoutPayment: confirmHoldWithoutPaymentRequest,
+    clearHoldLocalState,
+    markHoldObsolete,
+  } = useBookingHold({
+    mode: bookingMode,
+    isAuthenticatedBooking: canUseClienteHold,
+    bookingAdapter,
+    selectionFingerprint: bookingHoldFingerprint,
+  });
+
+  const {
+    paymentIntent,
+    paymentResult,
+    bookingSuccessResult,
+    creatingPaymentIntent,
+    checkingPaymentStatus,
+    setPaymentResult,
+    setBookingSuccessResult,
+    clearPaymentState,
+    restorePaymentContext,
+    createPaymentIntentOnce,
+    fetchPaymentStatusOnce,
+    completeMockPaymentOnce,
+    completeSimulatorPaymentOnce,
+    isCurrentPaymentGroup,
+  } = useBookingPayment({
+    currentGroupId: holdResult?.id_grupo_cita || '',
+  });
+
+  const handleSelectedSlotUnavailable = useCallback(() => {
+    notifications.warning(
+      'El horario seleccionado acaba de dejar de estar disponible. Selecciona otra hora para continuar.',
+      { dedupeKey: 'public-booking-agenda-sse-slot-lost' }
+    );
+  }, [notifications]);
+
+  const {
+    availabilityLoading,
+    availabilityMap,
+    slotsLoading,
+    slots,
+    slotsCurated,
+    slotMetrics,
+    slotSuggestions,
+    slotSuggestionsLoading,
+    fetchAvailability,
+    fetchSlots,
+    loadSlotSuggestions,
+    invalidateAvailabilityScope,
+    invalidateAgendaCaches,
+    resyncAvailabilityScope,
+    resetAvailabilityViewState: resetAvailabilityHookViewState,
+    resetAvailabilityData,
+    abortAvailabilityRequests,
+    clearSlotSuggestions,
+    fetchSlotsForBarber,
+  } = useBookingAvailability({
+    selectedBranchId,
+    activeBlockBarberId,
+    effectiveSelectionType,
+    effectiveSelectedServiceIdsForAgenda,
+    selectedPackageId,
+    selectedDate,
+    selectedTime,
+    monthRange,
+    selectionCacheKey,
+    bookingBlocksFingerprint: bookingAvailabilityFingerprint,
+    minBookingDateKey,
+    holdResult,
+    effectiveActiveBlockIndex,
+    barbers,
+    updateBlockAtIndex,
+    availabilityError,
+    setAvailabilityError,
+    notifyError,
+    onSelectedSlotUnavailable: handleSelectedSlotUnavailable,
+  });
 
   const rawSelectedServicesDurationSum = useMemo(
     () => Number(activeSelectionSummary.totalDurationMin || 0),
@@ -1046,11 +924,6 @@ const paymentStatusAbortRef = useRef(null);
     () => (selectedServices.length > 0 || selectedPackage) ? selectedServicesDurationSum + barberPrepTime : 0,
     [barberPrepTime, selectedPackage, selectedServices, selectedServicesDurationSum]
   );
-  const selectionCacheKey = useMemo(
-    () => `type:${effectiveSelectionType}|package:${selectedPackageId || ''}|services:${effectiveSelectedServiceIdsForAgenda.join(',')}`,
-    [effectiveSelectionType, selectedPackageId, effectiveSelectedServiceIdsForAgenda]
-  );
-
   const isValidOptionalEmail = useCallback((value) => {
     const normalized = normalizeEmail(value);
     return !normalized || isValidEmail(normalized);
@@ -1060,7 +933,7 @@ const paymentStatusAbortRef = useRef(null);
     const raw = String(value || '').trim();
     if (!raw) return true;
     if (hasLetters(raw)) return false;
-    return normalizePhone(raw).length >= 8;
+    return countPhoneDigits(raw) >= 8;
   }, []);
 
   const resolveBlockContactState = useCallback((rawBlock, index) => {
@@ -1099,11 +972,11 @@ const paymentStatusAbortRef = useRef(null);
         errors.contactEmail = 'No pudimos validar el correo de tu cuenta. Vuelve a iniciar sesión.';
       }
       if (needsPhone && !phoneRaw) {
-        errors.contactPhone = 'Ingresa un teléfono válido para continuar.';
+        errors.contactPhone = 'Ingresa un teléfono válido del titular. Debe tener al menos 8 dígitos.';
       } else if (needsPhone && !isValidOptionalPhone(phoneRaw)) {
         errors.contactPhone = hasLetters(phoneRaw)
           ? 'El teléfono no admite letras.'
-          : 'Ingresa un teléfono válido para continuar.';
+          : 'Ingresa un teléfono válido del titular. Debe tener al menos 8 dígitos.';
       }
 
       return {
@@ -1122,8 +995,11 @@ const paymentStatusAbortRef = useRef(null);
 
     if (isTitular) {
       const fullName = joinedName || fallbackName;
-      if (!fullName) {
+      if (!firstName) {
         errors.contactFirstName = 'El nombre del titular es obligatorio.';
+      }
+      if (!lastName) {
+        errors.contactLastName = 'El apellido del titular es obligatorio.';
       }
       if (!isValidEmail(email)) {
         errors.contactEmail = 'Ingresa un correo válido del titular.';
@@ -1131,7 +1007,7 @@ const paymentStatusAbortRef = useRef(null);
       if (!phoneRaw || !isValidOptionalPhone(phoneRaw)) {
         errors.contactPhone = phoneRaw && hasLetters(phoneRaw)
           ? 'El teléfono no admite letras.'
-          : 'Ingresa un teléfono válido del titular.';
+          : 'Ingresa un teléfono válido del titular. Debe tener al menos 8 dígitos.';
       }
       return {
         isTitular: true,
@@ -1163,7 +1039,7 @@ const paymentStatusAbortRef = useRef(null);
     if (!isValidOptionalPhone(phoneRaw)) {
       errors.contactPhone = hasLetters(phoneRaw)
         ? 'El teléfono del acompañante no admite letras.'
-        : 'El teléfono del acompañante debe ser válido.';
+        : 'Ingresa un teléfono válido del acompañante. Debe tener al menos 8 dígitos.';
     }
 
     return {
@@ -1214,10 +1090,15 @@ const paymentStatusAbortRef = useRef(null);
         });
 
         if (index === 0 && (membershipCoveredSet.size > 0 || rewardCoveredSet.size > 0)) {
+          const packageIncludedSet = new Set(
+            (Array.isArray(summary.includedServiceIdsFromPackage) ? summary.includedServiceIdsFromPackage : [])
+              .map((serviceId) => String(serviceId || '').trim())
+              .filter(Boolean)
+          );
           const mergedCoveredIds = new Set([
             ...membershipCoveredSet,
             ...rewardCoveredSet,
-          ]);
+          ].filter((serviceId) => !packageIncludedSet.has(String(serviceId || '').trim())));
           mergedCoveredIds.forEach((serviceId) => {
             if (!serviceId || blockServicesById.has(serviceId)) return;
             const serviceCatalog = servicesById.get(serviceId);
@@ -1277,7 +1158,7 @@ const paymentStatusAbortRef = useRef(null);
         return {
           ...block,
           index,
-          alias: contactState.fullName || block.alias || (index === 0 ? 'Titular' : `Acompañante ${index}`),
+          alias: contactState.fullName || block.alias || (index === 0 ? BOOKING_HOLDER_ALIAS : `${BOOKING_COMPANION_ALIAS_PREFIX} ${index}`),
           barbero: barbersById.get(block.idBarbero) || null,
           selection_type: blockSelectionType,
           selectedPackage: blockPackage,
@@ -1334,97 +1215,85 @@ const paymentStatusAbortRef = useRef(null);
     [activeBlock, effectiveActiveBlockIndex, resolveBlockContactState]
   );
 
-  const totalToPay = useMemo(
-    () => bookingBlocksSummary.reduce((total, block) => total + Number(block.total_hnl || 0), 0),
+  const bookingTotals = useMemo(
+    () => resolveBookingTotals(bookingBlocksSummary),
     [bookingBlocksSummary]
   );
-
-  const totalEstimatedPromotionDiscountHnl = useMemo(
-    () => bookingBlocksSummary.reduce((total, block) => total + Number(block.promocion_descuento_estimado_hnl || 0), 0),
-    [bookingBlocksSummary]
-  );
-  const totalEstimatedToPay = useMemo(
-    () => Math.max(0, totalToPay - totalEstimatedPromotionDiscountHnl),
-    [totalEstimatedPromotionDiscountHnl, totalToPay]
-  );
+  const {
+    totalToPay,
+    totalEstimatedPromotionDiscountHnl,
+    totalEstimatedToPay,
+  } = bookingTotals;
   const bookingSelectionFingerprint = useMemo(
-    () => JSON.stringify(
-      bookingBlocksSummary.map((block) => ({
-        id: block.id,
-        idBarbero: block.idBarbero,
-        selectedDate: block.selectedDate,
-        selectedTime: block.selectedTime,
-        selectedDateTime: block.selectedDateTime,
-        selection_type: block.selection_type,
-        packageId: block.selectedPackage?.id_paquete || '',
-        serviceIds: Array.isArray(block.selectedServiceIdsEffective) ? block.selectedServiceIdsEffective : [],
-        promotionIds: Array.isArray(block.promotionIds) ? block.promotionIds : [],
-      }))
-    ),
+    () => buildBookingSelectionFingerprint(bookingBlocksSummary),
     [bookingBlocksSummary]
   );
 
-  const holdPricing = useMemo(() => {
-    if (!holdResult || typeof holdResult !== 'object') return null;
-
-    const subtotal = Number(holdResult?.subtotal_hnl ?? holdResult?.monto_total_hnl ?? 0);
-    const coveredByPlan = Number(
-      holdResult?.membresia?.cubierto_por_plan_hnl
-      ?? 0
-    );
-    const coveredByReward = Number(
-      holdResult?.recompensa?.cubierto_hnl
-      ?? 0
-    );
-    const coveredTotal = Number(
-      holdResult?.descuento_total_hnl
-      ?? (coveredByPlan + coveredByReward)
-    );
-    const total = Number(holdResult?.total_pagar_hnl ?? holdResult?.monto_pendiente_hnl ?? 0);
-    const extras = Number(
-      holdResult?.recompensa?.extras_a_pagar_hnl
-      ?? holdResult?.membresia?.extras_a_pagar_hnl
-      ?? holdResult?.monto_pendiente_hnl
-      ?? total
-    );
-
-    return {
-      source: 'hold',
-      subtotal_hnl: Number.isFinite(subtotal) ? subtotal : 0,
-      cubierto_por_plan_hnl: Number.isFinite(coveredByPlan) ? coveredByPlan : 0,
-      cubierto_por_recompensa_hnl: Number.isFinite(coveredByReward) ? coveredByReward : 0,
-      cubierto_total_hnl: Number.isFinite(coveredTotal) ? coveredTotal : 0,
-      extras_a_pagar_hnl: Number.isFinite(extras) ? extras : 0,
-      total_pagar_hnl: Number.isFinite(total) ? total : 0,
-      recompensa_aplicada: Boolean(holdResult?.recompensa?.aplicada),
-      recompensa_servicio_nombre: String(holdResult?.recompensa?.servicio_nombre || '').trim(),
-      recompensa_mensaje: String(holdResult?.recompensa?.mensaje || '').trim(),
-    };
-  }, [holdResult]);
+  const holdPricing = useMemo(
+    () => resolveHoldPricing(holdResult),
+    [holdResult]
+  );
   const holdTotalToPay = useMemo(
-    () => Number(holdPricing?.total_pagar_hnl ?? holdResult?.total_pagar_hnl ?? 0),
-    [holdPricing, holdResult?.total_pagar_hnl]
+    () => resolveHoldTotalToPay({ holdPricing, holdResult }),
+    [holdPricing, holdResult]
   );
+  const holdMembership = useMemo(
+    () => (holdResult?.membresia && typeof holdResult.membresia === 'object' ? holdResult.membresia : null),
+    [holdResult?.membresia]
+  );
+  const membershipMotivoNoAplica = useMemo(
+    () => String(holdMembership?.motivo_no_aplica || '').trim().toUpperCase(),
+    [holdMembership?.motivo_no_aplica]
+  );
+  const membershipAplicaEnCita = holdMembership?.aplica_en_cita === true;
+  const membershipBranchMismatch = holdMembership?.branch_mismatch === true || membershipMotivoNoAplica === 'SUCURSAL_DIFERENTE';
+  const membershipHasContext = useMemo(() => {
+    if (!canUseClienteHold || !holdMembership) return false;
+    if (membershipAplicaEnCita) return true;
+    if (membershipBranchMismatch) return true;
+    if (membershipMotivoNoAplica === 'PLAN_NO_ACTIVO') return true;
+    return false;
+  }, [canUseClienteHold, holdMembership, membershipAplicaEnCita, membershipBranchMismatch, membershipMotivoNoAplica]);
+  const membershipCompanionsCovered = holdMembership?.acompanantes_cubiertos === true;
+  const membershipCompanionNotice = useMemo(() => {
+    const hasCompanions = Array.isArray(bookingBlocksSummary) && bookingBlocksSummary.length > 1;
+    if (!membershipHasContext || !hasCompanions || membershipCompanionsCovered) return '';
+    return 'La membresía aplica solo al titular. Los acompañantes se cobran como cita normal.';
+  }, [bookingBlocksSummary, membershipCompanionsCovered, membershipHasContext]);
+  const membershipUxMessage = useMemo(() => {
+    if (!membershipHasContext) return '';
+    if (membershipAplicaEnCita) {
+      return 'Tu membresía está activa. Los servicios incluidos para el titular se aplicarán automáticamente.';
+    }
+    if (membershipBranchMismatch) {
+      return 'Tu membresía está activa en otra sucursal. Para esta cita, el pago se realizará como una cita normal.';
+    }
+    if (membershipMotivoNoAplica === 'PLAN_NO_ACTIVO') {
+      return 'Tu membresía no está activa actualmente. Esta cita se pagará como una cita normal.';
+    }
+    return '';
+  }, [membershipAplicaEnCita, membershipBranchMismatch, membershipHasContext, membershipMotivoNoAplica]);
 
-  const canConfirmWithoutPayment = Boolean(
-    canUseClienteHold
-    && holdResult
-    && String(holdResult?.id_grupo_cita || '').trim()
-    && holdTotalToPay === 0
+  const canConfirmWithoutPayment = resolveConfirmWithoutPaymentState({
+    canUseClienteHold,
+    holdResult,
+    holdTotalToPay,
+  });
+
+  const holdCountdownState = useMemo(
+    () => resolveHoldCountdownState({ holdResult, paymentIntent, countdownNow }),
+    [countdownNow, holdResult, paymentIntent]
   );
+  const {
+    holdExpiresAtIso,
+    holdRemainingMs,
+    holdExpired,
+  } = holdCountdownState;
 
   const hasBlockingGroupConflict = useCallback((block) => {
-    if (!block?.idBarbero || !block?.selectedDate || !block?.selectedTime || Number(block?.duracion_bloque_min || 0) <= 0) {
+    const blockRange = getBookingBlockOccupiedRange(block);
+    if (!block?.idBarbero || !block?.selectedDate || !block?.selectedTime || !blockRange) {
       return false;
-    }
-    if (
-      block.index > 0
-      && bookingBlocksSummary[0]
-      && bookingBlocksSummary[0].idBarbero === block.idBarbero
-      && bookingBlocksSummary[0].selectedDate === block.selectedDate
-      && bookingBlocksSummary[0].selectedTime === block.selectedTime
-    ) {
-      return true;
     }
     return bookingBlocksSummary.some((candidate) =>
       candidate.id !== block.id
@@ -1432,9 +1301,9 @@ const paymentStatusAbortRef = useRef(null);
       && candidate.selectedDate === block.selectedDate
       && rangesOverlap(
         block.selectedTime,
-        block.duracion_bloque_min,
+        blockRange.occupiedDurationMin,
         candidate.selectedTime,
-        candidate.duracion_bloque_min
+        getBookingBlockOccupiedRange(candidate)?.occupiedDurationMin
       )
     );
   }, [bookingBlocksSummary]);
@@ -1449,7 +1318,10 @@ const paymentStatusAbortRef = useRef(null);
 
   const allBlocksComplete = useMemo(
     () => blocksToSubmitSummary.length > 0
-      && blocksToSubmitSummary.every((block) => block.isComplete && !hasBlockingGroupConflict(block)),
+      && blocksToSubmitSummary.every((block) =>
+        block.isComplete
+        && Boolean(getBookingBlockOccupiedRange(block))
+        && !hasBlockingGroupConflict(block)),
     [blocksToSubmitSummary, hasBlockingGroupConflict]
   );
   const bookingBlockingReason = useMemo(() => {
@@ -1462,6 +1334,8 @@ const paymentStatusAbortRef = useRef(null);
       const label = firstInvalidContact.index === 0
         ? 'titular'
         : `acompañante ${firstInvalidContact.index}`;
+      const feedback = getContactValidationFeedback(firstInvalidContact.contactResolved, firstInvalidContact.index);
+      if (feedback?.message) return feedback.message;
       if (!firstInvalidContact?.contactResolved?.fullName) {
         return `El ${label} no tiene nombre completo.`;
       }
@@ -1498,6 +1372,13 @@ const paymentStatusAbortRef = useRef(null);
         : `El acompañante ${firstMissingTime.index} no tiene horario seleccionado.`;
     }
 
+    const firstMissingDuration = blocksToSubmitSummary.find((block) => !getBookingBlockOccupiedRange(block));
+    if (firstMissingDuration) {
+      return firstMissingDuration.index === 0
+        ? 'El titular no tiene duración calculada.'
+        : `El acompañante ${firstMissingDuration.index} no tiene duración calculada.`;
+    }
+
     const firstConflict = blocksToSubmitSummary.find((block) => hasBlockingGroupConflict(block));
     if (firstConflict) {
       return firstConflict.index === 0
@@ -1507,32 +1388,6 @@ const paymentStatusAbortRef = useRef(null);
 
     return '';
   }, [blocksToSubmitSummary, hasBlockingGroupConflict]);
-  const holdExpiresAtIso = useMemo(() => {
-    if (holdResult?.expires_at) return holdResult.expires_at;
-    if (paymentIntent?.expires_at) return paymentIntent.expires_at;
-    return null;
-  }, [holdResult?.expires_at, paymentIntent?.expires_at]);
-  const holdRemainingMs = useMemo(() => {
-    if (!holdExpiresAtIso) return null;
-    const expiresAt = new Date(holdExpiresAtIso);
-    if (Number.isNaN(expiresAt.getTime())) return null;
-    return Math.max(expiresAt.getTime() - countdownNow, 0);
-  }, [holdExpiresAtIso, countdownNow]);
-  const holdExpired = holdRemainingMs != null && holdRemainingMs <= 0;
-
-  const canAddCompanionBlock = useMemo(
-    () => allowCompanions && bookingBlocks.length < (maxCompanions + 1),
-    [allowCompanions, bookingBlocks.length, maxCompanions]
-  );
-
-  const monthRange = useMemo(() => {
-    const year = currentMonth.getFullYear();
-    const month = currentMonth.getMonth();
-    const from = toDateKey(new Date(year, month, 1));
-    const to = toDateKey(new Date(year, month + 1, 0));
-    return { from, to };
-  }, [currentMonth]);
-
   const isPastSlotForToday = useCallback((dateKey, timeKey) => {
     if (!dateKey || !timeKey) return false;
     if (dateKey !== minBookingDateKey) return false;
@@ -1541,9 +1396,8 @@ const paymentStatusAbortRef = useRef(null);
 
   const clearSlotConflict = useCallback(() => {
     setSlotConflict(null);
-    setSlotSuggestions([]);
-    setSlotSuggestionsLoading(false);
-  }, []);
+    clearSlotSuggestions();
+  }, [clearSlotSuggestions]);
 
   const buildFieldErrorKey = useCallback((blockIndex, field) => `${Math.max(Number(blockIndex || 0), 0)}:${String(field || '')}`, []);
 
@@ -1555,39 +1409,83 @@ const paymentStatusAbortRef = useRef(null);
     }));
   }, [buildFieldErrorKey]);
 
+  const focusBookingField = useCallback((blockIndex, field = 'contactEmail') => {
+    const parsedIndex = Number(blockIndex);
+    const normalizedIndex = Number.isInteger(parsedIndex) && parsedIndex >= 0 ? parsedIndex : 0;
+    const block = bookingBlocks[normalizedIndex] || null;
+    setActiveBlockIndex(normalizedIndex);
+    if (!block?.id) return;
+    setPendingFieldFocus({
+      blockId: block.id,
+      field,
+      requestId: `${block.id}:${field}:${Date.now()}`,
+    });
+  }, [bookingBlocks, setActiveBlockIndex]);
+
+  const consumePendingFieldFocus = useCallback((requestId) => {
+    const normalizedId = String(requestId || '').trim();
+    setPendingFieldFocus((current) => {
+      if (!current) return null;
+      if (!normalizedId || current.requestId === normalizedId) return null;
+      return current;
+    });
+  }, []);
+
   const resetAvailabilityViewState = useCallback((options = {}) => {
-    const { clearError = true } = options;
-    setSlots(buildDefaultSlots());
-    setSlotsCurated(createEmptyCuratedSlots());
-    if (clearError) {
-      setAvailabilityError('');
-    }
+    resetAvailabilityHookViewState(options);
     clearSlotConflict();
-  }, [clearSlotConflict]);
+  }, [clearSlotConflict, resetAvailabilityHookViewState]);
 
   const clearRequestState = useCallback(() => {
-    if (availabilityAbortRef.current) availabilityAbortRef.current.abort();
-    if (slotsAbortRef.current) slotsAbortRef.current.abort();
-    availabilityCacheRef.current.clear();
-    slotsCacheRef.current.clear();
-    setAvailabilityMap({});
+    abortBranchData();
+    resetAvailabilityData();
+    clearSlotConflict();
     setFieldErrors({});
-    resetAvailabilityViewState();
-  }, [resetAvailabilityViewState]);
+    setPendingFieldFocus(null);
+  }, [abortBranchData, clearSlotConflict, resetAvailabilityData]);
+
+  const {
+    canAddCompanionBlock,
+    companionRuleValidation,
+    setActiveBlock,
+    addCompanionBlock,
+    consumePendingCompanionFocus,
+    removeCompanionBlock,
+    updateActiveBlockBarber,
+    updateActiveBlockContact,
+    buildIntegrantesPayload,
+  } = useBookingCompanions({
+    allowCompanions,
+    maxCompanions,
+    bookingBlocks,
+    setBookingBlocks,
+    selectedBranchId,
+    activeBlockIndex,
+    setActiveBlockIndex,
+    effectiveActiveBlockIndex,
+    titularSelectedDate,
+    pendingCompanionFocusId,
+    setPendingCompanionFocusId,
+    setFieldErrors,
+    buildFieldErrorKey,
+    clearSlotConflict,
+    resetAvailabilityViewState,
+    resolveBlockContactState,
+    bookingMode,
+  });
 
   const resetFlowForBranchChange = useCallback(() => {
-    setBookingBlocks([createBookingBlock({ alias: 'Titular' })]);
+    setBookingBlocks([createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })]);
     setActiveBlockIndex(0);
     setPendingCompanionFocusId('');
+    setPendingFieldFocus(null);
     setMembershipBranchNotice('');
     membershipBranchNoticeRef.current = '';
-    setHoldResult(null);
-    setPaymentIntent(null);
-    setPaymentResult(null);
-    setBookingSuccessResult(null);
+    clearHoldLocalState();
+    clearPaymentState();
     setCurrentMonth(new Date(minBookingMonth.getFullYear(), minBookingMonth.getMonth(), 1));
     clearRequestState();
-  }, [clearRequestState, minBookingMonth]);
+  }, [clearHoldLocalState, clearPaymentState, clearRequestState, minBookingMonth]);
 
   const syncServicesScrollState = useCallback(() => {
     const scroller = servicesScrollRef.current;
@@ -1603,561 +1501,54 @@ const paymentStatusAbortRef = useRef(null);
     setServicesAtEnd(atEnd);
   }, []);
 
-  const updateBlockAtIndex = useCallback((index, updater) => {
-    setBookingBlocks((prev) => {
-      if (!prev[index]) return prev;
-      const currentBlock = prev[index];
-      const nextRaw = typeof updater === 'function'
-        ? updater(currentBlock)
-        : { ...currentBlock, ...updater };
-      const nextBlock = normalizeBookingBlock(nextRaw, index);
-
-      if (areBlocksEqual(currentBlock, nextBlock)) {
-        return prev;
-      }
-
-      const nextBlocks = [...prev];
-      nextBlocks[index] = nextBlock;
-      return nextBlocks;
-    });
-  }, []);
-
-  const fetchContext = useCallback(async () => {
-    setContextLoading(true);
-    setContextError('');
-    try {
-      const response = await getPublicBookingContext();
-      const payload = response?.data ?? response;
-      const nextContext = {
-        sucursales: Array.isArray(payload?.sucursales) ? payload.sucursales : [],
-        parametros: payload?.parametros || {},
-      };
-      setContextData(nextContext);
-    } catch (err) {
-      setContextError(extractMessage(err));
-    } finally {
-      setContextLoading(false);
-    }
-  }, []);
-
-  const fetchBranchData = useCallback(async () => {
-    if (!selectedBranchId) {
-      setBarbers([]);
-      setServices([]);
-      setPackages([]);
-      setPromotions([]);
-      setPromotionsLoadError('');
-      setBarbersRefreshing(false);
-      setPackagesLoading(false);
-      setPromotionsLoading(false);
-      return;
-    }
-
-    const requestSeq = branchDataRequestSeqRef.current + 1;
-    branchDataRequestSeqRef.current = requestSeq;
-    const hasExistingBarbers = barbersCountRef.current > 0;
-    const hasExistingCatalog = servicesCountRef.current > 0 || packagesCountRef.current > 0;
-    const hasExistingPromotions = promotionsCountRef.current > 0;
-    setBarbersLoading(!hasExistingBarbers);
-    setBarbersRefreshing(hasExistingBarbers);
-    setServicesLoading(!hasExistingCatalog);
-    setPackagesLoading(!hasExistingCatalog);
-    setPromotionsLoading(!hasExistingPromotions);
-    setPromotionsLoadError('');
-    setAvailabilityError('');
-
-    try {
-      const barbersResponse = await listPublicAgendaBarberos({ id_sucursal: selectedBranchId });
-      if (requestSeq !== branchDataRequestSeqRef.current) return;
-
-      const barbersPayload = barbersResponse?.data ?? barbersResponse;
-      const nextBarbers = Array.isArray(barbersPayload?.barberos) ? barbersPayload.barberos : [];
-      const validBarberIds = new Set(nextBarbers.map((barber) => barber.id_empleado));
-      const fallbackBarberId = nextBarbers[0]?.id_empleado || '';
-      const scopedBarberId = activeBlockBarberId && validBarberIds.has(activeBlockBarberId)
-        ? activeBlockBarberId
-        : '';
-
-      setBarbers(nextBarbers);
-      setBarbersLoading(false);
-      setBarbersRefreshing(false);
-
-      const [servicesResult, packagesResult, promotionsResult] = await Promise.allSettled([
-        listPublicCatalogServicios({
-          id_sucursal: selectedBranchId,
-          id_barbero: scopedBarberId || undefined,
-        }),
-        listPublicCatalogPaquetes({
-          id_sucursal: selectedBranchId,
-          id_barbero: scopedBarberId || undefined,
-        }),
-        listPublicAgendaPromociones({
-          id_sucursal: selectedBranchId,
-        }),
-      ]);
-      if (requestSeq !== branchDataRequestSeqRef.current) return;
-
-      let nextServices = [];
-      let validServiceIds = new Set();
-      if (servicesResult.status === 'fulfilled') {
-        const servicesResponse = servicesResult.value;
-        const servicesPayload = servicesResponse?.data ?? servicesResponse;
-        const rawServices = Array.isArray(servicesPayload?.servicios)
-          ? servicesPayload.servicios.filter(
-            (service) => service?.activo !== false && service?.agendable && !service?.servicio_informativo
-          )
-          : [];
-        const dedupedServicesMap = new Map();
-        rawServices.forEach((service) => {
-          const serviceId = String(service?.id_servicio || '').trim();
-          if (!serviceId || dedupedServicesMap.has(serviceId)) return;
-          dedupedServicesMap.set(serviceId, service);
-        });
-        nextServices = Array.from(dedupedServicesMap.values());
-        validServiceIds = new Set(nextServices.map((service) => service.id_servicio));
-      }
-
-      let nextPackages = [];
-      let validPackageIds = new Set();
-      if (packagesResult.status === 'fulfilled') {
-        const packagesResponse = packagesResult.value;
-        const packagesPayload = packagesResponse?.data ?? packagesResponse;
-        nextPackages = Array.isArray(packagesPayload?.paquetes)
-          ? packagesPayload.paquetes
-          : [];
-        validPackageIds = new Set(nextPackages.map((pkg) => pkg.id_paquete));
-      }
-
-      const nextPromotions = promotionsResult.status === 'fulfilled'
-        ? (() => {
-          const promotionsResponse = promotionsResult.value;
-          const promotionsPayload = promotionsResponse?.data ?? promotionsResponse;
-          return Array.isArray(promotionsPayload?.promociones)
-            ? promotionsPayload.promociones
-            : [];
-        })()
-        : [];
-      const validPromotionIds = new Set(nextPromotions.map((promotion) => String(promotion?.id_promocion || '').trim()).filter(Boolean));
-      if (promotionsResult.status !== 'fulfilled') {
-        setPromotionsLoadError('No se pudieron cargar promociones en este momento. Puedes continuar sin promociones.');
-      }
-      if (servicesResult.status !== 'fulfilled' || packagesResult.status !== 'fulfilled') {
-        setAvailabilityError('No se pudo cargar el catálogo completo de esta sucursal en este momento. Puedes reintentar.');
-      }
-
-      setServices(nextServices);
-      setPackages(nextPackages);
-      setPromotions(nextPromotions);
-
-      setBookingBlocks((prev) => {
-        const sourceBlocks = prev.length > 0
-          ? prev
-          : [createBookingBlock({ alias: 'Titular', idBarbero: fallbackBarberId })];
-
-        let hasChanges = false;
-        const normalizedSource = sourceBlocks.map((block, index) => normalizeBookingBlock(block, index));
-
-        const nextBlocks = normalizedSource.map((block) => {
-          const nextBarberId = validBarberIds.has(block.idBarbero)
-            ? block.idBarbero
-            : fallbackBarberId;
-          const nextServiceIdsRaw = block.serviceIds.filter((serviceId) => validServiceIds.has(serviceId));
-          const nextPackageId = validPackageIds.has(block.packageId)
-            ? block.packageId
-            : '';
-          const nextPromotionIds = normalizePromotionIds(block.promotionIds, block.promotionId)
-            .filter((id) => validPromotionIds.has(id))
-            .slice(0, maxPromotionsPerBooking);
-          const nextPromotionId = nextPromotionIds[0] || '';
-
-          const nextPackage = nextPackageId
-            ? nextPackages.find((pkg) => pkg?.id_paquete === nextPackageId) || null
-            : null;
-          const includedByPackage = new Set(
-            (Array.isArray(nextPackage?.items) ? nextPackage.items : [])
-              .map((item) => String(item?.id_servicio || '').trim())
-              .filter(Boolean)
-          );
-          const nextServiceIds = nextServiceIdsRaw.filter((serviceId) => !includedByPackage.has(serviceId));
-
-          const normalizedSelectionType = nextPackageId && nextServiceIds.length > 0
-            ? 'mixed'
-            : nextPackageId
-              ? 'package'
-              : 'services';
-
-          if (
-            block.idBarbero === nextBarberId
-            && areServiceIdsEqual(block.serviceIds, nextServiceIds)
-            && block.selectionType === normalizedSelectionType
-            && block.packageId === nextPackageId
-            && block.promotionId === nextPromotionId
-            && areServiceIdsEqual(block.promotionIds, nextPromotionIds)
-          ) {
-            return block;
-          }
-
-          hasChanges = true;
-          return {
-            ...block,
-            idBarbero: nextBarberId,
-            selectionType: normalizedSelectionType,
-            packageId: nextPackageId,
-            serviceIds: nextServiceIds,
-            promotionId: nextPromotionId,
-            promotionIds: nextPromotionIds,
-            selectedDate: '',
-            selectedTime: '',
-            selectedDateTime: '',
-          };
-        });
-
-        return hasChanges ? nextBlocks : normalizedSource;
-      });
-    } catch (err) {
-      if (requestSeq !== branchDataRequestSeqRef.current) return;
-      const status = Number(err?.status || 0);
-      const message = status >= 500
-        ? 'No se pudo cargar la agenda de esta sucursal en este momento. Puedes reintentar o cambiar de sucursal.'
-        : extractMessage(err);
-      setBarbers([]);
-      setAvailabilityError(message);
-      notifyError(message, { dedupeKey: 'public-booking-branch-data-error' });
-    } finally {
-      if (requestSeq === branchDataRequestSeqRef.current) {
-        setBarbersLoading(false);
-        setBarbersRefreshing(false);
-        setServicesLoading(false);
-        setPackagesLoading(false);
-        setPromotionsLoading(false);
-      }
-    }
-  }, [activeBlockBarberId, maxPromotionsPerBooking, notifyError, selectedBranchId]);
-
-  const fetchAvailability = useCallback(async () => {
-    const hasSelection = Boolean(selectedPackageId) || effectiveSelectedServiceIdsForAgenda.length > 0;
-    if (!selectedBranchId || !hasSelection) {
-      setAvailabilityMap({});
-      setAvailabilityLoading(false);
-      return;
-    }
-
-    const cacheKey = [selectedBranchId, activeBlockBarberId || 'auto', selectionCacheKey, monthRange.from, monthRange.to].join('|');
-    const cached = availabilityCacheRef.current.get(cacheKey);
-    if (cached) {
-      setAvailabilityMap(cached);
-      setAvailabilityError('');
-
-      const shouldValidateSelectedDate = selectedDate >= monthRange.from && selectedDate <= monthRange.to;
-      if (
-        !holdResult
-        && selectedDate
-        && (selectedDate < minBookingDateKey || (shouldValidateSelectedDate && !cached[selectedDate]?.disponible))
-      ) {
-        updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
-          ...currentBlock,
-          selectedDate: '',
-          selectedTime: '',
-          selectedDateTime: '',
-        }));
-      }
-      return;
-    }
-
-    if (availabilityAbortRef.current) {
-      availabilityAbortRef.current.abort();
-    }
-
-    const controller = new AbortController();
-    availabilityAbortRef.current = controller;
-    const requestSeq = availabilityRequestSeqRef.current + 1;
-    availabilityRequestSeqRef.current = requestSeq;
-
-    setAvailabilityLoading(true);
-    setAvailabilityError('');
-
-    try {
-      const response = await listPublicAgendaDisponibilidad(
-        {
-          id_sucursal: selectedBranchId,
-          id_barbero: activeBlockBarberId || undefined,
-          selection_type: effectiveSelectionType,
-          servicios: effectiveSelectedServiceIdsForAgenda.length > 0 ? effectiveSelectedServiceIdsForAgenda.join(',') : undefined,
-          id_paquete: selectedPackageId || undefined,
-          fecha_desde: monthRange.from,
-          fecha_hasta: monthRange.to,
-        },
-        { signal: controller.signal }
-      );
-
-      if (requestSeq !== availabilityRequestSeqRef.current) return;
-
-      const payload = response?.data ?? response;
-      const list = Array.isArray(payload?.disponibilidad) ? payload.disponibilidad : [];
-      const nextMap = list.reduce((acc, item) => {
-        if (!item?.fecha) return acc;
-        acc[item.fecha] = item;
-        return acc;
-      }, {});
-
-      availabilityCacheRef.current.set(cacheKey, nextMap);
-      setAvailabilityMap(nextMap);
-
-      const shouldValidateSelectedDate = selectedDate >= monthRange.from && selectedDate <= monthRange.to;
-      if (
-        !holdResult
-        && selectedDate
-        && (selectedDate < minBookingDateKey || (shouldValidateSelectedDate && !nextMap[selectedDate]?.disponible))
-      ) {
-        updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
-          ...currentBlock,
-          selectedDate: '',
-          selectedTime: '',
-          selectedDateTime: '',
-        }));
-      }
-    } catch (err) {
-      if (err?.name === 'AbortError') return;
-      if (requestSeq !== availabilityRequestSeqRef.current) return;
-      const message = extractMessage(err);
-      setAvailabilityError(message);
-    } finally {
-      if (requestSeq === availabilityRequestSeqRef.current) {
-        setAvailabilityLoading(false);
-      }
-    }
-  }, [
-    activeBlockBarberId,
-    effectiveActiveBlockIndex,
-    minBookingDateKey,
-    monthRange.from,
-    monthRange.to,
-    selectedBranchId,
-    selectedDate,
-    holdResult,
-    selectionCacheKey,
-    effectiveSelectionType,
-    effectiveSelectedServiceIdsForAgenda,
-    selectedPackageId,
-    updateBlockAtIndex,
-  ]);
-
-  const fetchSlots = useCallback(async () => {
-    const hasSelection = Boolean(selectedPackageId) || effectiveSelectedServiceIdsForAgenda.length > 0;
-    if (!selectedBranchId || !hasSelection || !selectedDate) {
-      setSlots(buildDefaultSlots());
-      setSlotsCurated(createEmptyCuratedSlots());
-      setSlotMetrics({ duracionTotalMin: 0, bufferTotalMin: 0 });
-      setSlotsLoading(false);
-      return;
-    }
-
-    const cacheKey = [selectedBranchId, activeBlockBarberId || 'auto', selectionCacheKey, selectedDate].join('|');
-    const cached = slotsCacheRef.current.get(cacheKey);
-    if (cached) {
-      setSlots(cached.slots);
-      setSlotsCurated(cached.curated || createEmptyCuratedSlots());
-      setSlotMetrics(cached.metrics);
-      return;
-    }
-
-    if (slotsAbortRef.current) {
-      slotsAbortRef.current.abort();
-    }
-
-    const controller = new AbortController();
-    slotsAbortRef.current = controller;
-    const requestSeq = slotsRequestSeqRef.current + 1;
-    slotsRequestSeqRef.current = requestSeq;
-    setSlotsLoading(true);
-
-    try {
-      const response = await listPublicAgendaHorarios(
-        {
-          id_sucursal: selectedBranchId,
-          id_barbero: activeBlockBarberId || undefined,
-          selection_type: effectiveSelectionType,
-          servicios: effectiveSelectedServiceIdsForAgenda.length > 0 ? effectiveSelectedServiceIdsForAgenda.join(',') : undefined,
-          id_paquete: selectedPackageId || undefined,
-          fecha: selectedDate,
-        },
-        { signal: controller.signal }
-      );
-
-      if (requestSeq !== slotsRequestSeqRef.current) return;
-
-      const payload = response?.data ?? response;
-      const mapped = buildDynamicSlots({
-        horarios: payload?.horarios,
-        duracionTotalMin: payload?.duracion_total_min,
-      });
-      const curated = buildCuratedSlots({
-        horariosCurados: payload?.horarios_curados,
-        horarios: payload?.horarios,
-        duracionTotalMin: payload?.duracion_total_min,
-      });
-      const metrics = {
-        duracionTotalMin: Number(payload?.duracion_total_min || 0),
-        bufferTotalMin: Number(payload?.buffer_total_min || 0),
-      };
-
-      slotsCacheRef.current.set(cacheKey, { slots: mapped, curated, metrics });
-      setSlots(mapped);
-      setSlotsCurated(curated);
-      setSlotMetrics(metrics);
-
-      const currentSelectedTime = selectedTimeRef.current;
-      if (currentSelectedTime && !mapped.some((slot) => slot.hora === currentSelectedTime && slot.disponible)) {
-        updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
-          ...currentBlock,
-          selectedTime: '',
-          selectedDateTime: '',
-        }));
-      }
-    } catch (err) {
-      if (err?.name === 'AbortError') return;
-      if (requestSeq !== slotsRequestSeqRef.current) return;
-      notifyError(extractMessage(err), { dedupeKey: 'public-booking-slots-error' });
-    } finally {
-      if (requestSeq === slotsRequestSeqRef.current) {
-        setSlotsLoading(false);
-      }
-    }
-  }, [
-    activeBlockBarberId,
-    effectiveActiveBlockIndex,
-    notifyError,
-    selectedBranchId,
-    selectedDate,
-    selectionCacheKey,
-    effectiveSelectionType,
-    effectiveSelectedServiceIdsForAgenda,
-    selectedPackageId,
-    updateBlockAtIndex,
-  ]);
-
-  const fetchSlotsForBarber = useCallback(async ({
-    barberId,
-    dateKey,
-    selectionTypeValue,
-    servicesCsvValue,
-    packageIdValue,
-  }) => {
-    const hasSelection = Boolean(packageIdValue) || Boolean(servicesCsvValue);
-    if (!selectedBranchId || !barberId || !dateKey || !hasSelection) {
-      return buildDefaultSlots();
-    }
-
-    const selectionKey = `type:${selectionTypeValue}|package:${packageIdValue || ''}|services:${servicesCsvValue || ''}`;
-    const cacheKey = [selectedBranchId, barberId, selectionKey, dateKey].join('|');
-    const cached = slotsCacheRef.current.get(cacheKey);
-    if (cached) return cached.slots;
-
-    const response = await listPublicAgendaHorarios({
-      id_sucursal: selectedBranchId,
-      id_barbero: barberId,
-      selection_type: selectionTypeValue,
-      servicios: servicesCsvValue || undefined,
-      id_paquete: packageIdValue || undefined,
-      fecha: dateKey,
-    });
-
-    const payload = response?.data ?? response;
-    const mapped = buildDynamicSlots({
-      horarios: payload?.horarios,
-      duracionTotalMin: payload?.duracion_total_min,
-    });
-    slotsCacheRef.current.set(cacheKey, {
-      slots: mapped,
-      metrics: {
-        duracionTotalMin: Number(payload?.duracion_total_min || 0),
-        bufferTotalMin: Number(payload?.buffer_total_min || 0),
-      },
-    });
-    return mapped;
-  }, [selectedBranchId]);
-
   const findBlockCollision = useCallback((barberId, dateKey, timeKey, durationMinutes, ignoreIndex) => {
     if (!barberId || !dateKey || !timeKey || Number(durationMinutes || 0) <= 0) return null;
-    return bookingBlocksSummary.find((block) =>
-      block.index !== ignoreIndex
-      && block.idBarbero === barberId
-      && block.selectedDate === dateKey
-      && rangesOverlap(timeKey, durationMinutes, block.selectedTime, block.duracion_bloque_min)) || null;
+    return bookingBlocksSummary.find((block) => {
+      const blockRange = getBookingBlockOccupiedRange(block);
+      return block.index !== ignoreIndex
+        && block.idBarbero === barberId
+        && block.selectedDate === dateKey
+        && rangesOverlap(timeKey, durationMinutes, block.selectedTime, blockRange?.occupiedDurationMin);
+    }) || null;
   }, [bookingBlocksSummary]);
 
-  const loadSlotSuggestions = useCallback(async ({
-    barberId,
-    dateKey,
-    timeKey,
-    selectionTypeValue,
-    servicesCsvValue,
-    packageIdValue,
-  }) => {
-    const hasSelection = Boolean(packageIdValue) || Boolean(servicesCsvValue);
-    if (!barberId || !dateKey || !timeKey || !hasSelection) {
-      setSlotSuggestions([]);
-      setSlotSuggestionsLoading(false);
-      return;
-    }
-
-    const barberCandidates = (Array.isArray(barbers) ? barbers : [])
-      .filter((barber) => barber?.id_empleado && barber.id_empleado !== barberId);
-    if (!barberCandidates.length) {
-      setSlotSuggestions([]);
-      setSlotSuggestionsLoading(false);
-      return;
-    }
-
-    const requestSeq = slotSuggestionRequestSeqRef.current + 1;
-    slotSuggestionRequestSeqRef.current = requestSeq;
-    setSlotSuggestionsLoading(true);
-    setSlotSuggestions([]);
-
-    try {
-      const results = await Promise.all(
-        barberCandidates.map(async (barber) => {
-          try {
-            const barberSlots = await fetchSlotsForBarber({
-              barberId: barber.id_empleado,
-              dateKey,
-              selectionTypeValue,
-              servicesCsvValue,
-              packageIdValue,
-            });
-            const isAvailable = barberSlots.some((slot) => slot.hora === timeKey && slot.disponible);
-            if (!isAvailable) return null;
-            return {
-              idBarbero: barber.id_empleado,
-              nombreBarbero: barber.nombre_completo || 'Barbero',
-            };
-          } catch {
-            return null;
-          }
-        })
-      );
-
-      if (requestSeq !== slotSuggestionRequestSeqRef.current) return;
-      setSlotSuggestions(results.filter(Boolean));
-    } finally {
-      if (requestSeq === slotSuggestionRequestSeqRef.current) {
-        setSlotSuggestionsLoading(false);
-      }
-    }
-  }, [barbers, fetchSlotsForBarber]);
-
-  const invalidateAgendaCaches = useCallback(() => {
-    availabilityCacheRef.current.clear();
-    slotsCacheRef.current.clear();
-  }, []);
-
-  const refreshRealtimeAgenda = useCallback(() => {
+  const refreshPolledAgenda = useCallback(() => {
+    abortAvailabilityRequests();
     invalidateAgendaCaches();
     void fetchAvailability();
     if (selectedDate) {
       void fetchSlots();
     }
-  }, [fetchAvailability, fetchSlots, invalidateAgendaCaches, selectedDate]);
+  }, [abortAvailabilityRequests, fetchAvailability, fetchSlots, invalidateAgendaCaches, selectedDate]);
+
+  const agendaRouteActive = location.pathname.startsWith(BOOKING_ROUTES.agenda);
+  const hasAgendaSelectionForRealtime = Boolean(selectedPackageId || selectedServiceIdsEffective.length > 0);
+  const handleAgendaAvailabilityChanged = useCallback((event) => {
+    if (!event || event.id_sucursal !== selectedBranchId) return;
+    void invalidateAvailabilityScope({
+      branchId: event.id_sucursal,
+      barberId: event.id_barbero,
+      dateFrom: event.fecha_desde,
+      dateTo: event.fecha_hasta,
+      startAt: event.inicio_at,
+      endAt: event.fin_at,
+      reason: event.reason,
+    });
+  }, [invalidateAvailabilityScope, selectedBranchId]);
+
+  const handleAgendaResyncRequired = useCallback(() => {
+    void resyncAvailabilityScope();
+  }, [resyncAvailabilityScope]);
+
+  const agendaEventsState = usePublicAgendaEvents({
+    enabled: agendaSseEnabled && hasAgendaSelectionForRealtime,
+    branchId: selectedBranchId,
+    routeActive: agendaRouteActive,
+    selectedBarberId: activeBlockBarberId,
+    selectionType,
+    onAvailabilityChanged: handleAgendaAvailabilityChanged,
+    onResyncRequired: handleAgendaResyncRequired,
+  });
 
   const clearSelectedTimes = useCallback((options = {}) => {
     const { onlyIndex = null } = options;
@@ -2181,84 +1572,107 @@ const paymentStatusAbortRef = useRef(null);
     const normalizedOnlyIndex = Number.isInteger(onlyIndex) && onlyIndex >= 0
       ? onlyIndex
       : (keepOtherTimes ? fallbackIndex : null);
-    setHoldResult(null);
-    setPaymentIntent(null);
-    setPaymentResult(null);
-    setBookingSuccessResult(null);
+    clearHoldLocalState();
+    clearPaymentState();
     clearSelectedTimes({ onlyIndex: normalizedOnlyIndex });
+    abortAvailabilityRequests();
     invalidateAgendaCaches();
     notifications.warning(
       String(message || 'El horario ya no está disponible. Selecciona una nueva hora para continuar.'),
       { dedupeKey }
     );
-    navigate('/agendar/agenda', { replace: true });
+    navigate(BOOKING_ROUTES.agenda, { replace: true });
     void fetchAvailability();
     void fetchSlots();
   }, [
     effectiveActiveBlockIndex,
+    abortAvailabilityRequests,
+    clearHoldLocalState,
     clearSelectedTimes,
     fetchAvailability,
     fetchSlots,
     invalidateAgendaCaches,
     navigate,
     notifications,
+    clearPaymentState,
   ]);
 
-  usePublicAgendaRealtime({
+  const rejectInvalidScheduleBlock = useCallback((block) => {
+    const normalizedIndex = Number.isInteger(Number(block?.index))
+      ? Math.max(0, Number(block.index))
+      : (Number.isInteger(effectiveActiveBlockIndex) ? effectiveActiveBlockIndex : 0);
+    const label = String(
+      block?.alias
+      || (normalizedIndex === 0 ? BOOKING_HOLDER_ALIAS : `${BOOKING_COMPANION_ALIAS_PREFIX} ${normalizedIndex}`)
+    ).trim();
+
+    invalidHoldSelectionFingerprintRef.current = bookingHoldFingerprint;
+    clearSelectedTimes({ onlyIndex: normalizedIndex });
+    setSlotConflict(block?.selectedDate && block?.selectedTime && block?.idBarbero
+      ? {
+          dateKey: block.selectedDate,
+          timeKey: block.selectedTime,
+          barberId: block.idBarbero,
+          conflictingAlias: label,
+        }
+      : null);
+    notifications.warning(`Revisa el horario de ${label}. Selecciona una hora disponible.`, {
+      dedupeKey: 'public-booking-submit-invalid-block-schedule',
+    });
+    setActiveBlockIndex(normalizedIndex);
+    navigate(BOOKING_ROUTES.agenda, { replace: true });
+    return false;
+  }, [
+    bookingHoldFingerprint,
+    clearSelectedTimes,
+    effectiveActiveBlockIndex,
+    navigate,
+    notifications,
+  ]);
+
+  const isBlockSelectedSlotAvailable = useCallback(async (block) => {
+    const servicesCsvValue = Array.isArray(block?.selectedServiceIdsEffective)
+      ? block.selectedServiceIdsEffective.join(',')
+      : '';
+    const packageIdValue = String(block?.selectedPackage?.id_paquete || block?.packageId || '').trim();
+    const hasSelectionForLookup = Boolean(packageIdValue) || Boolean(servicesCsvValue);
+    if (!block?.idBarbero || !block?.selectedDate || !block?.selectedTime || !hasSelectionForLookup) {
+      return false;
+    }
+
+    try {
+      const blockSlots = await fetchSlotsForBarber({
+        barberId: block.idBarbero,
+        dateKey: block.selectedDate,
+        timeKey: block.selectedTime,
+        selectionTypeValue: block.selection_type || block.selectionType,
+        servicesCsvValue,
+        packageIdValue,
+      });
+      return Array.isArray(blockSlots)
+        && blockSlots.some((slot) => slot?.hora === block.selectedTime && slot?.disponible);
+    } catch {
+      return true;
+    }
+  }, [fetchSlotsForBarber]);
+
+  usePublicAgendaPolling({
+    branchId: selectedBranchId,
     barberId: activeBlockBarberId,
     dateKey: selectedDate,
     enabled: Boolean(
-      location.pathname.startsWith('/agendar/agenda')
+      location.pathname.startsWith(BOOKING_ROUTES.agenda)
       && selectedBranchId
-      && activeBlockBarberId
       && (selectedPackageId || selectedServiceIdsEffective.length > 0)
     ),
-    onInvalidate: refreshRealtimeAgenda,
+    connectionState: agendaEventsState.connectionState,
+    onInvalidate: refreshPolledAgenda,
   });
 
   useEffect(() => {
-    void fetchContext();
-  }, [fetchContext]);
-
-  useEffect(() => {
-    if (!branchList.length) {
-      setSelectedBranchId('');
-      return;
-    }
-
-    setSelectedBranchId((prev) =>
-      branchList.some((branch) => branch.id_sucursal === prev) ? prev : branchList[0]?.id_sucursal || ''
-    );
-  }, [branchList]);
-
-  useEffect(() => {
-    void fetchBranchData();
-  }, [fetchBranchData]);
-
-  useEffect(() => {
-    if (!canUseClienteHold) {
-      setMembershipStateData(null);
-      setMembershipBranchNotice('');
-      membershipBranchNoticeRef.current = '';
-      return;
-    }
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await getClienteMembershipEstado();
-        if (cancelled) return;
-        const payload = response?.data ?? response;
-        setMembershipStateData(payload && typeof payload === 'object' ? payload : null);
-      } catch {
-        if (cancelled) return;
-        setMembershipStateData(null);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    if (canUseClienteHold) return;
+    setMembershipBranchNotice('');
+    membershipBranchNoticeRef.current = '';
   }, [canUseClienteHold]);
 
   useEffect(() => {
@@ -2284,7 +1698,7 @@ const paymentStatusAbortRef = useRef(null);
     if (!branchList.some((branch) => branch.id_sucursal === rewardBranchId)) return;
     if (selectedBranchId === rewardBranchId) return;
     setSelectedBranchId(rewardBranchId);
-  }, [branchList, rewardBranchId, rewardModeActive, selectedBranchId]);
+  }, [branchList, rewardBranchId, rewardModeActive, selectedBranchId, setSelectedBranchId]);
 
   useEffect(() => {
     if (!rewardModeActive || !selectedBranchId || !selectedBarberId || !rewardServiceId) return;
@@ -2292,7 +1706,7 @@ const paymentStatusAbortRef = useRef(null);
     setBookingBlocks((prev) => {
       const source = Array.isArray(prev) && prev.length > 0
         ? prev
-        : [createBookingBlock({ alias: 'Titular' })];
+        : [createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })];
       const titular = normalizeBookingBlock(source[0], 0);
       const mergedServiceIds = Array.from(new Set([
         rewardServiceId,
@@ -2371,42 +1785,14 @@ const paymentStatusAbortRef = useRef(null);
 
   useEffect(() => {
     if (!canUseClienteHold || !selectedBranchId || !selectedBarberId) return;
-    if (rewardModeActive) {
-      if (membershipBranchNotice || membershipBranchNoticeRef.current) {
-        setMembershipBranchNotice('');
-        membershipBranchNoticeRef.current = '';
-      }
-      return;
-    }
-
-    if (!activeMembershipPlan) {
-      if (hasOperationalMembership && activeMembershipOtherBranchName) {
-        const notice = `Tu plan activo pertenece a ${activeMembershipOtherBranchName}. Si agendas en ${selectedBranchName}, esta cita no será cubierta por tu plan y deberás pagar el total.`;
-        setMembershipBranchNotice(notice);
-        if (membershipBranchNoticeRef.current !== notice) {
-          notifications.info(notice, { dedupeKey: 'public-booking-membership-branch-mismatch' });
-          membershipBranchNoticeRef.current = notice;
-        }
-        return;
-      }
-      if (membershipBranchNotice || membershipBranchNoticeRef.current) {
-        setMembershipBranchNotice('');
-        membershipBranchNoticeRef.current = '';
-      }
-      return;
-    }
-
-    if (membershipBranchNotice) {
-      setMembershipBranchNotice('');
-      membershipBranchNoticeRef.current = '';
-    }
+    if (rewardModeActive || !activeMembershipPlan) return;
 
     if (membershipLockedServiceIdsForTitular.length === 0) return;
 
     setBookingBlocks((prev) => {
       const source = Array.isArray(prev) && prev.length > 0
         ? prev
-        : [createBookingBlock({ alias: 'Titular' })];
+        : [createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })];
       const currentTitular = normalizeBookingBlock(source[0], 0);
       const mergedServiceIds = Array.from(new Set([
         ...membershipLockedServiceIdsForTitular,
@@ -2436,39 +1822,44 @@ const paymentStatusAbortRef = useRef(null);
     });
   }, [
     activeMembershipPlan,
-    activeMembershipOtherBranchName,
     canUseClienteHold,
-    hasOperationalMembership,
-    membershipBranchNotice,
     membershipLockedServiceIdsForTitular,
     rewardModeActive,
-    notifications,
     selectedBarberId,
     selectedBranchId,
-    selectedBranchName,
   ]);
 
   useEffect(() => {
-    if (!selectedBranchId) return;
+    if (!location.pathname.startsWith(BOOKING_ROUTES.agenda)) return;
+    const hasSelectionForAgenda = Boolean(selectedPackageId) || effectiveSelectedServiceIdsForAgenda.length > 0;
+    if (!selectedBranchId || !activeBlockBarberId || !hasSelectionForAgenda) return;
+    const key = [
+      selectedBranchId,
+      activeBlockBarberId,
+      selectionCacheKey,
+      monthRange?.from || '',
+      monthRange?.to || '',
+      selectedDate || '',
+    ].join('|');
+    if (agendaAutoLoadKeyRef.current === key) return;
+    agendaAutoLoadKeyRef.current = key;
     void fetchAvailability();
-  }, [fetchAvailability, selectedBranchId]);
-
-  useEffect(() => {
-    if (!selectedBranchId) return;
-    void fetchSlots();
-  }, [fetchSlots, selectedBranchId]);
-
-  useEffect(() => {
-    return () => {
-      if (availabilityAbortRef.current) availabilityAbortRef.current.abort();
-      if (slotsAbortRef.current) slotsAbortRef.current.abort();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (bookingBlocks[activeBlockIndex]) return;
-    setActiveBlockIndex(0);
-  }, [activeBlockIndex, bookingBlocks]);
+    if (selectedDate) {
+      void fetchSlots();
+    }
+  }, [
+    activeBlockBarberId,
+    effectiveSelectedServiceIdsForAgenda.length,
+    fetchAvailability,
+    fetchSlots,
+    location.pathname,
+    monthRange?.from,
+    monthRange?.to,
+    selectedBranchId,
+    selectedDate,
+    selectedPackageId,
+    selectionCacheKey,
+  ]);
 
   useEffect(() => {
     clearSlotConflict();
@@ -2497,28 +1888,6 @@ const paymentStatusAbortRef = useRef(null);
   }, [minBookingDateKey]);
 
   useEffect(() => {
-    const nextTitularDate = String(titularSelectedDate || '').trim();
-    setBookingBlocks((prev) => {
-      let changed = false;
-      const next = prev.map((block, index) => {
-        if (index === 0) return block;
-        if (block.selectedDate === nextTitularDate) return block;
-        changed = true;
-        return normalizeBookingBlock(
-          {
-            ...block,
-            selectedDate: nextTitularDate,
-            selectedTime: '',
-            selectedDateTime: '',
-          },
-          index
-        );
-      });
-      return changed ? next : prev;
-    });
-  }, [titularSelectedDate]);
-
-  useEffect(() => {
     setBookingBlocks((prev) => {
       let changed = false;
       const nextBlocks = prev.map((block) => {
@@ -2527,7 +1896,14 @@ const paymentStatusAbortRef = useRef(null);
         if (!currentPromotionIds.length) {
           if (!block?.promotionId && (!Array.isArray(block?.promotionIds) || block.promotionIds.length === 0)) return block;
           changed = true;
-          return { ...block, promotionId: '', promotionIds: [] };
+          return {
+            ...block,
+            promotionId: '',
+            promotionIds: [],
+            promotionRuleId: '',
+            promocion_id: null,
+            id_promocion_regla: null,
+          };
         }
         const validPromotionIds = currentPromotionIds.filter((promotionId) => {
           const promotion = promotionsById.get(promotionId);
@@ -2548,10 +1924,16 @@ const paymentStatusAbortRef = useRef(null);
           return block;
         }
         changed = true;
+        const nextPromotionRuleId = nextPromotionId
+          ? String(promotionsById.get(nextPromotionId)?.id_promocion_regla || '').trim()
+          : '';
         return {
           ...block,
           promotionId: nextPromotionId,
           promotionIds: validPromotionIds,
+          promotionRuleId: nextPromotionRuleId,
+          promocion_id: nextPromotionId || null,
+          id_promocion_regla: nextPromotionRuleId || null,
         };
       });
       return changed ? nextBlocks : prev;
@@ -2599,46 +1981,28 @@ const paymentStatusAbortRef = useRef(null);
     updateBlockAtIndex,
   ]);
 
-  useEffect(() => {
-    if (!location.pathname.startsWith('/agendar/confirmar')) return;
-    if (!selectedBranchId || !selectedBarberId) {
-      navigate('/agendar/barberos', { replace: true });
-      return;
-    }
-    if (!allBlocksComplete) {
-      navigate('/agendar/agenda', { replace: true });
-    }
-  }, [location.pathname, navigate, selectedBranchId, selectedBarberId, allBlocksComplete]);
-
-  useEffect(() => {
-    if (!location.pathname.startsWith('/agendar/pagar')) return;
-    if (!allBlocksComplete) {
-      navigate('/agendar/agenda', { replace: true });
-      return;
-    }
-    if (paymentResult?.booking_confirmed) {
-      navigate('/agendar/exito', { replace: true });
-    }
-  }, [allBlocksComplete, location.pathname, navigate, paymentResult?.booking_confirmed]);
-
-  useEffect(() => {
-    if (!location.pathname.startsWith('/agendar/agenda')) return;
-    if (!selectedBranchId || !selectedBarberId) {
-      navigate('/agendar/barberos', { replace: true });
-    }
-  }, [location.pathname, navigate, selectedBarberId, selectedBranchId]);
-
-  useEffect(() => {
-    if (paymentResult?.booking_confirmed && location.pathname !== '/agendar/exito') {
-      navigate('/agendar/exito', { replace: true });
-    }
-  }, [location.pathname, navigate, paymentResult?.booking_confirmed]);
-
-  useEffect(() => {
-    setHoldResult(null);
-    setPaymentIntent(null);
-    setPaymentResult(null);
-  }, [selectedBranchId, bookingBlocks]);
+  const {
+    rootRedirectPath,
+    showTopbarBackToBarberos,
+    homePath,
+    homeLabel,
+    showBranchDataErrorBanner,
+    goToAgenda,
+    goToBarberos,
+    goToPayment,
+  } = useBookingWizardNavigation({
+    location,
+    navigate,
+    bookingMode,
+    selectedBranchId,
+    selectedBarberId,
+    allBlocksComplete,
+    isPendingPaymentResumeRoute,
+    paymentConfirmed: paymentResult?.booking_confirmed === true,
+    holdResult,
+    availabilityError,
+    barbersLoading,
+  });
 
   useEffect(() => {
     if (!holdExpiresAtIso) return undefined;
@@ -2660,9 +2024,9 @@ const paymentStatusAbortRef = useRef(null);
       }
       resetFlowForBranchChange();
       setSelectedBranchId(nextBranchId);
-      navigate('/agendar/barberos');
+      navigate(BOOKING_ROUTES.barbers);
     },
-    [navigate, notifications, resetFlowForBranchChange, rewardBranchId, rewardModeActive, selectedBranchId]
+    [navigate, notifications, resetFlowForBranchChange, rewardBranchId, rewardModeActive, selectedBranchId, setSelectedBranchId]
   );
 
   const selectBarber = useCallback((barberId) => {
@@ -2677,118 +2041,34 @@ const paymentStatusAbortRef = useRef(null);
       selectedTime: '',
       selectedDateTime: '',
     }));
-    navigate('/agendar/agenda');
+    navigate(BOOKING_ROUTES.agenda);
   }, [clearRequestState, navigate, updateBlockAtIndex]);
 
-  const setActiveBlock = useCallback((nextIndex) => {
-    const parsed = Number(nextIndex);
-    if (!Number.isFinite(parsed)) return;
-    const clamped = Math.max(0, Math.min(bookingBlocks.length - 1, Math.trunc(parsed)));
-    setActiveBlockIndex(clamped);
-    resetAvailabilityViewState();
-  }, [bookingBlocks.length, resetAvailabilityViewState]);
-
-  const addCompanionBlock = useCallback(() => {
-    let createdBlockId = '';
-    setBookingBlocks((prev) => {
-      if (!allowCompanions || prev.length >= (maxCompanions + 1)) return prev;
-      const source = prev.length > 0 ? prev : [createBookingBlock({ alias: 'Titular' })];
-      const companionNumber = source.length;
-      const inheritedBarberId = source[effectiveActiveBlockIndex]?.idBarbero || source[0]?.idBarbero || '';
-      const inheritedDate = source[0]?.selectedDate || '';
-      const nextBlock = normalizeBookingBlock(
-        {
-          ...createBookingBlock({
-            alias: `Acompañante ${companionNumber}`,
-            idBarbero: inheritedBarberId,
-          }),
-          selectedDate: inheritedDate,
-          selectedTime: '',
-          selectedDateTime: '',
-        },
-        companionNumber
-      );
-      createdBlockId = nextBlock.id;
-      const nextBlocks = [...source, nextBlock];
-      setActiveBlockIndex(nextBlocks.length - 1);
-      return nextBlocks;
+  const requestCancelBooking = useCallback((source = 'booking') => {
+    if (cancelBookingProcessing) return false;
+    setCancelBookingModal({
+      open: true,
+      source: String(source || 'booking').trim() || 'booking',
     });
-    if (createdBlockId) {
-      setPendingCompanionFocusId(createdBlockId);
-    }
-    resetAvailabilityViewState();
-  }, [allowCompanions, effectiveActiveBlockIndex, maxCompanions, resetAvailabilityViewState]);
+    return false;
+  }, [cancelBookingProcessing]);
 
-  const consumePendingCompanionFocus = useCallback((blockId) => {
-    const normalizedId = String(blockId || '').trim();
-    setPendingCompanionFocusId((current) => {
-      if (!current) return '';
-      if (!normalizedId || current === normalizedId) return '';
-      return current;
-    });
-  }, []);
+  const closeCancelBookingModal = useCallback(() => {
+    if (cancelBookingProcessing) return;
+    setCancelBookingModal({ open: false, source: '' });
+  }, [cancelBookingProcessing]);
 
-  const removeCompanionBlock = useCallback((blockId) => {
-    const normalizedId = String(blockId || '').trim();
-    if (!normalizedId) return;
-    let removedIndex = -1;
-    setBookingBlocks((prev) => {
-      if (prev.length <= 1) return prev;
-      const targetIndex = prev.findIndex((item, index) => index > 0 && item.id === normalizedId);
-      if (targetIndex < 1) return prev;
-      removedIndex = targetIndex;
-      const nextRaw = prev.filter((item) => item.id !== normalizedId);
-      const nextBlocks = nextRaw.map((item, index) => normalizeBookingBlock({
-        ...item,
-        alias: index === 0 ? 'Titular' : (item.contactName || `Acompañante ${index}`),
-      }, index));
-      setActiveBlockIndex((current) => {
-        if (current > targetIndex) return current - 1;
-        if (current === targetIndex) return Math.max(0, current - 1);
-        return current;
-      });
-      return nextBlocks;
-    });
-    if (removedIndex > 0) {
-      setFieldErrors((prev) => {
-        const next = {};
-        Object.entries(prev).forEach(([key, value]) => {
-          const [rawIndex, field] = key.split(':');
-          const parsedIndex = Number(rawIndex);
-          if (!Number.isFinite(parsedIndex)) return;
-          if (parsedIndex === removedIndex) return;
-          const newIndex = parsedIndex > removedIndex ? parsedIndex - 1 : parsedIndex;
-          next[`${newIndex}:${field}`] = value;
-        });
-        return next;
-      });
-    }
-    clearSlotConflict();
-    resetAvailabilityViewState();
-  }, [clearSlotConflict, resetAvailabilityViewState]);
-
-  const goToAgenda = useCallback(() => {
-    if (!selectedBranchId || !selectedBarberId) return;
-    navigate('/agendar/agenda');
-  }, [
-    selectedBranchId,
-    selectedBarberId,
-    navigate,
-  ]);
-
-  const goToBarberos = useCallback(() => {
-    if (holdResult) return;
-    navigate('/agendar/barberos');
-  }, [holdResult, navigate]);
-
-  const cancelBookingFlow = useCallback(async () => {
-    const confirmed = window.confirm('¿Seguro que deseas cancelar el agendamiento? Se perderán los datos seleccionados.');
-    if (!confirmed) return false;
-
+  const executeCancelBooking = useCallback(async () => {
     const groupId = String(holdResult?.id_grupo_cita || '').trim();
+    if (groupId && paymentIntent?.id_intent && !paymentResult?.booking_confirmed) {
+      notifications.info('El pago ya fue iniciado. Verifica el estado del pago antes de cancelar la reserva temporal.', {
+        dedupeKey: 'public-booking-cancel-payment-started',
+      });
+      return false;
+    }
     if (groupId) {
       try {
-        await releasePublicCitaHold(groupId);
+        await releaseHold();
       } catch {
         notifications.warning('No se pudo liberar la reserva temporal en este momento, pero se canceló el flujo local.', {
           dedupeKey: 'public-booking-release-hold-warning',
@@ -2798,39 +2078,59 @@ const paymentStatusAbortRef = useRef(null);
 
     persistRewardBookingContext(null);
     setRewardBookingContext(null);
-    setHoldResult(null);
-    setPaymentIntent(null);
-    setPaymentResult(null);
-    setBookingSuccessResult(null);
+    clearHoldLocalState();
+    clearPaymentState();
     setContextError('');
     setAvailabilityError('');
     setFieldErrors({});
     setPendingCompanionFocusId('');
-    setBookingBlocks([createBookingBlock({ alias: 'Titular' })]);
+    setPendingFieldFocus(null);
+    setBookingBlocks([createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })]);
     setActiveBlockIndex(0);
     setCurrentMonth(new Date(minBookingMonth.getFullYear(), minBookingMonth.getMonth(), 1));
     holderProfileHydratedRef.current = false;
-    invalidateAgendaCaches();
-    setSlots(buildDefaultSlots());
-    setSlotsCurated(createEmptyCuratedSlots());
-    setAvailabilityMap({});
+    resetAvailabilityData();
     setSlotConflict(null);
-    setSlotSuggestions([]);
-    navigate('/', { replace: true });
+    navigate(BOOKING_ROUTES.home, { replace: true });
     return true;
-  }, [holdResult?.id_grupo_cita, minBookingMonth, navigate, notifications, invalidateAgendaCaches]);
+  }, [
+    clearHoldLocalState,
+    clearPaymentState,
+    holdResult?.id_grupo_cita,
+    minBookingMonth,
+    navigate,
+    notifications,
+    paymentIntent?.id_intent,
+    paymentResult?.booking_confirmed,
+    releaseHold,
+    resetAvailabilityData,
+    setContextError,
+  ]);
+
+  const confirmCancelBooking = useCallback(async () => {
+    if (cancelBookingProcessing) return false;
+    setCancelBookingProcessing(true);
+    try {
+      const result = await executeCancelBooking();
+      setCancelBookingModal({ open: false, source: '' });
+      return result;
+    } finally {
+      setCancelBookingProcessing(false);
+    }
+  }, [cancelBookingProcessing, executeCancelBooking]);
+
+  const cancelBookingFlow = useCallback((source = 'booking') => requestCancelBooking(source), [requestCancelBooking]);
 
   const cancelRewardRedemptionUsage = useCallback(() => {
     if (!rewardModeActive) return;
     setRewardBookingContext(null);
     persistRewardBookingContext(null);
-    setHoldResult(null);
-    setPaymentIntent(null);
-    setPaymentResult(null);
+    markHoldObsolete();
+    clearPaymentState();
     setBookingBlocks((prev) => {
       const source = Array.isArray(prev) && prev.length > 0
         ? prev
-        : [createBookingBlock({ alias: 'Titular' })];
+        : [createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })];
       const titular = normalizeBookingBlock(source[0], 0);
       const nextServiceIds = (Array.isArray(titular.serviceIds) ? titular.serviceIds : [])
         .filter((serviceId) => String(serviceId || '').trim() !== rewardServiceId);
@@ -2853,18 +2153,17 @@ const paymentStatusAbortRef = useRef(null);
     notifications.info('Cancelaste el uso de la recompensa. Puedes agendar normalmente.', {
       dedupeKey: 'public-booking-reward-cancelled',
     });
-  }, [notifications, rewardModeActive, rewardServiceId]);
+  }, [clearPaymentState, markHoldObsolete, notifications, rewardModeActive, rewardServiceId]);
 
   const completeBookingFlow = useCallback(() => {
     persistRewardBookingContext(null);
     setRewardBookingContext(null);
-    setHoldResult(null);
-    setPaymentIntent(null);
-    setPaymentResult(null);
-    setBookingSuccessResult(null);
+    clearHoldLocalState();
+    clearPaymentState();
     resetFlowForBranchChange();
-    navigate('/', { replace: true });
-  }, [navigate, resetFlowForBranchChange]);
+    const target = canUseClienteHold ? '/home/cliente/citas' : BOOKING_ROUTES.home;
+    navigate(target, { replace: true });
+  }, [canUseClienteHold, clearHoldLocalState, clearPaymentState, navigate, resetFlowForBranchChange]);
 
   const closeAuthRequiredModal = useCallback(() => {
     setAuthRequiredModal({ open: false, email: '' });
@@ -2878,11 +2177,11 @@ const paymentStatusAbortRef = useRef(null);
   }, []);
 
   const goToLoginForBooking = useCallback(() => {
-    const nextTarget = '/agendar/barberos';
+    const nextTarget = BOOKING_ROUTES.barbers;
     const params = new URLSearchParams();
     params.set('next', nextTarget);
     params.set('intent', 'agendar');
-    navigate(`/login?${params.toString()}`);
+    navigate(`${BOOKING_ROUTES.login}?${params.toString()}`);
     closeAuthRequiredModal();
   }, [closeAuthRequiredModal, navigate]);
 
@@ -3056,7 +2355,10 @@ const paymentStatusAbortRef = useRef(null);
       updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
         ...currentBlock,
         promotionId: '',
+        promotionRuleId: '',
         promotionIds: [],
+        promocion_id: null,
+        id_promocion_regla: null,
       }));
       return;
     }
@@ -3075,10 +2377,20 @@ const paymentStatusAbortRef = useRef(null);
         );
         const nextPromotionIds = normalizedCurrentPromotionIds
           .filter((promotionIdInBlock) => promotionIdInBlock !== normalizedPromotionId);
+        const nextPrimaryPromotionId = nextPromotionIds[0] || '';
+        const nextPrimaryPromotion = nextPrimaryPromotionId
+          ? promotionsById.get(nextPrimaryPromotionId) || null
+          : null;
+        const nextPromotionRuleId = nextPrimaryPromotionId
+          ? String(nextPrimaryPromotion?.id_promocion_regla || '').trim()
+          : '';
         return {
           ...activeCurrentBlock,
-          promotionId: nextPromotionIds[0] || '',
+          promotionId: nextPrimaryPromotionId,
           promotionIds: nextPromotionIds,
+          promotionRuleId: nextPromotionRuleId,
+          promocion_id: nextPrimaryPromotionId || null,
+          id_promocion_regla: nextPromotionRuleId || null,
         };
       });
       return;
@@ -3122,10 +2434,21 @@ const paymentStatusAbortRef = useRef(null);
       const nextPromotionIds = normalizedCurrentPromotionIds.includes(normalizedPromotionId)
         ? normalizedCurrentPromotionIds.filter((promotionIdInBlock) => promotionIdInBlock !== normalizedPromotionId)
         : [...normalizedCurrentPromotionIds, normalizedPromotionId];
+      const limitedPromotionIds = nextPromotionIds.slice(0, maxPromotionsPerBooking);
+      const nextPrimaryPromotionId = limitedPromotionIds[0] || '';
+      const nextPrimaryPromotion = nextPrimaryPromotionId
+        ? promotionsById.get(nextPrimaryPromotionId) || null
+        : null;
+      const nextPromotionRuleId = nextPrimaryPromotionId
+        ? String(nextPrimaryPromotion?.id_promocion_regla || '').trim()
+        : '';
       return {
         ...activeCurrentBlock,
-        promotionId: nextPromotionIds[0] || '',
-        promotionIds: nextPromotionIds.slice(0, maxPromotionsPerBooking),
+        promotionId: nextPrimaryPromotionId,
+        promotionIds: limitedPromotionIds,
+        promotionRuleId: nextPromotionRuleId,
+        promocion_id: nextPrimaryPromotionId || null,
+        id_promocion_regla: nextPromotionRuleId || null,
       };
     });
   }, [
@@ -3145,84 +2468,12 @@ const paymentStatusAbortRef = useRef(null);
     updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
       ...currentBlock,
       promotionId: '',
+      promotionRuleId: '',
       promotionIds: [],
+      promocion_id: null,
+      id_promocion_regla: null,
     }));
   }, [effectiveActiveBlockIndex, updateBlockAtIndex]);
-
-  const updateActiveBlockBarber = useCallback((barberId) => {
-    updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
-      ...currentBlock,
-      idBarbero: String(barberId || '').trim(),
-      selectedDate: currentBlock.selectedDate || '',
-      selectedTime: '',
-      selectedDateTime: '',
-    }));
-
-    resetAvailabilityViewState();
-  }, [effectiveActiveBlockIndex, resetAvailabilityViewState, updateBlockAtIndex]);
-
-  const updateActiveBlockContact = useCallback((patch) => {
-    const normalizedPatch = { ...patch };
-    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactPhone')) {
-      normalizedPatch.contactPhone = String(normalizedPatch.contactPhone || '').replace(/[^\d+\s()-]/g, '').slice(0, 24);
-    }
-    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactEmail')) {
-      normalizedPatch.contactEmail = normalizeEmail(normalizedPatch.contactEmail || '');
-    }
-    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactFirstName')) {
-      normalizedPatch.contactFirstName = normalizePersonName(normalizedPatch.contactFirstName || '');
-    }
-    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactLastName')) {
-      normalizedPatch.contactLastName = normalizePersonName(normalizedPatch.contactLastName || '');
-    }
-    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactName')) {
-      const split = splitFullName(normalizedPatch.contactName || '');
-      normalizedPatch.contactFirstName = split.firstName;
-      normalizedPatch.contactLastName = split.lastName;
-      normalizedPatch.contactName = buildFullName(split.firstName, split.lastName) || normalizePersonName(normalizedPatch.contactName || '');
-    }
-    updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => {
-      const next = {
-        ...currentBlock,
-        ...normalizedPatch,
-      };
-      const normalizedName = buildFullName(next.contactFirstName, next.contactLastName)
-        || normalizePersonName(next.contactName || '');
-      next.contactName = normalizedName;
-      next.alias = normalizedName || (effectiveActiveBlockIndex === 0 ? 'Titular' : `Acompañante ${effectiveActiveBlockIndex}`);
-      return next;
-    });
-    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactName')
-      || Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactFirstName')) {
-      setFieldErrors((prev) => {
-        const next = { ...prev };
-        delete next[buildFieldErrorKey(effectiveActiveBlockIndex, 'contactFirstName')];
-        delete next[buildFieldErrorKey(effectiveActiveBlockIndex, 'contactName')];
-        return next;
-      });
-    }
-    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactLastName')) {
-      setFieldErrors((prev) => {
-        const next = { ...prev };
-        delete next[buildFieldErrorKey(effectiveActiveBlockIndex, 'contactLastName')];
-        return next;
-      });
-    }
-    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactEmail')) {
-      setFieldErrors((prev) => {
-        const next = { ...prev };
-        delete next[buildFieldErrorKey(effectiveActiveBlockIndex, 'contactEmail')];
-        return next;
-      });
-    }
-    if (Object.prototype.hasOwnProperty.call(normalizedPatch, 'contactPhone')) {
-      setFieldErrors((prev) => {
-        const next = { ...prev };
-        delete next[buildFieldErrorKey(effectiveActiveBlockIndex, 'contactPhone')];
-        return next;
-      });
-    }
-  }, [buildFieldErrorKey, effectiveActiveBlockIndex, updateBlockAtIndex]);
 
   const selectSuggestedBarber = useCallback((barberId) => {
     const nextBarberId = String(barberId || '').trim();
@@ -3339,17 +2590,28 @@ const paymentStatusAbortRef = useRef(null);
   ]);
 
   const submitHold = useCallback(async () => {
+    if (holdSubmitting) return false;
+    if (bookingMode === 'loading') {
+      notifications.info('Estamos verificando tu sesion antes de continuar.', {
+        dedupeKey: 'public-booking-auth-loading-submit',
+      });
+      return false;
+    }
     if (!selectedBranchId || !selectedBarberId) {
       notifications.warning('Debes seleccionar sucursal y barbero.', { dedupeKey: 'public-booking-hold-context' });
-      navigate('/agendar/barberos');
+      navigate(BOOKING_ROUTES.barbers);
       return false;
     }
     const blocksToSubmit = blocksToSubmitSummary;
+    if (invalidHoldSelectionFingerprintRef.current === bookingHoldFingerprint) {
+      const fallbackBlock = blocksToSubmit[effectiveActiveBlockIndex] || blocksToSubmit[0] || bookingBlocksSummary[0] || null;
+      return rejectInvalidScheduleBlock(fallbackBlock);
+    }
     if (blocksToSubmit.length === 0) {
       notifications.warning('Completa servicios, fecha y hora en todos los bloques antes de confirmar.', {
         dedupeKey: 'public-booking-blocks-required',
       });
-      navigate('/agendar/agenda');
+      navigate(BOOKING_ROUTES.agenda);
       return false;
     }
     const localSelectionConflict = blocksToSubmit.find(
@@ -3362,14 +2624,10 @@ const paymentStatusAbortRef = useRef(null);
         { dedupeKey: `public-booking-local-selection-conflict-${firstConflictCode || 'unknown'}` }
       );
       setActiveBlockIndex(Math.max(0, Number(localSelectionConflict.index || 0)));
-      navigate('/agendar/agenda');
+      navigate(BOOKING_ROUTES.agenda);
       return false;
     }
-    const requestedPromotionIds = new Set();
-    blocksToSubmit.forEach((block) => {
-      const blockPromotionIds = normalizePromotionIds(block?.promotionIds, block?.promotionId);
-      blockPromotionIds.forEach((id) => requestedPromotionIds.add(id));
-    });
+    const requestedPromotionIds = resolveRequestedPromotionIds(blocksToSubmit);
     if (rewardModeActive && requestedPromotionIds.size > 0) {
       notifications.warning(
         mapPublicBookingErrorMessage(
@@ -3378,14 +2636,14 @@ const paymentStatusAbortRef = useRef(null);
         ),
         { dedupeKey: 'public-booking-redeem-and-promotions-not-allowed' }
       );
-      navigate('/agendar/agenda');
+      navigate(BOOKING_ROUTES.agenda);
       return false;
     }
     if (requestedPromotionIds.size > maxPromotionsPerBooking) {
       notifications.warning(mapPublicBookingErrorMessage('MAX_PROMOTIONS_EXCEEDED'), {
         dedupeKey: 'public-booking-promotions-max-before-submit',
       });
-      navigate('/agendar/agenda');
+      navigate(BOOKING_ROUTES.agenda);
       return false;
     }
 
@@ -3397,9 +2655,18 @@ const paymentStatusAbortRef = useRef(null);
     const titularEmail = titularContactState.email;
     const titularTelefono = titularContactState.phone;
     const titularMissingData = [];
-    if (!titularNombre) {
+    if (!titularContactState.firstName) {
       titularMissingData.push('nombre');
       nextFieldErrors[buildFieldErrorKey(0, 'contactFirstName')] = 'Ingresa el nombre del titular.';
+    }
+    if (!titularContactState.lastName) {
+      titularMissingData.push('apellido');
+      nextFieldErrors[buildFieldErrorKey(0, 'contactLastName')] = 'Ingresa el apellido del titular.';
+    }
+    if (!titularNombre) {
+      titularMissingData.push('nombre completo');
+      nextFieldErrors[buildFieldErrorKey(0, 'contactFirstName')] = nextFieldErrors[buildFieldErrorKey(0, 'contactFirstName')]
+        || 'Ingresa el nombre del titular.';
     }
     if (!titularEmail) {
       titularMissingData.push('correo');
@@ -3409,30 +2676,53 @@ const paymentStatusAbortRef = useRef(null);
       titularMissingData.push('telefono');
       nextFieldErrors[buildFieldErrorKey(0, 'contactPhone')] = 'Ingresa el telefono del titular.';
     }
+    CONTACT_ERROR_FIELD_ORDER.forEach((field) => {
+      const message = String(titularContactState?.errors?.[field] || '').trim();
+      if (!message) return;
+      nextFieldErrors[buildFieldErrorKey(0, field)] = message;
+      if (field === 'contactPhone' && !titularMissingData.includes('telefono')) {
+        titularMissingData.push('telefono');
+      }
+    });
     if (titularMissingData.length > 0) {
+      const feedback = getContactValidationFeedback(titularContactState, 0);
       notifications.warning(
-        titularState.isAuthenticated
+        feedback?.message
+        || (titularState.isAuthenticated
           ? 'Completa los datos faltantes del titular para continuar.'
-          : 'Completa nombre, correo y telefono del titular antes de confirmar.',
+          : 'Completa nombre, correo y telefono del titular antes de confirmar.'),
         {
           dedupeKey: 'public-booking-holder-data-required',
         }
       );
       setActiveBlockIndex(0);
-      navigate('/agendar/agenda');
+      navigate(BOOKING_ROUTES.agenda);
       setFieldErrors((prev) => ({ ...prev, ...nextFieldErrors }));
       return false;
     }
     for (const companion of blocksToSubmit.filter((block) => Number(block?.index) > 0)) {
       const companionContact = companion?.contactResolved || resolveBlockContactState(companion, companion.index);
-      if (!companionContact.fullName) {
-        nextFieldErrors[buildFieldErrorKey(companion.index, 'contactFirstName')] = 'Completa nombre y apellido del acompanante.';
-        nextFieldErrors[buildFieldErrorKey(companion.index, 'contactLastName')] = 'Completa nombre y apellido del acompanante.';
+      if (!companionContact.isValid) {
+        const feedback = getContactValidationFeedback(companionContact, companion.index);
+        if (feedback?.field) {
+          nextFieldErrors[buildFieldErrorKey(companion.index, feedback.field)] = feedback.message;
+        }
+        notifications.warning(feedback?.message || 'Completa los datos del acompañante.', {
+          dedupeKey: 'public-booking-companion-data-invalid-submit',
+        });
+        setActiveBlockIndex(companion.index);
+        navigate(BOOKING_ROUTES.agenda);
+        setFieldErrors((prev) => ({ ...prev, ...nextFieldErrors }));
+        return false;
+      }
+      if (!companionContact.firstName || !companionContact.lastName || !companionContact.fullName) {
+        nextFieldErrors[buildFieldErrorKey(companion.index, 'contactFirstName')] = 'Completa nombre y apellido del acompañante.';
+        nextFieldErrors[buildFieldErrorKey(companion.index, 'contactLastName')] = 'Completa nombre y apellido del acompañante.';
         notifications.warning('Cada acompañante debe tener nombre y apellido válidos para confirmar.', {
           dedupeKey: 'public-booking-companion-data-required-submit',
         });
         setActiveBlockIndex(companion.index);
-        navigate('/agendar/agenda');
+        navigate(BOOKING_ROUTES.agenda);
         setFieldErrors((prev) => ({ ...prev, ...nextFieldErrors }));
         return false;
       }
@@ -3445,7 +2735,7 @@ const paymentStatusAbortRef = useRef(null);
             dedupeKey: 'public-booking-companion-same-auth-user',
           });
           setActiveBlockIndex(companion.index);
-          navigate('/agendar/agenda');
+          navigate(BOOKING_ROUTES.agenda);
           return false;
         }
       }
@@ -3455,50 +2745,40 @@ const paymentStatusAbortRef = useRef(null);
     const resolvedBarberByBlockId = new Map();
     let autoAssignedCompanion = false;
     for (const block of blocksToSubmit) {
+      const blockRange = getBookingBlockOccupiedRange(block);
+      if (!blockRange) {
+        return rejectInvalidScheduleBlock(block);
+      }
       if (isPastSlotForToday(block.selectedDate, block.selectedTime)) {
         notifications.warning('No puedes confirmar una cita en hora pasada para hoy.', {
           dedupeKey: 'public-booking-submit-past-time',
         });
         setActiveBlockIndex(block.index);
-        navigate('/agendar/agenda');
+        navigate(BOOKING_ROUTES.agenda);
         return false;
+      }
+      const selectedSlotAvailable = await isBlockSelectedSlotAvailable(block);
+      if (!selectedSlotAvailable) {
+        return rejectInvalidScheduleBlock(block);
       }
       if (block.idBarbero) {
         const collisionKey = `${block.idBarbero}|${block.selectedDate}`;
         const previous = (selectedSlotMap.get(collisionKey) || []).find((candidate) =>
           rangesOverlap(
             block.selectedTime,
-            block.duracion_bloque_min,
+            blockRange.occupiedDurationMin,
             candidate.selectedTime,
-            candidate.duracion_bloque_min
+            getBookingBlockOccupiedRange(candidate)?.occupiedDurationMin
           )
         );
         if (previous) {
-          if (block.index > 0) {
-            resolvedBarberByBlockId.set(block.id, null);
-            autoAssignedCompanion = true;
-            continue;
-          }
           setSlotConflict({
             dateKey: block.selectedDate,
             timeKey: block.selectedTime,
             barberId: block.idBarbero,
             conflictingAlias: previous.alias || 'Integrante',
           });
-          notifications.warning('Hay integrantes con bloques que se solapan para el mismo barbero. Debes cambiar uno de ellos.', {
-            dedupeKey: 'public-booking-submit-duplicate-slot',
-          });
-          setActiveBlockIndex(block.index);
-          navigate('/agendar/agenda');
-          await loadSlotSuggestions({
-            barberId: block.idBarbero,
-            dateKey: block.selectedDate,
-            timeKey: block.selectedTime,
-            selectionTypeValue: block.selection_type,
-            servicesCsvValue: Array.isArray(block.selectedServiceIdsEffective) ? block.selectedServiceIdsEffective.join(',') : '',
-            packageIdValue: block.selectedPackage?.id_paquete || '',
-          });
-          return false;
+          return rejectInvalidScheduleBlock(block);
         }
         const currentEntries = selectedSlotMap.get(collisionKey) || [];
         currentEntries.push(block);
@@ -3515,51 +2795,23 @@ const paymentStatusAbortRef = useRef(null);
       });
     }
 
-    const integrantes = [];
-    for (const block of blocksToSubmit) {
-      const fechaInicio = toLocalDateTimeWithOffset(block.selectedDate, block.selectedTime);
-      const preservedFechaInicio = String(block?.selectedDateTime || '').trim();
-      const expectedPrefix = `${String(block?.selectedDate || '').trim()}T${String(block?.selectedTime || '').trim()}`;
-      const fechaInicioNormalizada = (preservedFechaInicio && expectedPrefix && preservedFechaInicio.startsWith(expectedPrefix))
-        ? preservedFechaInicio
-        : fechaInicio;
-      if (!fechaInicioNormalizada) {
+    const integrantesResult = buildIntegrantesPayload({
+      blocksToSubmit,
+      resolvedBarberByBlockId,
+    });
+    if (!integrantesResult.ok) {
+      if (integrantesResult.errorCode === 'COMPANION_DATE_MISMATCH') {
+        notifications.warning('Los acompañantes deben usar la misma fecha del titular.', {
+          dedupeKey: 'public-booking-companion-date-mismatch',
+        });
+      } else {
         notifications.error('No se pudo construir la fecha y hora de una de las citas del grupo.', {
           dedupeKey: 'public-booking-datetime-invalid',
         });
-        return false;
       }
-      const blockContactState = resolveBlockContactState(block, block.index);
-      const blockPromotionIds = normalizePromotionIds(block?.promotionIds, block?.promotionId);
-      const integrantePayload = {
-        orden_integrante: block.index + 1,
-        alias: blockContactState.fullName || block.alias,
-        rol_integrante_codigo: block.index === 0 ? 'titular' : 'acompanante',
-        id_barbero: resolvedBarberByBlockId.has(block.id)
-          ? resolvedBarberByBlockId.get(block.id)
-          : (block.idBarbero || null),
-        selection_type: block.selection_type,
-        id_paquete: ['package', 'mixed'].includes(block.selection_type) ? (block.selectedPackage?.id_paquete || null) : null,
-        fecha_inicio: fechaInicioNormalizada,
-        servicios: ['services', 'mixed'].includes(block.selection_type) ? block.selectedServices.map((service) => ({
-          id_servicio: service.id_servicio,
-        })) : [],
-      };
-      if (blockPromotionIds.length > 0) {
-        integrantePayload.promotionIds = blockPromotionIds;
-        integrantePayload.promotionId = blockPromotionIds[0] || null;
-      }
-      if (!canUseClienteHold) {
-        integrantePayload.contacto = {
-          nombre: String(blockContactState.fullName || block.alias || '').trim(),
-          nombres: String(blockContactState.firstName || '').trim() || null,
-          apellidos: String(blockContactState.lastName || '').trim() || null,
-          email: String(blockContactState.email || '').trim().toLowerCase() || null,
-          telefono: String(blockContactState.phone || '').trim() || null,
-        };
-      }
-      integrantes.push(integrantePayload);
+      return false;
     }
+    const integrantes = integrantesResult.integrantes;
 
     let guardarNombresApellidos = false;
     let guardarTelefono = false;
@@ -3569,7 +2821,7 @@ const paymentStatusAbortRef = useRef(null);
         || (titularState.missingFields.includes('apellidos') && normalizedTitularBlock.contactLastName)
       );
       const puedeGuardarTelefono = titularState.missingFields.includes('telefono_principal')
-        && normalizePhone(normalizedTitularBlock.contactPhone || '').length >= 8;
+        && countPhoneDigits(normalizedTitularBlock.contactPhone || '') >= 8;
 
       if (puedeGuardarNombres) {
         guardarNombresApellidos = await requestProfilePersistDecision('nombres_apellidos');
@@ -3579,47 +2831,30 @@ const paymentStatusAbortRef = useRef(null);
       }
     }
 
-    setHoldSubmitting(true);
     try {
-      const holdPayload = {
-        id_sucursal: selectedBranchId,
-        integrantes,
-      };
-      if (rewardModeActive && rewardBookingContext?.canje_context_token) {
-        holdPayload.canje_context_token = rewardBookingContext.canje_context_token;
+      const rewardContextToken = rewardModeActive ? rewardBookingContext?.canje_context_token : '';
+      const holdPayload = bookingAdapter.buildHoldPayload({
+          idSucursal: selectedBranchId,
+          integrantes,
+          titularState,
+          normalizedTitularBlock,
+          guardarNombresApellidos,
+          guardarTelefono,
+          rewardContextToken,
+          titularNombre,
+          titularEmail,
+          titularTelefono,
+        });
+      const createdHold = await createHold(holdPayload);
+      if (createdHold) {
+        setProfileIncompleteState({ message: '', missingFields: [] });
       }
-      if (canUseClienteHold) {
-        holdPayload.titular = {
-          nombres: normalizedTitularBlock.contactFirstName || null,
-          apellidos: normalizedTitularBlock.contactLastName || null,
-          telefono: titularState.missingFields.includes('telefono_principal')
-            ? (normalizePhone(normalizedTitularBlock.contactPhone || '') || null)
-            : null,
-          guardar_nombres_apellidos: guardarNombresApellidos,
-          guardar_telefono: guardarTelefono,
-        };
-      } else {
-        holdPayload.titular = {
-          nombre: titularNombre,
-          email: titularEmail,
-          telefono: normalizePhone(titularTelefono),
-        };
-      }
-      const response = canUseClienteHold
-        ? await createClienteCitaHold(holdPayload)
-        : await createPublicCitaHold(holdPayload);
-      const payload = response?.data ?? response;
-      setHoldResult(payload);
-      return payload;
+      return createdHold;
     } catch (err) {
       const apiError = err?.data?.error || err?.error || {};
+      const apiErrorDetails = apiError?.details || {};
       const detailField = String(apiError?.details?.field || '').trim();
-      const detailIndexRaw = apiError?.details?.blockIndex;
-      const detailOrderRaw = apiError?.details?.orden_integrante;
-      const detailOrder = Number.isFinite(Number(detailOrderRaw)) ? Number(detailOrderRaw) : null;
-      const detailIndex = Number.isFinite(Number(detailIndexRaw))
-        ? Number(detailIndexRaw)
-        : (detailOrder != null ? Math.max(0, detailOrder - 1) : null);
+      const detailIndex = resolveBookingDetailBlockIndex(apiErrorDetails);
       const conflictCode = String(apiError?.code || '').trim().toUpperCase();
       const conflictReason = String(apiError?.reason || '').trim().toUpperCase();
       const safeConflictMessage = mapPublicBookingErrorMessage(conflictCode, extractMessage(err));
@@ -3628,27 +2863,76 @@ const paymentStatusAbortRef = useRef(null);
       const affectedSummaryBlock = bookingBlocksSummary[affectedIndex] || null;
       const affectedLabel = affectedIndex === 0
         ? 'titular'
-        : (affectedSummaryBlock?.alias || `Acompañante ${affectedIndex}`);
+        : (affectedSummaryBlock?.alias || `${BOOKING_COMPANION_ALIAS_PREFIX} ${affectedIndex}`);
+
+      if (conflictCode === 'CLIENT_PROFILE_INCOMPLETE') {
+        // AM: Fallback de contrato backend Fase 1A para perfil incompleto.
+        setProfileIncompleteFromBackend(apiError);
+        notifications.warning(String(apiError?.message || 'Completa tu perfil antes de agendar una cita.'), {
+          dedupeKey: 'public-booking-profile-incomplete-backend',
+        });
+        setActiveBlockIndex(0);
+        navigate(BOOKING_ROUTES.agenda);
+        return false;
+      }
+      if (conflictCode === 'REWARD_REDEEM_REQUIRED') {
+        // AM: Bloqueo funcional backend P0.2B para agenda normal cuando hay recompensa disponible.
+        const rewardMessage = String(
+          apiError?.message
+          || 'Tienes una cortesía disponible. Para continuar, debes canjear tu recompensa antes de agendar una cita normal.'
+        );
+        notifications.warning(rewardMessage, {
+          dedupeKey: 'public-booking-reward-redeem-required',
+        });
+        // AM: Señal mínima para abrir canje obligatorio al volver al dashboard cliente.
+        navigate('/home/cliente?accion=canjear');
+        return false;
+      }
+
+      if (isPublicHoldRateLimitError(err, conflictCode)) {
+        notifications.warning(
+          'Hemos recibido demasiados intentos de reserva en poco tiempo. Espera unos minutos y vuelve a intentar. Tu tarjeta no ha sido procesada.',
+          {
+            dedupeKey: 'public-booking-hold-rate-limit',
+          }
+        );
+        navigate(BOOKING_ROUTES.confirm);
+        return false;
+      }
+
+      if (conflictCode === 'PUBLIC_CITAS_EMAIL_IN_USE' || conflictCode === 'EMAIL_BELONGS_TO_ACTIVE_USER') {
+        const emailErrorIndex = resolveEmailConflictBlockIndex(apiErrorDetails);
+        if (emailErrorIndex != null) {
+          const emailFeedback = buildActiveUserEmailFeedback({
+            details: apiErrorDetails,
+            blockIndex: emailErrorIndex,
+            bookingBlocksSummary,
+            fallbackEmail: titularEmail,
+          });
+          setFieldError(emailErrorIndex, 'contactEmail', emailFeedback.message);
+          focusBookingField(emailErrorIndex, 'contactEmail');
+          navigate(BOOKING_ROUTES.agenda);
+          notifications.warning(emailFeedback.message, { dedupeKey: 'public-booking-email-registered-login-required' });
+          if (emailFeedback.isTitular) {
+            openAuthRequiredModal(emailFeedback.email);
+          }
+          return false;
+        }
+
+        notifications.warning(safeConflictMessage, { dedupeKey: 'public-booking-email-registered-login-required' });
+        navigate(BOOKING_ROUTES.agenda);
+        return false;
+      }
 
       if (detailField) {
         const mappedIndex = detailField.startsWith('titular.')
           ? 0
           : (detailIndex != null ? detailIndex : effectiveActiveBlockIndex);
-        const mappedField = detailField.includes('telefono')
-          ? 'contactPhone'
-          : detailField.includes('email')
-            ? 'contactEmail'
-            : detailField.includes('apellidos')
-              ? 'contactLastName'
-              : detailField.includes('nombres')
-                ? 'contactFirstName'
-                : detailField.includes('nombre')
-                  ? 'contactFirstName'
-                  : null;
+        const mappedField = mapBookingDetailFieldToContactField(detailField);
         if (mappedField) {
           setFieldError(mappedIndex, mappedField, safeConflictMessage);
-          setActiveBlockIndex(mappedIndex);
-          navigate('/agendar/agenda');
+          focusBookingField(mappedIndex, mappedField);
+          navigate(BOOKING_ROUTES.agenda);
         }
       }
 
@@ -3667,19 +2951,19 @@ const paymentStatusAbortRef = useRef(null);
           : `El correo del acompañante ${companionNumber}, ${emailLabel}, pertenece a un usuario activo. Debe iniciar sesión o usar otro correo.`;
         setFieldError(emailErrorIndex, 'contactEmail', mapPublicBookingErrorMessage(conflictCode));
         setActiveBlockIndex(emailErrorIndex);
-        navigate('/agendar/agenda');
+        navigate(BOOKING_ROUTES.agenda);
         notifications.warning(conflictMessage, { dedupeKey: 'public-booking-email-registered-login-required' });
         openAuthRequiredModal(normalizedEmail);
       } else if (conflictCode === 'SERVICE_ALREADY_INCLUDED_IN_PACKAGE') {
         notifications.warning(safeConflictMessage, {
           dedupeKey: 'public-booking-service-included-backend',
         });
-        navigate('/agendar/agenda');
+        navigate(BOOKING_ROUTES.agenda);
       } else if (conflictCode === 'ONLY_ONE_PACKAGE_ALLOWED') {
         notifications.warning(safeConflictMessage, {
           dedupeKey: 'public-booking-only-one-package-backend',
         });
-        navigate('/agendar/agenda');
+        navigate(BOOKING_ROUTES.agenda);
       } else if (
         conflictCode === 'AUTHENTICATED_HOLDER_MISMATCH'
         || conflictCode === 'AUTHENTICATED_USER_CANNOT_BE_COMPANION'
@@ -3714,8 +2998,18 @@ const paymentStatusAbortRef = useRef(null);
         notifications.warning(safeConflictMessage, {
           dedupeKey: `public-booking-safe-error-${conflictCode || 'unknown'}`,
         });
-        navigate('/agendar/agenda');
+        navigate(BOOKING_ROUTES.agenda);
       } else if (err?.status === 409) {
+        if (conflictCode === 'CLIENT_PENDING_APPOINTMENT_EXISTS') {
+          notifications.warning(
+            'Tienes una reserva pendiente de pago. Completa o descarta esa reserva antes de agendar una nueva cita.',
+            { dedupeKey: 'public-booking-pending-appointment-exists' }
+          );
+          navigate('/home/cliente/citas', {
+            state: { openPendingPaymentModal: true },
+          });
+          return false;
+        }
         const isHoldConflict = conflictCode === 'PUBLIC_CITAS_HOLD_CONFLICT'
           || conflictCode === 'CITAS_HOLD_CONFLICT'
           || conflictCode === 'CITA_HOLD_CONFLICTO'
@@ -3731,6 +3025,8 @@ const paymentStatusAbortRef = useRef(null);
           const conflictMessage = isSameBarberConflict
             ? `${affectedLabel} usa el mismo barbero en un horario que se cruza. Selecciona una hora posterior o cambia de barbero.`
             : `El horario seleccionado para ${affectedLabel} ya no está disponible.`;
+          invalidHoldSelectionFingerprintRef.current = bookingHoldFingerprint;
+          setActiveBlockIndex(affectedIndex);
           recoverToAgendaForReselection(
             conflictMessage,
             {
@@ -3748,122 +3044,191 @@ const paymentStatusAbortRef = useRef(null);
         notifications.error(safeConflictMessage, { dedupeKey: 'public-booking-hold-error' });
       }
       return false;
-    } finally {
-      setHoldSubmitting(false);
     }
   }, [
     buildFieldErrorKey,
+    buildIntegrantesPayload,
+    bookingAdapter,
+    bookingMode,
     bookingBlocks,
     bookingBlocksSummary,
+    bookingHoldFingerprint,
     blocksToSubmitSummary,
+    createHold,
     effectiveActiveBlockIndex,
     canUseClienteHold,
+    focusBookingField,
+    holdSubmitting,
     isPastSlotForToday,
-    loadSlotSuggestions,
+    isBlockSelectedSlotAvailable,
     navigate,
     notifications,
     openAuthRequiredModal,
     maxPromotionsPerBooking,
     requestProfilePersistDecision,
     recoverToAgendaForReselection,
+    rejectInvalidScheduleBlock,
     resolveBlockContactState,
     rewardBookingContext,
     rewardModeActive,
     selectedBarberId,
     selectedBranchId,
     setFieldError,
-    titularState.isAuthenticated,
-    titularState.missingFields,
+    setProfileIncompleteFromBackend,
+    titularState,
+    setProfileIncompleteState,
   ]);
 
   useEffect(() => {
     if (!holdResult) {
-      lastHoldFingerprintRef.current = '';
+      holdSelectionFingerprintRef.current = '';
       return;
     }
-    if (!lastHoldFingerprintRef.current) {
-      lastHoldFingerprintRef.current = bookingSelectionFingerprint;
+    if (!holdSelectionFingerprintRef.current) {
+      holdSelectionFingerprintRef.current = bookingSelectionFingerprint;
       return;
     }
-    if (lastHoldFingerprintRef.current !== bookingSelectionFingerprint) {
-      setHoldResult(null);
-      setPaymentIntent(null);
-      setPaymentResult(null);
-      setBookingSuccessResult(null);
-      lastHoldFingerprintRef.current = '';
+    if (holdSelectionFingerprintRef.current !== bookingSelectionFingerprint) {
+      markHoldObsolete();
+      clearPaymentState();
+      holdSelectionFingerprintRef.current = '';
     }
-  }, [bookingSelectionFingerprint, holdResult]);
+  }, [bookingSelectionFingerprint, clearPaymentState, holdResult, markHoldObsolete]);
+
+  const buildContactValidationPayload = useCallback(() => {
+    const contactos = [];
+    bookingBlocks.forEach((block, index) => {
+      if (index === 0 && canUseClienteHold) return;
+      const contactState = resolveBlockContactState(block, index);
+      const email = String(contactState?.email || '').trim().toLowerCase();
+      if (index > 0 && !email) return;
+      const summaryBlock = bookingBlocksSummary[index] || null;
+      contactos.push({
+        blockIndex: index,
+        rol_integrante_codigo: index === 0 ? 'titular' : 'acompanante',
+        alias: summaryBlock?.alias || block?.alias || (index === 0 ? BOOKING_HOLDER_ALIAS : `${BOOKING_COMPANION_ALIAS_PREFIX} ${index}`),
+        email,
+      });
+    });
+    return contactos;
+  }, [bookingBlocks, bookingBlocksSummary, canUseClienteHold, resolveBlockContactState]);
+
+  const handleContactValidationError = useCallback((err) => {
+    const apiError = err?.data?.error || err?.error || {};
+    const conflictCode = String(apiError?.code || '').trim().toUpperCase();
+    const rawConflicts = Array.isArray(apiError?.details?.conflicts)
+      ? apiError.details.conflicts
+      : [];
+    if (
+      !['PUBLIC_CITAS_CONTACT_EMAIL_CONFLICT', 'PUBLIC_CITAS_CONTACT_DUPLICATE_CONFLICT'].includes(conflictCode)
+      || rawConflicts.length === 0
+    ) {
+      return false;
+    }
+
+    const conflicts = rawConflicts
+      .map((conflict) => normalizeContactEmailConflict(conflict))
+      .filter(Boolean);
+    if (conflicts.length === 0) return false;
+
+    const nextErrors = {};
+    conflicts.forEach((conflict) => {
+      nextErrors[buildFieldErrorKey(conflict.blockIndex, conflict.field)] = conflict.message;
+    });
+    const firstConflict = conflicts[0];
+    setFieldErrors((prev) => ({ ...prev, ...nextErrors }));
+    focusBookingField(firstConflict.blockIndex, firstConflict.field);
+    navigate(BOOKING_ROUTES.agenda);
+    notifications.warning(firstConflict.message, {
+      dedupeKey: 'public-booking-contact-email-conflict',
+    });
+    if (
+      firstConflict.blockIndex === 0
+      && firstConflict.code === 'EMAIL_BELONGS_TO_ACTIVE_USER'
+      && !canUseClienteHold
+    ) {
+      openAuthRequiredModal(firstConflict.email);
+    }
+    return true;
+  }, [
+    buildFieldErrorKey,
+    canUseClienteHold,
+    focusBookingField,
+    navigate,
+    notifications,
+    openAuthRequiredModal,
+  ]);
+
+  const validateContactsBeforeConfirm = useCallback(async () => {
+    const contactos = buildContactValidationPayload();
+    if (contactos.length === 0) return true;
+    try {
+      await validatePublicBookingContacts({ contactos });
+      return true;
+    } catch (err) {
+      if (handleContactValidationError(err)) return false;
+      notifications.warning(extractMessage(err), {
+        dedupeKey: 'public-booking-validate-contacts-before-confirm',
+      });
+      return false;
+    }
+  }, [buildContactValidationPayload, handleContactValidationError, notifications]);
 
   const goToConfirm = useCallback(async () => {
     if (holdSubmitting) return false;
+    if (bookingMode === 'loading') {
+      notifications.info('Estamos verificando tu sesion antes de continuar.', {
+        dedupeKey: 'public-booking-auth-loading-confirm',
+      });
+      return false;
+    }
     if (!allBlocksComplete) {
+      const firstInvalidContact = blocksToSubmitSummary.find((block) => !block?.contactResolved?.isValid);
+      const feedback = firstInvalidContact
+        ? getContactValidationFeedback(firstInvalidContact.contactResolved, firstInvalidContact.index)
+        : null;
+      if (feedback?.field) {
+        setFieldError(firstInvalidContact.index, feedback.field, feedback.message);
+        focusBookingField(firstInvalidContact.index, feedback.field);
+      }
       notifications.warning(bookingBlockingReason || 'Completa servicios, fecha y hora antes de continuar a resumen.', {
         dedupeKey: 'public-booking-confirm-requires-complete-blocks',
       });
       return false;
     }
-    if (!canUseClienteHold) {
-      const titularBlock = normalizeBookingBlock(bookingBlocks[0] || null, 0);
-      const titularContactState = resolveBlockContactState(titularBlock, 0);
-      const titularNombre = String(titularContactState.fullName || '').trim();
-      const titularEmail = String(titularContactState.email || '').trim().toLowerCase();
-      const titularTelefono = String(titularContactState.phone || '').trim();
-      try {
-        await validatePublicTitularForBooking({
-          titular: {
-            nombre: titularNombre,
-            email: titularEmail,
-            telefono: titularTelefono,
-          },
-        });
-      } catch (err) {
-        const apiError = err?.data?.error || err?.error || {};
-        const conflictCode = String(apiError?.code || '').trim().toUpperCase();
-        if (conflictCode === 'PUBLIC_CITAS_EMAIL_IN_USE' || conflictCode === 'EMAIL_BELONGS_TO_ACTIVE_USER') {
-          setFieldError(0, 'contactEmail', mapPublicBookingErrorMessage(conflictCode));
-          setActiveBlockIndex(0);
-          navigate('/agendar/agenda');
-          notifications.warning(
-            `El correo del titular, ${titularEmail || 'correo no identificado'}, pertenece a un usuario activo. Debes iniciar sesión para continuar.`,
-            { dedupeKey: 'public-booking-email-registered-login-required-preconfirm' }
-          );
-          openAuthRequiredModal(titularEmail);
-          return false;
-        }
-        notifications.warning(extractMessage(err), {
-          dedupeKey: 'public-booking-validate-titular-before-confirm',
-        });
-        return false;
-      }
-    }
-    navigate('/agendar/confirmar');
+    const contactsValid = await validateContactsBeforeConfirm();
+    if (!contactsValid) return false;
+    navigate(BOOKING_ROUTES.confirm);
     return true;
   }, [
     allBlocksComplete,
+    blocksToSubmitSummary,
     bookingBlockingReason,
+    bookingMode,
+    focusBookingField,
     holdSubmitting,
-    canUseClienteHold,
-    bookingBlocks,
-    resolveBlockContactState,
     navigate,
     notifications,
     setFieldError,
-    setActiveBlockIndex,
-    openAuthRequiredModal,
+    validateContactsBeforeConfirm,
   ]);
-
-  const goToPayment = useCallback(() => {
-    if (!allBlocksComplete) return;
-    if (paymentResult?.booking_confirmed) return;
-    navigate('/agendar/pagar');
-  }, [allBlocksComplete, navigate, paymentResult?.booking_confirmed]);
 
   const shouldRecoverFromPaymentError = useCallback((rawCode) => {
     const code = String(rawCode || '').trim().toUpperCase();
     return code === 'PUBLIC_PAGOS_HOLD_EXPIRED'
       || code === 'PUBLIC_PAGOS_GROUP_STATE_INVALID'
       || code === 'PUBLIC_PAGOS_GROUP_NOT_FOUND'
-      || code === 'PUBLIC_PAGOS_INTENT_NOT_FOUND';
+      || code === 'PUBLIC_PAGOS_INTENT_NOT_FOUND'
+      || code === 'PUBLIC_PAGOS_INTENT_GROUP_MISMATCH';
+  }, []);
+
+  const shouldRetryPaymentStatus = useCallback((payload) => {
+    if (payload?.booking_confirmed) return false;
+    const state = String(payload?.estado_intent_codigo || payload?.status || '').trim().toLowerCase();
+    return state === 'pendiente_confirmacion'
+      || state === 'processing'
+      || state === 'procesando'
+      || state === 'confirmando';
   }, []);
 
   const createPaymentIntentForHold = useCallback(async () => {
@@ -3876,11 +3241,11 @@ const paymentStatusAbortRef = useRef(null);
       });
       return null;
     }
-    if (Number(holdResult?.total_pagar_hnl || 0) <= 0) {
+    if (Number(holdResult?.total_pagar_hnl ?? holdResult?.total_hnl ?? 0) <= 0) {
       notifications.warning('Esta reserva no requiere pago. Confírmala directamente.', {
         dedupeKey: 'public-booking-payment-not-required',
       });
-      navigate('/agendar/confirmar');
+      navigate(BOOKING_ROUTES.confirm);
       return null;
     }
     if (!isValidEmail(titularEmail)) {
@@ -3890,14 +3255,15 @@ const paymentStatusAbortRef = useRef(null);
       return null;
     }
     try {
-      const response = await createPublicPaymentIntent({
-        id_grupo_cita: groupId,
-        titular_email: titularEmail,
-        nombre_apellido: String(titularContact.fullName || '').trim() || null,
-        telefono: normalizePhone(titularContact.phone || '') || null,
+      const payload = await createPaymentIntentOnce({
+        groupId,
+        titularEmail,
+        payload: buildCreatePaymentIntentPayload({
+          groupId,
+          titularEmail,
+          titularContact,
+        }),
       });
-      const payload = response?.data ?? response;
-      setPaymentIntent(payload);
       if (payload?.expires_at) {
         setHoldResult((current) => (current ? { ...current, expires_at: payload.expires_at } : current));
       }
@@ -3917,12 +3283,15 @@ const paymentStatusAbortRef = useRef(null);
     }
   }, [
     bookingBlocks,
+    createPaymentIntentOnce,
     holdResult?.id_grupo_cita,
     notifications,
     resolveBlockContactState,
     recoverToAgendaForReselection,
+    setHoldResult,
     shouldRecoverFromPaymentError,
     navigate,
+    holdResult?.total_hnl,
     holdResult?.total_pagar_hnl,
   ]);
 
@@ -3933,6 +3302,7 @@ const paymentStatusAbortRef = useRef(null);
     const totalToPay = Number(
       options?.totalPagarHnl
       ?? holdResult?.total_pagar_hnl
+      ?? holdResult?.total_hnl
       ?? 0
     );
     const rewardContextToken = String(
@@ -3976,10 +3346,8 @@ const paymentStatusAbortRef = useRef(null);
       return false;
     }
     try {
-      const confirmPayload = rewardContextToken
-        ? { canje_context_token: rewardContextToken }
-        : {};
-      const response = await confirmClienteCitaHoldWithoutPayment(
+      const confirmPayload = buildConfirmWithoutPaymentPayload({ rewardContextToken });
+      const response = await confirmHoldWithoutPaymentRequest(
         groupId,
         confirmPayload,
         requestController
@@ -4018,6 +3386,7 @@ const paymentStatusAbortRef = useRef(null);
       }));
       setBookingSuccessResult({
         source: rewardApplied ? 'reward_no_payment' : 'membership_no_payment',
+        booking_confirmed: true,
         confirmation: payload,
         codigo_cita: codigoCita,
         citas_confirmadas: Array.isArray(payload?.citas_confirmadas)
@@ -4027,6 +3396,7 @@ const paymentStatusAbortRef = useRef(null);
           ? (rewardMessage || 'Recompensa utilizada')
           : 'cubierto_por_plan',
         total_pagado_hnl: 0,
+        cubierto_por_plan_hnl: Number(holdPricing?.cubierto_por_plan_hnl || 0),
         recompensa_utilizada: payload?.recompensa_utilizada || null,
         created_at: new Date().toISOString(),
       });
@@ -4039,7 +3409,7 @@ const paymentStatusAbortRef = useRef(null);
         });
       }
       if (!options?.skipNavigate) {
-        navigate('/agendar/exito');
+        navigate(BOOKING_ROUTES.success);
       }
       return true;
     } catch (err) {
@@ -4069,31 +3439,46 @@ const paymentStatusAbortRef = useRef(null);
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
     }
-  }, [canUseClienteHold, holdResult, navigate, notifications, rewardBookingContext]);
+  }, [
+    canUseClienteHold,
+    confirmHoldWithoutPaymentRequest,
+    holdPricing?.cubierto_por_plan_hnl,
+    holdResult,
+    navigate,
+    notifications,
+    rewardBookingContext,
+    setBookingSuccessResult,
+    setPaymentResult,
+  ]);
 
-  const refreshPaymentStatus = useCallback(async () => {
-    if (!location.pathname.startsWith('/agendar/pagar')) return null;
-    const groupId = String(holdResult?.id_grupo_cita || '').trim();
-    const intentId = String(paymentIntent?.id_intent || '').trim();
+  const refreshPaymentStatus = useCallback(async (options = {}) => {
+    const canCheckOnRoute = location.pathname.startsWith(BOOKING_ROUTES.payment)
+      || location.pathname.startsWith(BOOKING_ROUTES.success);
+    if (!canCheckOnRoute) return null;
+    const searchParams = new URLSearchParams(location.search || '');
+    const groupIdFromUrl = String(searchParams.get('id_grupo_cita') || '').trim();
+    const storedContext = restorePaymentContext(groupIdFromUrl || holdResult?.id_grupo_cita || '');
+    const groupId = String(
+      holdResult?.id_grupo_cita
+      || storedContext?.id_grupo_cita
+      || groupIdFromUrl
+      || ''
+    ).trim();
+    const intentId = String(paymentIntent?.id_intent || storedContext?.id_intent || '').trim();
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
-    const titularEmail = String(titularContact.email || '').trim().toLowerCase();
+    const titularEmail = String(titularContact.email || storedContext?.titular_email || '').trim().toLowerCase();
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
 
-    if (paymentStatusAbortRef.current) {
-      paymentStatusAbortRef.current.abort('payment_status_refresh_replaced');
-    }
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    paymentStatusAbortRef.current = controller;
-
     try {
-      const response = await getPublicPaymentStatus({
-        id_grupo_cita: groupId,
-        id_intent: intentId,
-        titular_email: titularEmail,
-      }, {
-        signal: controller?.signal,
+      const payload = await fetchPaymentStatusOnce({
+        groupId,
+        intentId,
+        titularEmail,
+        retries: options?.retries ?? 0,
+        retryDelayMs: options?.retryDelayMs ?? 1200,
+        shouldRetry: shouldRetryPaymentStatus,
       });
-      const payload = response?.data ?? response;
+      if (!payload || !isCurrentPaymentGroup(groupId)) return null;
       let rewardFinalization = null;
       if (payload?.booking_confirmed && rewardModeActive) {
         const rewardContextToken = String(
@@ -4103,9 +3488,10 @@ const paymentStatusAbortRef = useRef(null);
         ).trim();
         if (rewardContextToken) {
           try {
-            const confirmResponse = await confirmClienteCitaHoldWithoutPayment(groupId, {
-              canje_context_token: rewardContextToken,
-            });
+            const confirmResponse = await confirmHoldWithoutPaymentRequest(
+              groupId,
+              buildConfirmWithoutPaymentPayload({ rewardContextToken })
+            );
             const confirmEnvelope = confirmResponse && typeof confirmResponse === 'object' ? confirmResponse : {};
             const confirmPayloadRaw = confirmEnvelope?.data && typeof confirmEnvelope.data === 'object'
               ? confirmEnvelope.data
@@ -4140,13 +3526,20 @@ const paymentStatusAbortRef = useRef(null);
       if (payload?.booking_confirmed) {
         const citasConfirmadas = extractConfirmedAppointments(payload);
         const codigoCita = extractBookingCode(payload);
-        const totalPagado = Number(payload?.monto_hnl ?? payload?.total_pagado_hnl ?? holdResult?.total_pagar_hnl ?? 0);
+        const totalPagado = Number(
+          payload?.monto_hnl
+          ?? payload?.total_pagado_hnl
+          ?? holdResult?.total_pagar_hnl
+          ?? holdResult?.total_hnl
+          ?? 0
+        );
         const rewardApplied = rewardFinalization?.aplicada === true || rewardFinalization?.ya_aplicada === true;
         const rewardMessage = rewardApplied
           ? String(rewardFinalization?.mensaje || 'Recompensa utilizada. Se descontaron 10 puntos de tu ruta.').trim()
           : '';
         setBookingSuccessResult({
           source: 'payment',
+          booking_confirmed: true,
           paymentResult: payload,
           codigo_cita: codigoCita,
           citas_confirmadas: citasConfirmadas,
@@ -4182,72 +3575,116 @@ const paymentStatusAbortRef = useRef(null);
       }
       notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-status-error' });
       return null;
-    } finally {
-      if (paymentStatusAbortRef.current === controller) {
-        paymentStatusAbortRef.current = null;
-      }
     }
   }, [
     bookingBlocks,
+    confirmHoldWithoutPaymentRequest,
+    fetchPaymentStatusOnce,
     holdResult?.id_grupo_cita,
+    holdResult?.total_hnl,
     holdResult?.total_pagar_hnl,
+    isCurrentPaymentGroup,
     location.pathname,
+    location.search,
     notifications,
     paymentIntent?.id_intent,
     rewardBookingContext,
     rewardModeActive,
     resolveBlockContactState,
     recoverToAgendaForReselection,
+    setBookingSuccessResult,
+    setPaymentResult,
+    restorePaymentContext,
     shouldRecoverFromPaymentError,
+    shouldRetryPaymentStatus,
   ]);
 
   const completeMockPayment = useCallback(async () => {
+    const groupId = String(holdResult?.id_grupo_cita || '').trim();
     const intentId = String(paymentIntent?.id_intent || '').trim();
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
     const titularEmail = String(titularContact.email || '').trim().toLowerCase();
-    if (!intentId || !isValidEmail(titularEmail)) return false;
+    if (!groupId || !intentId || !isValidEmail(titularEmail)) return false;
     try {
-      await completePublicMockPayment({
-        id_intent: intentId,
-        titular_email: titularEmail,
-        status: 'paid',
-      });
+      await completeMockPaymentOnce({ groupId, intentId, titularEmail });
       const status = await refreshPaymentStatus();
       return Boolean(status?.booking_confirmed);
     } catch (err) {
       notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-complete-error' });
       return false;
     }
-  }, [bookingBlocks, notifications, paymentIntent?.id_intent, refreshPaymentStatus, resolveBlockContactState]);
+  }, [bookingBlocks, completeMockPaymentOnce, holdResult?.id_grupo_cita, notifications, paymentIntent?.id_intent, refreshPaymentStatus, resolveBlockContactState]);
+
+  const completeSimulatorPayment = useCallback(async () => {
+    const groupId = String(holdResult?.id_grupo_cita || '').trim();
+    const intentId = String(paymentIntent?.id_intent || '').trim();
+    const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
+    const titularEmail = String(titularContact.email || '').trim().toLowerCase();
+    if (!groupId || !intentId || !isValidEmail(titularEmail)) return false;
+    try {
+      await completeSimulatorPaymentOnce({ groupId, intentId, titularEmail, status: 'success' });
+      const status = await refreshPaymentStatus({ retries: 2, retryDelayMs: 1500 });
+      return Boolean(status?.booking_confirmed);
+    } catch (err) {
+      notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-simulator-error' });
+      return false;
+    }
+  }, [bookingBlocks, completeSimulatorPaymentOnce, holdResult?.id_grupo_cita, notifications, paymentIntent?.id_intent, refreshPaymentStatus, resolveBlockContactState]);
+
+  const completePaymentSimulation = useCallback(async ({ provider } = {}) => {
+    const normalizedProvider = String(provider || '').trim().toLowerCase();
+    if (normalizedProvider === 'simulator') {
+      return completeSimulatorPayment();
+    }
+    return completeMockPayment();
+  }, [completeMockPayment, completeSimulatorPayment]);
 
   const startCheckout = useCallback(async () => {
     if (paymentResult?.booking_confirmed) return true;
     if (!allBlocksComplete) {
-      notifications.warning('Completa servicios, fecha y hora en todos los bloques antes de continuar al pago.', {
+      const firstInvalidContact = blocksToSubmitSummary.find((block) => !block?.contactResolved?.isValid);
+      const feedback = firstInvalidContact
+        ? getContactValidationFeedback(firstInvalidContact.contactResolved, firstInvalidContact.index)
+        : null;
+      if (feedback?.field) {
+        setFieldError(firstInvalidContact.index, feedback.field, feedback.message);
+        setActiveBlockIndex(firstInvalidContact.index);
+      }
+      notifications.warning(bookingBlockingReason || 'Completa servicios, fecha y hora en todos los bloques antes de continuar al pago.', {
         dedupeKey: 'public-booking-checkout-requires-complete-blocks',
       });
-      navigate('/agendar/agenda');
+      navigate(BOOKING_ROUTES.agenda);
       return false;
     }
-    if (holdResult && Number(holdResult?.total_pagar_hnl || 0) === 0) {
+    if (holdResult && Number(holdResult?.total_pagar_hnl ?? holdResult?.total_hnl ?? 0) === 0) {
       notifications.warning('Tu reserva no requiere pago. Confirma la cita desde el resumen.', {
         dedupeKey: 'public-booking-checkout-hold-total-zero',
       });
-      navigate('/agendar/confirmar');
+      navigate(BOOKING_ROUTES.confirm);
       return false;
     }
-    navigate('/agendar/pagar');
+    navigate(BOOKING_ROUTES.payment);
     return true;
-  }, [allBlocksComplete, holdResult, navigate, notifications, paymentResult?.booking_confirmed]);
+  }, [
+    allBlocksComplete,
+    blocksToSubmitSummary,
+    bookingBlockingReason,
+    holdResult,
+    navigate,
+    notifications,
+    paymentResult?.booking_confirmed,
+    setActiveBlockIndex,
+    setFieldError,
+  ]);
 
   useEffect(() => {
-    if (!location.pathname.startsWith('/agendar/pagar')) {
+    if (!location.pathname.startsWith(BOOKING_ROUTES.payment)) {
       paymentAutoBootstrapAttemptRef.current = '';
     }
   }, [location.pathname]);
 
   useEffect(() => {
-    if (!location.pathname.startsWith('/agendar/pagar')) return;
+    if (!location.pathname.startsWith(BOOKING_ROUTES.payment)) return;
     if (paymentResult?.booking_confirmed) return;
 
     let cancelled = false;
@@ -4261,8 +3698,8 @@ const paymentStatusAbortRef = useRef(null);
         if (!ok || cancelled) return;
         return;
       }
-      if (Number(holdResult?.total_pagar_hnl || 0) <= 0) {
-        navigate('/agendar/confirmar', { replace: true });
+      if (Number(holdResult?.total_pagar_hnl ?? holdResult?.total_hnl ?? 0) <= 0) {
+        navigate(BOOKING_ROUTES.confirm, { replace: true });
         return;
       }
       if (paymentIntent?.id_intent) return;
@@ -4278,6 +3715,7 @@ const paymentStatusAbortRef = useRef(null);
     bookingSelectionFingerprint,
     createPaymentIntentForHold,
     holdResult,
+    holdResult?.total_hnl,
     holdResult?.total_pagar_hnl,
     location.pathname,
     navigate,
@@ -4287,9 +3725,16 @@ const paymentStatusAbortRef = useRef(null);
   ]);
 
   useEffect(() => {
-    if (!location.pathname.startsWith('/agendar/pagar')) return;
+    if (!location.pathname.startsWith(BOOKING_ROUTES.payment)) return;
     if (paymentResult?.booking_confirmed) return;
     if (!holdResult || !holdExpired) return;
+    if (paymentIntent?.id_intent) {
+      notifications.info('La reserva temporal vencio, pero ya hay un pago iniciado. Verifica el estado antes de cambiar de horario.', {
+        dedupeKey: 'public-booking-payment-hold-expired-status-check',
+      });
+      void refreshPaymentStatus({ retries: 2, retryDelayMs: 1500 });
+      return;
+    }
     recoverToAgendaForReselection(
       'El tiempo de reserva expiró. Selecciona una nueva hora para continuar.',
       { dedupeKey: 'public-booking-payment-recover-hold-expired' }
@@ -4298,33 +3743,55 @@ const paymentStatusAbortRef = useRef(null);
     holdExpired,
     holdResult,
     location.pathname,
+    notifications,
+    paymentIntent?.id_intent,
     paymentResult?.booking_confirmed,
     recoverToAgendaForReselection,
+    refreshPaymentStatus,
   ]);
 
   useEffect(() => {
-    if (location.pathname.startsWith('/agendar/pagar')) return;
-    if (paymentStatusAbortRef.current) {
-      paymentStatusAbortRef.current.abort('payment_screen_left');
-      paymentStatusAbortRef.current = null;
+    const isPaymentRoute = location.pathname.startsWith(BOOKING_ROUTES.payment);
+    const isSuccessRoute = location.pathname.startsWith(BOOKING_ROUTES.success);
+    if (!isPaymentRoute && !isSuccessRoute) {
+      paymentReturnStatusCheckRef.current = '';
+      return;
     }
-  }, [location.pathname]);
+    if (paymentResult?.booking_confirmed) return;
 
-  useEffect(() => {
-    if (!location.pathname.startsWith('/agendar/pagar')) return undefined;
-    if (!paymentIntent?.id_intent) return undefined;
-    void refreshPaymentStatus();
-    const intervalId = setInterval(() => {
-      void refreshPaymentStatus();
-    }, 4000);
-    return () => {
-      clearInterval(intervalId);
-      if (paymentStatusAbortRef.current) {
-        paymentStatusAbortRef.current.abort('payment_polling_cleanup');
-        paymentStatusAbortRef.current = null;
-      }
-    };
-  }, [location.pathname, paymentIntent?.id_intent, refreshPaymentStatus]);
+    const searchParams = new URLSearchParams(location.search || '');
+    const groupIdFromUrl = String(searchParams.get('id_grupo_cita') || '').trim();
+    const restoredContext = restorePaymentContext(groupIdFromUrl || holdResult?.id_grupo_cita || '');
+    const groupId = String(
+      holdResult?.id_grupo_cita
+      || restoredContext?.id_grupo_cita
+      || groupIdFromUrl
+      || ''
+    ).trim();
+    const intentId = String(paymentIntent?.id_intent || restoredContext?.id_intent || '').trim();
+    if (!groupId || !intentId) return;
+
+    const checkKey = `${location.pathname}|${location.search}|${groupId}|${intentId}`;
+    if (paymentReturnStatusCheckRef.current === checkKey) return;
+    paymentReturnStatusCheckRef.current = checkKey;
+
+    const isProviderReturn = isSuccessRoute
+      || searchParams.has('provider_intent_id')
+      || searchParams.has('id_grupo_cita')
+      || searchParams.has('mock_result');
+    void refreshPaymentStatus({
+      retries: isProviderReturn ? 2 : 0,
+      retryDelayMs: 1500,
+    });
+  }, [
+    holdResult?.id_grupo_cita,
+    location.pathname,
+    location.search,
+    paymentIntent?.id_intent,
+    paymentResult?.booking_confirmed,
+    refreshPaymentStatus,
+    restorePaymentContext,
+  ]);
 
   const contextValue = useMemo(
     () => ({
@@ -4346,9 +3813,20 @@ const paymentStatusAbortRef = useRef(null);
       bookingBlocks,
       bookingBlocksSummary,
       bookingBlockingReason,
+      bookingMode,
       blockedServiceIds,
       membershipLockedServiceIdsForTitular,
       membershipBranchNotice,
+      membershipHasContext,
+      membershipUxMessage,
+      membershipAplicaEnCita,
+      membershipBranchMismatch,
+      membershipMotivoNoAplica,
+      membershipCompanionsCovered,
+      membershipCompanionNotice,
+      profileIncompleteState,
+      profileFieldLabels: PROFILE_FIELD_LABELS,
+      goToClienteProfile,
       rewardModeActive,
       rewardServiceId,
       rewardServiceName,
@@ -4362,16 +3840,23 @@ const paymentStatusAbortRef = useRef(null);
       canUseClienteHold,
       canGoPrevMonth,
       contextData,
+      contextError,
+      contextLoading,
       currentMonth,
+      fetchContext,
       goToAgenda,
       goToBarberos,
       goToConfirm,
       goToPayment,
       completeBookingFlow,
+      companionRuleValidation,
       createPaymentIntentForHold,
+      creatingPaymentIntent,
       confirmHoldWithoutPayment,
       refreshPaymentStatus,
+      checkingPaymentStatus,
       completeMockPayment,
+      completePaymentSimulation,
       startCheckout,
       holdDurationMin,
       holdExpiresAtIso,
@@ -4384,6 +3869,8 @@ const paymentStatusAbortRef = useRef(null);
       paymentResult,
       bookingSuccessResult,
       pendingCompanionFocusId,
+      pendingFieldFocus,
+      consumePendingFieldFocus,
       holdSubmitting,
       isPastSlotForToday,
       maxCompanions,
@@ -4472,9 +3959,19 @@ const paymentStatusAbortRef = useRef(null);
       bookingBlocks,
       bookingBlocksSummary,
       bookingBlockingReason,
+      bookingMode,
       blockedServiceIds,
       membershipLockedServiceIdsForTitular,
       membershipBranchNotice,
+      membershipHasContext,
+      membershipUxMessage,
+      membershipAplicaEnCita,
+      membershipBranchMismatch,
+      membershipMotivoNoAplica,
+      membershipCompanionsCovered,
+      membershipCompanionNotice,
+      profileIncompleteState,
+      goToClienteProfile,
       rewardModeActive,
       rewardServiceId,
       rewardServiceName,
@@ -4488,16 +3985,23 @@ const paymentStatusAbortRef = useRef(null);
       canUseClienteHold,
       canGoPrevMonth,
       contextData,
+      contextError,
+      contextLoading,
       currentMonth,
+      fetchContext,
       goToAgenda,
       goToBarberos,
       goToConfirm,
       goToPayment,
       completeBookingFlow,
+      companionRuleValidation,
       createPaymentIntentForHold,
+      creatingPaymentIntent,
       confirmHoldWithoutPayment,
       refreshPaymentStatus,
+      checkingPaymentStatus,
       completeMockPayment,
+      completePaymentSimulation,
       startCheckout,
       holdDurationMin,
       holdExpiresAtIso,
@@ -4510,6 +4014,8 @@ const paymentStatusAbortRef = useRef(null);
       paymentResult,
       bookingSuccessResult,
       pendingCompanionFocusId,
+      pendingFieldFocus,
+      consumePendingFieldFocus,
       holdSubmitting,
       isPastSlotForToday,
       maxCompanions,
@@ -4580,62 +4086,24 @@ const paymentStatusAbortRef = useRef(null);
     ]
   );
 
-  if (location.pathname === '/agendar') {
-    return <Navigate to="/agendar/barberos" replace />;
+  if (rootRedirectPath) {
+    return <Navigate to={rootRedirectPath} replace />;
   }
 
-  const showTopbarBackToBarberos = location.pathname.startsWith('/agendar/agenda');
-  const isClienteSession = isAuthenticated && Array.isArray(roles) && roles.includes('cliente');
-  const homePath = isClienteSession ? '/home/cliente' : '/';
-  const homeLabel = 'Inicio MasterFade';
-  const showBranchDataErrorBanner = Boolean(
-    location.pathname.startsWith('/agendar/barberos')
-    && availabilityError
-    && !barbersLoading
-  );
-
   return (
-    <div className="public-booking-page mf-page-gradient min-h-screen">
-      <div className="public-booking-shell">
-        <header className="public-booking-topbar">
-          <div className="public-booking-topbar-left">
-            <Link to={homePath} className="public-booking-home">
-              <House size={16} />
-              <span>{homeLabel}</span>
-            </Link>
-            {showTopbarBackToBarberos ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="public-booking-topbar-back gap-2"
-                onClick={goToBarberos}
-              >
-                <ArrowLeft size={15} />
-                Volver a barberos
-              </Button>
-            ) : null}
-          </div>
-          <ThemeSwitcher showLabel={false} />
-        </header>
-
-        {contextLoading ? (
-          <div className="public-booking-loading">
-            <LoadingSpinner />
-          </div>
-        ) : null}
-
-        {contextError ? (
-          <div className="public-booking-error">
-            <ErrorBanner message={contextError} onRetry={fetchContext} />
-          </div>
-        ) : null}
-
+    <BookingLayout
+      homePath={homePath}
+      homeLabel={homeLabel}
+      loading={contextLoading}
+      error={contextError}
+      onRetry={fetchContext}
+      showBackToBarberos={showTopbarBackToBarberos}
+      onBackToBarberos={goToBarberos}
+    >
         {!contextLoading && !contextError ? (
           <main className="mf-page citas-page public-booking-main">
             {showBranchDataErrorBanner ? (
-              <div className="public-booking-error">
-                <ErrorBanner message={availabilityError} onRetry={fetchBranchData} />
-              </div>
+              <BookingErrorState message={availabilityError} onRetry={fetchBranchData} />
             ) : null}
             <PublicBookingProvider value={contextValue}>
               <Outlet />
@@ -4678,6 +4146,42 @@ const paymentStatusAbortRef = useRef(null);
         </Dialog>
 
         <Dialog
+          open={cancelBookingModal.open}
+          onOpenChange={(open) => {
+            if (!open) closeCancelBookingModal();
+          }}
+        >
+          <DialogContent className="sm:max-w-md booking-cancel-modal">
+            <DialogHeader>
+              <DialogTitle>Cancelar agendamiento</DialogTitle>
+              <DialogDescription>
+                Se perderán los datos seleccionados y se liberará la reserva temporal si existe.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={closeCancelBookingModal}
+                disabled={cancelBookingProcessing}
+              >
+                Continuar agendando
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => {
+                  void confirmCancelBooking();
+                }}
+                disabled={cancelBookingProcessing || holdSubmitting}
+              >
+                {cancelBookingProcessing ? 'Cancelando...' : 'Cancelar agendamiento'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
           open={profilePersistModal.open}
           onOpenChange={(open) => {
             if (!open) resolveProfilePersistModal(false);
@@ -4706,9 +4210,7 @@ const paymentStatusAbortRef = useRef(null);
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
-    </div>
+    </BookingLayout>
   );
 }
-
 

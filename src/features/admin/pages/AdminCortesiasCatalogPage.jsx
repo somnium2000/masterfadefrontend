@@ -62,6 +62,9 @@ const FILTER_DEFAULTS = {
 };
 
 function extractMessage(error) {
+  if (error?.data?.error?.code === "CORTESIA_NAME_DUPLICATE") {
+    return "Ya existe una cortesía con ese nombre. Usa la cortesía existente o cambia el nombre.";
+  }
   return error?.data?.error?.message || error?.message || "Error desconocido.";
 }
 
@@ -128,7 +131,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loading 
         value={selected}
         onChange={(event) => onChange(String(event.target.value || "").trim())}
       >
-        <option value="">- Seleccionar sucursal -</option>
+        <option value="">Todas las sucursales</option>
         {available.map((branch) => (
           <option key={branch.id_sucursal} value={branch.id_sucursal}>{branch.nombre_sucursal}</option>
         ))}
@@ -178,12 +181,12 @@ function CortesiaForm({ values, onChange, branches, branchIds, lockBranchSelecti
           id="cortesia-descripcion"
           value={values.descripcion}
           onChange={(event) => onChange("descripcion", event.target.value)}
-          placeholder="Describe el alcance de la cortesía"
+          placeholder="Describe la cortesía maestra"
         />
       </div>
 
       <div className="space-y-2">
-        <Label>Sucursales *</Label>
+        <Label>Sucursales asociadas *</Label>
         <div className="space-y-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
           {scopedBranches.map((branch) => {
             const selected = selectedById.get(branch.id_sucursal);
@@ -316,6 +319,7 @@ export default function AdminCortesiasCatalogPage() {
 
   const mustSelectBranchForList = !isSuperAdmin && branchIds.length !== 1;
   const actionsLockedByBranch = !sucursal && mustSelectBranchForList;
+  const isGlobalView = !sucursal;
 
   useEffect(() => {
     const timeout = setTimeout(() => setSearch(searchInput.trim()), 250);
@@ -390,7 +394,9 @@ export default function AdminCortesiasCatalogPage() {
   }
 
   function openNuevo() {
-    const defaults = branchIds.length === 1
+    const defaults = sucursal
+      ? [{ id_sucursal: sucursal, activa: true }]
+      : branchIds.length === 1
       ? [{ id_sucursal: branchIds[0], activa: true }]
       : [];
     setEditTarget(null);
@@ -494,7 +500,7 @@ export default function AdminCortesiasCatalogPage() {
         <CompactActionButton
           icon={scope.activa ? <ToggleLeft size={16} strokeWidth={2} /> : <ToggleRight size={16} strokeWidth={2} />}
           label={scope.activa ? "Inactivar" : "Activar"}
-          title={scope.activa ? "Inactivar" : "Activar"}
+          title={scope.activa ? "Inactivar en esta sucursal" : "Activar en esta sucursal"}
           tone={scope.activa ? "warning" : "success"}
           disabled={actionsLockedByBranch}
           onClick={() => openConfirmState({
@@ -512,8 +518,8 @@ export default function AdminCortesiasCatalogPage() {
   function renderMainActions(cortesia) {
     return (
       <div className="flex items-center gap-1.5">
-        <CompactActionButton icon={<Eye size={16} strokeWidth={2} />} label="Detalle" title="Ver detalle" onClick={() => openDetail(cortesia)} />
-        <CompactActionButton icon={<Pencil size={16} strokeWidth={2} />} label="Editar" title="Editar" disabled={actionsLockedByBranch} onClick={() => openEditar(cortesia)} />
+        <CompactActionButton icon={<Eye size={16} strokeWidth={2} />} label="Detalle" title="Ver detalle de cortesía maestra" onClick={() => openDetail(cortesia)} />
+        <CompactActionButton icon={<Pencil size={16} strokeWidth={2} />} label="Editar" title="Editar cortesía maestra" disabled={actionsLockedByBranch} onClick={() => openEditar(cortesia)} />
       </div>
     );
   }
@@ -526,7 +532,7 @@ export default function AdminCortesiasCatalogPage() {
             <div className="space-y-1">
               <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Servicios - Cortesías</p>
               <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Cortesías</h1>
-              <p className="text-sm text-[var(--mf-text-2)]">Gestiona el catálogo administrativo de cortesías por sucursal.</p>
+              <p className="text-sm text-[var(--mf-text-2)]">Gestiona cortesías maestras y su disponibilidad por sucursal.</p>
             </div>
             <SucursalSelector
               branchIds={branchIds}
@@ -556,7 +562,7 @@ export default function AdminCortesiasCatalogPage() {
               </Button>
 
               <Button className="gap-2" onClick={openNuevo} disabled={actionsLockedByBranch}>
-                <Plus size={15} /> Nueva
+                <Plus size={15} /> Nueva maestra
               </Button>
             </div>
           </div>
@@ -567,7 +573,7 @@ export default function AdminCortesiasCatalogPage() {
       {loading ? <LoadingSpinner label="Cargando cortesías..." /> : null}
 
       {!loading && !listError && cortesias.length === 0 ? (
-        <EmptyState icon={Gift} title="Sin cortesías" description="No hay cortesías registradas para el alcance actual." actionLabel="Crear cortesía" onAction={openNuevo} />
+        <EmptyState icon={Gift} title="Sin cortesías" description="No hay cortesías maestras registradas para el alcance actual." actionLabel="Crear cortesía maestra" onAction={openNuevo} />
       ) : null}
 
       {!loading && !listError && cortesias.length > 0 && visibleCortesias.length === 0 ? (
@@ -593,10 +599,15 @@ export default function AdminCortesiasCatalogPage() {
                     <p className="mt-1 text-sm text-[var(--mf-text-2)] line-clamp-1">{item.descripcion || "Sin descripción"}</p>
                   </div>
                 </div>
-                <span className="mf-badge mf-badge-muted shrink-0">{(item.sucursales || []).length} sucursal(es)</span>
+                <span className="mf-badge mf-badge-muted shrink-0">
+                  {isGlobalView ? `${(item.sucursales || []).length} sucursal(es)` : "Vista sucursal"}
+                </span>
               </header>
 
               <div className="mt-3 space-y-2 border-t border-[var(--mf-nav-border)] pt-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-accent)]">
+                  {isGlobalView ? "Sucursales asociadas" : "Estado en esta sucursal"}
+                </p>
                 {(Array.isArray(item.sucursales) ? item.sucursales : []).map((scope) => (
                   <div key={scope.id} className="rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_50%,transparent)] px-2.5 py-2">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -627,7 +638,7 @@ export default function AdminCortesiasCatalogPage() {
               <TableRow className="border-[var(--mf-nav-border)]">
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Descripción</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursales</TableHead>
+                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">{isGlobalView ? "Sucursales asociadas" : "Estado en sucursal"}</TableHead>
                 <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
@@ -658,8 +669,8 @@ export default function AdminCortesiasCatalogPage() {
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading) setDialogOpen(open); }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editTarget ? "Editar cortesía" : "Nueva cortesía"}</DialogTitle>
-            <DialogDescription className="sr-only">Configura nombre, descripción, sucursales y estado inicial de la cortesía.</DialogDescription>
+            <DialogTitle>{editTarget ? "Editar cortesía maestra" : "Nueva cortesía maestra"}</DialogTitle>
+            <DialogDescription className="sr-only">Configura nombre, descripción y sucursales asociadas de la cortesía maestra.</DialogDescription>
           </DialogHeader>
 
           <CortesiaForm
@@ -676,7 +687,7 @@ export default function AdminCortesiasCatalogPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>Cancelar</Button>
             <Button onClick={handleGuardar} disabled={formLoading} className="gap-2 min-w-[120px]">
               {formLoading ? <Loader2 size={15} className="animate-spin" /> : null}
-              {editTarget ? "Guardar cambios" : "Crear cortesía"}
+              {editTarget ? "Guardar cambios" : "Crear cortesía maestra"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -686,7 +697,7 @@ export default function AdminCortesiasCatalogPage() {
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Detalle de cortesía</DialogTitle>
-            <DialogDescription className="sr-only">Consulta datos y estado por sucursal de la cortesía seleccionada.</DialogDescription>
+            <DialogDescription className="sr-only">Consulta datos maestros y estado por sucursal de la cortesía seleccionada.</DialogDescription>
           </DialogHeader>
 
           {detailTarget ? (
@@ -695,12 +706,12 @@ export default function AdminCortesiasCatalogPage() {
                 icon: <Gift size={16} />,
                 title: detailTarget.nombre || "-",
                 subtitle: detailTarget.descripcion || "Sin descripción",
-                badge: <span className="mf-badge mf-badge-muted">{(detailTarget.sucursales || []).length} sucursal(es)</span>,
+                badge: <span className="mf-badge mf-badge-muted">{(detailTarget.sucursales || []).length} sucursal(es) asociada(s)</span>,
               }}
               sections={[
                 {
                   id: "general",
-                  title: "Información general",
+                  title: "Información maestra",
                   icon: <Gift size={14} />,
                   fields: [
                     { label: "Nombre", value: detailTarget.nombre || "-" },
@@ -738,7 +749,7 @@ export default function AdminCortesiasCatalogPage() {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Filtros de cortesías</DialogTitle>
-            <DialogDescription className="sr-only">Filtra cortesías por estado y sucursal.</DialogDescription>
+            <DialogDescription className="sr-only">Filtra cortesías maestras por estado operativo y sucursal.</DialogDescription>
           </DialogHeader>
 
           <div className="flex flex-wrap gap-2">
@@ -767,7 +778,7 @@ export default function AdminCortesiasCatalogPage() {
                 </select>
               </div>
             ) : (
-              <p className="sm:col-span-2 text-xs text-[var(--mf-text-2)]">La sucursal ya está fijada en el selector superior.</p>
+              <p className="sm:col-span-2 text-xs text-[var(--mf-text-2)]">La vista operativa ya está fijada por la sucursal superior.</p>
             )}
           </div>
 
@@ -787,7 +798,7 @@ export default function AdminCortesiasCatalogPage() {
           }
         }}
         tone={stateTarget?._nextActiva ? "warning" : "danger"}
-        title={stateTarget?._nextActiva ? "Activar cortesía" : "Inactivar cortesía"}
+        title={stateTarget?._nextActiva ? "Activar cortesía en sucursal" : "Inactivar cortesía en sucursal"}
         description={stateTarget ? `Se ${stateTarget._nextActiva ? "activará" : "inactivará"} ${stateTarget.nombre} en ${stateTarget.nombre_sucursal || "la sucursal seleccionada"}.` : ""}
         confirmLabel={stateTarget?._nextActiva ? "Activar" : "Inactivar"}
         cancelLabel="Cancelar"

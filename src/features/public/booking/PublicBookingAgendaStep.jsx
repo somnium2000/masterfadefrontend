@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
@@ -19,7 +19,7 @@ import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import { DayButton, ServiceCard, SlotButton } from './PublicBookingBlocks.jsx';
-import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
+import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import {
   WEEK_DAYS,
   buildFullName,
@@ -58,12 +58,6 @@ function toMinutes(timeKey) {
   const minutes = Number(match[2]);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
   return (hours * 60) + minutes;
-}
-
-function isThirtyMinuteStepSlot(slot) {
-  const totalMinutes = toMinutes(slot?.hora);
-  if (!Number.isFinite(totalMinutes)) return false;
-  return totalMinutes % 30 === 0;
 }
 
 function overlapByMinutes(leftStart, leftDuration, rightStart, rightDuration) {
@@ -168,7 +162,7 @@ function pushUniqueSlots(target, candidates, seen, selectedDate, isPastSlotForTo
   });
 }
 
-function BookingBlocksSummary({
+const BookingBlocksSummary = memo(function BookingBlocksSummary({
   bookingBlocksSummary,
   totalToPay,
   totalEstimatedPromotionDiscountHnl,
@@ -235,7 +229,7 @@ function BookingBlocksSummary({
         {hasAnyPromotionSelected ? (
           <div className="public-booking-promo-summary">
             <div className="public-booking-promo-summary-row">
-              <span className="public-booking-promo-summary-label">Subtotal servicios:</span>
+              <span className="public-booking-promo-summary-label">Total de la reserva:</span>
               <strong className="public-booking-promo-summary-value">{formatCurrencyHnl(totalToPay)}</strong>
             </div>
             {hasAnyPendingTwoByOne && safeEstimatedDiscount <= 0 ? (
@@ -259,12 +253,12 @@ function BookingBlocksSummary({
             ) : null}
           </div>
         ) : (
-          <span>Total servicios: {formatCurrencyHnl(totalToPay)}</span>
+          <span>Total de la reserva: {formatCurrencyHnl(totalToPay)}</span>
         )}
       </div>
     </div>
   );
-}
+});
 
 export default function PublicBookingAgendaStep() {
   const {
@@ -273,6 +267,7 @@ export default function PublicBookingAgendaStep() {
     activeBlockIndex,
     addCompanionBlock,
     consumePendingCompanionFocus,
+    consumePendingFieldFocus,
     allowCompanions,
     maxCompanions,
     maxPromotionsPerBooking,
@@ -284,7 +279,11 @@ export default function PublicBookingAgendaStep() {
     bookingBlocksSummary,
     blockedServiceIds,
     membershipLockedServiceIdsForTitular,
-    membershipBranchNotice,
+    membershipUxMessage,
+    membershipCompanionNotice,
+    profileIncompleteState,
+    profileFieldLabels,
+    goToClienteProfile,
     rewardModeActive,
     rewardServiceId,
     rewardServiceName,
@@ -324,6 +323,7 @@ export default function PublicBookingAgendaStep() {
     packages,
     packagesLoading,
     pendingCompanionFocusId,
+    pendingFieldFocus,
     servicesAtEnd,
     servicesCanScroll,
     servicesLoading,
@@ -378,6 +378,12 @@ export default function PublicBookingAgendaStep() {
     selectedServiceIdsSet,
   ]);
 
+  const hasSelectedPackage = Boolean(selectedPackage || selectedPackageId);
+  const hasSelectedExtras = hasSelectedPackage && selectedServiceIdsSet.size > 0;
+  const totalSelectionLabel = hasSelectedPackage
+    ? (hasSelectedExtras ? 'Total de la reserva' : 'Total paquete')
+    : 'Total servicios';
+
   const hasValidSelectionForCalendar = selectedServicesCount > 0;
 
   const blockedServiceIdsSet = useMemo(
@@ -404,6 +410,7 @@ export default function PublicBookingAgendaStep() {
   const slotsSectionRef = useRef(null);
   const contactCardRef = useRef(null);
   const contactNameInputRef = useRef(null);
+  const contactEmailInputRef = useRef(null);
 
   const activeContactFirstName = String(activeBlock?.contactFirstName || '');
   const activeContactLastName = String(activeBlock?.contactLastName || '');
@@ -421,7 +428,17 @@ export default function PublicBookingAgendaStep() {
   const isTitularBlock = activeBlockIndex === 0;
   const titularMissingFields = new Set(Array.isArray(titularState?.missingFields) ? titularState.missingFields : []);
   const isAuthenticatedTitular = Boolean(isTitularBlock && titularState?.isAuthenticated);
-  const showTitularIdentityOnly = Boolean(isAuthenticatedTitular && titularState?.hasFullProfile);
+  const showTitularIdentityOnly = Boolean(isAuthenticatedTitular);
+  const profileIncompleteMessage = String(profileIncompleteState?.message || '').trim();
+  const profileMissingLabels = useMemo(() => {
+    const source = Array.isArray(profileIncompleteState?.missingFields) ? profileIncompleteState.missingFields : [];
+    const labelsMap = profileFieldLabels && typeof profileFieldLabels === 'object'
+      ? profileFieldLabels
+      : {};
+    return source
+      .map((field) => String(labelsMap?.[field] || field || '').trim())
+      .filter(Boolean);
+  }, [profileFieldLabels, profileIncompleteState?.missingFields]);
 
   const showFirstNameInput = !isTitularBlock
     || !isAuthenticatedTitular
@@ -595,15 +612,14 @@ export default function PublicBookingAgendaStep() {
         return leftMin - rightMin;
       });
 
-      const recommendedPool = [...curatedRecommended, ...fallbackUnique];
-      const recommended = recommendedPool.find((slot) => isThirtyMinuteStepSlot(slot)) || null;
-      const alternativesRaw = [
+      const recommendedPool = sortSlotsByTime([...curatedRecommended, ...fallbackUnique]);
+      const recommended = recommendedPool[0] || null;
+      const alternativesRaw = sortSlotsByTime([
         ...curatedAlternatives,
         ...(recommended ? fallbackUnique.filter((slot) => slot.hora !== recommended.hora) : fallbackUnique),
-      ];
+      ]);
       const alternatives = alternativesRaw
         .filter((slot) => slot && slot.hora !== recommended?.hora)
-        .filter((slot) => isThirtyMinuteStepSlot(slot))
         .slice(0, 3);
       const visibleSlots = [recommended, ...alternatives]
         .filter(Boolean)
@@ -697,28 +713,63 @@ export default function PublicBookingAgendaStep() {
     slotsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [selectedDate]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!pendingCompanionFocusId) return;
     if (activeBlockIndex <= 0) return;
     if (!activeBlock?.id || activeBlock.id !== pendingCompanionFocusId) return;
 
     let cancelled = false;
+    let innerRafId = 0;
     const rafId = requestAnimationFrame(() => {
       if (cancelled) return;
-      contactCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      contactNameInputRef.current?.focus({ preventScroll: true });
-      consumePendingCompanionFocus(pendingCompanionFocusId);
+      innerRafId = requestAnimationFrame(() => {
+        if (cancelled) return;
+        contactCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        contactNameInputRef.current?.focus({ preventScroll: true });
+        consumePendingCompanionFocus(pendingCompanionFocusId);
+      });
     });
 
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafId);
+      if (innerRafId) cancelAnimationFrame(innerRafId);
     };
   }, [
     activeBlock?.id,
     activeBlockIndex,
     consumePendingCompanionFocus,
     pendingCompanionFocusId,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!pendingFieldFocus?.blockId || !pendingFieldFocus?.field) return;
+    if (!activeBlock?.id || activeBlock.id !== pendingFieldFocus.blockId) return;
+
+    let cancelled = false;
+    let innerRafId = 0;
+    const rafId = requestAnimationFrame(() => {
+      if (cancelled) return;
+      innerRafId = requestAnimationFrame(() => {
+        if (cancelled) return;
+        const focusTarget = pendingFieldFocus.field === 'contactEmail'
+          ? contactEmailInputRef.current
+          : contactNameInputRef.current;
+        contactCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        focusTarget?.focus({ preventScroll: true });
+        consumePendingFieldFocus(pendingFieldFocus.requestId);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+      if (innerRafId) cancelAnimationFrame(innerRafId);
+    };
+  }, [
+    activeBlock?.id,
+    consumePendingFieldFocus,
+    pendingFieldFocus,
   ]);
 
   if ((servicesLoading || packagesLoading) && services.length === 0 && packages.length === 0) {
@@ -773,12 +824,15 @@ export default function PublicBookingAgendaStep() {
         </div>
       ) : null}
 
-      {membershipBranchNotice ? (
+      {membershipUxMessage ? (
         <div className="citas-surface p-4 border border-amber-400/35 bg-amber-500/10">
           <p className="inline-flex items-center gap-2 text-sm font-semibold text-amber-200">
             <AlertTriangle size={15} /> Aviso de cobertura de plan
           </p>
-          <p className="mt-2 text-sm text-amber-100">{membershipBranchNotice}</p>
+          <p className="mt-2 text-sm text-amber-100">{membershipUxMessage}</p>
+          {membershipCompanionNotice ? (
+            <p className="mt-2 text-sm text-amber-100">{membershipCompanionNotice}</p>
+          ) : null}
         </div>
       ) : null}
 
@@ -847,9 +901,33 @@ export default function PublicBookingAgendaStep() {
 
           <div className="public-booking-contact-card" ref={contactCardRef}>
             {showTitularIdentityOnly ? (
-              <p className="citas-selected-date">
-                Agendando como: <strong>{titularDisplayName || 'Titular autenticado'}</strong>
-              </p>
+              <div className="space-y-2">
+                <p className="citas-selected-date">
+                  Agendando como: <strong>{titularDisplayName || 'Titular autenticado'}</strong>
+                </p>
+                {titularState?.hasFullProfile ? (
+                  <p className="citas-selected-date">Agendarás esta cita con tu perfil de cliente.</p>
+                ) : (
+                  <>
+                    <p className="public-booking-field-error">
+                      {profileIncompleteMessage || 'Completa tu perfil antes de agendar una cita.'}
+                    </p>
+                    {profileMissingLabels.length > 0 ? (
+                      <p className="citas-selected-date">
+                        Campos faltantes: {profileMissingLabels.join(', ')}.
+                      </p>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={goToClienteProfile}
+                    >
+                      Completar perfil
+                    </Button>
+                  </>
+                )}
+              </div>
             ) : (
               <>
                 <div className="public-booking-form-grid">
@@ -862,6 +940,9 @@ export default function PublicBookingAgendaStep() {
                         id="booking-contact-first-name"
                         ref={contactNameInputRef}
                         type="text"
+                        inputMode="text"
+                        maxLength={20}
+                        autoComplete="given-name"
                         className={`mf-input ${activeFirstNameError ? 'is-invalid' : ''}`.trim()}
                         value={activeContactFirstName}
                         onChange={(event) => updateActiveBlockContact({ contactFirstName: event.target.value })}
@@ -878,6 +959,9 @@ export default function PublicBookingAgendaStep() {
                       <input
                         id="booking-contact-last-name"
                         type="text"
+                        inputMode="text"
+                        maxLength={20}
+                        autoComplete="family-name"
                         className={`mf-input ${activeLastNameError ? 'is-invalid' : ''}`.trim()}
                         value={activeContactLastName}
                         onChange={(event) => updateActiveBlockContact({ contactLastName: event.target.value })}
@@ -893,6 +977,7 @@ export default function PublicBookingAgendaStep() {
                       </label>
                       <input
                         id="booking-contact-email"
+                        ref={contactEmailInputRef}
                         type="email"
                         className={`mf-input ${activeEmailError ? 'is-invalid' : ''}`.trim()}
                         value={activeContactEmail}
@@ -910,6 +995,8 @@ export default function PublicBookingAgendaStep() {
                       <input
                         id="booking-contact-phone"
                         type="tel"
+                        inputMode="tel"
+                        maxLength={24}
                         className={`mf-input ${activePhoneError ? 'is-invalid' : ''}`.trim()}
                         value={activeContactPhone}
                         onChange={(event) => updateActiveBlockContact({ contactPhone: event.target.value })}
@@ -993,7 +1080,7 @@ export default function PublicBookingAgendaStep() {
                         blockedLabel={blockedLabel}
                         coveredByPlan={coveredByPlan || coveredByReward}
                         disabled={!canSelectServices}
-                        onToggle={() => toggleService(service.id_servicio)}
+                        onToggle={toggleService}
                       />
                     );
                   })()
@@ -1104,8 +1191,7 @@ export default function PublicBookingAgendaStep() {
             {catalogTab === 'promotions' && selectedPromotionsForBlock.length > 0 ? (
               <div className="public-booking-actions is-inline mt-2">
                 <p className="citas-selected-date">
-                  Promociones activas: {selectedPromotionTitles
-                    .join(', ')}
+                  Promociones activas: {selectedPromotionTitles.join(', ')}
                 </p>
                 <Button type="button" variant="outline" size="sm" onClick={clearSelectedPromotion}>
                   Quitar promociones
@@ -1158,7 +1244,7 @@ export default function PublicBookingAgendaStep() {
                 <small>El descuento será aplicado y confirmado en el pago final.</small>
               </div>
             ) : (
-              <span>Total servicios: {formatCurrencyHnl(totalToPay)}</span>
+              <span>{totalSelectionLabel}: {formatCurrencyHnl(totalToPay)}</span>
             )}
           </div>
         </motion.div>
@@ -1218,8 +1304,8 @@ export default function PublicBookingAgendaStep() {
                       cell={cell}
                       dayInfo={availabilityMap[cell.key]}
                       minDateKey={minBookingDateKey}
-                      selectedDate={selectedDate}
-                      onSelect={(dateKey, enabled) => onSelectDay(dateKey, enabled)}
+                      isSelected={selectedDate === cell.key}
+                      onSelect={onSelectDay}
                     />
                   ))}
                 </div>
@@ -1310,7 +1396,7 @@ export default function PublicBookingAgendaStep() {
                     </div>
 
                     <div className="public-booking-time-blocks-shell">
-                      {totalAvailableSlots === 0 ? (
+                      {availabilityError ? null : totalAvailableSlots === 0 ? (
                         <div className="public-booking-period-empty">
                           <p className="text-sm font-semibold text-[var(--mf-text)]">
                             No hay horarios disponibles para este día.
@@ -1330,7 +1416,7 @@ export default function PublicBookingAgendaStep() {
                                       <SlotButton
                                         key={`recommended-${activePeriodModel.recommended.hora}`}
                                         slot={activePeriodModel.recommended}
-                                        selectedTime={selectedTime}
+                                        isSelected={selectedTime === activePeriodModel.recommended.hora}
                                         onSelect={onSelectTime}
                                         disabled={restriction.disabled}
                                         variant={restriction.variant}
@@ -1350,7 +1436,7 @@ export default function PublicBookingAgendaStep() {
                                       <SlotButton
                                         key={`alternative-${slot.hora}`}
                                         slot={slot}
-                                        selectedTime={selectedTime}
+                                        isSelected={selectedTime === slot.hora}
                                         onSelect={onSelectTime}
                                         disabled={restriction.disabled}
                                         variant={restriction.variant}
@@ -1360,7 +1446,6 @@ export default function PublicBookingAgendaStep() {
                                   })}
                                 </section>
                               ) : null}
-
                             </>
                           ) : (
                             <div className="public-booking-period-empty">
@@ -1424,17 +1509,17 @@ export default function PublicBookingAgendaStep() {
             disabled={!allowCompanions || !canAddCompanionBlock}
           >
             <Plus size={15} />
-              {!allowCompanions
-                ? 'Acompañantes no habilitados'
-                : canAddCompanionBlock
-                  ? 'Añadir acompañante'
-                  : `Límite de ${maxCompanions} acompañantes alcanzado`}
+            {!allowCompanions
+              ? 'Acompañantes no habilitados'
+              : canAddCompanionBlock
+                ? 'Añadir acompañante'
+                : `Límite de ${maxCompanions} acompañantes alcanzado`}
           </Button>
           <Button
             variant="outline"
             className="gap-2 public-booking-agenda-action-button"
             onClick={() => {
-              void cancelBookingFlow();
+              void cancelBookingFlow('agenda');
             }}
           >
             Cancelar

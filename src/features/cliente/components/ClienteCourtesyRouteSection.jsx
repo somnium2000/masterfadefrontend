@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Coins, Gift, Loader2, RefreshCw, Sparkles, Users, UserRound } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { Button } from '../../../components/ui/button.jsx';
-import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import {
   Dialog,
   DialogContent,
@@ -12,13 +11,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../../components/ui/dialog.jsx';
-import { listPublicCatalogBranches, listPublicCatalogServices } from '../../public/lib/catalogApi.js';
+import { listPublicCatalogBranches } from '../../public/lib/catalogApi.js';
 import {
   getClienteMe,
-  getClientePlanEstado,
   getClientePuntosResumen,
   redeemClientePuntosReward,
 } from '../lib/clienteApi.js';
+import { CLIENT_BOOKING_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
 
 const DEFAULT_REWARD_TARGET = 10;
 const REWARD_BOOKING_CONTEXT_STORAGE_KEY = 'mf_reward_redeem_context_v1';
@@ -37,11 +36,8 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
-function normalizeSearchText(value) {
-  return normalizeText(value)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
+function isOperationalPlanState(value) {
+  return normalizeText(value).toLowerCase() === 'activa';
 }
 
 function formatCompactDate(value) {
@@ -63,15 +59,15 @@ function formatSignedPoints(value) {
 function resolveMovementOriginLabel(origin) {
   const normalized = normalizeText(origin).toLowerCase();
   if (normalized === 'titular') return 'Titular';
-  if (normalized === 'integrante') return 'Acompanante';
+  if (normalized === 'integrante') return 'Acompañante';
   return 'Sistema';
 }
 
 function resolveErrorMessage(error, fallbackMessage) {
   const status = Number(error?.status || 0);
-  if (status === 401) return 'Tu sesion expiro. Inicia sesion nuevamente.';
-  if (status === 403) return 'No tienes permisos para realizar esta accion.';
-  if (status === 409) return error?.data?.error?.message || error?.message || 'No fue posible completar la operacion por un conflicto de saldo.';
+  if (status === 401) return 'Tu sesión expiró. Inicia sesión nuevamente.';
+  if (status === 403) return 'No tienes permisos para realizar esta acción.';
+  if (status === 409) return error?.data?.error?.message || error?.message || 'No fue posible completar la operación por un conflicto de saldo.';
   return error?.data?.error?.message || error?.message || fallbackMessage;
 }
 
@@ -106,42 +102,6 @@ function uniqueServices(records = []) {
   return Array.from(map.values());
 }
 
-function resolveRedeemServiceBucket(serviceName, hasActivePlan = false) {
-  const normalizedName = normalizeSearchText(serviceName);
-  if (!normalizedName) return null;
-
-  if (hasActivePlan) {
-    return normalizedName.includes('facial express') ? 'facial express' : null;
-  }
-
-  if (normalizedName.includes('corte de cabello')) return 'corte de cabello';
-  if (normalizedName.includes('corte de barba')) return 'corte de barba';
-  return null;
-}
-
-function dedupeRedeemServices(serviceOptions = [], hasActivePlan = false) {
-  const dedupedById = uniqueServices(serviceOptions);
-  const dedupedByBucket = new Map();
-
-  dedupedById.forEach((service) => {
-    const bucket = resolveRedeemServiceBucket(service?.nombre_servicio, hasActivePlan);
-    if (!bucket) return;
-    if (dedupedByBucket.has(bucket)) return;
-    dedupedByBucket.set(bucket, service);
-  });
-
-  return Array.from(dedupedByBucket.values());
-}
-
-function resolveHasActivePlanFromMembership(state) {
-  const status = normalizeText(state?.estado_plan).toLowerCase();
-  if (status && !['sin_plan_activo', 'vencida', 'cancelada', 'agotada'].includes(status)) {
-    return true;
-  }
-  if (Array.isArray(state?.planes_activos) && state.planes_activos.length > 0) return true;
-  return Boolean(state?.plan_activo);
-}
-
 function persistRewardBookingContext(payload) {
   if (typeof window === 'undefined') return;
   const canjeContextToken = normalizeText(payload?.canje_context_token || payload?.id_points_tx_canje || payload?.id_points_tx);
@@ -155,10 +115,6 @@ function persistRewardBookingContext(payload) {
   };
   if (!context.id_points_tx_canje || !context.id_servicio_canje || !context.id_sucursal) return;
   window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, JSON.stringify(context));
-}
-
-function filterServicesByPlan(serviceOptions = [], hasActivePlan = false) {
-  return dedupeRedeemServices(serviceOptions, hasActivePlan);
 }
 
 function normalizeMovementRecord(record = {}, index = 0) {
@@ -186,8 +142,8 @@ function normalizeSummary(payload) {
     : Math.max(0, toSafeInteger(explicitProgress, 0));
   const rewardsAvailable = Math.max(0, toSafeInteger(summarySource?.recompensas_disponibles ?? root?.recompensas_disponibles, 0));
   const canRedeem = Boolean(summarySource?.puede_canjear ?? root?.puede_canjear ?? totalBalance >= rewardTarget);
-  const hasActivePlanRaw = summarySource?.plan_activo ?? root?.plan_activo ?? summarySource?.tiene_plan_activo ?? root?.tiene_plan_activo;
-  const hasActivePlan = hasActivePlanRaw == null ? null : Boolean(hasActivePlanRaw);
+  const summaryPlanStatus = summarySource?.estado_plan ?? root?.estado_plan;
+  const hasActivePlan = summaryPlanStatus == null ? null : isOperationalPlanState(summaryPlanStatus);
 
   const remainingPoints = canRedeem ? 0 : Math.max(0, rewardTarget - progressCurrent);
   const movementSource = summarySource?.historial
@@ -200,6 +156,8 @@ function normalizeSummary(payload) {
     : [];
 
   const serviceCandidates = uniqueServices([
+    ...(Array.isArray(summarySource?.servicios_redimibles) ? summarySource.servicios_redimibles : []),
+    ...(Array.isArray(root?.servicios_redimibles) ? root.servicios_redimibles : []),
     ...(Array.isArray(summarySource?.servicios_canjeables) ? summarySource.servicios_canjeables : []),
     ...(Array.isArray(root?.servicios_canjeables) ? root.servicios_canjeables : []),
     ...(Array.isArray(summarySource?.servicios_recompensa) ? summarySource.servicios_recompensa : []),
@@ -252,9 +210,11 @@ function resolveContributionWidths(summary) {
 }
 
 export default function ClienteCourtesyRouteSection() {
+  const location = useLocation();
   const navigate = useNavigate();
   const notifications = useNotifications();
   const redeemNavigationLockRef = useRef(false);
+  const autoRedeemHandledRef = useRef(false);
   const rewardPreparedShownRef = useRef(false);
   const rewardDiscountInfoShownRef = useRef(false);
   const [summary, setSummary] = useState(null);
@@ -265,7 +225,6 @@ export default function ClienteCourtesyRouteSection() {
   const [redeemLoading, setRedeemLoading] = useState(false);
   const [redeemSubmitting, setRedeemSubmitting] = useState(false);
   const [redeemError, setRedeemError] = useState('');
-  const [planActiveForRedeem, setPlanActiveForRedeem] = useState(false);
   const [branchOptions, setBranchOptions] = useState([]);
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [serviceOptions, setServiceOptions] = useState([]);
@@ -298,17 +257,8 @@ export default function ClienteCourtesyRouteSection() {
     [summary]
   );
 
-  const resolveRedeemServices = useCallback(async ({ branchId, hasActivePlan, summaryServices }) => {
-    const localSummaryServices = filterServicesByPlan(summaryServices, hasActivePlan);
-    if (localSummaryServices.length > 0) {
-      return localSummaryServices;
-    }
-
-    if (!branchId) return [];
-    const catalogPayload = await listPublicCatalogServices({ id_sucursal: branchId });
-    const catalogServices = Array.isArray(catalogPayload?.services) ? catalogPayload.services : [];
-    const normalizedCatalogServices = uniqueServices(catalogServices);
-    return filterServicesByPlan(normalizedCatalogServices, hasActivePlan);
+  const resolveRedeemServices = useCallback(async ({ summaryServices }) => {
+    return uniqueServices(summaryServices);
   }, []);
 
   const loadRedeemContext = useCallback(async () => {
@@ -320,10 +270,9 @@ export default function ClienteCourtesyRouteSection() {
     setSelectedServiceId('');
 
     try {
-      const [branchesResult, meResult, planResult] = await Promise.allSettled([
+      const [branchesResult, meResult] = await Promise.allSettled([
         listPublicCatalogBranches(),
         getClienteMe(),
-        getClientePlanEstado(),
       ]);
 
       const branches = branchesResult.status === 'fulfilled'
@@ -338,16 +287,7 @@ export default function ClienteCourtesyRouteSection() {
       const preferredBranchId = normalizeText(summary?.preferredBranchId || mePreferredBranch || branches[0]?.id_sucursal);
       setSelectedBranchId(preferredBranchId);
 
-      const hasPlanFromSummary = summary?.hasActivePlan;
-      const hasPlanFromEndpoint = planResult.status === 'fulfilled'
-        ? resolveHasActivePlanFromMembership(planResult.value?.data || planResult.value || {})
-        : false;
-      const hasActivePlan = hasPlanFromSummary == null ? hasPlanFromEndpoint : Boolean(hasPlanFromSummary);
-      setPlanActiveForRedeem(hasActivePlan);
-
       const resolvedServices = await resolveRedeemServices({
-        branchId: preferredBranchId,
-        hasActivePlan,
         summaryServices: Array.isArray(summary?.serviceCandidates) ? summary.serviceCandidates : [],
       });
       setServiceOptions(resolvedServices);
@@ -360,12 +300,33 @@ export default function ClienteCourtesyRouteSection() {
     }
   }, [resolveRedeemServices, summary]);
 
-  async function handleOpenRedeemModal() {
+  const handleOpenRedeemModal = useCallback(async () => {
     rewardPreparedShownRef.current = false;
     rewardDiscountInfoShownRef.current = false;
     setRedeemModalOpen(true);
     await loadRedeemContext();
-  }
+  }, [loadRedeemContext]);
+
+  useEffect(() => {
+    if (autoRedeemHandledRef.current) return;
+    const searchParams = new URLSearchParams(location.search || '');
+    const shouldAutoRedeem = normalizeText(searchParams.get('accion')).toLowerCase() === 'canjear';
+    if (!shouldAutoRedeem) return;
+    if (loadingSummary) return;
+    autoRedeemHandledRef.current = true;
+
+    if (summary?.canRedeem) {
+      // AM: Autoapertura segura solo cuando backend/summary confirma recompensa disponible.
+      void handleOpenRedeemModal();
+      notifications.info('Canjea tu recompensa para continuar con tu cita.', {
+        dedupeKey: 'cliente-auto-open-redeem',
+      });
+    }
+
+    searchParams.delete('accion');
+    const nextSearch = searchParams.toString();
+    navigate(`/home/cliente${nextSearch ? `?${nextSearch}` : ''}`, { replace: true });
+  }, [handleOpenRedeemModal, location.search, loadingSummary, navigate, notifications, summary?.canRedeem]);
 
   async function handleBranchChange(nextBranchId) {
     const safeBranchId = normalizeText(nextBranchId);
@@ -374,8 +335,6 @@ export default function ClienteCourtesyRouteSection() {
     setRedeemLoading(true);
     try {
       const resolvedServices = await resolveRedeemServices({
-        branchId: safeBranchId,
-        hasActivePlan: planActiveForRedeem,
         summaryServices: Array.isArray(summary?.serviceCandidates) ? summary.serviceCandidates : [],
       });
       setServiceOptions(resolvedServices);
@@ -392,6 +351,10 @@ export default function ClienteCourtesyRouteSection() {
 
   async function handleRedeemReward() {
     if (!selectedServiceId || !selectedBranchId || redeemSubmitting || redeemNavigationLockRef.current) return;
+    if (!CLIENT_BOOKING_ENABLED) {
+      notifications.info('El agendamiento estara disponible proximamente.', { dedupeKey: 'cliente-booking-disabled' });
+      return;
+    }
     setRedeemSubmitting(true);
     setRedeemError('');
     try {
@@ -410,7 +373,7 @@ export default function ClienteCourtesyRouteSection() {
         rewardPreparedShownRef.current = true;
       }
       if (!rewardDiscountInfoShownRef.current) {
-        notifications.info('Tus 10 puntos se descontaran cuando confirmes la cita.', {
+        notifications.info('Tus puntos se descontaran cuando confirmes la cita.', {
           dedupeKey: 'cliente-reward-discount-info',
         });
         rewardDiscountInfoShownRef.current = true;
@@ -427,12 +390,16 @@ export default function ClienteCourtesyRouteSection() {
     }
   }
 
-  const canSubmitRedeem = Boolean(selectedServiceId && selectedBranchId && !redeemLoading && !redeemSubmitting);
-  const movementHistory = useMemo(
-    () => (Array.isArray(summary?.history) ? summary.history : []),
-    [summary?.history]
-  );
-  const shouldUseMovementCarousel = movementHistory.length > 4;
+  const canSubmitRedeem = Boolean(CLIENT_BOOKING_ENABLED && selectedServiceId && selectedBranchId && !redeemLoading && !redeemSubmitting);
+  const hasRedeemableServices = Boolean(Array.isArray(summary?.serviceCandidates) && summary.serviceCandidates.length > 0);
+  const movementHistory = useMemo(() => {
+    const source = Array.isArray(summary?.history) ? summary.history : [];
+    // AM: Inicio Cliente muestra solo trazabilidad reciente (últimos 5 movimientos).
+    return source
+      .slice()
+      .sort((left, right) => new Date(right?.created_at || 0).getTime() - new Date(left?.created_at || 0).getTime())
+      .slice(0, 5);
+  }, [summary?.history]);
 
   return (
     <section className="mf-glass-surface relative overflow-hidden rounded-[24px] border border-[var(--mf-nav-border)] p-4 sm:p-5">
@@ -445,7 +412,7 @@ export default function ClienteCourtesyRouteSection() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.17em] text-[var(--mf-accent)]">Superpuntos</p>
-            <h2 className="mf-font-display mt-1 text-2xl text-[var(--mf-text)] sm:text-[32px]">Ruta a tu Cortesia</h2>
+            <h2 className="mf-font-display mt-1 text-2xl text-[var(--mf-text)] sm:text-[32px]">Ruta a tu cortesía</h2>
           </div>
           <button
             type="button"
@@ -500,7 +467,7 @@ export default function ClienteCourtesyRouteSection() {
 
             <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_74%,transparent)] p-4">
               <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-text-2)]">
-                <span>Progreso hacia tu cortesia</span>
+                <span>Progreso hacia tu cortesía</span>
                 <span>{summary.progressCurrent}/{summary.rewardTarget}</span>
               </div>
 
@@ -524,86 +491,66 @@ export default function ClienteCourtesyRouteSection() {
                 </p>
                 <p className="inline-flex items-center gap-2 text-[var(--mf-text)]">
                   <Users size={14} className="text-[#4aa6ff]" />
-                  Puntos por acompanantes: <strong>{summary.companionPoints}</strong>
+                  Puntos por acompañantes: <strong>{summary.companionPoints}</strong>
                 </p>
               </div>
 
               <p className="mt-2 text-sm text-[var(--mf-text-2)]">
                 {summary.canRedeem
                   ? 'Ya puedes canjear tu recompensa.'
-                  : `Faltan ${summary.remainingPoints} puntos para tu cortesia.`}
+                  : `Faltan ${summary.remainingPoints} puntos para tu cortesía.`}
               </p>
 
               {summary.canRedeem ? (
-                <Button
-                  type="button"
-                  className="mf-accent-gradient mt-4 h-10 rounded-xl px-4 text-sm font-semibold"
-                  onClick={() => void handleOpenRedeemModal()}
-                  disabled={redeemLoading || redeemSubmitting}
-                >
-                  <Sparkles size={14} className="mr-1.5" />
-                  Canjear mi recompensa
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    className="mf-accent-gradient mt-4 h-10 rounded-xl px-4 text-sm font-semibold"
+                    onClick={() => void handleOpenRedeemModal()}
+                    disabled={redeemLoading || redeemSubmitting || !hasRedeemableServices}
+                    title={hasRedeemableServices ? undefined : 'No hay servicios disponibles para canje en este momento.'}
+                  >
+                    <Sparkles size={14} className="mr-1.5" />
+                    Canjear mi recompensa
+                  </Button>
+                  {!hasRedeemableServices ? (
+                    <p className="mt-2 text-sm text-[var(--mf-text-2)]">
+                      No hay servicios disponibles para canje en este momento.
+                    </p>
+                  ) : null}
+                </>
               ) : null}
             </div>
 
-            <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">Ultimos movimientos</p>
+            <section className="mt-6 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">Últimos movimientos</p>
+              <p className="mt-1 text-xs text-[var(--mf-text-2)]">Revisa tus últimos 5 movimientos de puntos.</p>
               {movementHistory.length ? (
-                shouldUseMovementCarousel ? (
-                  <div className="mt-3">
-                    <CardsCarousel
-                      items={movementHistory}
-                      getItemKey={(movement) => movement.id}
-                      pageSizeByViewport={{ mobile: 4, tablet: 4, desktop: 4 }}
-                      gridClassName="grid grid-cols-1 gap-2"
-                      compactControls
-                      showHeaderTag={false}
-                      renderItem={(movement) => {
-                        const positive = movement.puntos >= 0;
-                        return (
-                          <article className="flex items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-[var(--mf-text)]">{movement.motivo}</p>
-                              <p className="truncate text-xs text-[var(--mf-text-2)]">
-                                {formatCompactDate(movement.created_at)} - {resolveMovementOriginLabel(movement.origen_punto_codigo)}
-                              </p>
-                            </div>
-                            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${positive ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>
-                              {formatSignedPoints(movement.puntos)}
-                            </span>
-                          </article>
-                        );
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="mt-3 space-y-2">
-                    {movementHistory.map((movement) => {
-                      const positive = movement.puntos >= 0;
-                      return (
-                        <article
-                          key={movement.id}
-                          className="flex items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2"
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-[var(--mf-text)]">{movement.motivo}</p>
-                            <p className="truncate text-xs text-[var(--mf-text-2)]">
-                              {formatCompactDate(movement.created_at)} - {resolveMovementOriginLabel(movement.origen_punto_codigo)}
-                            </p>
-                          </div>
-                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${positive ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>
-                            {formatSignedPoints(movement.puntos)}
-                          </span>
-                        </article>
-                      );
-                    })}
-                  </div>
-                )
+                <div className="mt-3 space-y-2">
+                  {movementHistory.map((movement) => {
+                    const positive = movement.puntos >= 0;
+                    return (
+                      <article
+                        key={movement.id}
+                        className="flex items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-[var(--mf-text)]">{movement.motivo}</p>
+                          <p className="truncate text-xs text-[var(--mf-text-2)]">
+                            {formatCompactDate(movement.created_at)} - {resolveMovementOriginLabel(movement.origen_punto_codigo)}
+                          </p>
+                        </div>
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${positive ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>
+                          {formatSignedPoints(movement.puntos)}
+                        </span>
+                      </article>
+                    );
+                  })}
+                </div>
               ) : (
-                <p className="mt-2 text-sm text-[var(--mf-text-2)]">Aun no hay movimientos de puntos.</p>
+                <p className="mt-2 text-sm text-[var(--mf-text-2)]">Aún no tienes movimientos. Tus puntos aparecerán aquí después de tus visitas.</p>
               )}
-            </div>
+            </section>
           </>
         ) : null}
       </div>
@@ -613,17 +560,13 @@ export default function ClienteCourtesyRouteSection() {
           <DialogHeader>
             <DialogTitle>Canjear recompensa</DialogTitle>
             <DialogDescription>
-              Selecciona la sucursal y servicio para registrar tu canje de 10 puntos.
+              Selecciona la sucursal y servicio para preparar tu recompensa. Los puntos se descuentan al confirmar la cita.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">
             <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3 text-sm text-[var(--mf-text-2)]">
-              <p>
-                {planActiveForRedeem
-                  ? 'Plan activo detectado: solo puedes canjear Facial Express.'
-                  : 'Sin plan activo: puedes canjear Corte de Cabello o Corte de Barba.'}
-              </p>
+              <p>Los servicios disponibles para canje se cargan desde tu resumen de MasterPuntos.</p>
             </div>
 
             <div>
@@ -676,7 +619,7 @@ export default function ClienteCourtesyRouteSection() {
                 </div>
               ) : (
                 <p className="mt-2 text-sm text-[var(--mf-text-2)]">
-                  Aun no hay servicios disponibles para canje en esta fase.
+                  No hay servicios disponibles para canje en este momento.
                 </p>
               )}
             </div>
@@ -701,10 +644,11 @@ export default function ClienteCourtesyRouteSection() {
               type="button"
               onClick={() => void handleRedeemReward()}
               disabled={!canSubmitRedeem}
+              title={CLIENT_BOOKING_ENABLED ? undefined : 'El agendamiento estara disponible proximamente.'}
               className="gap-2"
             >
               {redeemSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
-              Confirmar canje
+              {CLIENT_BOOKING_ENABLED ? 'Confirmar canje' : CLIENT_LOCK_MESSAGE}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -59,6 +59,44 @@ function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
 }
 
+const SUCURSAL_DEPENDENCY_LABELS = {
+  empleados_activos: 'Empleados activos',
+  roles_activos: 'Roles activos',
+  tarifas_activas: 'Servicios/tarifas activas',
+  citas_futuras_activas: 'Citas futuras activas',
+};
+
+function buildSucursalDependencyMessage(err) {
+  const error = err?.data?.error || err?.error || {};
+  if (error?.code !== 'SUCURSALES_HAS_ACTIVE_DEPENDENCIES') {
+    return null;
+  }
+
+  const details = error?.details || err?.data?.details || err?.details || {};
+  const dependencies = Object.entries(SUCURSAL_DEPENDENCY_LABELS)
+    .map(([key, label]) => ({ key, label, count: Number(details?.[key] || 0) }))
+    .filter((item) => Number.isFinite(item.count) && item.count > 0);
+
+  const baseMessage = error?.message || extractMessage(err);
+  if (dependencies.length === 0) {
+    return {
+      message: baseMessage,
+      dependencies: [],
+    };
+  }
+
+  return {
+    message: [
+      'No puedes inactivar esta sucursal porque todavía tiene dependencias activas:',
+      '',
+      ...dependencies.map((item) => `• ${item.label}: ${item.count}`),
+      '',
+      'Primero desactiva, reasigna o finaliza esas dependencias antes de inactivar la sucursal.',
+    ].join('\n'),
+    dependencies,
+  };
+}
+
 function quickFilterButtonClass(isActive) {
   // JK: Realce visual para filtros rapidos en mobile y desktop.
   return isActive
@@ -286,6 +324,7 @@ export default function AdminSucursalesPage() {
 
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState('');
+  const [dependencyDialog, setDependencyDialog] = useState(null);
 
   const empresaNameById = useMemo(() => {
     const map = new Map();
@@ -525,7 +564,18 @@ export default function AdminSucursalesPage() {
         navigate('/login');
         return;
       }
-      notifications.error(extractMessage(err), { dedupeKey: 'sucursales-toggle-error' });
+      const dependencyMessage = isActive ? buildSucursalDependencyMessage(err) : null;
+      if (dependencyMessage) {
+        setDependencyDialog({
+          sucursal,
+          ...dependencyMessage,
+        });
+        notifications.error('No se puede inactivar la sucursal. Revisa las dependencias activas.', {
+          dedupeKey: 'sucursales-toggle-dependencies',
+        });
+      } else {
+        notifications.error(extractMessage(err), { dedupeKey: 'sucursales-toggle-error' });
+      }
     } finally {
       setActionLoadingId('');
     }
@@ -707,7 +757,9 @@ export default function AdminSucursalesPage() {
         title={confirmTarget?.estado ? 'Inactivar sucursal' : 'Activar sucursal'}
         description={
           confirmTarget
-            ? `Vas a ${confirmTarget.estado ? 'inactivar' : 'activar'} ${confirmTarget.nombre_sucursal}.`
+            ? confirmTarget.estado
+              ? `Vas a inactivar ${confirmTarget.nombre_sucursal}. Esta acción solo será posible si no tiene empleados, roles, servicios/tarifas o citas futuras activas.`
+              : `Vas a activar ${confirmTarget.nombre_sucursal}.`
             : ''
         }
         confirmLabel={confirmTarget?.estado ? 'Inactivar' : 'Activar'}
@@ -715,6 +767,41 @@ export default function AdminSucursalesPage() {
         loading={Boolean(actionLoadingId)}
         onConfirm={handleToggleLifecycle}
       />
+
+      <Dialog open={Boolean(dependencyDialog)} onOpenChange={(open) => {
+        if (!open) {
+          setDependencyDialog(null);
+        }
+      }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>No se puede inactivar la sucursal</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 text-sm text-[var(--mf-text-2)]">
+            <p>
+              {dependencyDialog?.sucursal?.nombre_sucursal || 'La sucursal seleccionada'} todavía tiene dependencias activas:
+            </p>
+            {dependencyDialog?.dependencies?.length ? (
+              <ul className="space-y-2 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_42%,transparent)] p-3">
+                {dependencyDialog.dependencies.map((item) => (
+                  <li key={item.key} className="flex items-center justify-between gap-3">
+                    <span>{item.label}</span>
+                    <span className="font-semibold text-[var(--mf-text)]">{item.count}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>{dependencyDialog?.message || 'No se pudo inactivar la sucursal.'}</p>
+            )}
+            <p>Primero desactiva, reasigna o finaliza estas dependencias.</p>
+          </div>
+
+          <DialogFooter>
+            <Button onClick={() => setDependencyDialog(null)}>Entendido</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
         <DialogContent className="sm:max-w-xl">

@@ -8,6 +8,29 @@ import million from "million/compiler";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function getManualChunk(id) {
+  const normalizedId = id.split(path.sep).join("/");
+
+  if (!normalizedId.includes("/node_modules/")) {
+    return undefined;
+  }
+
+  if (
+    normalizedId.includes("/node_modules/react/") ||
+    normalizedId.includes("/node_modules/react-dom/") ||
+    normalizedId.includes("/node_modules/react-router/") ||
+    normalizedId.includes("/node_modules/react-router-dom/")
+  ) {
+    return "vendor-react";
+  }
+
+  if (normalizedId.includes("/node_modules/framer-motion/")) {
+    return "vendor-motion";
+  }
+
+  return undefined;
+}
+
 export default defineConfig(({ mode }) => {
   const isProduction = mode === "production";
 
@@ -20,6 +43,13 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
+      },
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: getManualChunk,
+        },
       },
     },
     server: {

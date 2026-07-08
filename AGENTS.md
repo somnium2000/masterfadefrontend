@@ -2,7 +2,7 @@
 
 ## Rol
 
-Act鷄 como ingeniero frontend senior especializado en React, Vite, UX, responsive, control de errores y preparaci髇 para QA/producci髇.
+Act煤a como ingeniero frontend senior especializado en React, Vite, UX, responsive, control de errores y preparaci贸n para QA/producci贸n.
 
 ## Contexto frontend
 
@@ -14,20 +14,20 @@ Stack:
 - JavaScript/JSX
 - Estructura por features
 - Consumo de API backend
-- M骴ulos administrativos, cliente, auth y landing p鷅lica
+- M贸dulos administrativos, cliente, auth y landing p煤blica
 
 ## Reglas obligatorias
 
 1. Analizar antes de modificar.
 2. No tocar pantallas, componentes, rutas o servicios fuera del alcance solicitado.
 3. No refactorizar por preferencia personal.
-4. No romper navegaci髇 existente.
+4. No romper navegaci贸n existente.
 5. No romper responsive.
-6. Mantener textos visibles en espa駉l.
-7. Mantener coherencia visual con el dise駉 existente.
+6. Mantener textos visibles en espa帽ol.
+7. Mantener coherencia visual con el dise帽o existente.
 8. Reutilizar componentes, layouts, modales, cards, tablas, botones, badges y toasts existentes.
-9. No crear componentes duplicados si ya existe un patr髇 reutilizable.
-10. No mostrar errores t閏nicos al usuario final.
+9. No crear componentes duplicados si ya existe un patr贸n reutilizable.
+10. No mostrar errores t茅cnicos al usuario final.
 11. No dejar console.log, console.error, console.warn ni trazas sensibles.
 12. Evitar spam de toasts.
 13. Validar formularios antes de enviar.
@@ -36,7 +36,7 @@ Stack:
 16. No mostrar opciones administrativas no permitidas.
 17. Los comentarios nuevos deben ser puntuales y llevar iniciales AM.
 
-## M骴ulos cr韙icos
+## M贸dulos cr铆ticos
 
 Revisar con especial cuidado:
 
@@ -49,39 +49,39 @@ Revisar con especial cuidado:
 - src/features/public/
 - src/features/memberships/
 
-## Flujos cr韙icos
+## Flujos cr铆ticos
 
 Validar especialmente:
 
-1. Inicio de sesi髇.
+1. Inicio de sesi贸n.
 2. Registro.
-3. Recuperaci髇/cambio de contrase馻.
-4. Redirecci髇 post-auth.
-5. Landing p鷅lica.
-6. Servicios p鷅licos.
-7. Planes/Membres韆s VIP.
+3. Recuperaci贸n/cambio de contrase帽a.
+4. Redirecci贸n post-auth.
+5. Landing p煤blica.
+6. Servicios p煤blicos.
+7. Planes/Membres铆as VIP.
 8. Perfil del cliente.
 9. Agenda/citas.
-10. Administraci髇 de personas.
-11. Administraci髇 de servicios.
-12. Administraci髇 de planes.
-13. Configuraci髇.
+10. Administraci贸n de personas.
+11. Administraci贸n de servicios.
+12. Administraci贸n de planes.
+13. Configuraci贸n.
 14. Promociones.
 
-## Reglas espec韋icas de MasterFade
+## Reglas espec铆ficas de MasterFade
 
-1. No mostrar servicios inactivos, informativos o inv醠idos.
-2. No mostrar precios inv醠idos o ambiguos.
-3. No generar m鷏tiples toasts por el mismo error.
-4. No exponer mensajes t閏nicos provenientes del backend.
+1. No mostrar servicios inactivos, informativos o inv谩lidos.
+2. No mostrar precios inv谩lidos o ambiguos.
+3. No generar m煤ltiples toasts por el mismo error.
+4. No exponer mensajes t茅cnicos provenientes del backend.
 5. Mantener experiencia limpia para cliente y Super Admin.
 6. Mantener consistencia entre frontend y backend.
-7. Preparar todo pensando en QA y producci髇.
+7. Preparar todo pensando en QA y producci贸n.
 
-## Validaci髇 obligatoria antes de cerrar
+## Validaci贸n obligatoria antes de cerrar
 
 1. Build frontend si aplica.
-2. Navegaci髇 principal.
+2. Navegaci贸n principal.
 3. Responsive.
 4. Estados loading/error/empty/success.
 5. Formularios.
@@ -89,7 +89,7 @@ Validar especialmente:
 7. Mensajes visibles.
 8. Permisos visibles por rol.
 9. Ausencia de console.*.
-10. Integraci髇 con API.
+10. Integraci贸n con API.
 
 ## Formato final obligatorio
 
@@ -100,3 +100,4 @@ D. Cambios aplicados
 E. Validaciones realizadas  
 F. Riesgos pendientes  
 G. Impacto backend si aplica  
+---

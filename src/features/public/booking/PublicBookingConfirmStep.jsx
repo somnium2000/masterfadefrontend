@@ -1,8 +1,10 @@
 import { ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '../../../components/ui/button.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
-import { usePublicBookingFlow } from './PublicBookingFlow.jsx';
+import { usePublicBookingFlow } from './BookingFlowContext.jsx';
+import BookingActions from './components/BookingActions.jsx';
+import BookingStepHeader from './components/BookingStepHeader.jsx';
 import {
   formatCurrencyHnl,
   formatDateOnly,
@@ -21,45 +23,96 @@ export default function PublicBookingConfirmStep() {
     cancelBookingFlow,
     canConfirmWithoutPayment,
     paymentRequired,
+    membershipHasContext,
+    membershipUxMessage,
+    membershipAplicaEnCita,
+    membershipCompanionNotice,
     mode = 'public',
     canUseClienteHold = false,
   } = usePublicBookingFlow();
   const notifications = useNotifications();
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const hasHoldReady = Boolean(holdResult && String(holdResult?.id_grupo_cita || '').trim());
 
   const subtotalFallback = bookingBlocksSummary.reduce(
     (acc, block) => acc + Number(block?.total_hnl || 0),
     0
   );
+  const hasPackageSelection = bookingBlocksSummary.some((block) => (
+    block?.selection_type === 'package'
+    || block?.selection_type === 'mixed'
+    || block?.selectedPackage
+    || block?.packageId
+  ));
   const subtotalApi = Number(holdPricing?.subtotal_hnl ?? holdResult?.subtotal_hnl ?? holdResult?.monto_total_hnl ?? 0);
   const subtotalResolved = Number.isFinite(subtotalApi) && subtotalApi > 0 ? subtotalApi : subtotalFallback;
   const descuento = Number(holdPricing?.descuento_total_hnl ?? holdResult?.descuento_total_hnl ?? 0);
-  const coveredByPlan = Number(holdPricing?.cubierto_por_plan_hnl || 0);
-  const coveredByReward = Number(holdPricing?.cubierto_por_recompensa_hnl || 0);
+  const coveredByPlanFallback = bookingBlocksSummary.reduce((acc, block) => {
+    const selected = Array.isArray(block?.selectedServices) ? block.selectedServices : [];
+    return acc + selected.reduce((sum, service) => {
+      if (!service?.coveredByPlan) return sum;
+      return sum + Number(service?.precio_hnl ?? service?.subtotal_hnl ?? 0);
+    }, 0);
+  }, 0);
+  const coveredByRewardFallback = bookingBlocksSummary.reduce((acc, block) => {
+    const selected = Array.isArray(block?.selectedServices) ? block.selectedServices : [];
+    return acc + selected.reduce((sum, service) => {
+      if (!service?.coveredByReward) return sum;
+      return sum + Number(service?.precio_hnl ?? service?.subtotal_hnl ?? 0);
+    }, 0);
+  }, 0);
+  const coveredByPlan = Number(holdPricing?.cubierto_por_plan_hnl ?? coveredByPlanFallback ?? 0);
+  const coveredByReward = Number(holdPricing?.cubierto_por_recompensa_hnl ?? coveredByRewardFallback ?? 0);
   const coveredTotal = Math.max(0, coveredByPlan + coveredByReward);
   const extrasToPay = Number(
     holdPricing?.extras_a_pagar_hnl
     ?? holdResult?.extras_a_pagar_hnl
     ?? holdResult?.total_pagar_hnl
+    ?? holdResult?.total_hnl
     ?? 0
   );
-  const totalToPayApi = Number(holdPricing?.total_pagar_hnl ?? holdResult?.total_pagar_hnl ?? 0);
+  const totalToPayApi = Number(holdPricing?.total_pagar_hnl ?? holdResult?.total_pagar_hnl ?? holdResult?.total_hnl ?? 0);
   const subtotalMenosDescuento = Math.max(0, subtotalResolved - Math.max(0, descuento));
   const totalServiciosNeto = Math.max(0, subtotalMenosDescuento - coveredTotal);
-  const totalToPay = paymentRequired
-    ? (Number.isFinite(totalToPayApi) && totalToPayApi > 0 ? totalToPayApi : totalServiciosNeto)
-    : totalServiciosNeto;
+  const hasBackendTotal = hasHoldReady && Number.isFinite(totalToPayApi);
+  const totalToPay = hasBackendTotal ? Math.max(0, totalToPayApi) : totalServiciosNeto;
   const requiresOnlinePayment = Boolean(paymentRequired && totalToPay > 0);
   const totalLabel = paymentRequired ? 'Total a pagar' : 'Total a pagar en salón';
-  const showExtrasRow = Number.isFinite(extrasToPay) && extrasToPay > 0;
+  const safeCoveredByPlan = Math.max(0, Number(coveredByPlan || 0));
+  const safeExtrasToPay = Math.max(0, Number(extrasToPay || 0));
+  const hasPlanCoverage = safeCoveredByPlan > 0;
+  const hasSaldoToPay = hasPlanCoverage && safeExtrasToPay > 0;
+  const isFullyCoveredByPlan = hasPlanCoverage && safeExtrasToPay <= 0;
+  const hasRealDiscount = Math.max(0, descuento) > 0;
+  const showIsvLine = totalToPay > 0;
   const mustLoginForNoPaymentConfirmation = Boolean(!requiresOnlinePayment && !canUseClienteHold);
 
   const handleContinueAction = async () => {
-    if (submitting) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
-      if (requiresOnlinePayment) {
+      let currentHold = holdResult;
+      if (!currentHold && typeof submitHold === 'function') {
+        currentHold = await submitHold();
+      }
+      if (!currentHold) return;
+
+      const backendTotalToPay = Number(
+        currentHold?.total_pagar_hnl
+        ?? currentHold?.monto_pendiente_hnl
+        ?? currentHold?.total_hnl
+        ?? NaN
+      );
+      const resolvedTotalToPay = Number.isFinite(backendTotalToPay)
+        ? backendTotalToPay
+        : Number(
+          holdPricing?.total_pagar_hnl
+          ?? totalToPay
+          ?? 0
+        );
+      if (paymentRequired && resolvedTotalToPay > 0) {
         if (typeof startCheckout === 'function') {
           await startCheckout();
         }
@@ -70,24 +123,14 @@ export default function PublicBookingConfirmStep() {
         return;
       }
 
-      const resolvedTotalToPay = Number(
-        holdPricing?.total_pagar_hnl
-        ?? holdResult?.total_pagar_hnl
-        ?? totalToPay
-        ?? 0
-      );
       const canConfirmNow = Boolean(
         !paymentRequired
-        || canConfirmWithoutPayment
         || (Number.isFinite(resolvedTotalToPay) && resolvedTotalToPay === 0)
+        || canConfirmWithoutPayment
       );
       if (!canConfirmNow) return;
 
-      let localGroupId = String(holdResult?.id_grupo_cita || '').trim();
-      if (!localGroupId && typeof submitHold === 'function') {
-        const freshHold = await submitHold();
-        localGroupId = String(freshHold?.id_grupo_cita || '').trim();
-      }
+      const localGroupId = String(currentHold?.id_grupo_cita || '').trim();
       if (!localGroupId) {
         notifications.error('No se pudo preparar la reserva para confirmar. Vuelve a agenda e inténtalo de nuevo.', {
           dedupeKey: 'public-booking-confirm-no-payment-group-missing',
@@ -102,6 +145,7 @@ export default function PublicBookingConfirmStep() {
         });
       }
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -117,7 +161,11 @@ export default function PublicBookingConfirmStep() {
   return (
     <div className="citas-confirm-wrap">
       <div className="citas-surface p-5">
-        <h3 className="citas-confirm-title">Resumen de cita</h3>
+        <BookingStepHeader
+          title="Resumen de cita"
+          headingLevel="h3"
+          titleClassName="citas-confirm-title"
+        />
         {mode === 'preview' ? (
           <p className="citas-selected-date mt-2">Modo vista previa: puedes validar estructura y reglas antes de publicar.</p>
         ) : null}
@@ -125,6 +173,16 @@ export default function PublicBookingConfirmStep() {
           <p className="citas-selected-date mt-2">
             El bloqueo del horario se realizará cuando continúes a pago o confirmes la reserva.
           </p>
+        ) : null}
+        {membershipUxMessage ? (
+          <div className="public-booking-payment-note mt-2">
+            <span>{membershipUxMessage}</span>
+          </div>
+        ) : null}
+        {membershipCompanionNotice ? (
+          <div className="public-booking-payment-note mt-2">
+            <span>{membershipCompanionNotice}</span>
+          </div>
         ) : null}
         {Number(coveredByReward) > 0 ? (
           <>
@@ -163,37 +221,46 @@ export default function PublicBookingConfirmStep() {
         </div>
 
         <div className="citas-confirm-row mt-4">
-          <span>Total servicios</span>
+          <span>{hasPackageSelection ? 'Total de la reserva' : 'Total servicios'}</span>
           <span>{formatCurrencyHnl(subtotalResolved)}</span>
         </div>
-        <div className="citas-confirm-row">
-          <span>Descuento</span>
-          <span>-{formatCurrencyHnl(Math.max(0, descuento))}</span>
-        </div>
+        {hasRealDiscount ? (
+          <div className="citas-confirm-row">
+            <span>Descuento</span>
+            <span>-{formatCurrencyHnl(Math.max(0, descuento))}</span>
+          </div>
+        ) : null}
         {coveredByReward > 0 ? (
           <div className="citas-confirm-row">
             <span>Cubierto por recompensa</span>
             <span>-{formatCurrencyHnl(coveredByReward)}</span>
           </div>
         ) : null}
-        {coveredByPlan > 0 ? (
+        {hasPlanCoverage ? (
           <div className="citas-confirm-row">
-            <span>Cubierto por tu plan</span>
-            <span>-{formatCurrencyHnl(coveredByPlan)}</span>
+            <span>{membershipHasContext ? 'Cubierto por tu membresía' : 'Cubierto por tu plan'}</span>
+            <span>-{formatCurrencyHnl(safeCoveredByPlan)}</span>
           </div>
         ) : null}
-        {showExtrasRow ? (
+        {hasSaldoToPay ? (
           <div className="citas-confirm-row">
-            <span>Extras a pagar</span>
-            <span>{formatCurrencyHnl(extrasToPay)}</span>
+            <span>{membershipHasContext ? 'Extras y acompañantes' : 'Saldo a pagar'}</span>
+            <span>{formatCurrencyHnl(safeExtrasToPay)}</span>
           </div>
         ) : null}
-        <div className="citas-confirm-row">
-          <span>ISV</span>
-          <span>{formatCurrencyHnl(0)}</span>
-        </div>
+        {isFullyCoveredByPlan ? (
+          <div className="public-booking-payment-note mt-2">
+            <span>Cubierto completamente por tu plan.</span>
+          </div>
+        ) : null}
+        {showIsvLine ? (
+          <div className="citas-confirm-row">
+            <span>ISV</span>
+            <span>{formatCurrencyHnl(0)}</span>
+          </div>
+        ) : null}
         <div className="citas-confirm-row mt-1">
-          <span>{totalLabel}</span>
+          <span>{membershipHasContext ? 'Total a pagar hoy' : totalLabel}</span>
           <span>{formatCurrencyHnl(totalToPay)}</span>
         </div>
 
@@ -203,7 +270,7 @@ export default function PublicBookingConfirmStep() {
           </span>
         </div>
 
-        <div className="public-booking-actions is-inline mt-4">
+        <BookingActions inline className="mt-4">
           <Button variant="outline" className="gap-2" onClick={goToAgenda} disabled={submitting}>
             <ArrowLeft size={15} />
             Volver a agenda
@@ -212,7 +279,7 @@ export default function PublicBookingConfirmStep() {
             variant="outline"
             className="gap-2"
             onClick={() => {
-              void cancelBookingFlow();
+              void cancelBookingFlow('confirm');
             }}
             disabled={submitting}
           >
@@ -223,15 +290,17 @@ export default function PublicBookingConfirmStep() {
             onClick={handleContinueAction}
             disabled={
               submitting
-              || (!requiresOnlinePayment && paymentRequired && !canConfirmWithoutPayment)
+              || (!requiresOnlinePayment && paymentRequired && totalToPay > 0)
               || (!requiresOnlinePayment && !canUseClienteHold)
             }
           >
             {submitting ? <Loader2 size={16} className="animate-spin" /> : null}
-            {requiresOnlinePayment ? 'Continuar al pago' : 'Confirmar cita'}
+            {requiresOnlinePayment
+              ? 'Continuar al pago'
+              : (membershipAplicaEnCita && totalToPay === 0 ? 'Agendar con mi membresía' : 'Confirmar cita')}
             <ArrowRight size={15} />
           </Button>
-        </div>
+        </BookingActions>
         {mustLoginForNoPaymentConfirmation ? (
           <p className="citas-selected-date mt-2">
             Para confirmar sin pago en línea debes iniciar sesión.

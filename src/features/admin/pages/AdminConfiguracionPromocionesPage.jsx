@@ -59,6 +59,7 @@ const PROMOTION_TYPE_RULES = {
   descuento_paquete: { aplica_a: 'paquete', mecanicas: ['porcentaje', 'monto_fijo'], mecanica_default: 'porcentaje' },
   dos_por_uno_servicio: { aplica_a: 'servicio', mecanicas: ['dos_por_uno'], mecanica_default: 'dos_por_uno' },
 };
+const BUSINESS_TIME_ZONE = 'America/Tegucigalpa';
 
 function extractMessage(error) {
   return error?.data?.error?.message || error?.message || 'Error desconocido.';
@@ -158,6 +159,71 @@ function toTimeSeconds(value) {
   return (hours * 3600) + (minutes * 60);
 }
 
+function getBusinessNowParts() {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(new Date());
+  const pick = (type) => parts.find((entry) => entry.type === type)?.value || '';
+  return {
+    date: `${pick('year')}-${pick('month')}-${pick('day')}`,
+    time: `${pick('hour')}:${pick('minute')}:${pick('second')}`,
+  };
+}
+
+function getPromotionVigenciaStatus({
+  vigencia_desde: vigenciaDesdeRaw,
+  vigencia_hasta: vigenciaHastaRaw,
+  vigencia_hora_desde: horaDesdeRaw,
+  vigencia_hora_hasta: horaHastaRaw,
+} = {}, nowParts = getBusinessNowParts()) {
+  const nowDate = toDateInputValue(nowParts?.date);
+  const nowTime = normalizeTimeInput(nowParts?.time);
+  const nowSeconds = toTimeSeconds(nowTime);
+  const vigenciaDesde = toDateInputValue(vigenciaDesdeRaw);
+  const vigenciaHasta = toDateInputValue(vigenciaHastaRaw);
+  const horaDesde = normalizeTimeInput(horaDesdeRaw);
+  const horaHasta = normalizeTimeInput(horaHastaRaw);
+  const horaDesdeSeconds = toTimeSeconds(horaDesde);
+  const horaHastaSeconds = toTimeSeconds(horaHasta);
+  const crossesMidnight = (
+    Number.isFinite(horaDesdeSeconds)
+    && Number.isFinite(horaHastaSeconds)
+    && horaDesdeSeconds > horaHastaSeconds
+  );
+
+  if (!vigenciaDesde && !vigenciaHasta && !horaDesde && !horaHasta) return 'sin_vigencia';
+  if (vigenciaDesde && nowDate < vigenciaDesde) return 'programada';
+  if (vigenciaHasta && nowDate > vigenciaHasta) return 'vencida';
+
+  let inWindow = true;
+  if (Number.isFinite(horaDesdeSeconds) || Number.isFinite(horaHastaSeconds)) {
+    if (Number.isFinite(horaDesdeSeconds) && !Number.isFinite(horaHastaSeconds)) inWindow = nowSeconds >= horaDesdeSeconds;
+    else if (!Number.isFinite(horaDesdeSeconds) && Number.isFinite(horaHastaSeconds)) inWindow = nowSeconds <= horaHastaSeconds;
+    else if (!crossesMidnight) inWindow = nowSeconds >= horaDesdeSeconds && nowSeconds <= horaHastaSeconds;
+    else inWindow = nowSeconds >= horaDesdeSeconds || nowSeconds <= horaHastaSeconds;
+  }
+
+  if (crossesMidnight && vigenciaDesde && nowDate === vigenciaDesde) inWindow = nowSeconds >= horaDesdeSeconds;
+  if (crossesMidnight && vigenciaHasta && nowDate === vigenciaHasta) inWindow = nowSeconds <= horaHastaSeconds;
+
+  if (!inWindow) {
+    if (vigenciaDesde && nowDate === vigenciaDesde) return 'programada';
+    if (vigenciaHasta && nowDate === vigenciaHasta) return 'vencida';
+    if (Number.isFinite(horaDesdeSeconds) && nowSeconds < horaDesdeSeconds) return 'programada';
+    return 'vencida';
+  }
+
+  return 'vigente';
+}
+
 function formatTimeDisplay(value) {
   // JK: Presenta HH:mm en formato amigable de 12 horas para UI.
   const normalized = normalizeTimeInput(value);
@@ -255,9 +321,9 @@ function parsePositiveInteger(value) {
 
 function sortPromos(list = []) {
   return [...(Array.isArray(list) ? list : [])].sort((a, b) => {
-    if (Boolean(a?.destacada) !== Boolean(b?.destacada)) return a?.destacada ? -1 : 1;
-    const order = Number(a?.orden_visual ?? 100) - Number(b?.orden_visual ?? 100);
-    if (order !== 0) return order;
+    const aDate = new Date(a?.updated_at || a?.created_at || 0).getTime();
+    const bDate = new Date(b?.updated_at || b?.created_at || 0).getTime();
+    if (bDate !== aDate) return bDate - aDate;
     return String(a?.titulo || '').localeCompare(String(b?.titulo || ''), 'es');
   });
 }
@@ -273,12 +339,22 @@ function stateClass(v) { return v === 'publicada' ? 'mf-badge-green' : v === 'ar
 function PromotionStateBadge({ estado }) { return <span className={`mf-badge ${stateClass(estado)}`}>{stateLabel(estado)}</span>; }
 function PromotionVisibilityBadge({ visible }) { return <span className={`mf-badge ${visible ? 'mf-badge-green' : 'mf-badge-muted'}`}>{visible ? 'Visible' : 'Oculta'}</span>; }
 function PromotionFeaturedBadge({ destacada }) { return <span className={`mf-badge ${destacada ? 'mf-badge-gold' : 'mf-badge-muted'}`}>{destacada ? 'Destacada' : 'Normal'}</span>; }
-function PromotionVigenciaBadge({ vigenciaHasta }) {
-  const endDate = toDateInputValue(vigenciaHasta);
-  if (!endDate) return <span className="mf-badge mf-badge-muted">Sin vigencia</span>;
-  const today = new Date().toISOString().slice(0, 10);
-  const expired = endDate < today;
-  return <span className={`mf-badge ${expired ? 'mf-badge-red' : 'mf-badge-green'}`}>{expired ? 'Vencida' : 'Vigente'}</span>;
+function PromotionVigenciaBadge({
+  vigenciaDesde,
+  vigenciaHasta,
+  vigenciaHoraDesde,
+  vigenciaHoraHasta,
+}) {
+  const status = getPromotionVigenciaStatus({
+    vigencia_desde: vigenciaDesde,
+    vigencia_hasta: vigenciaHasta,
+    vigencia_hora_desde: vigenciaHoraDesde,
+    vigencia_hora_hasta: vigenciaHoraHasta,
+  });
+  if (status === 'sin_vigencia') return <span className="mf-badge mf-badge-muted">Sin vigencia</span>;
+  if (status === 'programada') return <span className="mf-badge mf-badge-muted">Programada</span>;
+  if (status === 'vencida') return <span className="mf-badge mf-badge-red">Vencida</span>;
+  return <span className="mf-badge mf-badge-green">Vigente</span>;
 }
 
 function validate(values) {
@@ -862,6 +938,7 @@ export default function AdminConfiguracionPromocionesPage() {
     try { const stored = localStorage.getItem('mf-view-promociones'); return stored === 'table' || stored === 'cards' ? stored : 'cards'; }
     catch { return 'cards'; }
   });
+  const [cardsResetVersion, setCardsResetVersion] = useState(0);
 
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -898,6 +975,18 @@ export default function AdminConfiguracionPromocionesPage() {
       return true;
     });
   }, [filters, promociones, search, sucursal]);
+  const cardsResetKey = useMemo(() => {
+    return [
+      cardsResetVersion,
+      sucursal || 'all',
+      search.trim().toLowerCase(),
+      filters.estado,
+      filters.visibilidad,
+      filters.destacada,
+      filters.idSucursal,
+      filteredPromociones.length,
+    ].join('|');
+  }, [cardsResetVersion, filteredPromociones.length, filters.destacada, filters.estado, filters.idSucursal, filters.visibilidad, search, sucursal]);
   const activeFilterCount = useMemo(() => Object.values(filters).filter((value) => value !== 'all').length, [filters]);
   const chips = useMemo(() => {
     const out = [];
@@ -1119,6 +1208,7 @@ export default function AdminConfiguracionPromocionesPage() {
         emitCatalogSync('promocion-created');
         notifications.success('Promocion creada correctamente.', { dedupeKey: 'promos-create-ok' });
       }
+      setCardsResetVersion((value) => value + 1);
       setDialogOpen(false);
       setEditTarget(null);
       await fetchPromociones({ silent: true });
@@ -1183,6 +1273,7 @@ export default function AdminConfiguracionPromocionesPage() {
         <CardsCarousel
           items={filteredPromociones}
           pageSizeByViewport={{ mobile: 1, tablet: 2, desktop: 3 }}
+          resetKey={cardsResetKey}
           getItemKey={(promo) => `${promo?.id_promocion || 'promo'}:${promo?.id_sucursal || 'all'}`}
           renderItem={(promo, index, pageIndex) => (
             <DataCard
@@ -1205,7 +1296,17 @@ export default function AdminConfiguracionPromocionesPage() {
                 { label: 'Aplicacion', value: promo.resumen_promocion || '-' },
                 { label: 'Publico', value: <PromotionVisibilityBadge visible={Boolean(promo.visible_publico)} /> },
                 { label: 'Destacada', value: <PromotionFeaturedBadge destacada={Boolean(promo.destacada)} /> },
-                { label: 'Vigencia', value: <PromotionVigenciaBadge vigenciaHasta={promo.vigencia_hasta} /> },
+                {
+                  label: 'Vigencia',
+                  value: (
+                    <PromotionVigenciaBadge
+                      vigenciaDesde={promo.vigencia_desde}
+                      vigenciaHasta={promo.vigencia_hasta}
+                      vigenciaHoraDesde={promo.vigencia_hora_desde}
+                      vigenciaHoraHasta={promo.vigencia_hora_hasta}
+                    />
+                  ),
+                },
               ]}
               actions={renderActions(promo)}
             />
@@ -1217,7 +1318,7 @@ export default function AdminConfiguracionPromocionesPage() {
         <div className="mf-table-wrap">
           <Table>
             <TableHeader><TableRow className="border-[var(--mf-nav-border)]">{!sucursal ? <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursal</TableHead> : null}<TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Titulo</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden lg:table-cell">Slug</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Estado</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Publico</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Destacada</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Vigencia</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden lg:table-cell">Fechas</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead></TableRow></TableHeader>
-            <TableBody>{filteredPromociones.map((promo) => (<TableRow key={`${promo.id_promocion}:${promo.id_sucursal}`} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">{!sucursal ? <TableCell className="text-[var(--mf-text-2)] text-sm whitespace-nowrap">{branchNameById[promo.id_sucursal] || 'Sin sucursal'}</TableCell> : null}<TableCell className="font-medium text-[var(--mf-text)]"><div className="flex items-center gap-2"><div className="h-10 w-16 shrink-0 overflow-hidden rounded-md border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)]">{promo.imagen_principal_url ? <img src={promo.imagen_principal_url} alt={promo.titulo || 'Promocion'} className="h-full w-full object-cover" loading="lazy" /> : null}</div><div><div>{promo.titulo}</div>{promo.subtitulo ? <div className="text-xs text-[var(--mf-text-2)] mt-0.5">{promo.subtitulo}</div> : null}</div></div></TableCell><TableCell className="text-[var(--mf-text-2)] hidden lg:table-cell">{promo.slug || '-'}</TableCell><TableCell className="text-center"><PromotionStateBadge estado={promo.estado} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVisibilityBadge visible={Boolean(promo.visible_publico)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionFeaturedBadge destacada={Boolean(promo.destacada)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVigenciaBadge vigenciaHasta={promo.vigencia_hasta} /></TableCell><TableCell className="text-center text-[var(--mf-text-2)]">{Number(promo.orden_visual ?? 100)}</TableCell><TableCell className="hidden lg:table-cell text-[var(--mf-text-2)] text-xs whitespace-nowrap">{(promo.vigencia_desde || '-')} {' -> '} {(promo.vigencia_hasta || '-')}</TableCell><TableCell className="text-right"><div className="flex items-center justify-end gap-1.5">{renderActions(promo)}</div></TableCell></TableRow>))}</TableBody>
+            <TableBody>{filteredPromociones.map((promo) => (<TableRow key={`${promo.id_promocion}:${promo.id_sucursal}`} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">{!sucursal ? <TableCell className="text-[var(--mf-text-2)] text-sm whitespace-nowrap">{branchNameById[promo.id_sucursal] || 'Sin sucursal'}</TableCell> : null}<TableCell className="font-medium text-[var(--mf-text)]"><div className="flex items-center gap-2"><div className="h-10 w-16 shrink-0 overflow-hidden rounded-md border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)]">{promo.imagen_principal_url ? <img src={promo.imagen_principal_url} alt={promo.titulo || 'Promocion'} className="h-full w-full object-cover" loading="lazy" /> : null}</div><div><div>{promo.titulo}</div>{promo.subtitulo ? <div className="text-xs text-[var(--mf-text-2)] mt-0.5">{promo.subtitulo}</div> : null}</div></div></TableCell><TableCell className="text-[var(--mf-text-2)] hidden lg:table-cell">{promo.slug || '-'}</TableCell><TableCell className="text-center"><PromotionStateBadge estado={promo.estado} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVisibilityBadge visible={Boolean(promo.visible_publico)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionFeaturedBadge destacada={Boolean(promo.destacada)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVigenciaBadge vigenciaDesde={promo.vigencia_desde} vigenciaHasta={promo.vigencia_hasta} vigenciaHoraDesde={promo.vigencia_hora_desde} vigenciaHoraHasta={promo.vigencia_hora_hasta} /></TableCell><TableCell className="text-center text-[var(--mf-text-2)]">{Number(promo.orden_visual ?? 100)}</TableCell><TableCell className="hidden lg:table-cell text-[var(--mf-text-2)] text-xs whitespace-nowrap">{(promo.vigencia_desde || '-')} {' -> '} {(promo.vigencia_hasta || '-')}</TableCell><TableCell className="text-right"><div className="flex items-center justify-end gap-1.5">{renderActions(promo)}</div></TableCell></TableRow>))}</TableBody>
           </Table>
         </div>
       ) : null}
@@ -1253,7 +1354,17 @@ export default function AdminConfiguracionPromocionesPage() {
                   { label: 'Estado', value: <PromotionStateBadge estado={detailTarget.estado} /> },
                   { label: 'Destacada', value: <PromotionFeaturedBadge destacada={Boolean(detailTarget.destacada)} /> },
                   { label: 'Orden visual', value: Number(detailTarget.orden_visual ?? 100) },
-                  { label: 'Vigencia', value: <PromotionVigenciaBadge vigenciaHasta={detailTarget.vigencia_hasta} /> },
+                  {
+                    label: 'Vigencia',
+                    value: (
+                      <PromotionVigenciaBadge
+                        vigenciaDesde={detailTarget.vigencia_desde}
+                        vigenciaHasta={detailTarget.vigencia_hasta}
+                        vigenciaHoraDesde={detailTarget.vigencia_hora_desde}
+                        vigenciaHoraHasta={detailTarget.vigencia_hora_hasta}
+                      />
+                    ),
+                  },
                   // JK: Vigencia detallada en formato amigable y estable sin desfase por zona horaria.
                   { label: 'Vigencia desde', value: formatDateDetailDisplay(detailTarget.vigencia_desde) },
                   { label: 'Hora inicio', value: formatTimeDetailDisplay(detailTarget.vigencia_hora_desde) },

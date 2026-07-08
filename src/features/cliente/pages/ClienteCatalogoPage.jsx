@@ -1,4 +1,4 @@
-﻿import { motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Package, Scissors, Search, Sparkles, Tag } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
@@ -14,6 +14,7 @@ import {
   resolveValidClienteBranchId,
   setStoredClienteCatalogBranchId,
 } from '../lib/clienteCatalogBranch.js';
+
 
 function formatPrice(value) {
   const amount = Number(value);
@@ -298,7 +299,6 @@ function PromotionHeroImage({ promotion }) {
     </picture>
   );
 }
-
 function PromotionPublicCard({ promotion }) {
   const paragraphs = Array.isArray(promotion?.parrafos) ? promotion.parrafos.filter(Boolean) : [];
   const dateRangeLabel = formatRangeLabel(promotion?.vigencia_desde, promotion?.vigencia_hasta);
@@ -352,7 +352,7 @@ function PromotionPublicCard({ promotion }) {
 }
 
 export default function ClienteCatalogoPage() {
-  const location = useLocation();
+    const location = useLocation();
   const { error: notifyError } = useNotifications();
 
   const [loading, setLoading] = useState(true);
@@ -400,6 +400,7 @@ export default function ClienteCatalogoPage() {
       setLoading(false);
     }
   }, [fetchCatalogData, notifyError]);
+
 
   useEffect(() => {
     void loadInitial();
@@ -541,7 +542,9 @@ export default function ClienteCatalogoPage() {
                 title={item.nombre_servicio}
                 description={item.descripcion || ''}
                 price={Number(item?.precio_hnl) > 0 ? formatPrice(item.precio_hnl) : null}
-                footer={<p className="mt-2 text-xs text-[var(--mf-text-2)]">Duración: {item.duracion_min} min</p>}
+                footer={(
+                  <p className="mt-2 text-xs text-[var(--mf-text-2)]">Duración: {item.duracion_min} min</p>
+                )}
               />
             )}
           />
@@ -562,13 +565,17 @@ export default function ClienteCatalogoPage() {
                 title={item.nombre_paquete}
                 description={item.descripcion || ''}
                 price={Number(item?.precio_hnl) > 0 ? formatPrice(item.precio_hnl) : null}
-                footer={Array.isArray(item.items) && item.items.length ? (
-                  <ul className="mt-2 space-y-1 text-xs text-[var(--mf-text-2)]">
-                    {item.items.map((detail) => (
-                      <li key={`${item.id_paquete}:${detail.id_servicio}`}>- {detail.nombre_servicio} x{detail.cantidad}</li>
-                    ))}
-                  </ul>
-                ) : null}
+                footer={(
+                  <div className="mt-2">
+                    {Array.isArray(item.items) && item.items.length ? (
+                      <ul className="space-y-1 text-xs text-[var(--mf-text-2)]">
+                        {item.items.map((detail) => (
+                          <li key={`${item.id_paquete}:${detail.id_servicio}`}>- {detail.nombre_servicio} x{detail.cantidad}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                )}
                 isRail={isRail}
               />
             )}
@@ -641,4 +648,5 @@ export default function ClienteCatalogoPage() {
     </div>
   );
 }
+
 

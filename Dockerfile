@@ -3,6 +3,7 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+# Vite embeds these values at build time; pass production HTTPS URLs in CI/deploy.
 ARG VITE_API_URL
 ARG VITE_APP_URL
 ARG VITE_SUPABASE_URL

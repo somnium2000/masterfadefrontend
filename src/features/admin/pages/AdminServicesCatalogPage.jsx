@@ -4,13 +4,17 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Plus, Pencil, Building2, Scissors, Eye, ToggleLeft, ToggleRight, Tags, Search, SlidersHorizontal, RotateCcw, X } from 'lucide-react';
+import { Loader2, Plus, Pencil, Building2, Scissors, ToggleLeft, ToggleRight, Search, SlidersHorizontal, RotateCcw, X } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import {
-    listAdminServicios,
+    listAdminServiciosAgrupados,
     createAdminServicio,
     updateAdminServicio,
+    updateAdminServicioTarifa,
+    createAdminServicioTarifa,
     setAdminServicioEstado,
+    deactivateAdminServicioTarifa,
+    deactivateAdminServicioGlobal,
     getAdminServicioBarberos,
     saveAdminServicioBarberos,
     SERVICE_BARBER_ASSIGNMENTS_ENABLED,
@@ -22,14 +26,8 @@ import {
 } from '../../../components/ui/dialog.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
-import {
-    Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '../../../components/ui/table.jsx';
-import ViewToggle from '../../../components/data/ViewToggle.jsx';
-import DataCard from '../../../components/data/DataCard.jsx';
 import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import HoverActionButton from '../../../components/data/HoverActionButton.jsx';
-import DetailInfoModalContent from '../../../components/data/DetailInfoModalContent.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
@@ -38,19 +36,25 @@ import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialo
 import { emitCatalogSync } from '../../../lib/catalogSync.js';
 
 function extractMessage(err) {
+    // AM: Mensaje funcional para duplicados normalizados de servicios.
+    if (err?.data?.error?.code === 'SERVICE_NAME_DUPLICATE') {
+        return 'Ya existe un servicio con ese nombre. Usa el servicio existente o cambia el nombre.';
+    }
+    if (err?.data?.error?.code === 'SERVICE_TARIFF_DUPLICATE') {
+        return 'Ya existe una tarifa activa para este servicio en esa sucursal.';
+    }
+    if (err?.data?.error?.code === 'SERVICE_BRANCH_REMOVE_BLOCKED') {
+        return 'No se puede quitar este servicio de la sucursal porque tiene citas futuras activas asociadas.';
+    }
+    if (err?.data?.error?.code === 'SERVICE_GLOBAL_DEACTIVATE_BLOCKED') {
+        return 'No se puede desactivar globalmente este servicio porque tiene citas futuras activas asociadas.';
+    }
+    if (err?.data?.error?.code === 'CATALOG_SERVICE_PRICE_REQUIRED') {
+        return 'Configura una tarifa para una sucursal antes de reactivar este servicio.';
+    }
     const apiMessage = err?.data?.error?.message;
     if (typeof apiMessage === 'string' && apiMessage.trim()) return apiMessage.trim();
     return 'No se pudo completar la operación de servicios.';
-}
-
-function getPendingAppointmentsWarning(err) {
-    const code = err?.data?.error?.code;
-    if (code !== 'CATALOG_SERVICE_PENDING_APPOINTMENTS_CONFIRMATION_REQUIRED') return null;
-    const total = Number(err?.data?.error?.details?.total_citas_futuras ?? 0);
-    if (!Number.isFinite(total) || total <= 0) {
-        return 'Este servicio tiene citas futuras asociadas. Confirma nuevamente para inactivarlo.';
-    }
-    return `Este servicio tiene ${total} cita(s) futura(s) asociada(s). Si continúas, quedará inactivo para agendamiento/catálogo pero se conservará en esas citas ya creadas.`;
 }
 
 /**
@@ -101,7 +105,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingB
                     onChange(validBranchIds.has(nextValue) ? nextValue : '');
                 }}
             >
-                <option value="">- Seleccionar sucursal -</option>
+                <option value="">Todas las sucursales</option>
                 {availableBranches.map((branch) => (
                     <option key={branch.id_sucursal} value={branch.id_sucursal}>
                         {branch.nombre_sucursal}
@@ -117,10 +121,18 @@ const FORM_DEFAULTS = {
     descripcion: '',
     duracion_min: '',
     precio_hnl: '',
-    grupo_catalogo: 'barberia',
     visible_publico: true,
+    agendable: true,
     servicio_informativo: false,
     orden_visual: '100',
+};
+
+const TARIFF_FORM_DEFAULTS = {
+    precio_hnl: '',
+    duracion_min: '',
+    buffer_min: '5',
+    activo: true,
+    servicio_informativo: false,
 };
 
 const SERVICE_BARBER_ASSIGNMENTS_DEFAULTS = {
@@ -134,7 +146,6 @@ const SERVICES_FILTER_DEFAULTS = {
     estado: 'all',
     visibilidad: 'all',
     agendable: 'all',
-    grupo: 'all',
     idSucursal: 'all',
 };
 
@@ -153,11 +164,6 @@ const SERVICE_AGENDABLE_FILTER_LABELS = {
     no: 'Agendable: No',
 };
 
-const SERVICE_GROUP_FILTER_LABELS = {
-    barberia: 'Grupo: Barberia',
-    otros: 'Grupo: Otros',
-};
-
 function quickFilterButtonClass(isActive) {
     // AM: Estilo consistente con PERSONAS para que filtros activos sean evidentes en escritorio y móvil.
     return isActive
@@ -165,7 +171,7 @@ function quickFilterButtonClass(isActive) {
         : 'rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_54%,transparent)] text-[var(--mf-text)] hover:border-[var(--mf-accent)]/60';
 }
 
-function ServicioForm({ values, onChange }) {
+function ServicioForm({ values, onChange, includeTariffFields = true }) {
     return (
         <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
@@ -186,44 +192,34 @@ function ServicioForm({ values, onChange }) {
                     placeholder="Ej. Incluye lavado, corte y peinado."
                 />
             </div>
+            {includeTariffFields ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="flex flex-col gap-1">
+                        <Label htmlFor="f-dur">Duración (min) *</Label>
+                        <Input
+                            id="f-dur"
+                            type="number"
+                            min="1"
+                            value={values.duracion_min}
+                            onChange={(e) => onChange('duracion_min', e.target.value)}
+                            placeholder="30"
+                        />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                        <Label htmlFor="f-precio">Precio HNL *</Label>
+                        <Input
+                            id="f-precio"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={values.precio_hnl}
+                            onChange={(e) => onChange('precio_hnl', e.target.value)}
+                            placeholder="250.00"
+                        />
+                    </div>
+                </div>
+            ) : null}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="flex flex-col gap-1">
-                    <Label htmlFor="f-dur">Duración (min) *</Label>
-                    <Input
-                        id="f-dur"
-                        type="number"
-                        min="1"
-                        value={values.duracion_min}
-                        onChange={(e) => onChange('duracion_min', e.target.value)}
-                        placeholder="30"
-                    />
-                </div>
-                <div className="flex flex-col gap-1">
-                    <Label htmlFor="f-grupo">Grupo *</Label>
-                    <select
-                        id="f-grupo"
-                        className="mf-select"
-                        value={values.grupo_catalogo}
-                        onChange={(e) => onChange('grupo_catalogo', e.target.value)}
-                    >
-                        <option value="barberia">Barberia</option>
-                        <option value="otros">Otros</option>
-                    </select>
-                </div>
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="flex flex-col gap-1">
-                <Label htmlFor="f-precio">Precio HNL *</Label>
-                <Input
-                    id="f-precio"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={values.precio_hnl}
-                    onChange={(e) => onChange('precio_hnl', e.target.value)}
-                    placeholder="250.00"
-                />
-                </div>
                 <div className="flex flex-col gap-1">
                     <Label htmlFor="f-orden">Orden visual *</Label>
                     <Input
@@ -247,34 +243,91 @@ function ServicioForm({ values, onChange }) {
                     <span className="block">Controla si el servicio se publica para consulta externa.</span>
                 </span>
             </label>
-            <label className="mf-checkbox flex items-start gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_48%,transparent)] px-3 py-2.5">
-                <input
-                    type="checkbox"
-                    checked={Boolean(values.servicio_informativo)}
-                    onChange={(event) => onChange('servicio_informativo', event.target.checked)}
-                />
-                <span className="space-y-0.5 text-xs text-[var(--mf-text-2)]">
-                    <span className="block font-semibold uppercase tracking-[0.08em] text-[var(--mf-text)]">Servicio informativo</span>
-                    <span className="block">Visible en catálogo público informativo y excluido de agendamiento.</span>
-                </span>
-            </label>
+            {!includeTariffFields ? (
+                <label className="mf-checkbox flex items-start gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_48%,transparent)] px-3 py-2.5">
+                    <input
+                        type="checkbox"
+                        checked={Boolean(values.agendable)}
+                        onChange={(event) => onChange('agendable', event.target.checked)}
+                    />
+                    <span className="space-y-0.5 text-xs text-[var(--mf-text-2)]">
+                        <span className="block font-semibold uppercase tracking-[0.08em] text-[var(--mf-text)]">Agendable</span>
+                        <span className="block">Control maestro del servicio; el modo informativo se configura por tarifa/sucursal.</span>
+                    </span>
+                </label>
+            ) : (
+                <label className="mf-checkbox flex items-start gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_48%,transparent)] px-3 py-2.5">
+                    <input
+                        type="checkbox"
+                        checked={Boolean(values.servicio_informativo)}
+                        onChange={(event) => onChange('servicio_informativo', event.target.checked)}
+                    />
+                    <span className="space-y-0.5 text-xs text-[var(--mf-text-2)]">
+                        <span className="block font-semibold uppercase tracking-[0.08em] text-[var(--mf-text)]">Servicio informativo</span>
+                        <span className="block">Visible en catálogo público informativo y excluido de agendamiento.</span>
+                    </span>
+                </label>
+            )}
         </div>
     );
 }
 
-function validateForm(values) {
+function TarifaForm({ values, onChange, serviceName, branchName }) {
+    return (
+        <div className="space-y-4">
+            <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_42%,transparent)] px-3 py-2 text-sm text-[var(--mf-text-2)]">
+                <p><span className="font-semibold text-[var(--mf-text)]">Servicio:</span> {serviceName || '-'}</p>
+                <p><span className="font-semibold text-[var(--mf-text)]">Sucursal:</span> {branchName || '-'}</p>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="flex flex-col gap-1">
+                    <Label htmlFor="tarifa-precio">Precio HNL *</Label>
+                    <Input id="tarifa-precio" type="number" min="0" step="0.01" value={values.precio_hnl} onChange={(e) => onChange('precio_hnl', e.target.value)} />
+                </div>
+                <div className="flex flex-col gap-1">
+                    <Label htmlFor="tarifa-duracion">Duración (min) *</Label>
+                    <Input id="tarifa-duracion" type="number" min="1" value={values.duracion_min} onChange={(e) => onChange('duracion_min', e.target.value)} />
+                </div>
+                <div className="flex flex-col gap-1">
+                    <Label htmlFor="tarifa-buffer">Buffer (min)</Label>
+                    <Input id="tarifa-buffer" type="number" min="0" value={values.buffer_min} onChange={(e) => onChange('buffer_min', e.target.value)} />
+                </div>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="mf-checkbox flex items-start gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_48%,transparent)] px-3 py-2.5">
+                    <input type="checkbox" checked={Boolean(values.activo)} onChange={(event) => onChange('activo', event.target.checked)} />
+                    <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--mf-text)]">Tarifa activa</span>
+                </label>
+                <label className="mf-checkbox flex items-start gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_48%,transparent)] px-3 py-2.5">
+                    <input type="checkbox" checked={Boolean(values.servicio_informativo)} onChange={(event) => onChange('servicio_informativo', event.target.checked)} />
+                    <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--mf-text)]">Servicio informativo</span>
+                </label>
+            </div>
+        </div>
+    );
+}
+
+function validateForm(values, { includeTariffFields = true } = {}) {
     if (!values.nombre_servicio.trim()) return 'El nombre del servicio es requerido.';
-    const dur = parseInt(values.duracion_min, 10);
-    if (isNaN(dur) || dur < 1) return 'La Duración debe ser al menos 1 minuto.';
-    const precio = parseFloat(values.precio_hnl);
-    if (isNaN(precio) || precio < 0) return 'El precio no puede ser negativo.';
+    if (includeTariffFields) {
+        const dur = parseInt(values.duracion_min, 10);
+        if (isNaN(dur) || dur < 1) return 'La Duración debe ser al menos 1 minuto.';
+        const precio = parseFloat(values.precio_hnl);
+        if (isNaN(precio) || precio < 0) return 'El precio no puede ser negativo.';
+    }
     const orden = parseInt(values.orden_visual, 10);
     if (isNaN(orden) || orden < 0) return 'El orden visual no puede ser negativo.';
     return null;
 }
 
-function resolveGrupoLabel(grupo) {
-    return String(grupo || '').trim().toLowerCase() === 'otros' ? 'Otros servicios' : 'Barberia';
+function validateTariffForm(values) {
+    const precio = parseFloat(values.precio_hnl);
+    if (isNaN(precio) || precio < 0) return 'El precio no puede ser negativo.';
+    const dur = parseInt(values.duracion_min, 10);
+    if (isNaN(dur) || dur < 1) return 'La duración debe ser al menos 1 minuto.';
+    const buffer = parseInt(values.buffer_min, 10);
+    if (isNaN(buffer) || buffer < 0) return 'El buffer no puede ser negativo.';
+    return null;
 }
 
 function summarizeAssignedBarbers(barberos = [], maxVisible = 2) {
@@ -320,25 +373,62 @@ function ServiceTypeBadge({ informativo }) {
     );
 }
 
-function ServiceGroupBadge({ grupo }) {
-    const normalized = String(grupo || '').trim().toLowerCase() === 'otros' ? 'otros' : 'barberia';
+function GlobalStateRow({ label, value }) {
     return (
-        <span className={`mf-badge ${normalized === 'otros' ? 'mf-badge-muted' : 'mf-badge-gold'}`}>
-            {normalized === 'otros' ? 'Otros' : 'Barberia'}
-        </span>
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_42%,transparent)] px-3 py-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--mf-text-2)]">{label}</span>
+            <span className={`text-sm font-semibold ${value ? 'text-[var(--mf-success)]' : 'text-[var(--mf-text-2)]'}`}>
+                {value ? 'Sí' : 'No'}
+            </span>
+        </div>
+    );
+}
+
+function BranchConfigField({ label, value }) {
+    return (
+        <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_72%,transparent)] px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--mf-text-2)]">{label}</p>
+            <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">{value ?? '-'}</p>
+        </div>
     );
 }
 
 function buildServicioScopeKey(servicio) {
     const serviceId = String(servicio?.id_servicio ?? servicio?.id ?? '').trim() || 'servicio';
-    const branchId = String(servicio?.id_sucursal ?? '').trim() || 'all';
-    return `${serviceId}:${branchId}`;
+    return serviceId;
 }
 
 function formatServicePrice(value) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric) || numeric < 0) return 'Sin tarifa';
     return `L ${numeric.toFixed(2)}`;
+}
+
+function getTarifaKey(tarifa) {
+    return `${tarifa?.id_sucursal || 'sucursal'}:${tarifa?.id_tarifa || 'sin-tarifa'}`;
+}
+
+function getActiveTariffs(servicio) {
+    return (Array.isArray(servicio?.tarifas) ? servicio.tarifas : []).filter((tarifa) => tarifa?.tarifa_activa);
+}
+
+function getBranchShortName(name) {
+    const raw = String(name || '').trim();
+    return raw.replace(/^MasterFade\s*/i, '').trim() || raw || 'Sucursal';
+}
+
+function getSelectedBranchTariff(servicio, branchId) {
+    return (Array.isArray(servicio?.tarifas) ? servicio.tarifas : []).find((tarifa) => tarifa?.id_sucursal === branchId) || null;
+}
+
+function getFirstServiceTariff(servicio) {
+    return (Array.isArray(servicio?.tarifas) ? servicio.tarifas : []).find((tarifa) => tarifa?.id_sucursal) || null;
+}
+
+function formatActiveBranchesCount(servicio) {
+    const count = getActiveTariffs(servicio).length;
+    if (count === 1) return 'Disponible en 1 sucursal';
+    return `Disponible en ${count} sucursales`;
 }
 
 export default function AdminServicesCatalogPage() {
@@ -356,9 +446,6 @@ export default function AdminServicesCatalogPage() {
     const [servicios, setServicios] = useState([]);
     const [loading, setLoading] = useState(false);
     const [listError, setListError] = useState('');
-    const [view, setView] = useState(
-        () => { try { const v = localStorage.getItem('mf-view-servicios'); return (v === 'table' || v === 'cards') ? v : 'cards'; } catch { return 'cards'; } }
-    );
     const [search, setSearch] = useState('');
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [filters, setFilters] = useState(() => ({ ...SERVICES_FILTER_DEFAULTS }));
@@ -370,15 +457,20 @@ export default function AdminServicesCatalogPage() {
     const [formError, setFormError] = useState('');
     const [formLoading, setFormLoading] = useState(false);
     const [serviceBarberAssignments, setServiceBarberAssignments] = useState(SERVICE_BARBER_ASSIGNMENTS_DEFAULTS);
+    const [createBranchTariffs, setCreateBranchTariffs] = useState([]);
+    const [useSameTariffForAll, setUseSameTariffForAll] = useState(true);
+    const [commonCreateTariff, setCommonCreateTariff] = useState(TARIFF_FORM_DEFAULTS);
+    const [tariffDialogOpen, setTariffDialogOpen] = useState(false);
+    const [tariffTarget, setTariffTarget] = useState(null);
+    const [tariffFormValues, setTariffFormValues] = useState(TARIFF_FORM_DEFAULTS);
+    const [tariffFormError, setTariffFormError] = useState('');
+    const [tariffFormLoading, setTariffFormLoading] = useState(false);
 
-    // Dialogo detalle
-    const [detailOpen, setDetailOpen] = useState(false);
-    const [detailTarget, setDetailTarget] = useState(null);
-
-    // Dialogo confirmar activar/inactivar
-    const [confirmOpen, setConfirmOpen] = useState(false);
-    const [stateTarget, setStateTarget] = useState(null);
-    const [stateLoading, setStateLoading] = useState(false);
+    // Dialogos de confirmacion operativa
+    const [removeBranchTarget, setRemoveBranchTarget] = useState(null);
+    const [removeBranchLoading, setRemoveBranchLoading] = useState(false);
+    const [globalDeactivateTarget, setGlobalDeactivateTarget] = useState(null);
+    const [globalDeactivateLoading, setGlobalDeactivateLoading] = useState(false);
 
     const branchNameById = useMemo(
         () => allBranches.reduce((acc, branch) => ({ ...acc, [branch.id_sucursal]: branch.nombre_sucursal }), {}),
@@ -424,12 +516,11 @@ export default function AdminServicesCatalogPage() {
                 if (Boolean(servicio?.agendable) !== expected) return false;
             }
 
-            if (filters.grupo !== 'all') {
-                const normalizedGroup = String(servicio?.grupo_catalogo || '').trim().toLowerCase() === 'otros' ? 'otros' : 'barberia';
-                if (normalizedGroup !== filters.grupo) return false;
-            }
-
-            if (!sucursal && filters.idSucursal !== 'all' && String(servicio?.id_sucursal || '') !== filters.idSucursal) {
+            if (
+                !sucursal &&
+                filters.idSucursal !== 'all' &&
+                !((Array.isArray(servicio?.tarifas) ? servicio.tarifas : []).some((tarifa) => tarifa?.id_sucursal === filters.idSucursal))
+            ) {
                 return false;
             }
 
@@ -457,9 +548,6 @@ export default function AdminServicesCatalogPage() {
         }
         if (filters.agendable !== 'all') {
             chips.push({ key: 'agendable', label: SERVICE_AGENDABLE_FILTER_LABELS[filters.agendable] || 'Agendable' });
-        }
-        if (filters.grupo !== 'all') {
-            chips.push({ key: 'grupo', label: SERVICE_GROUP_FILTER_LABELS[filters.grupo] || 'Grupo' });
         }
         if (!sucursal && filters.idSucursal !== 'all') {
             chips.push({ key: 'idSucursal', label: `Sucursal: ${branchNameById[filters.idSucursal] || 'Seleccionada'}` });
@@ -535,7 +623,7 @@ export default function AdminServicesCatalogPage() {
             setListError('');
         }
         try {
-            const data = await listAdminServicios(sucursal ? { id_sucursal: sucursal } : {});
+            const data = await listAdminServiciosAgrupados(sucursal ? { id_sucursal: sucursal } : {});
             const payloadData = data?.data ?? data;
             const lista = payloadData?.servicios ?? [];
             setServicios(Array.isArray(lista) ? lista : []);
@@ -566,6 +654,35 @@ export default function AdminServicesCatalogPage() {
         }
     }
 
+    function buildDefaultBranchTariff(branchId = '') {
+        return {
+            id_sucursal: branchId,
+            precio_hnl: '',
+            duracion_min: '',
+            buffer_min: '5',
+            activo: true,
+            servicio_informativo: false,
+        };
+    }
+
+    function toggleCreateBranch(branchId) {
+        setCreateBranchTariffs((prev) => {
+            const exists = prev.some((item) => item.id_sucursal === branchId);
+            if (exists) return prev.filter((item) => item.id_sucursal !== branchId);
+            return [...prev, buildDefaultBranchTariff(branchId)];
+        });
+    }
+
+    function updateCreateBranchTariff(branchId, field, value) {
+        setCreateBranchTariffs((prev) => prev.map((item) => (
+            item.id_sucursal === branchId ? { ...item, [field]: value } : item
+        )));
+    }
+
+    function updateCommonCreateTariff(field, value) {
+        setCommonCreateTariff((prev) => ({ ...prev, [field]: value }));
+    }
+
     function handleBarberAssignmentToggle(idEmpleado) {
         setServiceBarberAssignments((prev) => {
             const currentIds = Array.isArray(prev.selectedIds) ? prev.selectedIds : [];
@@ -577,19 +694,16 @@ export default function AdminServicesCatalogPage() {
     }
 
     function resolveMutationBranchId(servicio = null) {
-        // AM: Para super admin sin filtro global, permite operar tomando la sucursal del registro.
-        return sucursal || servicio?.id_sucursal || '';
+        // AM: Scope tecnico para endpoints legacy; la tarifa se edita en modal separado.
+        return sucursal || servicio?.id_sucursal || servicio?.tarifas?.find((tarifa) => tarifa?.id_sucursal)?.id_sucursal || '';
     }
 
     function openCrear() {
-        if (!sucursal) {
-            notifications.warning('Selecciona una sucursal antes de crear un servicio.', {
-                dedupeKey: 'servicios-create-branch-required',
-            });
-            return;
-        }
         setEditTarget(null);
         setFormValues(FORM_DEFAULTS);
+        setCreateBranchTariffs(sucursal ? [buildDefaultBranchTariff(sucursal)] : []);
+        setUseSameTariffForAll(true);
+        setCommonCreateTariff(TARIFF_FORM_DEFAULTS);
         setFormError('');
         setServiceBarberAssignments(SERVICE_BARBER_ASSIGNMENTS_DEFAULTS);
         setDialogOpen(true);
@@ -608,11 +722,11 @@ export default function AdminServicesCatalogPage() {
         setFormValues({
             nombre_servicio: servicio.nombre_servicio ?? '',
             descripcion: servicio.descripcion ?? '',
-            duracion_min: String(servicio.duracion_min ?? ''),
-            precio_hnl: String(servicio.precio_hnl ?? ''),
-            grupo_catalogo: String(servicio.grupo_catalogo || 'barberia').trim().toLowerCase() === 'otros' ? 'otros' : 'barberia',
+            duracion_min: '',
+            precio_hnl: '',
             visible_publico: Boolean(servicio.visible_publico),
-            servicio_informativo: Boolean(servicio.servicio_informativo),
+            agendable: Boolean(servicio.agendable),
+            servicio_informativo: false,
             orden_visual: String(servicio.orden_visual ?? 100),
         });
         setFormError('');
@@ -666,8 +780,24 @@ export default function AdminServicesCatalogPage() {
     }, [canManageServiceBarberAssignments, dialogOpen, editTarget, formValues.servicio_informativo]);
 
     async function handleGuardar() {
-        const validationError = validateForm(formValues);
+        const validationError = validateForm(formValues, { includeTariffFields: false });
         if (validationError) { setFormError(validationError); return; }
+        if (!editTarget && createBranchTariffs.length === 0) {
+            setFormError('Selecciona al menos una sucursal para ofrecer el servicio.');
+            return;
+        }
+        if (!editTarget) {
+            const commonError = useSameTariffForAll ? validateTariffForm(commonCreateTariff) : null;
+            if (commonError) {
+                setFormError(commonError);
+                return;
+            }
+            const invalidTariff = !useSameTariffForAll ? createBranchTariffs.find((tariff) => validateTariffForm(tariff)) : null;
+            if (invalidTariff) {
+                setFormError(validateTariffForm(invalidTariff));
+                return;
+            }
+        }
 
         if (canManageServiceBarberAssignments && editTarget && Boolean(formValues.servicio_informativo)) {
             if (serviceBarberAssignments.loading) {
@@ -680,7 +810,7 @@ export default function AdminServicesCatalogPage() {
             }
         }
 
-        const mutationBranchId = editTarget?._mutation_branch_id || sucursal;
+        const mutationBranchId = editTarget?._mutation_branch_id || sucursal || createBranchTariffs[0]?.id_sucursal;
         if (!mutationBranchId) {
             setFormError('Selecciona o ingresa una sucursal antes de guardar.');
             return;
@@ -692,23 +822,28 @@ export default function AdminServicesCatalogPage() {
         const createPayload = {
             nombre_servicio: formValues.nombre_servicio.trim(),
             descripcion: formValues.descripcion.trim() || null,
-            duracion_min: parseInt(formValues.duracion_min, 10),
-            precio_hnl: parseFloat(formValues.precio_hnl),
-            grupo_catalogo: String(formValues.grupo_catalogo || 'barberia').trim().toLowerCase() === 'otros' ? 'otros' : 'barberia',
             orden_visual: parseInt(formValues.orden_visual, 10),
             visible_publico: Boolean(formValues.visible_publico),
-            servicio_informativo: Boolean(formValues.servicio_informativo),
-            id_sucursal: mutationBranchId,
+            agendable: Boolean(formValues.agendable),
+            activo: true,
+            sucursales: createBranchTariffs.map((tariff) => {
+                const source = useSameTariffForAll ? commonCreateTariff : tariff;
+                return {
+                id_sucursal: tariff.id_sucursal,
+                precio_hnl: parseFloat(source.precio_hnl),
+                duracion_min: parseInt(source.duracion_min, 10),
+                buffer_min: parseInt(source.buffer_min, 10),
+                activo: Boolean(source.activo),
+                servicio_informativo: Boolean(source.servicio_informativo),
+            };
+            }),
         };
         const editPayload = {
             nombre_servicio: formValues.nombre_servicio.trim(),
             descripcion: formValues.descripcion.trim() || null,
-            duracion_min: parseInt(formValues.duracion_min, 10),
-            precio_hnl: parseFloat(formValues.precio_hnl),
-            grupo_catalogo: String(formValues.grupo_catalogo || 'barberia').trim().toLowerCase() === 'otros' ? 'otros' : 'barberia',
             orden_visual: parseInt(formValues.orden_visual, 10),
             visible_publico: Boolean(formValues.visible_publico),
-            servicio_informativo: Boolean(formValues.servicio_informativo),
+            agendable: Boolean(formValues.agendable),
             id_sucursal: mutationBranchId,
         };
 
@@ -754,88 +889,193 @@ export default function AdminServicesCatalogPage() {
         }
     }
 
-    function openDetail(servicio) {
-        setDetailTarget(servicio || null);
-        setDetailOpen(true);
-    }
-
-    function openConfirmState(servicio) {
-        const mutationBranchId = resolveMutationBranchId(servicio);
-        if (!mutationBranchId) {
-            notifications.error('No se pudo determinar la sucursal del servicio para cambiar estado.', {
-                dedupeKey: 'servicios-state-branch-required',
+    function openTarifa(servicio, tarifa) {
+        if (!servicio?.id_servicio || !tarifa?.id_sucursal) {
+            notifications.error('No se pudo determinar el servicio o la sucursal de la tarifa.', {
+                dedupeKey: 'servicios-tarifa-scope-error',
             });
             return;
         }
 
-        setStateTarget({
-            ...servicio,
-            _nextActivo: !servicio?.activo,
-            _mutation_branch_id: mutationBranchId,
-            _forcePendingAppointmentsConfirm: false,
-            _pendingAppointmentsWarning: '',
+        setTariffTarget({ servicio, tarifa });
+        setTariffFormValues({
+            precio_hnl: tarifa.precio_hnl == null ? '' : String(tarifa.precio_hnl),
+            duracion_min: tarifa.duracion_min == null ? '' : String(tarifa.duracion_min),
+            buffer_min: tarifa.buffer_min == null ? '5' : String(tarifa.buffer_min),
+            activo: Boolean(tarifa.tarifa_activa),
+            servicio_informativo: Boolean(tarifa.servicio_informativo),
         });
-        setConfirmOpen(true);
+        setTariffFormError('');
+        setTariffDialogOpen(true);
     }
 
-    async function handleConfirmState() {
-        if (!stateTarget) return;
-        const mutationBranchId = stateTarget?._mutation_branch_id || sucursal;
-        if (!mutationBranchId) {
-            notifications.error('No hay sucursal seleccionada.', { dedupeKey: 'servicios-state-no-branch' });
+    function openAgregarSucursal(servicio) {
+        if (!sucursal) {
+            notifications.error('Selecciona una sucursal para agregar este servicio.', {
+                dedupeKey: 'servicios-add-branch-no-scope',
+            });
             return;
         }
 
-        setStateLoading(true);
+        const fallbackTariff = getFirstServiceTariff(servicio);
+        const existingTariff = getSelectedBranchTariff(servicio, sucursal);
+        const targetTariff = existingTariff || {
+            id_sucursal: sucursal,
+            nombre_sucursal: branchNameById[sucursal] || 'Sucursal seleccionada',
+            precio_hnl: null,
+            duracion_min: fallbackTariff?.duracion_min ?? null,
+            buffer_min: fallbackTariff?.buffer_min ?? 5,
+            tarifa_activa: true,
+            servicio_informativo: fallbackTariff?.servicio_informativo ?? false,
+        };
+
+        setTariffTarget({ servicio, tarifa: targetTariff });
+        setTariffFormValues({
+            precio_hnl: targetTariff.precio_hnl == null ? '' : String(targetTariff.precio_hnl),
+            duracion_min: targetTariff.duracion_min == null ? '' : String(targetTariff.duracion_min),
+            buffer_min: targetTariff.buffer_min == null ? '5' : String(targetTariff.buffer_min),
+            activo: true,
+            servicio_informativo: Boolean(targetTariff.servicio_informativo),
+        });
+        setTariffFormError('');
+        setTariffDialogOpen(true);
+    }
+
+    function handleTariffFormChange(field, value) {
+        setTariffFormValues((prev) => ({ ...prev, [field]: value }));
+    }
+
+    async function handleGuardarTarifa() {
+        const validationError = validateTariffForm(tariffFormValues);
+        if (validationError) {
+            setTariffFormError(validationError);
+            return;
+        }
+
+        const serviceId = tariffTarget?.servicio?.id_servicio;
+        const branchId = tariffTarget?.tarifa?.id_sucursal;
+        if (!serviceId || !branchId) {
+            setTariffFormError('No se pudo determinar el servicio o la sucursal.');
+            return;
+        }
+
+        setTariffFormLoading(true);
+        setTariffFormError('');
         try {
             const payload = {
-                activo: Boolean(stateTarget._nextActivo),
-                id_sucursal: mutationBranchId,
+                precio_hnl: parseFloat(tariffFormValues.precio_hnl),
+                duracion_min: parseInt(tariffFormValues.duracion_min, 10),
+                buffer_min: parseInt(tariffFormValues.buffer_min, 10),
+                activo: Boolean(tariffFormValues.activo),
+                servicio_informativo: Boolean(tariffFormValues.servicio_informativo),
             };
-            if (!payload.activo && stateTarget?._forcePendingAppointmentsConfirm) {
-                payload.confirmar_citas_pendientes = true;
+            if (tariffTarget?.tarifa?.id_tarifa) {
+                await updateAdminServicioTarifa(serviceId, branchId, payload);
+            } else {
+                await createAdminServicioTarifa(serviceId, { ...payload, id_sucursal: branchId });
             }
-
-            if (payload.activo && Number.isFinite(Number(stateTarget.precio_hnl))) {
-                payload.precio_hnl = Number(stateTarget.precio_hnl);
-            }
-
-            await setAdminServicioEstado(stateTarget.id_servicio ?? stateTarget.id, payload);
-
-            notifications.success(payload.activo ? 'Servicio activado.' : 'Servicio inactivado.', {
-                dedupeKey: 'servicios-state-ok',
-            });
-            // AM: Publica sincronizacion para reflejar activacion/inactivacion en catalogo publico de inmediato.
-            emitCatalogSync(payload.activo ? 'servicio-activated' : 'servicio-inactivated');
+            notifications.success('Tarifa actualizada.', { dedupeKey: 'servicios-tarifa-save-ok' });
+            // AM: Refresca catalogos que dependen de tarifa por sucursal.
+            emitCatalogSync('servicio-tarifa-updated');
             await fetchServicios();
-            setConfirmOpen(false);
-            setStateTarget(null);
+            setTariffDialogOpen(false);
+            setTariffTarget(null);
         } catch (err) {
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
-            const pendingWarning = getPendingAppointmentsWarning(err);
-            if (pendingWarning && !stateTarget?._nextActivo) {
-                setStateTarget((prev) => (prev ? ({
-                    ...prev,
-                    _forcePendingAppointmentsConfirm: true,
-                    _pendingAppointmentsWarning: pendingWarning,
-                }) : prev));
-                notifications.warning(pendingWarning, { dedupeKey: 'servicios-state-pending-appointments' });
-                return;
-            }
-            notifications.error(extractMessage(err), { dedupeKey: 'servicios-state-error' });
+            const message = extractMessage(err);
+            setTariffFormError(message);
+            notifications.error(message, { dedupeKey: 'servicios-tarifa-save-error' });
         } finally {
-            setStateLoading(false);
+            setTariffFormLoading(false);
+        }
+    }
+
+    function openRemoveBranch(servicio, tarifa) {
+        if (!servicio?.id_servicio || !tarifa?.id_sucursal || !tarifa?.tarifa_activa) return;
+        setRemoveBranchTarget({ servicio, tarifa });
+    }
+
+    async function handleConfirmRemoveBranch() {
+        const serviceId = removeBranchTarget?.servicio?.id_servicio;
+        const branchId = removeBranchTarget?.tarifa?.id_sucursal;
+        if (!serviceId || !branchId) return;
+
+        setRemoveBranchLoading(true);
+        try {
+            await deactivateAdminServicioTarifa(serviceId, branchId);
+            notifications.success('Servicio quitado de la sucursal.', { dedupeKey: 'servicios-branch-remove-ok' });
+            emitCatalogSync('servicio-tarifa-deactivated');
+            await fetchServicios();
+            setRemoveBranchTarget(null);
+        } catch (err) {
+            if (err.status === 401) { navigate('/login'); return; }
+            if (err.status === 403) { navigate('/unauthorized'); return; }
+            notifications.error(extractMessage(err), { dedupeKey: 'servicios-branch-remove-error' });
+        } finally {
+            setRemoveBranchLoading(false);
+        }
+    }
+
+    function openGlobalDeactivate(servicio) {
+        if (!servicio?.id_servicio) return;
+        setGlobalDeactivateTarget(servicio);
+    }
+
+    async function handleConfirmGlobalDeactivate() {
+        const serviceId = globalDeactivateTarget?.id_servicio;
+        if (!serviceId) return;
+
+        setGlobalDeactivateLoading(true);
+        try {
+            await deactivateAdminServicioGlobal(serviceId);
+            notifications.success('Servicio desactivado globalmente.', { dedupeKey: 'servicios-global-deactivate-ok' });
+            emitCatalogSync('servicio-global-deactivated');
+            await fetchServicios();
+            setGlobalDeactivateTarget(null);
+        } catch (err) {
+            if (err.status === 401) { navigate('/login'); return; }
+            if (err.status === 403) { navigate('/unauthorized'); return; }
+            notifications.error(extractMessage(err), { dedupeKey: 'servicios-global-deactivate-error' });
+        } finally {
+            setGlobalDeactivateLoading(false);
+        }
+    }
+
+    async function handleReactivateService(servicio) {
+        const serviceId = servicio?.id_servicio;
+        if (!serviceId) return;
+
+        const branchId = sucursal || getFirstServiceTariff(servicio)?.id_sucursal;
+        if (!branchId) {
+            notifications.error('Agrega o configura una sucursal antes de reactivar este servicio.', {
+                dedupeKey: 'servicios-reactivate-no-branch',
+            });
+            return;
+        }
+
+        try {
+            await setAdminServicioEstado(serviceId, {
+                activo: true,
+                id_sucursal: branchId,
+            });
+            notifications.success('Servicio reactivado.', { dedupeKey: 'servicios-reactivate-ok' });
+            emitCatalogSync('servicio-reactivated');
+            await fetchServicios();
+        } catch (err) {
+            if (err.status === 401) { navigate('/login'); return; }
+            if (err.status === 403) { navigate('/unauthorized'); return; }
+            notifications.error(extractMessage(err), { dedupeKey: 'servicios-reactivate-error' });
         }
     }
 
     // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const sinSucursal = !sucursal;
-    // AM: Bloquea acciones hasta seleccionar sucursal cuando hay multiples disponibles.
-    const actionsLockedByBranch = !sucursal && availableBranches.length > 1;
+    // AM: El listado agrupado permite revisar/editar maestro en todas las sucursales; crear sigue requiriendo sucursal.
+    const actionsLockedByBranch = false;
     const titleSubtitle = !sucursal && availableBranches.length > 1
-        ? 'Selecciona una sucursal para crear, editar o cambiar estado de servicios.'
-        : 'Gestiona servicios por sucursal con configuración operativa.';
+        ? 'Gestiona servicios maestro y tarifas por sucursal.'
+        : 'Gestiona servicios maestro y tarifas por sucursal.';
     // AM: Requisito de operacion: mostrar siempre servicios agendables e informativos en la misma vista por sucursal.
     const visibleServicios = useMemo(() => filteredServicios, [filteredServicios]);
     const modeLabel = 'servicios';
@@ -847,54 +1087,104 @@ export default function AdminServicesCatalogPage() {
                 items={visibleServicios}
                 getItemKey={(servicio) => buildServicioScopeKey(servicio)}
                 showHeaderTag={false}
-                renderItem={(s, i, pageIndex) => (
-                    <DataCard
-                        key={buildServicioScopeKey(s)}
-                        animationDelay={(pageIndex * 0.02) + (i * 0.05)}
-                        avatar={<Scissors size={20} />}
-                        title={s.nombre_servicio}
-                        subtitle={s.descripcion}
-                        badge={
-                            <div className="flex items-center gap-1.5">
-                                <ServiceTypeBadge informativo={Boolean(s.servicio_informativo)} />
-                                <ServiceStatusBadge activo={Boolean(s.activo)} />
+                renderItem={(s, i, pageIndex) => {
+                    const selectedTariff = sucursal ? getSelectedBranchTariff(s, sucursal) : null;
+                    const activeTariffs = getActiveTariffs(s);
+                    const globalMode = !sucursal;
+                    return (
+                        <div
+                            key={buildServicioScopeKey(s)}
+                            className="rounded-[20px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-4 shadow-[var(--mf-shadow-soft)]"
+                            style={{ animationDelay: `${(pageIndex * 0.02) + (i * 0.05)}s` }}
+                        >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="flex min-w-0 items-start gap-3">
+                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]">
+                                        <Scissors size={20} />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-semibold leading-tight text-[var(--mf-text)] break-words">{s.nombre_servicio}</p>
+                                        {s.descripcion ? <p className="mt-0.5 text-xs leading-snug text-[var(--mf-text-2)] break-words">{s.descripcion}</p> : null}
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                            <ServiceStatusBadge activo={Boolean(s.activo)} />
+                                            {activeTariffs.length === 0 ? <span className="mf-badge mf-badge-muted">Sin sucursales activas</span> : null}
+                                        </div>
+                                    </div>
+                                </div>
+                                {globalMode ? (
+                                    <div className="min-w-[220px] rounded-xl border border-[var(--mf-nav-border)] p-3">
+                                        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Estado global</p>
+                                        <div className="grid gap-2">
+                                            <GlobalStateRow label="Activo" value={Boolean(s.activo)} />
+                                            <GlobalStateRow label="Visible en catálogo" value={Boolean(s.visible_publico)} />
+                                            <GlobalStateRow label="Reservable" value={Boolean(s.agendable)} />
+                                        </div>
+                                    </div>
+                                ) : null}
                             </div>
-                        }
-                        fields={[
-                            { label: 'Tipo', value: s.servicio_informativo ? 'Informativo' : 'Agendable' },
-                            { label: 'Precio', value: <span className="font-mono font-bold text-[var(--mf-accent)]">{formatServicePrice(s.precio_hnl)}</span> },
-                            { label: 'Duracion', value: `${s.duracion_min} min` },
-                            ...(canManageServiceBarberAssignments ? [{ label: 'Barberos', value: summarizeAssignedBarbers(s.barberos_ofrecen) }] : []),
-                            { label: 'Orden visual', value: Number(s.orden_visual ?? 100) },
-                        ]}
-                        actions={
-                            <>
-                                <HoverActionButton
-                                    icon={<Eye size={16} strokeWidth={2} />}
-                                    label="Ver detalle"
-                                    title="Ver detalle de servicio"
-                                    disabled={actionsLockedByBranch}
-                                    onClick={() => openDetail(s)}
-                                />
-                                <HoverActionButton
-                                    icon={<Pencil size={16} strokeWidth={2} />}
-                                    label="Editar"
-                                    title="Editar servicio"
-                                    disabled={actionsLockedByBranch || !resolveMutationBranchId(s)}
-                                    onClick={() => openEditar(s)}
-                                />
-                                <HoverActionButton
-                                    icon={s.activo ? <ToggleLeft size={16} strokeWidth={2} /> : <ToggleRight size={16} strokeWidth={2} />}
-                                    label={s.activo ? 'Inactivar' : 'Activar'}
-                                    title={s.activo ? 'Inactivar servicio' : 'Activar servicio'}
-                                    tone={s.activo ? 'warning' : 'success'}
-                                    disabled={actionsLockedByBranch || !resolveMutationBranchId(s)}
-                                    onClick={() => openConfirmState(s)}
-                                />
-                            </>
-                        }
-                    />
-                )}
+
+                            {globalMode ? (
+                                <div className="mt-4 border-t border-[var(--mf-nav-border)] pt-3">
+                                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Sucursales activas</p>
+                                    <p className="mt-1 text-sm text-[var(--mf-text-2)]">{formatActiveBranchesCount(s)}</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {activeTariffs.map((tarifa) => (
+                                            <span key={getTarifaKey(tarifa)} className="rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-2.5 py-1 text-xs text-[var(--mf-text)]">
+                                                {getBranchShortName(tarifa.nombre_sucursal)}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="mt-4 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_42%,transparent)] p-3">
+                                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Configuración en esta sucursal</p>
+                                    <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">{selectedTariff?.nombre_sucursal || 'Sucursal seleccionada'}</p>
+                                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                        <BranchConfigField label="Precio" value={formatServicePrice(selectedTariff?.precio_hnl)} />
+                                        <BranchConfigField label="Duración" value={`${selectedTariff?.duracion_min ?? '-'} min`} />
+                                        <BranchConfigField label="Buffer" value={`${selectedTariff?.buffer_min ?? '-'} min`} />
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--mf-nav-border)] pt-3">
+                                {globalMode ? (
+                                    <>
+                                        <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" disabled={!resolveMutationBranchId(s)} onClick={() => openEditar(s)}>
+                                            <Pencil size={15} /> Editar servicio global
+                                        </Button>
+                                        {s.activo ? (
+                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openGlobalDeactivate(s)}>
+                                                <ToggleLeft size={15} /> Desactivar globalmente
+                                            </Button>
+                                        ) : (
+                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => handleReactivateService(s)}>
+                                                <ToggleRight size={15} /> Reactivar servicio
+                                            </Button>
+                                        )}
+                                    </>
+                                ) : (
+                                    <>
+                                        {selectedTariff?.tarifa_activa ? (
+                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openTarifa(s, selectedTariff)}>
+                                                <Pencil size={15} /> Editar tarifa
+                                            </Button>
+                                        ) : (
+                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openAgregarSucursal(s)}>
+                                                <Plus size={15} /> Agregar a esta sucursal
+                                            </Button>
+                                        )}
+                                        {selectedTariff?.tarifa_activa ? (
+                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openRemoveBranch(s, selectedTariff)}>
+                                                <ToggleLeft size={15} /> Desactivar en esta sucursal
+                                            </Button>
+                                        ) : null}
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    );
+                }}
             />
         );
     }
@@ -924,9 +1214,6 @@ export default function AdminServicesCatalogPage() {
                                 <p className="text-sm text-[var(--mf-text-2)]">
                                     {loading ? 'Cargando...' : `${visibleServicios.length} ${modeLabel}`}
                                 </p>
-                                <div className="flex items-center gap-3">
-                                <ViewToggle defaultView={view} onViewChange={setView} storageKey="servicios" />
-                            </div>
                         </div>
 
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -1010,115 +1297,7 @@ export default function AdminServicesCatalogPage() {
 
             {/* Datos */}
             {!loading && !listError && visibleServicios.length > 0 && (
-                view === 'cards' ? <ServicioCards /> :
-                    <div className="mf-table-wrap">
-                        <Table>
-                            <TableHeader>
-                                <TableRow className="border-[var(--mf-nav-border)]">
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
-                                    {!sucursal && <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursal</TableHead>}
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Tipo</TableHead>
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Grupo</TableHead>
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden lg:table-cell">Agendable</TableHead>
-                                    {canManageServiceBarberAssignments ? (
-                                        <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden xl:table-cell">Barberos</TableHead>
-                                    ) : null}
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Dur (min)</TableHead>
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead>
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Precio HNL</TableHead>
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Publico</TableHead>
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Estado</TableHead>
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden sm:table-cell">Tarifa</TableHead>
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {visibleServicios.map((s) => (
-                                    <TableRow
-                                        key={buildServicioScopeKey(s)}
-                                        className={`border-[var(--mf-nav-border)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] ${
-                                            s.servicio_informativo
-                                                ? 'bg-[color:color-mix(in_srgb,#2a405f_16%,var(--mf-card))]'
-                                                : ''
-                                        }`}
-                                    >
-                                        <TableCell className="font-medium text-[var(--mf-text)]">
-                                            <div>{s.nombre_servicio}</div>
-                                            {s.descripcion && (
-                                                <div className="text-xs text-[var(--mf-text-2)] mt-0.5">{s.descripcion}</div>
-                                            )}
-                                        </TableCell>
-                                        {!sucursal && (
-                                            <TableCell className="text-[var(--mf-text-2)] text-sm whitespace-nowrap">
-                                                {branchNameById[s.id_sucursal] || <span className="opacity-50">Global</span>}
-                                            </TableCell>
-                                        )}
-                                        <TableCell className="text-center">
-                                            <ServiceTypeBadge informativo={Boolean(s.servicio_informativo)} />
-                                        </TableCell>
-                                        <TableCell className="text-[var(--mf-text-2)] text-sm">
-                                            {resolveGrupoLabel(s.grupo_catalogo)}
-                                        </TableCell>
-                                        <TableCell className="text-center hidden lg:table-cell">
-                                            <ServiceAgendableBadge agendable={Boolean(s.agendable)} />
-                                        </TableCell>
-                                        {canManageServiceBarberAssignments ? (
-                                            <TableCell className="hidden xl:table-cell text-sm text-[var(--mf-text-2)]">
-                                                <div className="space-y-1">
-                                                    <div className="font-medium text-[var(--mf-text)]">
-                                                        {Number(s.barberos_ofrecen_total ?? 0)} asignado(s)
-                                                    </div>
-                                                    <div>{summarizeAssignedBarbers(s.barberos_ofrecen, 1)}</div>
-                                                </div>
-                                            </TableCell>
-                                        ) : null}
-                                        <TableCell className="text-center text-[var(--mf-text-2)]">{s.duracion_min}</TableCell>
-                                        <TableCell className="text-center text-[var(--mf-text-2)]">{Number(s.orden_visual ?? 100)}</TableCell>
-                                        <TableCell className="text-right font-mono font-semibold text-[var(--mf-accent)]">
-                                            {formatServicePrice(s.precio_hnl)}
-                                        </TableCell>
-                                        <TableCell className="text-center">
-                                            <ServiceVisibilityBadge visiblePublico={Boolean(s.visible_publico)} />
-                                        </TableCell>
-                                        <TableCell className="text-center">
-                                            <ServiceStatusBadge activo={Boolean(s.activo)} />
-                                        </TableCell>
-                                        <TableCell className="text-center hidden sm:table-cell">
-                                            <span className={`mf-badge ${s.tarifa_activa ? 'mf-badge-gold' : 'mf-badge-muted'}`}>
-                                                {s.tarifa_activa ? 'Activa' : '-'}
-                                            </span>
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            <div className="flex items-center justify-end gap-1.5">
-                                                <HoverActionButton
-                                                    icon={<Eye size={16} strokeWidth={2} />}
-                                                    label="Detalle"
-                                                    title="Ver detalle de servicio"
-                                                    disabled={actionsLockedByBranch}
-                                                    onClick={() => openDetail(s)}
-                                                />
-                                                <HoverActionButton
-                                                    icon={<Pencil size={16} strokeWidth={2} />}
-                                                    label="Editar"
-                                                    title="Editar servicio"
-                                                    disabled={actionsLockedByBranch || !resolveMutationBranchId(s)}
-                                                    onClick={() => openEditar(s)}
-                                                />
-                                                <HoverActionButton
-                                                    icon={s.activo ? <ToggleLeft size={16} strokeWidth={2} /> : <ToggleRight size={16} strokeWidth={2} />}
-                                                    label={s.activo ? 'Inactivar' : 'Activar'}
-                                                    title={s.activo ? 'Inactivar servicio' : 'Activar servicio'}
-                                                    tone={s.activo ? 'warning' : 'success'}
-                                                    disabled={actionsLockedByBranch || !resolveMutationBranchId(s)}
-                                                    onClick={() => openConfirmState(s)}
-                                                />
-                                            </div>
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                    </div>
+                <ServicioCards />
             )}
 
             {/* Dialog Crear / Editar */}
@@ -1127,11 +1306,71 @@ export default function AdminServicesCatalogPage() {
                     <DialogHeader>
                         <DialogTitle>{editTarget ? 'Editar servicio' : 'Nuevo servicio'}</DialogTitle>
                         <DialogDescription className="sr-only">
-                            Configura nombre, duracion, precio y visibilidad del servicio por sucursal.
+                            Configura datos maestros del servicio; las tarifas por sucursal se editan por separado.
                         </DialogDescription>
                     </DialogHeader>
                     <div className={`grid gap-5 ${canManageServiceBarberAssignments && editTarget ? 'lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]' : 'grid-cols-1'}`}>
-                        <ServicioForm values={formValues} onChange={handleFormChange} />
+                        <ServicioForm values={formValues} onChange={handleFormChange} includeTariffFields={false} />
+
+                        {!editTarget ? (
+                            <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_38%,transparent)] p-4">
+                                <div className="space-y-1">
+                                    <p className="text-xs uppercase tracking-[0.22em] text-[var(--mf-accent)]">Sucursales donde se ofrecerá</p>
+                                    <h3 className="text-base font-semibold text-[var(--mf-text)]">Tarifas por sucursal</h3>
+                                    <p className="text-sm text-[var(--mf-text-2)]">Selecciona una o varias sucursales y configura su tarifa base actual.</p>
+                                </div>
+                                <label className="mf-checkbox mt-4 flex items-center gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_70%,transparent)] px-3 py-2.5">
+                                    <input type="checkbox" checked={useSameTariffForAll} onChange={(event) => setUseSameTariffForAll(event.target.checked)} />
+                                    <span className="text-sm font-semibold text-[var(--mf-text)]">Usar misma tarifa para todas las sucursales seleccionadas</span>
+                                </label>
+                                {useSameTariffForAll ? (
+                                    <div className="mt-3 rounded-xl border border-[var(--mf-nav-border)] p-3">
+                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                            <Input type="number" min="0" step="0.01" placeholder="Precio HNL" value={commonCreateTariff.precio_hnl} onChange={(e) => updateCommonCreateTariff('precio_hnl', e.target.value)} />
+                                            <Input type="number" min="1" placeholder="Duración min" value={commonCreateTariff.duracion_min} onChange={(e) => updateCommonCreateTariff('duracion_min', e.target.value)} />
+                                            <Input type="number" min="0" placeholder="Buffer min" value={commonCreateTariff.buffer_min} onChange={(e) => updateCommonCreateTariff('buffer_min', e.target.value)} />
+                                            <label className="mf-checkbox flex items-center gap-2 text-xs text-[var(--mf-text-2)]">
+                                                <input type="checkbox" checked={Boolean(commonCreateTariff.activo)} onChange={(e) => updateCommonCreateTariff('activo', e.target.checked)} />
+                                                Activa
+                                            </label>
+                                            <label className="mf-checkbox flex items-center gap-2 text-xs text-[var(--mf-text-2)]">
+                                                <input type="checkbox" checked={Boolean(commonCreateTariff.servicio_informativo)} onChange={(e) => updateCommonCreateTariff('servicio_informativo', e.target.checked)} />
+                                                Informativo
+                                            </label>
+                                        </div>
+                                    </div>
+                                ) : null}
+                                <div className="mt-4 space-y-3">
+                                    {availableBranches.map((branch) => {
+                                        const selectedTariff = createBranchTariffs.find((item) => item.id_sucursal === branch.id_sucursal);
+                                        const checked = Boolean(selectedTariff);
+                                        return (
+                                            <div key={branch.id_sucursal} className="rounded-xl border border-[var(--mf-nav-border)] p-3">
+                                                <label className="mf-checkbox flex items-center gap-2">
+                                                    <input type="checkbox" checked={checked} onChange={() => toggleCreateBranch(branch.id_sucursal)} />
+                                                    <span className="font-semibold text-[var(--mf-text)]">{branch.nombre_sucursal}</span>
+                                                </label>
+                                                {checked && !useSameTariffForAll ? (
+                                                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                                        <Input type="number" min="0" step="0.01" placeholder="Precio HNL" value={selectedTariff.precio_hnl} onChange={(e) => updateCreateBranchTariff(branch.id_sucursal, 'precio_hnl', e.target.value)} />
+                                                        <Input type="number" min="1" placeholder="Duración min" value={selectedTariff.duracion_min} onChange={(e) => updateCreateBranchTariff(branch.id_sucursal, 'duracion_min', e.target.value)} />
+                                                        <Input type="number" min="0" placeholder="Buffer min" value={selectedTariff.buffer_min} onChange={(e) => updateCreateBranchTariff(branch.id_sucursal, 'buffer_min', e.target.value)} />
+                                                        <label className="mf-checkbox flex items-center gap-2 text-xs text-[var(--mf-text-2)]">
+                                                            <input type="checkbox" checked={Boolean(selectedTariff.activo)} onChange={(e) => updateCreateBranchTariff(branch.id_sucursal, 'activo', e.target.checked)} />
+                                                            Activa
+                                                        </label>
+                                                        <label className="mf-checkbox flex items-center gap-2 text-xs text-[var(--mf-text-2)]">
+                                                            <input type="checkbox" checked={Boolean(selectedTariff.servicio_informativo)} onChange={(e) => updateCreateBranchTariff(branch.id_sucursal, 'servicio_informativo', e.target.checked)} />
+                                                            Informativo
+                                                        </label>
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </section>
+                        ) : null}
 
                         {canManageServiceBarberAssignments && Boolean(formValues.servicio_informativo) ? (
                             <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_38%,transparent)] p-4">
@@ -1236,58 +1475,29 @@ export default function AdminServicesCatalogPage() {
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-                <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl">
+            <Dialog open={tariffDialogOpen} onOpenChange={setTariffDialogOpen}>
+                <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-2xl">
                     <DialogHeader>
-                        <DialogTitle>Detalle de servicio</DialogTitle>
+                        <DialogTitle>Editar tarifa</DialogTitle>
                         <DialogDescription className="sr-only">
-                            Consulta los datos operativos y comerciales del servicio seleccionado.
+                            Configura precio, duración, buffer y estado de la tarifa por sucursal.
                         </DialogDescription>
                     </DialogHeader>
-                    {detailTarget && (
-                        <DetailInfoModalContent
-                            summary={{
-                                icon: <Scissors size={16} />,
-                                title: detailTarget.nombre_servicio || '-',
-                                subtitle: detailTarget.descripcion || 'Sin descripcion',
-                                badge: <ServiceStatusBadge activo={Boolean(detailTarget.activo)} />,
-                            }}
-                            sections={[
-                                {
-                                    id: 'operativo',
-                                    title: 'Configuración operativa',
-                                    icon: <Tags size={14} />,
-                                    fields: [
-                                        { label: 'Tipo', value: detailTarget.servicio_informativo ? 'Informativo' : 'Agendable' },
-                                        { label: 'Grupo', value: resolveGrupoLabel(detailTarget.grupo_catalogo) },
-                                        { label: 'Agendable', value: detailTarget.agendable ? 'Si' : 'No' },
-                                        { label: 'Visible publico', value: detailTarget.visible_publico ? 'Si' : 'No' },
-                                        { label: 'Orden visual', value: detailTarget.orden_visual ?? 100 },
-                                    ],
-                                },
-                                {
-                                    id: 'tiempo',
-                                    title: 'Tiempo y tarifa',
-                                    icon: <ToggleRight size={14} />,
-                                    fields: [
-                                        { label: 'Duracion', value: `${detailTarget.duracion_min ?? 0} min` },
-                                        { label: 'Precio HNL', value: formatServicePrice(detailTarget.precio_hnl) },
-                                        { label: 'Tarifa activa', value: detailTarget.tarifa_activa ? 'Si' : 'No' },
-                                    ],
-                                },
-                                {
-                                    id: 'sucursal',
-                                    title: 'Sucursal',
-                                    icon: <Building2 size={14} />,
-                                    fields: [
-                                        { label: 'Sucursal', value: detailTarget.id_sucursal ? (branchNameById[detailTarget.id_sucursal] || detailTarget.id_sucursal) : 'No definida' },
-                                        { label: 'ID servicio', value: detailTarget.id_servicio || '-' },
-                                        ...(canManageServiceBarberAssignments ? [{ label: 'Barberos asignados', value: summarizeAssignedBarbers(detailTarget.barberos_ofrecen, 3) }] : []),
-                                    ],
-                                },
-                            ]}
-                        />
-                    )}
+                    <TarifaForm
+                        values={tariffFormValues}
+                        onChange={handleTariffFormChange}
+                        serviceName={tariffTarget?.servicio?.nombre_servicio}
+                        branchName={tariffTarget?.tarifa?.nombre_sucursal}
+                    />
+                    {tariffFormError ? <ErrorBanner message={tariffFormError} /> : null}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setTariffDialogOpen(false)} disabled={tariffFormLoading}>
+                            Cancelar
+                        </Button>
+                        <Button onClick={handleGuardarTarifa} disabled={tariffFormLoading} className="gap-2 min-w-[120px]">
+                            {tariffFormLoading ? 'Guardando...' : 'Guardar tarifa'}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 
@@ -1328,15 +1538,6 @@ export default function AdminServicesCatalogPage() {
                         >
                             Agendables
                         </Button>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setFilters((prev) => ({ ...prev, grupo: prev.grupo === 'barberia' ? 'all' : 'barberia' }))}
-                            className={quickFilterButtonClass(filters.grupo === 'barberia')}
-                        >
-                            Grupo barberia
-                        </Button>
                     </div>
 
                     <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1376,18 +1577,6 @@ export default function AdminServicesCatalogPage() {
                                 <option value="no">No</option>
                             </select>
                         </div>
-                        <div>
-                            <Label className="mf-label">Grupo</Label>
-                            <select
-                                className="mf-select mt-1"
-                                value={filters.grupo}
-                                onChange={(event) => setFilters((prev) => ({ ...prev, grupo: event.target.value }))}
-                            >
-                                <option value="all">Todos</option>
-                                <option value="barberia">Barberia</option>
-                                <option value="otros">Otros</option>
-                            </select>
-                        </div>
                         {!sucursal ? (
                             <div className="sm:col-span-2">
                                 <Label className="mf-label">Sucursal</Label>
@@ -1421,41 +1610,34 @@ export default function AdminServicesCatalogPage() {
             </Dialog>
 
             <ActionConfirmDialog
-                open={confirmOpen}
+                open={Boolean(globalDeactivateTarget)}
                 onOpenChange={(open) => {
-                    if (!open && !stateLoading) {
-                        setConfirmOpen(false);
-                        setStateTarget(null);
-                    }
+                    if (!open && !globalDeactivateLoading) setGlobalDeactivateTarget(null);
                 }}
-                tone={stateTarget?._nextActivo ? 'warning' : 'danger'}
-                title={
-                    stateTarget?._nextActivo
-                        ? 'Activar servicio'
-                        : stateTarget?._forcePendingAppointmentsConfirm
-                            ? 'Confirmar inactivación con citas pendientes'
-                            : 'Inactivar servicio'
-                }
+                tone="danger"
+                title="Desactivar globalmente"
+                description="Este servicio dejará de mostrarse y no podrá reservarse en ninguna sucursal. Las tarifas e historial se conservarán."
+                confirmLabel="Desactivar globalmente"
+                cancelLabel="Cancelar"
+                loading={globalDeactivateLoading}
+                onConfirm={handleConfirmGlobalDeactivate}
+            />
+            <ActionConfirmDialog
+                open={Boolean(removeBranchTarget)}
+                onOpenChange={(open) => {
+                    if (!open && !removeBranchLoading) setRemoveBranchTarget(null);
+                }}
+                tone="danger"
+                title="Quitar de sucursal"
                 description={
-                    stateTarget
-                        ? (
-                            stateTarget?._nextActivo
-                                ? `Se activara ${stateTarget.nombre_servicio}.`
-                                : stateTarget?._pendingAppointmentsWarning
-                                    || `Se inactivara ${stateTarget.nombre_servicio}.`
-                        )
+                    removeBranchTarget
+                        ? `Se desactivará ${removeBranchTarget.servicio?.nombre_servicio || 'el servicio'} en ${removeBranchTarget.tarifa?.nombre_sucursal || 'la sucursal'}.`
                         : ''
                 }
-                confirmLabel={
-                    stateTarget?._nextActivo
-                        ? 'Activar'
-                        : stateTarget?._forcePendingAppointmentsConfirm
-                            ? 'Sí, inactivar'
-                            : 'Inactivar'
-                }
+                confirmLabel="Quitar"
                 cancelLabel="Cancelar"
-                loading={stateLoading}
-                onConfirm={handleConfirmState}
+                loading={removeBranchLoading}
+                onConfirm={handleConfirmRemoveBranch}
             />
         </div>
     );

@@ -75,8 +75,14 @@ function shouldHydrateForPath(pathname) {
   if (path.startsWith('/auth/callback')) return false;
   if (path.startsWith('/home')) return true;
   if (path.startsWith('/admin')) return true;
+  if (path === '/agendar' || path.startsWith('/agendar/')) return true;
   if (path === '/login' || path === '/register') return true;
   return false;
+}
+
+function isPublicBookingPath(pathname) {
+  const path = String(pathname || '').trim();
+  return path === '/agendar' || path.startsWith('/agendar/');
 }
 
 export function AuthProvider({ children }) {
@@ -121,7 +127,10 @@ export function AuthProvider({ children }) {
     setIsHydrated(false);
 
     try {
-      const response = await http.get('/v1/auth/me');
+      const currentPathname = typeof window !== 'undefined' ? window.location?.pathname || '' : '';
+      const response = await http.get('/v1/auth/me', {
+        skipAuthInvalidation: isPublicBookingPath(currentPathname),
+      });
       const payload = response?.data || response;
 
       if (!response?.ok || !payload?.user) {

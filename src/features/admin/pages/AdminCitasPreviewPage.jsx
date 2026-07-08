@@ -14,7 +14,7 @@ import PublicBookingAgendaStep from '../../public/booking/PublicBookingAgendaSte
 import PublicBookingConfirmStep from '../../public/booking/PublicBookingConfirmStep.jsx';
 import {
   PublicBookingProvider,
-} from '../../public/booking/PublicBookingFlow.jsx';
+} from '../../public/booking/BookingFlowContext.jsx';
 import {
   getPublicBookingContext,
   listPublicAgendaBarberos,
@@ -24,10 +24,8 @@ import {
   listPublicCatalogServicios,
 } from '../../public/booking/publicBookingApi.js';
 import {
-  ALL_TIME_SLOTS,
   MAX_COMPANIONS,
   buildAppointmentSelectionSummary,
-  buildTimeSlots,
   extractMessage,
   getCurrentTimeKeyInTimeZone,
   getTodayDateKeyInTimeZone,
@@ -36,6 +34,22 @@ import {
   toLocalDateTimeWithOffset,
   toMonthStartFromDateKey,
 } from '../../public/booking/bookingUtils.js';
+import {
+  areBlocksEqual,
+  areServiceIdsEqual,
+  createBookingBlock,
+  normalizeSharedBookingBlock,
+} from '../../public/booking/utils/bookingMappers.js';
+import previewBookingAdapter from '../../booking/adapters/previewBookingAdapter.js';
+import {
+  buildBarberSlotSuggestions,
+  buildBookingAvailabilityParams,
+  buildPreviewDefaultSlots,
+  findBookingBlockCollision,
+  hasBookingSelection,
+  loadBookingAvailability,
+  loadBookingSlots,
+} from '../../booking/core/bookingAvailabilityCore.js';
 import './AdminCitasPage.css';
 import '../../public/booking/PublicBookingFlow.css';
 
@@ -43,6 +57,8 @@ const EMPTY_CONTEXT = {
   sucursales: [],
   parametros: {},
 };
+
+const normalizeSharedBlock = normalizeSharedBookingBlock;
 
 function readBooleanParam(parametros, key, fallback) {
   const value = parametros?.[key];
@@ -62,43 +78,6 @@ function readNumberParam(parametros, key, fallback) {
   return fallback;
 }
 
-function buildDefaultSlots() {
-  return ALL_TIME_SLOTS.map((hora) => ({ hora, disponible: false }));
-}
-
-function normalizeHourMinute(value) {
-  const normalized = String(value || '').trim();
-  const match = normalized.match(/^(\d{2}:\d{2})/);
-  return match ? match[1] : null;
-}
-
-function buildDynamicSlots({ availableTimes, horaInicio, horaFin }) {
-  const start = normalizeHourMinute(horaInicio);
-  const end = normalizeHourMinute(horaFin);
-  const rangeSlots = start && end ? buildTimeSlots(start, end) : ALL_TIME_SLOTS;
-  return rangeSlots.map((hora) => ({
-    hora,
-    disponible: availableTimes.has(hora),
-  }));
-}
-
-function createBlockId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `blk-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-}
-
-function areServiceIdsEqual(left, right) {
-  if (left === right) return true;
-  if (!Array.isArray(left) || !Array.isArray(right)) return false;
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return false;
-  }
-  return true;
-}
-
 function extractSafeErrorCode(err) {
   return String(
     err?.data?.error?.code
@@ -111,72 +90,6 @@ function getSafeAdminErrorMessage(err, fallbackMessage = '') {
   const code = extractSafeErrorCode(err);
   const fallback = String(fallbackMessage || '').trim() || extractMessage(err);
   return mapPublicBookingErrorMessage(code, fallback);
-}
-
-function normalizeBookingBlock(block, index) {
-  const fallbackAlias = index === 0 ? 'Titular' : `Acompañante ${index}`;
-  const nextServiceIds = Array.isArray(block?.serviceIds)
-    ? Array.from(new Set(block.serviceIds.map((id) => String(id || '').trim()).filter(Boolean)))
-    : [];
-  const contactName = String(block?.contactName || '').trim();
-  const resolvedAlias = contactName || String(block?.alias || '').trim() || fallbackAlias;
-  const hasPackage = Boolean(String(block?.packageId || '').trim());
-  const requestedType = String(block?.selectionType || '').trim().toLowerCase();
-  let normalizedSelectionType = 'services';
-  if (requestedType === 'mixed' || (hasPackage && nextServiceIds.length > 0)) {
-    normalizedSelectionType = 'mixed';
-  } else if (requestedType === 'package' || hasPackage) {
-    normalizedSelectionType = 'package';
-  }
-
-  return {
-    id: String(block?.id || '').trim() || createBlockId(),
-    alias: resolvedAlias,
-    idBarbero: String(block?.idBarbero || '').trim(),
-    selectionType: normalizedSelectionType,
-    packageId: String(block?.packageId || '').trim(),
-    serviceIds: nextServiceIds,
-    selectedDate: String(block?.selectedDate || '').trim(),
-    selectedTime: String(block?.selectedTime || '').trim(),
-    // AM: Campos de contacto deben persistir a través de normalizaciones.
-    contactName,
-    contactEmail: String(block?.contactEmail || '').trim(),
-    contactPhone: String(block?.contactPhone || '').trim(),
-  };
-}
-
-function areBlocksEqual(left, right) {
-  if (!left || !right) return false;
-  return left.id === right.id
-    && left.alias === right.alias
-    && left.idBarbero === right.idBarbero
-    && left.selectionType === right.selectionType
-    && left.packageId === right.packageId
-    && left.selectedDate === right.selectedDate
-    && left.selectedTime === right.selectedTime
-    && left.contactName === right.contactName
-    && left.contactEmail === right.contactEmail
-    && left.contactPhone === right.contactPhone
-    && areServiceIdsEqual(left.serviceIds, right.serviceIds);
-}
-
-function createBookingBlock({ alias = '', idBarbero = '' } = {}) {
-  return normalizeBookingBlock(
-    {
-      id: createBlockId(),
-      alias,
-      idBarbero,
-      selectionType: 'services',
-      packageId: '',
-      serviceIds: [],
-      selectedDate: '',
-      selectedTime: '',
-      contactName: '',
-      contactEmail: '',
-      contactPhone: '',
-    },
-    alias === 'Titular' ? 0 : 1
-  );
 }
 
 const PREVIEW_STEPS = [
@@ -222,7 +135,7 @@ export default function AdminCitasPreviewPage() {
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityMap, setAvailabilityMap] = useState({});
   const [slotsLoading, setSlotsLoading] = useState(false);
-  const [slots, setSlots] = useState(() => buildDefaultSlots());
+  const [slots, setSlots] = useState(() => buildPreviewDefaultSlots());
   const [slotConflict, setSlotConflict] = useState(null);
   const [slotSuggestions, setSlotSuggestions] = useState([]);
   const [slotSuggestionsLoading, setSlotSuggestionsLoading] = useState(false);
@@ -455,7 +368,7 @@ export default function AdminCitasPreviewPage() {
 
   const resetAvailabilityViewState = useCallback((options = {}) => {
     const { clearError = true } = options;
-    setSlots(buildDefaultSlots());
+    setSlots(buildPreviewDefaultSlots());
     if (clearError) {
       setAvailabilityError('');
     }
@@ -501,7 +414,7 @@ export default function AdminCitasPreviewPage() {
       const nextRaw = typeof updater === 'function'
         ? updater(currentBlock)
         : { ...currentBlock, ...updater };
-      const nextBlock = normalizeBookingBlock(nextRaw, index);
+      const nextBlock = normalizeSharedBlock(nextRaw, index);
 
       if (areBlocksEqual(currentBlock, nextBlock)) {
         return prev;
@@ -575,7 +488,7 @@ export default function AdminCitasPreviewPage() {
           : [createBookingBlock({ alias: 'Titular', idBarbero: fallbackBarberId })];
 
         let hasChanges = false;
-        const normalizedSource = sourceBlocks.map((block, index) => normalizeBookingBlock(block, index));
+        const normalizedSource = sourceBlocks.map((block, index) => normalizeSharedBlock(block, index));
 
         const nextBlocks = normalizedSource.map((block) => {
           const nextBarberId = validBarberIds.has(block.idBarbero)
@@ -612,11 +525,7 @@ export default function AdminCitasPreviewPage() {
   }, [notifications, selectedBranchId]);
 
   const fetchAvailability = useCallback(async () => {
-    const hasSelection = selectionType === 'package'
-      ? Boolean(selectedPackageId)
-      : selectionType === 'mixed'
-        ? Boolean(selectedPackageId) || Boolean(servicesCsv)
-        : Boolean(servicesCsv);
+    const hasSelection = hasBookingSelection({ selectionType, packageId: selectedPackageId, servicesCsv });
     if (!selectedBranchId || !activeBlockBarberId || !hasSelection) {
       setAvailabilityMap({});
       setAvailabilityLoading(false);
@@ -653,28 +562,21 @@ export default function AdminCitasPreviewPage() {
     setAvailabilityError('');
 
     try {
-      const response = await listPublicAgendaDisponibilidad(
-        {
-          id_sucursal: selectedBranchId,
-          id_barbero: activeBlockBarberId || undefined,
-          selection_type: selectionType,
-          servicios: ['services', 'mixed'].includes(selectionType) ? servicesCsv : undefined,
-          id_paquete: ['package', 'mixed'].includes(selectionType) ? selectedPackageId : undefined,
-          fecha_desde: monthRange.from,
-          fecha_hasta: monthRange.to,
-        },
-        { signal: controller.signal }
-      );
+      const nextMap = await loadBookingAvailability({
+        requestAvailability: listPublicAgendaDisponibilidad,
+        params: buildBookingAvailabilityParams({
+          branchId: selectedBranchId,
+          barberId: activeBlockBarberId,
+          selectionType,
+          packageId: selectedPackageId,
+          servicesCsv,
+          dateFrom: monthRange.from,
+          dateTo: monthRange.to,
+        }),
+        signal: controller.signal,
+      });
 
       if (requestSeq !== availabilityRequestSeqRef.current) return;
-
-      const payload = response?.data ?? response;
-      const list = Array.isArray(payload?.disponibilidad) ? payload.disponibilidad : [];
-      const nextMap = list.reduce((acc, item) => {
-        if (!item?.fecha) return acc;
-        acc[item.fecha] = item;
-        return acc;
-      }, {});
 
       availabilityCacheRef.current.set(cacheKey, nextMap);
       setAvailabilityMap(nextMap);
@@ -712,13 +614,9 @@ export default function AdminCitasPreviewPage() {
   ]);
 
   const fetchSlots = useCallback(async () => {
-    const hasSelection = selectionType === 'package'
-      ? Boolean(selectedPackageId)
-      : selectionType === 'mixed'
-        ? Boolean(selectedPackageId) || Boolean(servicesCsv)
-        : Boolean(servicesCsv);
+    const hasSelection = hasBookingSelection({ selectionType, packageId: selectedPackageId, servicesCsv });
     if (!selectedBranchId || !activeBlockBarberId || !hasSelection || !selectedDate) {
-      setSlots(buildDefaultSlots());
+      setSlots(buildPreviewDefaultSlots());
       setSlotsLoading(false);
       return;
     }
@@ -741,33 +639,25 @@ export default function AdminCitasPreviewPage() {
     setSlotsLoading(true);
 
     try {
-      const response = await listPublicAgendaHorarios(
-        {
-          id_sucursal: selectedBranchId,
-          id_barbero: activeBlockBarberId || undefined,
-          selection_type: selectionType,
-          servicios: ['services', 'mixed'].includes(selectionType) ? servicesCsv : undefined,
-          id_paquete: ['package', 'mixed'].includes(selectionType) ? selectedPackageId : undefined,
-          fecha: selectedDate,
-        },
-        { signal: controller.signal }
-      );
+      const mapped = await loadBookingSlots({
+        requestSlots: listPublicAgendaHorarios,
+        params: buildBookingAvailabilityParams({
+          branchId: selectedBranchId,
+          barberId: activeBlockBarberId,
+          selectionType,
+          packageId: selectedPackageId,
+          servicesCsv,
+          date: selectedDate,
+        }),
+        signal: controller.signal,
+      });
 
       if (requestSeq !== slotsRequestSeqRef.current) return;
-
-      const payload = response?.data ?? response;
-      const list = Array.isArray(payload?.horarios) ? payload.horarios : [];
-      const availableTimes = new Set(list.map((slot) => slot?.hora).filter(Boolean));
-      const mapped = buildDynamicSlots({
-        availableTimes,
-        horaInicio: payload?.hora_inicio,
-        horaFin: payload?.hora_fin,
-      });
 
       slotsCacheRef.current.set(cacheKey, mapped);
       setSlots(mapped);
 
-      if (selectedTime && !availableTimes.has(selectedTime)) {
+      if (selectedTime && !mapped.some((slot) => slot.hora === selectedTime && slot.disponible)) {
         updateBlockAtIndex(effectiveActiveBlockIndex, (currentBlock) => ({
           ...currentBlock,
           selectedTime: '',
@@ -796,47 +686,43 @@ export default function AdminCitasPreviewPage() {
   ]);
 
   const fetchSlotsForBarber = useCallback(async ({ barberId, dateKey, servicesCsvValue, selectionTypeValue, packageIdValue }) => {
-    const hasSel = selectionTypeValue === 'package'
-      ? Boolean(packageIdValue)
-      : selectionTypeValue === 'mixed'
-        ? Boolean(packageIdValue) || Boolean(servicesCsvValue)
-        : Boolean(servicesCsvValue);
+    const hasSel = hasBookingSelection({
+      selectionType: selectionTypeValue,
+      packageId: packageIdValue,
+      servicesCsv: servicesCsvValue,
+    });
     if (!selectedBranchId || !barberId || !dateKey || !hasSel) {
-      return buildDefaultSlots();
+      return buildPreviewDefaultSlots();
     }
 
     const cacheKey = [selectedBranchId, barberId, selectionTypeValue, packageIdValue, servicesCsvValue, dateKey].join('|');
     const cached = slotsCacheRef.current.get(cacheKey);
     if (cached) return cached;
 
-    const response = await listPublicAgendaHorarios({
-      id_sucursal: selectedBranchId,
-      id_barbero: barberId,
-      selection_type: selectionTypeValue,
-      servicios: ['services', 'mixed'].includes(selectionTypeValue) ? servicesCsvValue : undefined,
-      id_paquete: ['package', 'mixed'].includes(selectionTypeValue) ? packageIdValue : undefined,
-      fecha: dateKey,
+    const mapped = await loadBookingSlots({
+      requestSlots: listPublicAgendaHorarios,
+      params: buildBookingAvailabilityParams({
+        branchId: selectedBranchId,
+        barberId,
+        selectionType: selectionTypeValue,
+        packageId: packageIdValue,
+        servicesCsv: servicesCsvValue,
+        date: dateKey,
+      }),
     });
 
-    const payload = response?.data ?? response;
-    const list = Array.isArray(payload?.horarios) ? payload.horarios : [];
-    const availableTimes = new Set(list.map((slot) => slot?.hora).filter(Boolean));
-    const mapped = buildDynamicSlots({
-      availableTimes,
-      horaInicio: payload?.hora_inicio,
-      horaFin: payload?.hora_fin,
-    });
     slotsCacheRef.current.set(cacheKey, mapped);
     return mapped;
   }, [selectedBranchId]);
 
   const findBlockCollision = useCallback((barberId, dateKey, timeKey, ignoreIndex) => {
-    if (!barberId || !dateKey || !timeKey) return null;
-    return bookingBlocksSummary.find((block) =>
-      block.index !== ignoreIndex
-      && block.idBarbero === barberId
-      && block.selectedDate === dateKey
-      && block.selectedTime === timeKey) || null;
+    return findBookingBlockCollision({
+      blocks: bookingBlocksSummary,
+      barberId,
+      dateKey,
+      timeKey,
+      ignoreIndex,
+    });
   }, [bookingBlocksSummary]);
 
   const loadSlotSuggestions = useCallback(async ({
@@ -847,11 +733,11 @@ export default function AdminCitasPreviewPage() {
     selectionTypeValue,
     packageIdValue,
   }) => {
-    const hasSelection = selectionTypeValue === 'package'
-      ? Boolean(packageIdValue)
-      : selectionTypeValue === 'mixed'
-        ? Boolean(packageIdValue) || Boolean(servicesCsvValue)
-        : Boolean(servicesCsvValue);
+    const hasSelection = hasBookingSelection({
+      selectionType: selectionTypeValue,
+      packageId: packageIdValue,
+      servicesCsv: servicesCsvValue,
+    });
     if (!barberId || !dateKey || !timeKey || !hasSelection) {
       setSlotSuggestions([]);
       setSlotSuggestionsLoading(false);
@@ -872,27 +758,18 @@ export default function AdminCitasPreviewPage() {
     setSlotSuggestions([]);
 
     try {
-      const results = await Promise.all(
-        barberCandidates.map(async (barber) => {
-          try {
-            const barberSlots = await fetchSlotsForBarber({
-              barberId: barber.id_empleado,
-              dateKey,
-              servicesCsvValue,
-              selectionTypeValue,
-              packageIdValue,
-            });
-            const isAvailable = barberSlots.some((slot) => slot.hora === timeKey && slot.disponible);
-            if (!isAvailable) return null;
-            return {
-              idBarbero: barber.id_empleado,
-              nombreBarbero: barber.nombre_completo || 'Barbero',
-            };
-          } catch {
-            return null;
-          }
-        })
-      );
+      const results = await buildBarberSlotSuggestions({
+        barbers: barberCandidates,
+        excludedBarberId: barberId,
+        timeKey,
+        fetchSlotsForBarber: (barber) => fetchSlotsForBarber({
+          barberId: barber.id_empleado,
+          dateKey,
+          servicesCsvValue,
+          selectionTypeValue,
+          packageIdValue,
+        }),
+      });
 
       if (requestSeq !== slotSuggestionRequestSeqRef.current) return;
       setSlotSuggestions(results.filter(Boolean));
@@ -962,7 +839,7 @@ export default function AdminCitasPreviewPage() {
           return block;
         }
         changed = true;
-        return normalizeBookingBlock(
+        return normalizeSharedBlock(
           {
             ...block,
             selectedDate: '',
@@ -994,7 +871,7 @@ export default function AdminCitasPreviewPage() {
     setBookingBlocks((prev) => {
       let changed = false;
       const nextBlocks = prev.map((block, index) => {
-        const normalizedBlock = normalizeBookingBlock(block, index);
+        const normalizedBlock = normalizeSharedBlock(block, index);
         const selectionSummary = buildAppointmentSelectionSummary({
           selectedPackage: normalizedBlock.packageId ? [normalizedBlock.packageId] : [],
           selectedServices: normalizedBlock.serviceIds,
@@ -1015,7 +892,7 @@ export default function AdminCitasPreviewPage() {
           return normalizedBlock;
         }
         changed = true;
-        return normalizeBookingBlock(
+        return normalizeSharedBlock(
           {
             ...normalizedBlock,
             selectionType: nextType,
@@ -1131,7 +1008,7 @@ export default function AdminCitasPreviewPage() {
     }
 
     updateBlockAtIndex(effectiveActiveBlockIndex, (block) => {
-      const normalizedBlock = normalizeBookingBlock(block, effectiveActiveBlockIndex);
+      const normalizedBlock = normalizeSharedBlock(block, effectiveActiveBlockIndex);
       const exists = (Array.isArray(normalizedBlock.serviceIds) ? normalizedBlock.serviceIds : []).includes(normalizedServiceId);
       const nextServiceIds = exists
         ? normalizedBlock.serviceIds.filter((id) => id !== normalizedServiceId)
@@ -1163,7 +1040,7 @@ export default function AdminCitasPreviewPage() {
   const selectSelectionType = useCallback((type) => {
     const normalizedType = String(type || '').trim().toLowerCase() === 'package' ? 'package' : 'services';
     updateBlockAtIndex(effectiveActiveBlockIndex, (block) => {
-      const normalizedBlock = normalizeBookingBlock(block, effectiveActiveBlockIndex);
+      const normalizedBlock = normalizeSharedBlock(block, effectiveActiveBlockIndex);
       if (normalizedType === 'services' && normalizedBlock.packageId && normalizedBlock.serviceIds.length > 0) {
         return { ...normalizedBlock, selectionType: 'mixed' };
       }
@@ -1180,7 +1057,7 @@ export default function AdminCitasPreviewPage() {
   const selectPackage = useCallback((pkgId) => {
     const normalizedPackageId = String(pkgId || '').trim();
     updateBlockAtIndex(effectiveActiveBlockIndex, (block) => {
-      const normalizedBlock = normalizeBookingBlock(block, effectiveActiveBlockIndex);
+      const normalizedBlock = normalizeSharedBlock(block, effectiveActiveBlockIndex);
       const nextPackageId = normalizedBlock.packageId === normalizedPackageId ? '' : normalizedPackageId;
       const selectedPackageEntity = nextPackageId ? packagesById.get(nextPackageId) : null;
       const includedServiceIds = new Set(
@@ -1415,15 +1292,13 @@ export default function AdminCitasPreviewPage() {
 
     setHoldSubmitting(true);
     try {
-      const expiresAt = new Date(Date.now() + holdDurationMin * 60 * 1000).toISOString();
-      setHoldResult({
-        demo: true,
-        id_grupo_cita: `SIM-${Date.now()}`,
-        estado_grupo_codigo: 'simulada',
-        expires_at: expiresAt,
-        monto_total_hnl: totalToPay,
+      const previewHold = await previewBookingAdapter.createHold({
+        totalHnl: totalToPay,
         bloques,
+        blocks: bloques,
+        holdDurationMin,
       });
+      setHoldResult(previewHold);
       notifications.success('Simulacion completada. No se creo ningun hold real.', {
         dedupeKey: 'admin-preview-hold-success',
       });
@@ -1620,6 +1495,9 @@ export default function AdminCitasPreviewPage() {
             </button>
           ))}
         </div>
+      </div>
+      <div className="citas-preview-warning" role="status">
+        Vista de simulación. Ninguna cita será creada.
       </div>
 
       {contextLoading ? (

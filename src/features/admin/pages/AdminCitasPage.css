@@ -47,6 +47,17 @@
   font-size: 14px;
 }
 
+.citas-preview-warning {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, #f0b429 55%, transparent);
+  background: color-mix(in srgb, #f0b429 12%, var(--mf-card) 88%);
+  color: color-mix(in srgb, #8a4b00 92%, black 8%);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .citas-stepper {
   display: inline-flex;
   flex-wrap: wrap;

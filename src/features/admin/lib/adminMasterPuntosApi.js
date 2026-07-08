@@ -30,3 +30,11 @@ export async function searchAdminClientesActivos(query, { limit = 10 } = {}) {
   });
   return http.get(`${BASE}/clientes/buscar?${params.toString()}`);
 }
+
+export async function getAdminMasterPuntosRegalias() {
+  return http.get(`${BASE}/regalias`);
+}
+
+export async function updateAdminMasterPuntosRegalias(payload) {
+  return http.patch(`${BASE}/regalias`, payload);
+}

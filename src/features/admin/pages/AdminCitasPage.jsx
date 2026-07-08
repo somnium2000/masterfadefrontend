@@ -31,14 +31,14 @@ import {
   deleteAdminCitasBloqueo,
   deleteAdminCitasDiaInhabilitado,
   getAdminCitasContexto,
-  getAdminCitasHorarios,
   getAdminCitasParametros,
+  getAdminCitasSucursalHorarios,
   listAdminCitasBloqueos,
   listAdminCitasDiasInhabilitados,
   listPublicAgendaDisponibilidad,
   listPublicAgendaHorarios,
   patchAdminCitasParametros,
-  putAdminCitasHorarios,
+  putAdminCitasSucursalHorarios,
 } from '../lib/adminCitasApi.js';
 import './AdminCitasPage.css';
 
@@ -246,26 +246,86 @@ function buildDefaultScheduleRows() {
   });
 }
 
-function normalizeScheduleRows(horarios) {
+function normalizeBranchScheduleRows(blocks) {
   const byDay = new Map();
-  (Array.isArray(horarios) ? horarios : []).forEach((row) => {
-    if (!byDay.has(row.dia_semana)) {
-      byDay.set(row.dia_semana, row);
-    }
+  (Array.isArray(blocks) ? blocks : []).forEach((block) => {
+    const day = Number(block?.dia_semana);
+    if (!Number.isInteger(day)) return;
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(block);
   });
 
   return buildDefaultScheduleRows().map((base) => {
-    const found = byDay.get(base.dia_semana);
-    if (!found) return base;
+    const dayBlocks = [...(byDay.get(base.dia_semana) || [])].sort((left, right) => (
+      String(left?.hora_inicio || '').localeCompare(String(right?.hora_inicio || ''))
+      || Number(left?.orden_visual || 1) - Number(right?.orden_visual || 1)
+    ));
+    if (!dayBlocks.length) {
+      return { ...base, almuerzo_inicio: '', almuerzo_fin: '', activo: false };
+    }
+
+    const firstBlock = dayBlocks[0];
+    const lastBlock = dayBlocks[dayBlocks.length - 1];
+    const hasSingleBreak = dayBlocks.length === 2;
     return {
       ...base,
-      hora_inicio: toInputTime(found.hora_inicio || base.hora_inicio),
-      hora_fin: toInputTime(found.hora_fin || base.hora_fin),
-      almuerzo_inicio: toInputTime(found.almuerzo_inicio || base.almuerzo_inicio),
-      almuerzo_fin: toInputTime(found.almuerzo_fin || base.almuerzo_fin),
-      activo: found.activo !== false,
+      hora_inicio: toInputTime(firstBlock.hora_inicio || base.hora_inicio),
+      hora_fin: toInputTime(lastBlock.hora_fin || base.hora_fin),
+      almuerzo_inicio: hasSingleBreak ? toInputTime(firstBlock.hora_fin) : '',
+      almuerzo_fin: hasSingleBreak ? toInputTime(lastBlock.hora_inicio) : '',
+      activo: true,
     };
   });
+}
+
+function buildBranchScheduleBlocks(scheduleRows) {
+  const blocks = [];
+  for (const row of scheduleRows) {
+    if (row.activo === false) continue;
+
+    const horaInicio = toInputTime(row.hora_inicio);
+    const horaFin = toInputTime(row.hora_fin);
+    const almuerzoInicio = toInputTime(row.almuerzo_inicio);
+    const almuerzoFin = toInputTime(row.almuerzo_fin);
+    if (!horaInicio || !horaFin || horaFin <= horaInicio) {
+      throw new Error(`${row.dia_label}: la hora final debe ser mayor que la hora inicial.`);
+    }
+
+    const hasLunchStart = Boolean(almuerzoInicio);
+    const hasLunchEnd = Boolean(almuerzoFin);
+    if (hasLunchStart !== hasLunchEnd) {
+      throw new Error(`${row.dia_label}: completa ambas horas del almuerzo o deja ambas vacías.`);
+    }
+
+    if (hasLunchStart) {
+      if (!(horaInicio < almuerzoInicio && almuerzoInicio < almuerzoFin && almuerzoFin < horaFin)) {
+        throw new Error(`${row.dia_label}: el almuerzo debe estar dentro del turno y tener un rango válido.`);
+      }
+      blocks.push(
+        {
+          dia_semana: row.dia_semana,
+          hora_inicio: toTimeWithSeconds(horaInicio),
+          hora_fin: toTimeWithSeconds(almuerzoInicio),
+          orden_visual: 1,
+        },
+        {
+          dia_semana: row.dia_semana,
+          hora_inicio: toTimeWithSeconds(almuerzoFin),
+          hora_fin: toTimeWithSeconds(horaFin),
+          orden_visual: 2,
+        }
+      );
+      continue;
+    }
+
+    blocks.push({
+      dia_semana: row.dia_semana,
+      hora_inicio: toTimeWithSeconds(horaInicio),
+      hora_fin: toTimeWithSeconds(horaFin),
+      orden_visual: 1,
+    });
+  }
+  return blocks;
 }
 
 function getBlockTone(tipo) {
@@ -491,7 +551,7 @@ export default function AdminCitasPage() {
     if (!tabId) return '';
     if (tabId === 'parametros') return 'params:global';
     if (tabId === 'sucursal') return selectedBranchId ? `branchDays:${selectedBranchId}` : '';
-    if (tabId === 'horario') return selectedBarberId ? `schedule:${selectedBarberId}` : '';
+    if (tabId === 'horario') return selectedBranchId ? `branchSchedule:${selectedBranchId}` : '';
     if (tabId === 'restricciones') return selectedBarberId ? `restricciones:${selectedBarberId}` : '';
     return '';
   }, [selectedBarberId, selectedBranchId]);
@@ -718,12 +778,12 @@ export default function AdminCitasPage() {
   }, [handleAuthError, previewDate, selectedBarberId, selectedBranchId, servicesCsv]);
 
   const fetchSchedule = useCallback(async () => {
-    if (!selectedBarberId) return false;
+    if (!selectedBranchId) return false;
     setScheduleLoading(true);
     try {
-      const response = await getAdminCitasHorarios(selectedBarberId);
+      const response = await getAdminCitasSucursalHorarios(selectedBranchId);
       const payload = response?.data ?? response;
-      setScheduleRows(normalizeScheduleRows(payload?.horarios || []));
+      setScheduleRows(normalizeBranchScheduleRows(payload?.bloques || []));
       return true;
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -732,7 +792,7 @@ export default function AdminCitasPage() {
     } finally {
       setScheduleLoading(false);
     }
-  }, [handleAuthError, notifications, selectedBarberId]);
+  }, [handleAuthError, notifications, selectedBranchId]);
 
   const fetchBlocks = useCallback(async () => {
     if (!selectedBarberId) return false;
@@ -1053,22 +1113,19 @@ export default function AdminCitasPage() {
   }
 
   async function saveSchedule() {
-    if (!selectedBarberId) return;
+    if (!selectedBranchId) return;
     setScheduleSaving(true);
     try {
       const payload = {
-        horarios: scheduleRows.map((row) => ({
-          dia_semana: row.dia_semana,
-          hora_inicio: toTimeWithSeconds(row.hora_inicio),
-          hora_fin: toTimeWithSeconds(row.hora_fin),
-          almuerzo_inicio: row.almuerzo_inicio ? toTimeWithSeconds(row.almuerzo_inicio) : null,
-          almuerzo_fin: row.almuerzo_fin ? toTimeWithSeconds(row.almuerzo_fin) : null,
-          activo: Boolean(row.activo),
-        })),
+        motivo_cambio: 'Actualización desde configuración de citas',
+        bloques: buildBranchScheduleBlocks(scheduleRows),
       };
-      const response = await putAdminCitasHorarios(selectedBarberId, payload);
+      const response = await putAdminCitasSucursalHorarios(selectedBranchId, payload);
       const result = response?.data ?? response;
-      setScheduleRows(normalizeScheduleRows(result?.horarios || []));
+      setScheduleRows(normalizeBranchScheduleRows(result?.bloques || []));
+      configLoadCacheRef.current.delete(`branchSchedule:${selectedBranchId}`);
+      previewAvailabilityCacheRef.current.clear();
+      previewSlotsCacheRef.current.clear();
       notifications.success('Horario guardado.', { dedupeKey: 'citas-horarios-save' });
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1665,22 +1722,27 @@ export default function AdminCitasPage() {
           className="text-sm text-[var(--mf-text-2)]"
           onClick={resetPreview}
         >
-          â† Reiniciar vista previa
+          ← Reiniciar vista previa
         </button>
       </div>
     );
   }
 
   function renderHorarioTab() {
-    if (!selectedBarber) {
-      return <EmptyState icon={Clock3} title="Selecciona un barbero" description="Primero elige un barbero para editar su horario." />;
+    if (!selectedBranch) {
+      return <EmptyState icon={Clock3} title="Selecciona una sucursal" description="Primero elige una sucursal para administrar el horario habitual." />;
     }
     return (
       <div className="citas-surface">
         <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <h3 className="mf-font-display text-[22px] md:text-[24px] text-[var(--mf-accent)]">
-            Horario Semanal · {selectedBarber.nombre_completo}
-          </h3>
+          <div>
+            <h3 className="mf-font-display text-[22px] md:text-[24px] text-[var(--mf-accent)]">
+              Horario Semanal · {selectedBranch.nombre_sucursal}
+            </h3>
+            <p className="mt-1 text-sm text-[var(--mf-text-2)]">
+              Este horario aplica para todos los barberos y empleados activos de la sucursal. Los bloqueos y excepciones individuales se administran en la pestaña correspondiente.
+            </p>
+          </div>
           <Button onClick={saveSchedule} disabled={scheduleSaving || scheduleLoading} className="w-full gap-2 sm:w-auto">
             <Save size={14} />
             {scheduleSaving ? 'Guardando...' : (
@@ -2173,8 +2235,8 @@ export default function AdminCitasPage() {
         </div>
 
         <div className="citas-config-rail" />
-        {['horario', 'restricciones'].includes(selectedConfigTab)
-          ? renderBarberChips({ firstNameOnly: selectedConfigTab === 'restricciones' })
+        {selectedConfigTab === 'restricciones'
+          ? renderBarberChips({ firstNameOnly: true })
           : null}
 
         {selectedConfigTab === 'horario' && renderHorarioTab()}

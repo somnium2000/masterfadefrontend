@@ -3,8 +3,18 @@ import { useEffect } from 'react';
 import { CalendarDays, Coins, Gift, Sparkles, UserRound } from 'lucide-react';
 
 const MASTERPUNTOS_META = 10;
+function formatUpcomingDateTimeHn(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('es-HN', {
+    timeZone: 'America/Tegucigalpa',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
+}
 
-function KpiCard({ icon: Icon, label, value, helper, actionLabel, onAction, tone = 'default' }) {
+function KpiCard({ icon: Icon, label, value, helper, actionLabel, onAction, actionDisabled = false, actionTitle = '', tone = 'default' }) {
   const toneClass = tone === 'success'
     ? 'text-emerald-300'
     : tone === 'accent'
@@ -27,7 +37,14 @@ function KpiCard({ icon: Icon, label, value, helper, actionLabel, onAction, tone
         <button
           type="button"
           onClick={onAction}
-          className="mt-4 inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--mf-accent)] transition-colors hover:text-[var(--mf-accent-hover)]"
+          disabled={actionDisabled}
+          title={actionTitle || undefined}
+          className={[
+            'mt-4 inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.08em] transition-colors',
+            actionDisabled
+              ? 'cursor-not-allowed text-[var(--mf-text-2)] opacity-75'
+              : 'text-[var(--mf-accent)] hover:text-[var(--mf-accent-hover)]',
+          ].join(' ')}
         >
           {actionLabel}
         </button>
@@ -70,10 +87,13 @@ function MasterpuntoSlot({ index, progressSpring, reduceMotion }) {
 export default function ClienteSummaryCards({
   masterpuntos = 0,
   upcomingAppointments = 0,
-  totalAppointments = 0,
+  nextUpcomingAppointmentAt = null,
   completionPercent = 0,
   onNewAppointment,
   onOpenProfile,
+  appointmentActionsEnabled = true,
+  appointmentActionLabel = 'Agendar nueva',
+  appointmentActionDisabledMessage = '',
   hideRewardsHero = false,
   hideProfileKpi = false,
 }) {
@@ -83,6 +103,10 @@ export default function ClienteSummaryCards({
   const progressPercent = Math.max(0, Math.min(100, (progressPoints / MASTERPUNTOS_META) * 100));
   const safeCompletionPercent = Math.max(0, Number(completionPercent || 0));
   const profileCompleted = safeCompletionPercent >= 100;
+  const nextUpcomingLabel = formatUpcomingDateTimeHn(nextUpcomingAppointmentAt);
+  const upcomingHelperText = upcomingAppointments > 0
+    ? `Próxima cita: ${nextUpcomingLabel || 'por confirmar'}`
+    : 'No tienes citas próximas. Agenda tu próxima visita.';
   const progressValue = useMotionValue(progressPercent);
   const progressSpring = useSpring(progressValue, {
     stiffness: reduceMotion ? 1000 : 160,
@@ -102,9 +126,11 @@ export default function ClienteSummaryCards({
           icon={CalendarDays}
           label="Citas proximas"
           value={upcomingAppointments}
-          helper={`Total registradas: ${totalAppointments}`}
-          actionLabel="Agendar nueva"
+          helper={upcomingHelperText}
+          actionLabel={appointmentActionLabel}
           onAction={onNewAppointment}
+          actionDisabled={!appointmentActionsEnabled}
+          actionTitle={appointmentActionDisabledMessage}
           tone="accent"
         />
         {!hideProfileKpi ? (
@@ -191,10 +217,17 @@ export default function ClienteSummaryCards({
           <button
             type="button"
             onClick={onNewAppointment}
-            className="mf-accent-gradient mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold shadow-[var(--mf-shadow-accent)]"
+            disabled={!appointmentActionsEnabled}
+            title={appointmentActionDisabledMessage || undefined}
+            className={[
+              'mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold',
+              appointmentActionsEnabled
+                ? 'mf-accent-gradient shadow-[var(--mf-shadow-accent)]'
+                : 'cursor-not-allowed border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)] opacity-80',
+            ].join(' ')}
           >
             <Sparkles size={15} />
-            Sumar puntos con una cita
+            {appointmentActionsEnabled ? 'Sumar puntos con una cita' : appointmentActionLabel}
           </button>
         </div>
       </article>
@@ -204,9 +237,11 @@ export default function ClienteSummaryCards({
           icon={CalendarDays}
           label="Citas próximas"
           value={upcomingAppointments}
-          helper={`Total registradas: ${totalAppointments}`}
-          actionLabel="Agendar nueva"
+          helper={upcomingHelperText}
+          actionLabel={appointmentActionLabel}
           onAction={onNewAppointment}
+          actionDisabled={!appointmentActionsEnabled}
+          actionTitle={appointmentActionDisabledMessage}
           tone="accent"
         />
         {!hideProfileKpi ? (

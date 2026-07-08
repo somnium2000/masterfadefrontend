@@ -17,11 +17,18 @@ function normalizeBranchId(value) {
  * Lista servicios del catálogo.
  * @param {{ id_sucursal?: string }} params
  */
-export async function listAdminServicios({ id_sucursal } = {}) {
+export async function listAdminServicios({ id_sucursal } = {}, options = {}) {
     // AM: Evita enviar placeholders o valores no UUID como id_sucursal.
     const branchId = normalizeBranchId(id_sucursal);
     const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
-    return http.get(`/v1/admin/catalog/servicios${query}`);
+    return http.get(`/v1/admin/catalog/servicios${query}`, options);
+}
+
+export async function listAdminServiciosAgrupados({ id_sucursal } = {}) {
+    // AM: Listado maestro 1 servicio + N tarifas por sucursal.
+    const branchId = normalizeBranchId(id_sucursal);
+    const query = branchId ? `?id_sucursal=${encodeURIComponent(branchId)}` : '';
+    return http.get(`/v1/admin/catalog/servicios/agrupados${query}`);
 }
 
 /**
@@ -64,6 +71,37 @@ export async function deleteAdminServicio(id, id_sucursal) {
  */
 export async function setAdminServicioEstado(id, payload) {
     return http.patch(`/v1/admin/catalog/servicios/${id}/estado`, payload);
+}
+
+export async function updateAdminServicioTarifa(idServicio, idSucursal, payload) {
+    const branchId = normalizeBranchId(idSucursal);
+    if (!branchId) {
+        throw new Error('Debes seleccionar una sucursal valida para actualizar la tarifa.');
+    }
+    return http.patch(`/v1/admin/catalog/servicios/${idServicio}/tarifas/${branchId}`, payload);
+}
+
+export async function createAdminServicioTarifa(idServicio, payload) {
+    const branchId = normalizeBranchId(payload?.id_sucursal);
+    if (!branchId) {
+        throw new Error('Debes seleccionar una sucursal valida para agregarla al servicio.');
+    }
+    return http.post(`/v1/admin/catalog/servicios/${idServicio}/tarifas`, {
+        ...payload,
+        id_sucursal: branchId,
+    });
+}
+
+export async function deactivateAdminServicioTarifa(idServicio, idSucursal) {
+    const branchId = normalizeBranchId(idSucursal);
+    if (!branchId) {
+        throw new Error('Debes seleccionar una sucursal valida para quitarla del servicio.');
+    }
+    return http.patch(`/v1/admin/catalog/servicios/${idServicio}/tarifas/${branchId}/desactivar`, {});
+}
+
+export async function deactivateAdminServicioGlobal(idServicio) {
+    return http.patch(`/v1/admin/catalog/servicios/${idServicio}/desactivar-global`, {});
 }
 
 /**
