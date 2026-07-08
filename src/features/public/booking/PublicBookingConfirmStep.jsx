@@ -87,6 +87,9 @@ export default function PublicBookingConfirmStep() {
   const hasRealDiscount = Math.max(0, descuento) > 0;
   const showIsvLine = totalToPay > 0;
   const mustLoginForNoPaymentConfirmation = Boolean(!requiresOnlinePayment && !canUseClienteHold);
+  const primaryActionLabel = requiresOnlinePayment
+    ? (mode === 'preview' ? 'Ir a Pagadito (demo)' : 'Continuar al pago')
+    : (membershipAplicaEnCita && totalToPay === 0 ? 'Agendar con mi membres\u00eda' : 'Confirmar cita');
 
   const handleContinueAction = async () => {
     if (submittingRef.current) return;
@@ -295,9 +298,7 @@ export default function PublicBookingConfirmStep() {
             }
           >
             {submitting ? <Loader2 size={16} className="animate-spin" /> : null}
-            {requiresOnlinePayment
-              ? 'Continuar al pago'
-              : (membershipAplicaEnCita && totalToPay === 0 ? 'Agendar con mi membresía' : 'Confirmar cita')}
+            {primaryActionLabel}
             <ArrowRight size={15} />
           </Button>
         </BookingActions>

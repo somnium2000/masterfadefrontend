@@ -171,6 +171,9 @@ export default function AdminCitasPreviewPage() {
   const selectedPackageId = activeBlock?.packageId || '';
   const selectedDate = activeBlock?.selectedDate || '';
   const selectedTime = activeBlock?.selectedTime || '';
+  const activeBlockContactState = useMemo(() => ({
+    fullName: String(activeBlock?.contactName || '').trim(),
+  }), [activeBlock?.contactName]);
 
   const canGoPrevMonth = useMemo(() => {
     const currentMonthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
@@ -944,6 +947,7 @@ export default function AdminCitasPreviewPage() {
       selectedDate: '',
       selectedTime: '',
     }));
+    setPreviewStep('agenda');
   }, [clearRequestState, updateBlockAtIndex]);
 
   const setActiveBlock = useCallback((nextIndex) => {
@@ -1318,6 +1322,16 @@ export default function AdminCitasPreviewPage() {
     totalToPay,
   ]);
 
+  const startPreviewCheckoutDemo = useCallback(() => {
+    notifications.info('Vista previa: Pagadito se mantiene en modo demostracion. No se inicia un pago real.', {
+      dedupeKey: 'admin-preview-payment-demo',
+    });
+  }, [notifications]);
+
+  const cancelPreviewFlow = useCallback(() => {
+    resetFlowForBranchChange();
+  }, [resetFlowForBranchChange]);
+
   const selectPreviewStep = useCallback((stepId) => {
     if (!previewCanOpenStep[stepId]) return;
     setPreviewStep(stepId);
@@ -1328,6 +1342,7 @@ export default function AdminCitasPreviewPage() {
       mode: 'preview',
       activeBlock,
       activeBlockIndex: effectiveActiveBlockIndex,
+      activeBlockContactState,
       addCompanionBlock,
       allBlocksComplete,
       allowCompanions,
@@ -1343,19 +1358,37 @@ export default function AdminCitasPreviewPage() {
       canGoPrevMonth,
       contextData,
       currentMonth,
+      fieldErrors: {},
       goToAgenda,
       goToBarberos,
       goToConfirm,
+      goToClienteProfile: () => {},
       holdDurationMin,
       holdResult,
       holdSubmitting,
       isPastSlotForToday,
       maxCompanions,
+      maxPromotionsPerBooking: 0,
+      membershipCompanionNotice: '',
+      membershipLockedServiceIdsForTitular: [],
+      membershipUxMessage: '',
       minBookingDateKey,
       monthRange,
       onSelectDay,
       onSelectTime,
       paymentRequired,
+      pendingCompanionFocusId: '',
+      pendingFieldFocus: null,
+      profileFieldLabels: {},
+      profileIncompleteState: null,
+      promotions: [],
+      promotionsLoadError: '',
+      promotionsLoading: false,
+      rewardBranchMismatch: false,
+      rewardBranchName: '',
+      rewardModeActive: false,
+      rewardServiceId: '',
+      rewardServiceName: '',
       selectedBarber,
       selectedBarberId,
       selectedBranch,
@@ -1381,6 +1414,8 @@ export default function AdminCitasPreviewPage() {
       slots,
       slotsLoading,
       submitHold,
+      startCheckout: startPreviewCheckoutDemo,
+      cancelBookingFlow: cancelPreviewFlow,
       syncServicesScrollState,
       toggleService,
       totalToPay,
@@ -1388,14 +1423,26 @@ export default function AdminCitasPreviewPage() {
       selectBarber,
       selectBranch,
       fetchAvailability,
+      cancelRewardRedemptionUsage: () => {},
+      clearSelectedPromotion: () => {},
+      consumePendingCompanionFocus: () => {},
+      consumePendingFieldFocus: () => {},
       packages,
       packagesLoading,
+      removeCompanionBlock: () => {},
+      selectPromotion: () => {},
       selectionType,
       selectedPackage,
       selectedPackageId,
+      selectedPromotionIds: activeBlock?.promotionIds || [],
       selectPackage,
       selectSelectionType,
       selectedServicesDurationSum: Number(activeSelectionSummary.totalDurationMin || 0),
+      slotsCurated: null,
+      titularSelectedDate: bookingBlocks[0]?.selectedDate || '',
+      titularState: { isAuthenticated: false, hasFullProfile: false, missingFields: [], profile: null },
+      totalEstimatedPromotionDiscountHnl: 0,
+      totalEstimatedToPay: totalToPay,
       updateActiveBlockContact: (patch) => {
         updateBlockAtIndex(effectiveActiveBlockIndex, (block) => {
           const next = { ...block, ...patch };
@@ -1407,6 +1454,7 @@ export default function AdminCitasPreviewPage() {
     }),
     [
       activeBlock,
+      activeBlockContactState,
       effectiveActiveBlockIndex,
       addCompanionBlock,
       allBlocksComplete,
@@ -1468,6 +1516,8 @@ export default function AdminCitasPreviewPage() {
       slots,
       slotsLoading,
       submitHold,
+      startPreviewCheckoutDemo,
+      cancelPreviewFlow,
       syncServicesScrollState,
       toggleService,
       totalToPay,

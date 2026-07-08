@@ -919,7 +919,18 @@ export default function AdminCitasPage() {
     setPreviewCompanionsCount(0);
     setPreviewCompanionServices([]);
     setPreviewStep('barberos');
-  }, [selectedBarberId, selectedBranchId]);
+  }, [selectedBranchId]);
+
+  useEffect(() => {
+    if (previewAvailabilityAbortRef.current) previewAvailabilityAbortRef.current.abort();
+    if (previewSlotsAbortRef.current) previewSlotsAbortRef.current.abort();
+    previewAvailabilityCacheRef.current.clear();
+    previewSlotsCacheRef.current.clear();
+    setPreviewDate('');
+    setPreviewTime('');
+    setPreviewAvailabilityMap({});
+    setPreviewSlots(ALL_TIME_SLOTS.map((hora) => ({ hora, disponible: false })));
+  }, [selectedBarberId]);
 
   useEffect(() => {
     if (!isPreviewMode) return;
