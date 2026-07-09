@@ -722,6 +722,9 @@ export default function AdminAgendamientoCitasPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, () => { scheduleLiveRefresh(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_holds' }, () => { scheduleLiveRefresh(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bloqueos_agenda' }, () => { scheduleLiveRefresh(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agenda_bloqueos_empleados' }, () => { scheduleLiveRefresh(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agenda_excepciones_sucursal' }, () => { scheduleLiveRefresh(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agenda_excepciones_sucursal_bloques' }, () => { scheduleLiveRefresh(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_reagendaciones' }, () => { scheduleLiveRefresh(); })
       .subscribe((status) => {
         realtimeStatusRef.current = status;

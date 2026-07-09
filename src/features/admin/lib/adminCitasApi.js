@@ -94,24 +94,55 @@ export async function listAdminCitasBloqueos(params = {}) {
   return http.get(`/v1/admin/citas/bloqueos${toQueryString(params)}`);
 }
 
+export async function listAdminCitasBloqueosEmpleado(params = {}) {
+  return listAdminCitasBloqueos(params);
+}
+
 export async function createAdminCitasBloqueo(payload) {
   return http.post('/v1/admin/citas/bloqueos', payload);
+}
+
+export async function createAdminCitasBloqueoEmpleado(payload) {
+  return createAdminCitasBloqueo(payload);
 }
 
 export async function deleteAdminCitasBloqueo(idBloqueo) {
   return http.del(`/v1/admin/citas/bloqueos${toQueryString({ id_bloqueo: idBloqueo })}`);
 }
 
+export async function deleteAdminCitasBloqueoEmpleado(idBloqueo) {
+  return deleteAdminCitasBloqueo(idBloqueo);
+}
+
 export async function listAdminCitasDiasInhabilitados(params = {}) {
   return http.get(`/v1/admin/citas/dias-inhabilitados${toQueryString(params)}`);
+}
+
+export async function listAdminCitasExcepcionesSucursal(params = {}) {
+  return listAdminCitasDiasInhabilitados({ ...params, scope: 'sucursal' });
 }
 
 export async function createAdminCitasDiaInhabilitado(payload) {
   return http.post('/v1/admin/citas/dias-inhabilitados', payload);
 }
 
+export async function createAdminCitasExcepcionSucursal(payload) {
+  return createAdminCitasDiaInhabilitado({
+    modo_excepcion_codigo: 'cierre_total',
+    ...payload,
+  });
+}
+
 export async function deleteAdminCitasDiaInhabilitado(idBloqueo, params = {}) {
   return http.del(`/v1/admin/citas/dias-inhabilitados${toQueryString({ id_bloqueo: idBloqueo, ...params })}`);
+}
+
+export async function deleteAdminCitasExcepcionSucursal(idExcepcionSucursal, params = {}) {
+  return deleteAdminCitasDiaInhabilitado(idExcepcionSucursal, {
+    scope: 'sucursal',
+    id_excepcion_sucursal: idExcepcionSucursal,
+    ...params,
+  });
 }
 
 export async function getAdminCitasParametros() {

@@ -28,13 +28,16 @@ import { listAdminServicios } from '../lib/adminCatalogApi.js';
 import {
   createAdminCitasBloqueo,
   createAdminCitasDiaInhabilitado,
+  createAdminCitasExcepcionSucursal,
   deleteAdminCitasBloqueo,
   deleteAdminCitasDiaInhabilitado,
+  deleteAdminCitasExcepcionSucursal,
   getAdminCitasContexto,
   getAdminCitasParametros,
   getAdminCitasSucursalHorarios,
   listAdminCitasBloqueos,
   listAdminCitasDiasInhabilitados,
+  listAdminCitasExcepcionesSucursal,
   listPublicAgendaDisponibilidad,
   listPublicAgendaHorarios,
   patchAdminCitasParametros,
@@ -50,7 +53,7 @@ const PREVIEW_STEPS = [
 
 const CONFIG_TABS = [
   { id: 'horario', label: 'Horario Habitual', icon: Clock3 },
-  { id: 'restricciones', label: 'Bloqueos y Excepciones', icon: AlertTriangle },
+  { id: 'restricciones', label: 'Bloqueos individuales', icon: AlertTriangle },
   { id: 'parametros', label: 'Parámetros Globales', icon: SlidersHorizontal },
   { id: 'sucursal', label: 'Por Sucursal', icon: Ban },
 ];
@@ -832,7 +835,7 @@ export default function AdminCitasPage() {
     if (!selectedBranchId) return false;
     setBranchDaysOffLoading(true);
     try {
-      const response = await listAdminCitasDiasInhabilitados({ id_sucursal: selectedBranchId, scope: 'sucursal' });
+      const response = await listAdminCitasExcepcionesSucursal({ id_sucursal: selectedBranchId });
       const payload = response?.data ?? response;
       setBranchDaysOff(Array.isArray(payload?.dias_inhabilitados) ? payload.dias_inhabilitados : []);
       return true;
@@ -1254,11 +1257,10 @@ export default function AdminCitasPage() {
     if (!idBloqueo) return;
     setBranchDayOffDeleteId(idBloqueo);
     try {
-      await deleteAdminCitasDiaInhabilitado(idBloqueo, {
-        scope: 'sucursal',
+      await deleteAdminCitasExcepcionSucursal(idBloqueo, {
         id_sucursal: selectedBranchId,
       });
-      notifications.warning('Bloqueo por sucursal eliminado.', { dedupeKey: 'citas-branch-dayoff-delete-ok' });
+      notifications.warning('Excepción de sucursal eliminada.', { dedupeKey: 'citas-branch-dayoff-delete-ok' });
       void fetchBranchDaysOff();
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1276,14 +1278,14 @@ export default function AdminCitasPage() {
     }
     setBranchDayOffSaving(true);
     try {
-      await createAdminCitasDiaInhabilitado({
+      await createAdminCitasExcepcionSucursal({
         id_sucursal: selectedBranchId,
         fecha: branchDayOffForm.fecha,
         motivo: branchDayOffForm.motivo || null,
       });
       setBranchDayOffDialogOpen(false);
       setBranchDayOffForm({ fecha: '', motivo: '' });
-      notifications.success('Día inhabilitado por sucursal creado.', { dedupeKey: 'citas-branch-dayoff-create-ok' });
+      notifications.success('Cierre total de sucursal creado.', { dedupeKey: 'citas-branch-dayoff-create-ok' });
       void fetchBranchDaysOff();
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1294,7 +1296,7 @@ export default function AdminCitasPage() {
   }
 
   function handleEditBranchDayOff() {
-    notifications.info('La edicion de bloqueos por sucursal se habilitara en una siguiente iteracion.', {
+    notifications.info('La edicion de excepciones de sucursal se habilitara en una siguiente iteracion.', {
       dedupeKey: 'citas-sucursal-edit-info',
     });
   }
@@ -1915,7 +1917,7 @@ export default function AdminCitasPage() {
               Restricciones de agenda para <span className="font-semibold text-[var(--mf-text)]">{selectedBarber.nombre_completo}</span>
             </p>
             <p className="text-sm text-[var(--mf-text-2)]">
-              Unifica bloqueos, días inhabilitados y excepciones de horario en un solo flujo.
+              Administra bloqueos individuales del barbero sin mezclar excepciones de sucursal.
             </p>
           </div>
           <Button className="gap-2" onClick={() => handleOpenRestrictionDialog('bloqueo')}>
@@ -1929,7 +1931,7 @@ export default function AdminCitasPage() {
           <EmptyState
             icon={AlertTriangle}
             title="Sin restricciones"
-            description="No hay bloqueos, excepciones ni días inhabilitados registrados para este barbero."
+            description="No hay bloqueos individuales ni días inhabilitados registrados para este barbero."
           />
         ) : (
           <div className="citas-block-list">
@@ -2143,10 +2145,10 @@ export default function AdminCitasPage() {
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[var(--mf-text-2)] text-lg">
-            Inhabilitar un día completo por sucursal
+            Excepciones de sucursal
           </p>
           <Button className="gap-2" onClick={() => setBranchDayOffDialogOpen(true)}>
-            <Plus size={15} /> Bloquear día
+            <Plus size={15} /> Cierre total
           </Button>
         </div>
 
@@ -2155,8 +2157,8 @@ export default function AdminCitasPage() {
         ) : branchDaysOff.length === 0 ? (
           <EmptyState
             icon={Ban}
-            title="Sin bloqueos por sucursal"
-            description="No hay días completos bloqueados en la sucursal seleccionada."
+            title="Sin excepciones de sucursal"
+            description="No hay cierres o excepciones registradas para la sucursal seleccionada."
           />
         ) : (
           <div className="citas-block-list">
@@ -2165,14 +2167,15 @@ export default function AdminCitasPage() {
                 <span className="citas-block-color" style={{ background: '#dc2626' }} />
                 <div className="text-xl font-semibold text-[var(--mf-text)]">{item.nombre_sucursal || selectedBranch?.nombre_sucursal || 'Sucursal'}</div>
                 <div className="text-[var(--mf-accent)] text-lg">{item.fecha}</div>
+                <div className="text-[var(--mf-text-2)]">{item.modo_excepcion_codigo || 'cierre_total'}</div>
                 <div className="text-[var(--mf-text-2)]">{item.motivo || 'Sin motivo'}</div>
                 <div className="citas-card-actions">
                   <button
                     type="button"
                     className="citas-icon-action"
                     onClick={handleEditBranchDayOff}
-                    aria-label="Editar bloqueo por sucursal"
-                    title="Editar bloqueo por sucursal"
+                    aria-label="Editar excepción de sucursal"
+                    title="Editar excepción de sucursal"
                   >
                     <Pencil size={18} />
                   </button>
@@ -2181,8 +2184,8 @@ export default function AdminCitasPage() {
                     className="citas-icon-action is-danger disabled:opacity-45"
                     onClick={() => handleDeleteBranchDayOff(item.id_bloqueo)}
                     disabled={branchDayOffDeleteId === item.id_bloqueo}
-                    aria-label="Eliminar bloqueo por sucursal"
-                    title="Eliminar bloqueo por sucursal"
+                    aria-label="Eliminar excepción de sucursal"
+                    title="Eliminar excepción de sucursal"
                   >
                     <Trash2 size={18} />
                   </button>
@@ -2402,7 +2405,7 @@ export default function AdminCitasPage() {
       <Dialog open={branchDayOffDialogOpen} onOpenChange={setBranchDayOffDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Bloquear dia por sucursal</DialogTitle>
+            <DialogTitle>Cierre total de sucursal</DialogTitle>
           </DialogHeader>
 
           <div className="grid grid-cols-1 gap-3">
@@ -2429,7 +2432,7 @@ export default function AdminCitasPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setBranchDayOffDialogOpen(false)} disabled={branchDayOffSaving}>Cancelar</Button>
             <Button onClick={handleCreateBranchDayOff} disabled={branchDayOffSaving}>
-              {branchDayOffSaving ? 'Guardando...' : 'Bloquear dia'}
+              {branchDayOffSaving ? 'Guardando...' : 'Crear cierre total'}
             </Button>
           </DialogFooter>
         </DialogContent>
