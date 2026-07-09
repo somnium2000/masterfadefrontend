@@ -20,7 +20,11 @@ function getAvailabilityPeriodCount(value) {
 export function hasRealDayAvailability(dayInfo) {
   if (!dayInfo || dayInfo.disponible !== true) return false;
 
-  if (Array.isArray(dayInfo.slots) && !dayInfo.slots.some((slot) => slot?.disponible !== false)) {
+  if (
+    Array.isArray(dayInfo.slots)
+    && dayInfo.slots.length > 0
+    && !dayInfo.slots.some((slot) => slot?.disponible !== false)
+  ) {
     return false;
   }
 
