@@ -806,10 +806,48 @@
   border-radius: 20px;
   background: color-mix(in srgb, var(--mf-card) 92%, transparent);
   display: grid;
-  grid-template-columns: 6px minmax(160px, 1fr) minmax(120px, auto) minmax(0, 1fr) auto;
+  grid-template-columns: 6px minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
   padding: 14px;
+}
+
+.citas-branch-exception-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.citas-branch-blocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.citas-branch-block-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--mf-nav-border);
+  background: color-mix(in srgb, var(--mf-btn-bg) 68%, transparent);
+  color: var(--mf-text);
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.citas-branch-block-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px;
+  gap: 10px;
+  align-items: end;
+  border: 1px solid var(--mf-nav-border);
+  border-radius: 12px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--mf-card) 86%, transparent);
 }
 
 .citas-card-actions {
@@ -919,6 +957,10 @@
 
   .citas-card-actions {
     justify-content: flex-end;
+  }
+
+  .citas-branch-block-row {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -9,7 +9,6 @@ import {
   Check,
   ChevronDown,
   Clock3,
-  Pencil,
   Plus,
   Save,
   Scissors,
@@ -28,13 +27,16 @@ import { listAdminServicios } from '../lib/adminCatalogApi.js';
 import {
   createAdminCitasBloqueo,
   createAdminCitasDiaInhabilitado,
+  createAdminCitasExcepcionSucursal,
   deleteAdminCitasBloqueo,
   deleteAdminCitasDiaInhabilitado,
+  deleteAdminCitasExcepcionSucursal,
   getAdminCitasContexto,
   getAdminCitasParametros,
   getAdminCitasSucursalHorarios,
   listAdminCitasBloqueos,
   listAdminCitasDiasInhabilitados,
+  listAdminCitasExcepcionesSucursal,
   listPublicAgendaDisponibilidad,
   listPublicAgendaHorarios,
   patchAdminCitasParametros,
@@ -50,7 +52,7 @@ const PREVIEW_STEPS = [
 
 const CONFIG_TABS = [
   { id: 'horario', label: 'Horario Habitual', icon: Clock3 },
-  { id: 'restricciones', label: 'Bloqueos y Excepciones', icon: AlertTriangle },
+  { id: 'restricciones', label: 'Bloqueos individuales', icon: AlertTriangle },
   { id: 'parametros', label: 'Parámetros Globales', icon: SlidersHorizontal },
   { id: 'sucursal', label: 'Por Sucursal', icon: Ban },
 ];
@@ -83,6 +85,33 @@ const BARBER_GRADIENTS = [
 ];
 
 const MAX_COMPANIONS = 4;
+const BRANCH_EXCEPTION_MODES = [
+  {
+    value: 'cierre_total',
+    label: 'Cierre total',
+    help: 'La sucursal no tendrá disponibilidad durante todo el día.',
+    tone: '#dc2626',
+  },
+  {
+    value: 'horario_especial',
+    label: 'Horario especial',
+    help: 'Reemplaza el horario habitual de esta fecha.',
+    tone: '#2563eb',
+  },
+  {
+    value: 'apertura_extra',
+    label: 'Apertura extra',
+    help: 'Agrega disponibilidad adicional al horario habitual.',
+    tone: '#16a34a',
+  },
+  {
+    value: 'cierre_parcial',
+    label: 'Cierre parcial',
+    help: 'Resta estos rangos del horario disponible.',
+    tone: '#f97316',
+  },
+];
+const BRANCH_EXCEPTION_MODE_BY_CODE = new Map(BRANCH_EXCEPTION_MODES.map((item) => [item.value, item]));
 
 const EMPTY_CONTEXT = {
   sucursales: [],
@@ -218,6 +247,71 @@ function formatTimeRange(startAt, endAt) {
     hour12: false,
   }).format(new Date(value));
   return `${formatTime(startAt)} - ${formatTime(endAt)}`;
+}
+
+function normalizeTimeInput(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+  if (!match) return '';
+  return `${match[1]}:${match[2]}`;
+}
+
+function timeToMinutes(value) {
+  const safe = normalizeTimeInput(value);
+  if (!safe) return null;
+  const [hours, minutes] = safe.split(':').map(Number);
+  return (hours * 60) + minutes;
+}
+
+function getBranchExceptionModeMeta(mode) {
+  return BRANCH_EXCEPTION_MODE_BY_CODE.get(String(mode || '').trim()) || BRANCH_EXCEPTION_MODE_BY_CODE.get('cierre_total');
+}
+
+function formatBranchExceptionBlock(block) {
+  const start = normalizeTimeInput(block?.hora_inicio);
+  const end = normalizeTimeInput(block?.hora_fin);
+  if (!start || !end) return '';
+  return `${start} - ${end}`;
+}
+
+function normalizeBranchExceptionBlocks(blocks) {
+  return (Array.isArray(blocks) ? blocks : []).map((block, index) => ({
+    hora_inicio: normalizeTimeInput(block?.hora_inicio),
+    hora_fin: normalizeTimeInput(block?.hora_fin),
+    orden_visual: Number(block?.orden_visual || index + 1),
+  }));
+}
+
+function findBranchExceptionBlockValidationError(blocks) {
+  if (!Array.isArray(blocks) || blocks.length === 0) {
+    return 'Agrega al menos un bloque horario para este tipo de excepción.';
+  }
+
+  const normalized = normalizeBranchExceptionBlocks(blocks);
+  for (const block of normalized) {
+    if (!block.hora_inicio || !block.hora_fin) {
+      return 'Completa todos los bloques horarios antes de guardar.';
+    }
+    const start = timeToMinutes(block.hora_inicio);
+    const end = timeToMinutes(block.hora_fin);
+    if (start === null || end === null || end <= start) {
+      return 'La hora de fin debe ser mayor a la hora de inicio en cada bloque.';
+    }
+  }
+
+  const sorted = normalized
+    .map((block) => ({
+      start: timeToMinutes(block.hora_inicio),
+      end: timeToMinutes(block.hora_fin),
+    }))
+    .sort((left, right) => left.start - right.start);
+  for (let index = 1; index < sorted.length; index += 1) {
+    if (sorted[index].start < sorted[index - 1].end) {
+      return 'Los bloques horarios no pueden traslaparse entre sí.';
+    }
+  }
+
+  return '';
 }
 
 function formatCurrencyHnl(value) {
@@ -403,7 +497,9 @@ export default function AdminCitasPage() {
   const [branchDayOffDeleteId, setBranchDayOffDeleteId] = useState('');
   const [branchDayOffForm, setBranchDayOffForm] = useState({
     fecha: '',
+    modo_excepcion_codigo: 'cierre_total',
     motivo: '',
+    bloques: [{ hora_inicio: '10:00', hora_fin: '12:00' }],
   });
 
   const [paramsLoading, setParamsLoading] = useState(false);
@@ -777,6 +873,36 @@ export default function AdminCitasPage() {
     }
   }, [handleAuthError, previewDate, selectedBarberId, selectedBranchId, servicesCsv]);
 
+  const resetPreviewAvailabilityState = useCallback((options = {}) => {
+    const { clearSelection = true } = options;
+    if (previewAvailabilityAbortRef.current) {
+      previewAvailabilityAbortRef.current.abort();
+      previewAvailabilityAbortRef.current = null;
+    }
+    if (previewSlotsAbortRef.current) {
+      previewSlotsAbortRef.current.abort();
+      previewSlotsAbortRef.current = null;
+    }
+    previewAvailabilityRequestSeqRef.current += 1;
+    previewSlotsRequestSeqRef.current += 1;
+    previewAvailabilityCacheRef.current.clear();
+    previewSlotsCacheRef.current.clear();
+    if (clearSelection) {
+      setPreviewDate('');
+      setPreviewTime('');
+    }
+    setPreviewAvailabilityMap({});
+    setPreviewSlots(ALL_TIME_SLOTS.map((hora) => ({ hora, disponible: false })));
+    setPreviewAvailabilityLoading(false);
+    setPreviewSlotsLoading(false);
+  }, []);
+
+  const refreshPreviewAvailabilityAfterAgendaChange = useCallback(async () => {
+    if (isPreviewMode) {
+      await fetchPreviewAvailability();
+    }
+  }, [fetchPreviewAvailability, isPreviewMode]);
+
   const fetchSchedule = useCallback(async () => {
     if (!selectedBranchId) return false;
     setScheduleLoading(true);
@@ -832,7 +958,7 @@ export default function AdminCitasPage() {
     if (!selectedBranchId) return false;
     setBranchDaysOffLoading(true);
     try {
-      const response = await listAdminCitasDiasInhabilitados({ id_sucursal: selectedBranchId, scope: 'sucursal' });
+      const response = await listAdminCitasExcepcionesSucursal({ id_sucursal: selectedBranchId });
       const payload = response?.data ?? response;
       setBranchDaysOff(Array.isArray(payload?.dias_inhabilitados) ? payload.dias_inhabilitados : []);
       return true;
@@ -909,17 +1035,16 @@ export default function AdminCitasPage() {
   }, [fetchServices]);
 
   useEffect(() => {
-    if (previewAvailabilityAbortRef.current) previewAvailabilityAbortRef.current.abort();
-    if (previewSlotsAbortRef.current) previewSlotsAbortRef.current.abort();
-    previewAvailabilityCacheRef.current.clear();
-    previewSlotsCacheRef.current.clear();
-    setPreviewDate('');
-    setPreviewTime('');
+    resetPreviewAvailabilityState();
     setPreviewServiceIds([]);
     setPreviewCompanionsCount(0);
     setPreviewCompanionServices([]);
     setPreviewStep('barberos');
-  }, [selectedBarberId, selectedBranchId]);
+  }, [resetPreviewAvailabilityState, selectedBranchId]);
+
+  useEffect(() => {
+    resetPreviewAvailabilityState();
+  }, [resetPreviewAvailabilityState, selectedBarberId]);
 
   useEffect(() => {
     if (!isPreviewMode) return;
@@ -1124,8 +1249,8 @@ export default function AdminCitasPage() {
       const result = response?.data ?? response;
       setScheduleRows(normalizeBranchScheduleRows(result?.bloques || []));
       configLoadCacheRef.current.delete(`branchSchedule:${selectedBranchId}`);
-      previewAvailabilityCacheRef.current.clear();
-      previewSlotsCacheRef.current.clear();
+      resetPreviewAvailabilityState();
+      await refreshPreviewAvailabilityAfterAgendaChange();
       notifications.success('Horario guardado.', { dedupeKey: 'citas-horarios-save' });
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1200,7 +1325,9 @@ export default function AdminCitasPage() {
       }
       setRestrictionDialogOpen(false);
       notifications.success('Restricción guardada.', { dedupeKey: 'citas-restriction-save-ok' });
+      resetPreviewAvailabilityState();
       await Promise.all([fetchBlocks(), fetchDaysOff()]);
+      await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
       notifications.error(extractMessage(err), { dedupeKey: 'citas-restriction-save-error' });
@@ -1215,7 +1342,9 @@ export default function AdminCitasPage() {
     try {
       await deleteAdminCitasBloqueo(idBloqueo);
       notifications.warning('Bloqueo eliminado.', { dedupeKey: 'citas-block-delete-ok' });
-      void fetchBlocks();
+      resetPreviewAvailabilityState();
+      await fetchBlocks();
+      await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
       notifications.error(extractMessage(err), { dedupeKey: 'citas-block-delete-error' });
@@ -1230,7 +1359,9 @@ export default function AdminCitasPage() {
     try {
       await deleteAdminCitasDiaInhabilitado(idBloqueo);
       notifications.warning('Día inhabilitado eliminado.', { dedupeKey: 'citas-dayoff-delete-ok' });
-      void fetchDaysOff();
+      resetPreviewAvailabilityState();
+      await fetchDaysOff();
+      await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
       notifications.error(extractMessage(err), { dedupeKey: 'citas-dayoff-delete-error' });
@@ -1243,12 +1374,13 @@ export default function AdminCitasPage() {
     if (!idBloqueo) return;
     setBranchDayOffDeleteId(idBloqueo);
     try {
-      await deleteAdminCitasDiaInhabilitado(idBloqueo, {
-        scope: 'sucursal',
+      await deleteAdminCitasExcepcionSucursal(idBloqueo, {
         id_sucursal: selectedBranchId,
       });
-      notifications.warning('Bloqueo por sucursal eliminado.', { dedupeKey: 'citas-branch-dayoff-delete-ok' });
-      void fetchBranchDaysOff();
+      notifications.warning('Excepción de sucursal eliminada.', { dedupeKey: 'citas-branch-dayoff-delete-ok' });
+      resetPreviewAvailabilityState();
+      await fetchBranchDaysOff();
+      await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
       notifications.error(extractMessage(err), { dedupeKey: 'citas-branch-dayoff-delete-error' });
@@ -1257,35 +1389,96 @@ export default function AdminCitasPage() {
     }
   }
 
+  function resetBranchExceptionForm() {
+    setBranchDayOffForm({
+      fecha: '',
+      modo_excepcion_codigo: 'cierre_total',
+      motivo: '',
+      bloques: [{ hora_inicio: '10:00', hora_fin: '12:00' }],
+    });
+  }
+
+  function openBranchExceptionDialog() {
+    resetBranchExceptionForm();
+    setBranchDayOffDialogOpen(true);
+  }
+
+  function updateBranchExceptionBlock(index, field, value) {
+    setBranchDayOffForm((prev) => ({
+      ...prev,
+      bloques: (Array.isArray(prev.bloques) ? prev.bloques : []).map((block, blockIndex) => (
+        blockIndex === index ? { ...block, [field]: value } : block
+      )),
+    }));
+  }
+
+  function addBranchExceptionBlock() {
+    setBranchDayOffForm((prev) => ({
+      ...prev,
+      bloques: [...(Array.isArray(prev.bloques) ? prev.bloques : []), { hora_inicio: '10:00', hora_fin: '12:00' }],
+    }));
+  }
+
+  function removeBranchExceptionBlock(index) {
+    setBranchDayOffForm((prev) => {
+      const nextBlocks = (Array.isArray(prev.bloques) ? prev.bloques : []).filter((_, blockIndex) => blockIndex !== index);
+      return {
+        ...prev,
+        bloques: nextBlocks.length ? nextBlocks : [{ hora_inicio: '', hora_fin: '' }],
+      };
+    });
+  }
+
   async function handleCreateBranchDayOff() {
-    if (!selectedBranchId) return;
-    if (!branchDayOffForm.fecha) {
-      notifications.warning('Selecciona una fecha para inhabilitar.', { dedupeKey: 'citas-branch-dayoff-create-date' });
+    if (!selectedBranchId) {
+      notifications.warning('Selecciona una sucursal antes de crear la excepción.', { dedupeKey: 'citas-branch-exception-branch' });
       return;
     }
+    if (!branchDayOffForm.fecha) {
+      notifications.warning('Selecciona una fecha para la excepción.', { dedupeKey: 'citas-branch-dayoff-create-date' });
+      return;
+    }
+    const mode = branchDayOffForm.modo_excepcion_codigo || 'cierre_total';
+    if (!BRANCH_EXCEPTION_MODE_BY_CODE.has(mode)) {
+      notifications.warning('Selecciona un tipo de excepción.', { dedupeKey: 'citas-branch-exception-mode' });
+      return;
+    }
+    const requiresBlocks = mode !== 'cierre_total';
+    const normalizedBlocks = normalizeBranchExceptionBlocks(branchDayOffForm.bloques)
+      .map((block, index) => ({ ...block, orden_visual: index + 1 }));
+    if (requiresBlocks) {
+      const validationError = findBranchExceptionBlockValidationError(normalizedBlocks);
+      if (validationError) {
+        notifications.warning(validationError, { dedupeKey: 'citas-branch-exception-blocks' });
+        return;
+      }
+    }
+
+    const payload = {
+      id_sucursal: selectedBranchId,
+      fecha: branchDayOffForm.fecha,
+      modo_excepcion_codigo: mode,
+      motivo: branchDayOffForm.motivo || null,
+    };
+    if (requiresBlocks) {
+      payload.bloques = normalizedBlocks;
+    }
+
     setBranchDayOffSaving(true);
     try {
-      await createAdminCitasDiaInhabilitado({
-        id_sucursal: selectedBranchId,
-        fecha: branchDayOffForm.fecha,
-        motivo: branchDayOffForm.motivo || null,
-      });
+      await createAdminCitasExcepcionSucursal(payload);
       setBranchDayOffDialogOpen(false);
-      setBranchDayOffForm({ fecha: '', motivo: '' });
-      notifications.success('Día inhabilitado por sucursal creado.', { dedupeKey: 'citas-branch-dayoff-create-ok' });
-      void fetchBranchDaysOff();
+      resetBranchExceptionForm();
+      notifications.success('Excepción de sucursal creada.', { dedupeKey: 'citas-branch-dayoff-create-ok' });
+      resetPreviewAvailabilityState();
+      await fetchBranchDaysOff();
+      await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
       notifications.error(extractMessage(err), { dedupeKey: 'citas-branch-dayoff-create-error' });
     } finally {
       setBranchDayOffSaving(false);
     }
-  }
-
-  function handleEditBranchDayOff() {
-    notifications.info('La edicion de bloqueos por sucursal se habilitara en una siguiente iteracion.', {
-      dedupeKey: 'citas-sucursal-edit-info',
-    });
   }
 
   async function handleSaveParams() {
@@ -1904,7 +2097,7 @@ export default function AdminCitasPage() {
               Restricciones de agenda para <span className="font-semibold text-[var(--mf-text)]">{selectedBarber.nombre_completo}</span>
             </p>
             <p className="text-sm text-[var(--mf-text-2)]">
-              Unifica bloqueos, días inhabilitados y excepciones de horario en un solo flujo.
+              Administra bloqueos individuales del barbero sin mezclar excepciones de sucursal.
             </p>
           </div>
           <Button className="gap-2" onClick={() => handleOpenRestrictionDialog('bloqueo')}>
@@ -1918,7 +2111,7 @@ export default function AdminCitasPage() {
           <EmptyState
             icon={AlertTriangle}
             title="Sin restricciones"
-            description="No hay bloqueos, excepciones ni días inhabilitados registrados para este barbero."
+            description="No hay bloqueos individuales ni días inhabilitados registrados para este barbero."
           />
         ) : (
           <div className="citas-block-list">
@@ -2131,11 +2324,14 @@ export default function AdminCitasPage() {
     return (
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-[var(--mf-text-2)] text-lg">
-            Inhabilitar un día completo por sucursal
-          </p>
-          <Button className="gap-2" onClick={() => setBranchDayOffDialogOpen(true)}>
-            <Plus size={15} /> Bloquear día
+          <div>
+            <h3 className="mf-font-display text-[30px] text-[var(--mf-accent)]">Excepciones de sucursal</h3>
+            <p className="max-w-3xl text-sm text-[var(--mf-text-2)]">
+              Administra cierres, horarios especiales, aperturas extra y cierres parciales sin afectar bloqueos individuales de barberos.
+            </p>
+          </div>
+          <Button className="gap-2" onClick={openBranchExceptionDialog}>
+            <Plus size={15} /> Nueva excepción
           </Button>
         </div>
 
@@ -2144,40 +2340,50 @@ export default function AdminCitasPage() {
         ) : branchDaysOff.length === 0 ? (
           <EmptyState
             icon={Ban}
-            title="Sin bloqueos por sucursal"
-            description="No hay días completos bloqueados en la sucursal seleccionada."
+            title="Sin excepciones de sucursal"
+            description="No hay cierres ni ajustes especiales registrados para esta sucursal."
           />
         ) : (
           <div className="citas-block-list">
-            {branchDaysOff.map((item) => (
-              <div key={item.id_bloqueo} className="citas-branch-card">
-                <span className="citas-block-color" style={{ background: '#dc2626' }} />
-                <div className="text-xl font-semibold text-[var(--mf-text)]">{item.nombre_sucursal || selectedBranch?.nombre_sucursal || 'Sucursal'}</div>
-                <div className="text-[var(--mf-accent)] text-lg">{item.fecha}</div>
-                <div className="text-[var(--mf-text-2)]">{item.motivo || 'Sin motivo'}</div>
-                <div className="citas-card-actions">
-                  <button
-                    type="button"
-                    className="citas-icon-action"
-                    onClick={handleEditBranchDayOff}
-                    aria-label="Editar bloqueo por sucursal"
-                    title="Editar bloqueo por sucursal"
-                  >
-                    <Pencil size={18} />
-                  </button>
-                  <button
-                    type="button"
-                    className="citas-icon-action is-danger disabled:opacity-45"
-                    onClick={() => handleDeleteBranchDayOff(item.id_bloqueo)}
-                    disabled={branchDayOffDeleteId === item.id_bloqueo}
-                    aria-label="Eliminar bloqueo por sucursal"
-                    title="Eliminar bloqueo por sucursal"
-                  >
-                    <Trash2 size={18} />
-                  </button>
+            {branchDaysOff.map((item) => {
+              const mode = item.modo_excepcion_codigo || 'cierre_total';
+              const modeMeta = getBranchExceptionModeMeta(mode);
+              const blocks = mode === 'cierre_total' ? [] : normalizeBranchExceptionBlocks(item.bloques);
+              return (
+                <div key={item.id_bloqueo || item.id_excepcion_sucursal} className="citas-branch-card">
+                  <span className="citas-block-color" style={{ background: modeMeta.tone }} />
+                  <div className="citas-branch-exception-main">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xl font-semibold text-[var(--mf-text)]">{formatFriendlyDate(item.fecha)}</span>
+                      <span className="citas-tag" style={{ borderColor: modeMeta.tone, color: modeMeta.tone }}>{modeMeta.label}</span>
+                    </div>
+                    <div className="text-sm text-[var(--mf-text-2)]">{item.nombre_sucursal || selectedBranch?.nombre_sucursal || 'Sucursal'}</div>
+                    <div className="text-sm text-[var(--mf-text-2)]">{item.motivo || 'Sin motivo'}</div>
+                    {blocks.length ? (
+                      <div className="citas-branch-blocks">
+                        {blocks.map((block, index) => (
+                          <span key={`${block.hora_inicio}-${block.hora_fin}-${index}`} className="citas-branch-block-pill">
+                            {formatBranchExceptionBlock(block)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="citas-card-actions">
+                    <button
+                      type="button"
+                      className="citas-icon-action is-danger disabled:opacity-45"
+                      onClick={() => handleDeleteBranchDayOff(item.id_bloqueo || item.id_excepcion_sucursal)}
+                      disabled={branchDayOffDeleteId === (item.id_bloqueo || item.id_excepcion_sucursal)}
+                      aria-label="Eliminar excepción de sucursal"
+                      title="Eliminar excepción de sucursal"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -2391,10 +2597,10 @@ export default function AdminCitasPage() {
       <Dialog open={branchDayOffDialogOpen} onOpenChange={setBranchDayOffDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Bloquear dia por sucursal</DialogTitle>
+            <DialogTitle>Nueva excepción de sucursal</DialogTitle>
           </DialogHeader>
 
-          <div className="grid grid-cols-1 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label className="mf-label">Fecha</Label>
               <Input
@@ -2405,6 +2611,27 @@ export default function AdminCitasPage() {
               />
             </div>
             <div>
+              <Label className="mf-label">Tipo de excepción</Label>
+              <select
+                className="mf-select mt-1"
+                value={branchDayOffForm.modo_excepcion_codigo}
+                onChange={(event) => setBranchDayOffForm((prev) => ({
+                  ...prev,
+                  modo_excepcion_codigo: event.target.value,
+                  bloques: event.target.value === 'cierre_total'
+                    ? prev.bloques
+                    : (Array.isArray(prev.bloques) && prev.bloques.length ? prev.bloques : [{ hora_inicio: '10:00', hora_fin: '12:00' }]),
+                }))}
+              >
+                {BRANCH_EXCEPTION_MODES.map((mode) => (
+                  <option key={mode.value} value={mode.value}>{mode.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <p className="citas-readonly-note">{getBranchExceptionModeMeta(branchDayOffForm.modo_excepcion_codigo).help}</p>
+            </div>
+            <div className="sm:col-span-2">
               <Label className="mf-label">Motivo</Label>
               <Input
                 className="mf-input mt-1"
@@ -2413,12 +2640,54 @@ export default function AdminCitasPage() {
                 placeholder="Ej. Mantenimiento del local"
               />
             </div>
+
+            {branchDayOffForm.modo_excepcion_codigo !== 'cierre_total' ? (
+              <div className="sm:col-span-2 flex flex-col gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label className="mf-label">Bloques horarios</Label>
+                  <Button type="button" variant="outline" className="gap-2" onClick={addBranchExceptionBlock}>
+                    <Plus size={14} /> Agregar bloque
+                  </Button>
+                </div>
+                {(Array.isArray(branchDayOffForm.bloques) ? branchDayOffForm.bloques : []).map((block, index) => (
+                  <div key={`branch-exception-block-${index}`} className="citas-branch-block-row">
+                    <div>
+                      <Label className="mf-label">Hora inicio</Label>
+                      <Input
+                        type="time"
+                        className="mf-input mt-1"
+                        value={block.hora_inicio}
+                        onChange={(event) => updateBranchExceptionBlock(index, 'hora_inicio', event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <Label className="mf-label">Hora fin</Label>
+                      <Input
+                        type="time"
+                        className="mf-input mt-1"
+                        value={block.hora_fin}
+                        onChange={(event) => updateBranchExceptionBlock(index, 'hora_fin', event.target.value)}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="citas-icon-action is-danger self-end"
+                      onClick={() => removeBranchExceptionBlock(index)}
+                      aria-label="Eliminar bloque horario"
+                      title="Eliminar bloque horario"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setBranchDayOffDialogOpen(false)} disabled={branchDayOffSaving}>Cancelar</Button>
             <Button onClick={handleCreateBranchDayOff} disabled={branchDayOffSaving}>
-              {branchDayOffSaving ? 'Guardando...' : 'Bloquear dia'}
+              {branchDayOffSaving ? 'Guardando...' : 'Guardar excepción'}
             </Button>
           </DialogFooter>
         </DialogContent>
