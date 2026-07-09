@@ -114,6 +114,8 @@ const inFlightControllers = new Set();
 const inFlightRequests = new Map();
 const safeResponseCache = new Map();
 const SAFE_RESPONSE_CACHE_TTL_MS = 10000;
+const NETWORK_UNAVAILABLE_MESSAGE =
+  "No fue posible conectar con el servicio. Verifica tu conexión a internet e intenta nuevamente.";
 let sessionInvalidated = false;
 let sessionInvalidationHandler = null;
 const CSRF_SESSION_KEY = "mf_cached_csrf_token";
@@ -183,6 +185,31 @@ export function isAbortError(err) {
     err?.code === "ABORT_ERR" ||
     String(err?.message || "").toLowerCase().includes("aborted")
   );
+}
+
+function isNetworkFetchError(err) {
+  if (!err || isAbortError(err)) return false;
+  const message = String(err.message || "").toLowerCase();
+  return (
+    err instanceof TypeError ||
+    message.includes("failed to fetch") ||
+    message.includes("networkerror") ||
+    message.includes("load failed")
+  );
+}
+
+function createNetworkUnavailableError(cause) {
+  const error = new Error(NETWORK_UNAVAILABLE_MESSAGE);
+  error.status = 0;
+  error.code = "NETWORK_UNAVAILABLE";
+  error.cause = cause;
+  error.data = {
+    error: {
+      code: "NETWORK_UNAVAILABLE",
+      message: NETWORK_UNAVAILABLE_MESSAGE,
+    },
+  };
+  return error;
 }
 
 export function abortInFlightRequests(reason = "request_aborted") {
@@ -321,6 +348,11 @@ export function request(path, options = {}) {
       });
     }
     return data;
+  } catch (err) {
+    if (isNetworkFetchError(err)) {
+      throw createNetworkUnavailableError(err);
+    }
+    throw err;
   } finally {
     inFlightControllers.delete(controller);
     if (signal && typeof signal.removeEventListener === "function") {
