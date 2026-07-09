@@ -873,6 +873,36 @@ export default function AdminCitasPage() {
     }
   }, [handleAuthError, previewDate, selectedBarberId, selectedBranchId, servicesCsv]);
 
+  const resetPreviewAvailabilityState = useCallback((options = {}) => {
+    const { clearSelection = true } = options;
+    if (previewAvailabilityAbortRef.current) {
+      previewAvailabilityAbortRef.current.abort();
+      previewAvailabilityAbortRef.current = null;
+    }
+    if (previewSlotsAbortRef.current) {
+      previewSlotsAbortRef.current.abort();
+      previewSlotsAbortRef.current = null;
+    }
+    previewAvailabilityRequestSeqRef.current += 1;
+    previewSlotsRequestSeqRef.current += 1;
+    previewAvailabilityCacheRef.current.clear();
+    previewSlotsCacheRef.current.clear();
+    if (clearSelection) {
+      setPreviewDate('');
+      setPreviewTime('');
+    }
+    setPreviewAvailabilityMap({});
+    setPreviewSlots(ALL_TIME_SLOTS.map((hora) => ({ hora, disponible: false })));
+    setPreviewAvailabilityLoading(false);
+    setPreviewSlotsLoading(false);
+  }, []);
+
+  const refreshPreviewAvailabilityAfterAgendaChange = useCallback(async () => {
+    if (isPreviewMode) {
+      await fetchPreviewAvailability();
+    }
+  }, [fetchPreviewAvailability, isPreviewMode]);
+
   const fetchSchedule = useCallback(async () => {
     if (!selectedBranchId) return false;
     setScheduleLoading(true);
@@ -1005,28 +1035,16 @@ export default function AdminCitasPage() {
   }, [fetchServices]);
 
   useEffect(() => {
-    if (previewAvailabilityAbortRef.current) previewAvailabilityAbortRef.current.abort();
-    if (previewSlotsAbortRef.current) previewSlotsAbortRef.current.abort();
-    previewAvailabilityCacheRef.current.clear();
-    previewSlotsCacheRef.current.clear();
-    setPreviewDate('');
-    setPreviewTime('');
+    resetPreviewAvailabilityState();
     setPreviewServiceIds([]);
     setPreviewCompanionsCount(0);
     setPreviewCompanionServices([]);
     setPreviewStep('barberos');
-  }, [selectedBranchId]);
+  }, [resetPreviewAvailabilityState, selectedBranchId]);
 
   useEffect(() => {
-    if (previewAvailabilityAbortRef.current) previewAvailabilityAbortRef.current.abort();
-    if (previewSlotsAbortRef.current) previewSlotsAbortRef.current.abort();
-    previewAvailabilityCacheRef.current.clear();
-    previewSlotsCacheRef.current.clear();
-    setPreviewDate('');
-    setPreviewTime('');
-    setPreviewAvailabilityMap({});
-    setPreviewSlots(ALL_TIME_SLOTS.map((hora) => ({ hora, disponible: false })));
-  }, [selectedBarberId]);
+    resetPreviewAvailabilityState();
+  }, [resetPreviewAvailabilityState, selectedBarberId]);
 
   useEffect(() => {
     if (!isPreviewMode) return;
@@ -1231,8 +1249,8 @@ export default function AdminCitasPage() {
       const result = response?.data ?? response;
       setScheduleRows(normalizeBranchScheduleRows(result?.bloques || []));
       configLoadCacheRef.current.delete(`branchSchedule:${selectedBranchId}`);
-      previewAvailabilityCacheRef.current.clear();
-      previewSlotsCacheRef.current.clear();
+      resetPreviewAvailabilityState();
+      await refreshPreviewAvailabilityAfterAgendaChange();
       notifications.success('Horario guardado.', { dedupeKey: 'citas-horarios-save' });
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1307,7 +1325,9 @@ export default function AdminCitasPage() {
       }
       setRestrictionDialogOpen(false);
       notifications.success('Restricción guardada.', { dedupeKey: 'citas-restriction-save-ok' });
+      resetPreviewAvailabilityState();
       await Promise.all([fetchBlocks(), fetchDaysOff()]);
+      await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
       notifications.error(extractMessage(err), { dedupeKey: 'citas-restriction-save-error' });
@@ -1322,7 +1342,9 @@ export default function AdminCitasPage() {
     try {
       await deleteAdminCitasBloqueo(idBloqueo);
       notifications.warning('Bloqueo eliminado.', { dedupeKey: 'citas-block-delete-ok' });
-      void fetchBlocks();
+      resetPreviewAvailabilityState();
+      await fetchBlocks();
+      await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
       notifications.error(extractMessage(err), { dedupeKey: 'citas-block-delete-error' });
@@ -1337,7 +1359,9 @@ export default function AdminCitasPage() {
     try {
       await deleteAdminCitasDiaInhabilitado(idBloqueo);
       notifications.warning('Día inhabilitado eliminado.', { dedupeKey: 'citas-dayoff-delete-ok' });
-      void fetchDaysOff();
+      resetPreviewAvailabilityState();
+      await fetchDaysOff();
+      await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
       notifications.error(extractMessage(err), { dedupeKey: 'citas-dayoff-delete-error' });
@@ -1354,7 +1378,9 @@ export default function AdminCitasPage() {
         id_sucursal: selectedBranchId,
       });
       notifications.warning('Excepción de sucursal eliminada.', { dedupeKey: 'citas-branch-dayoff-delete-ok' });
-      void fetchBranchDaysOff();
+      resetPreviewAvailabilityState();
+      await fetchBranchDaysOff();
+      await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
       notifications.error(extractMessage(err), { dedupeKey: 'citas-branch-dayoff-delete-error' });
@@ -1444,7 +1470,9 @@ export default function AdminCitasPage() {
       setBranchDayOffDialogOpen(false);
       resetBranchExceptionForm();
       notifications.success('Excepción de sucursal creada.', { dedupeKey: 'citas-branch-dayoff-create-ok' });
-      void fetchBranchDaysOff();
+      resetPreviewAvailabilityState();
+      await fetchBranchDaysOff();
+      await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
       notifications.error(extractMessage(err), { dedupeKey: 'citas-branch-dayoff-create-error' });
