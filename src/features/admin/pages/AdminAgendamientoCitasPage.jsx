@@ -415,6 +415,8 @@ export default function AdminAgendamientoCitasPage() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [activeMobileContainer, setActiveMobileContainer] = useState('confirmada');
   const fetchInFlightRef = useRef(false);
+  const pendingRefreshRef = useRef(false);
+  const fetchCitasRef = useRef(null);
   const liveRefreshTimeoutRef = useRef(null);
   const adminBookingAdapter = useMemo(
     () => createAdminBookingAdapter({ roles }),
@@ -683,7 +685,10 @@ export default function AdminAgendamientoCitasPage() {
   const fetchCitas = useCallback(async ({ silent = false } = {}) => {
     if (!isAuthenticated) return;
     if (!canOperateWithSucursal) return;
-    if (fetchInFlightRef.current) return;
+    if (fetchInFlightRef.current) {
+      pendingRefreshRef.current = true;
+      return;
+    }
     fetchInFlightRef.current = true;
     if (!silent) setLoading(true);
     setListError('');
@@ -704,8 +709,16 @@ export default function AdminAgendamientoCitasPage() {
     } finally {
       fetchInFlightRef.current = false;
       if (!silent) setLoading(false);
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        const refresh = fetchCitasRef.current;
+        if (typeof refresh === 'function') {
+          void refresh({ silent: true });
+        }
+      }
     }
   }, [canOperateWithSucursal, filters, handleAuthError, isAuthenticated, search, selectedSucursalId]);
+  fetchCitasRef.current = fetchCitas;
   const scheduleLiveRefresh = useCallback((options = {}) => {
     if (!isAuthenticated) return;
     if (!canOperateWithSucursal) return;
@@ -773,6 +786,7 @@ export default function AdminAgendamientoCitasPage() {
         window.clearTimeout(liveRefreshTimeoutRef.current);
         liveRefreshTimeoutRef.current = null;
       }
+      pendingRefreshRef.current = false;
       source.close();
     };
   }, [canOperateWithSucursal, isAuthenticated, scheduleLiveRefresh, selectedSucursalId]);
@@ -783,6 +797,7 @@ export default function AdminAgendamientoCitasPage() {
     setFilters((prev) => ({ ...prev, idSucursal: safeId || 'all' }));
     setSearch('');
     setCitas([]);
+    pendingRefreshRef.current = false;
     try {
       if (safeId) localStorage.setItem(AGENDAMIENTO_SELECTED_SUCURSAL_KEY, safeId);
       else localStorage.removeItem(AGENDAMIENTO_SELECTED_SUCURSAL_KEY);
