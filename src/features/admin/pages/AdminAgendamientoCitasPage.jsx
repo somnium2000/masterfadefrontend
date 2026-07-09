@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   MapPin,
   Phone,
+  RefreshCw,
   Search,
   SlidersHorizontal,
   UserPlus,
@@ -40,7 +41,6 @@ import { listAdminServicios } from '../lib/adminCatalogApi.js';
 import { listAdminPersonasClientes } from '../lib/adminPersonasApi.js';
 import createAdminBookingAdapter from '../../booking/adapters/adminBookingAdapter.js';
 import { buildTimeSlots } from '../../public/booking/bookingUtils.js';
-import { supabase } from '../../../config/supabaseClient.js';
 import { isAbortError } from '../../../services/httpClient.js';
 
 const FILTER_DEFAULTS = {
@@ -51,7 +51,6 @@ const FILTER_DEFAULTS = {
 };
 
 const LIVE_REFRESH_DEBOUNCE_MS = 180;
-const LIVE_REFRESH_POLL_MS = 8000;
 const AGENDAMIENTO_SELECTED_SUCURSAL_KEY = 'masterfade.admin.agendamiento.selectedSucursalId';
 const ADMIN_BOOKING_FORM_INITIAL = {
   clientMode: 'existing',
@@ -353,6 +352,22 @@ function compareOperationalByProximity(a, b, nowMs) {
   return bDiff - aDiff;
 }
 
+function joinEventUrl(baseUrl, path) {
+  const base = String(baseUrl || '').trim();
+  const p = String(path || '').trim();
+  if (!base) return p;
+  if (!p) return base;
+  if (p.startsWith('http://') || p.startsWith('https://')) return p;
+  const baseClean = base.replace(/\/+$/, '');
+  const pathClean = p.startsWith('/') ? p : `/${p}`;
+  return `${baseClean}${pathClean}`;
+}
+
+function buildOperationalEventsUrl(idSucursal) {
+  const query = new URLSearchParams({ id_sucursal: idSucursal });
+  return joinEventUrl(import.meta.env.VITE_API_URL, `/v1/admin/citas/operativas/events?${query.toString()}`);
+}
+
 export default function AdminAgendamientoCitasPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
@@ -377,6 +392,7 @@ export default function AdminAgendamientoCitasPage() {
   const [selectedSucursalId, setSelectedSucursalId] = useState('');
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [liveStatus, setLiveStatus] = useState('idle');
 
   const [stateDialog, setStateDialog] = useState({ open: false, cita: null, estadoDestino: '' });
   const [stateActionLoadingId, setStateActionLoadingId] = useState('');
@@ -400,7 +416,6 @@ export default function AdminAgendamientoCitasPage() {
   const [activeMobileContainer, setActiveMobileContainer] = useState('confirmada');
   const fetchInFlightRef = useRef(false);
   const liveRefreshTimeoutRef = useRef(null);
-  const realtimeStatusRef = useRef('idle');
   const adminBookingAdapter = useMemo(
     () => createAdminBookingAdapter({ roles }),
     [roles]
@@ -447,6 +462,14 @@ export default function AdminAgendamientoCitasPage() {
   const canOperateWithSucursal = !hasMultipleSucursales || Boolean(selectedSucursalId);
   const isInitialPageLoading = contextLoading || (loading && citas.length === 0 && !listError);
   const canRenderCitasContent = !isInitialPageLoading && !contextError && !listError && canOperateWithSucursal;
+  const liveStatusLabel = useMemo(() => {
+    if (!isAuthenticated || !canOperateWithSucursal) return '';
+    if (liveStatus === 'connected') return 'Conectado en vivo';
+    if (liveStatus === 'connecting') return 'Conectando en vivo';
+    if (liveStatus === 'reconnecting') return 'Reconectando';
+    if (liveStatus === 'manual') return 'Actualización manual disponible';
+    return '';
+  }, [canOperateWithSucursal, isAuthenticated, liveStatus]);
 
   useEffect(() => {
     const timerId = window.setInterval(() => setNowMs(Date.now()), 30000);
@@ -692,7 +715,6 @@ export default function AdminAgendamientoCitasPage() {
       liveRefreshTimeoutRef.current = null;
     }
     const runRefresh = () => {
-      if (typeof document !== 'undefined' && document.hidden && !immediate) return;
       void fetchCitas({ silent: true });
     };
     if (immediate) {
@@ -701,6 +723,9 @@ export default function AdminAgendamientoCitasPage() {
     }
     liveRefreshTimeoutRef.current = window.setTimeout(runRefresh, LIVE_REFRESH_DEBOUNCE_MS);
   }, [canOperateWithSucursal, fetchCitas, isAuthenticated]);
+  const handleManualRefresh = useCallback(() => {
+    void fetchCitas({ silent: false });
+  }, [fetchCitas]);
   useEffect(() => {
     if (!isAuthenticated) return;
     void fetchContext();
@@ -714,61 +739,43 @@ export default function AdminAgendamientoCitasPage() {
     return () => clearTimeout(timer);
   }, [canOperateWithSucursal, fetchCitas, isAuthenticated]);
   useEffect(() => {
-    if (!isAuthenticated) return undefined;
-    if (!canOperateWithSucursal) return undefined;
-    if (!supabase) return undefined;
-    const channel = supabase
-      .channel('admin-agendamiento-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas' }, () => { scheduleLiveRefresh(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_holds' }, () => { scheduleLiveRefresh(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bloqueos_agenda' }, () => { scheduleLiveRefresh(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'agenda_bloqueos_empleados' }, () => { scheduleLiveRefresh(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'agenda_excepciones_sucursal' }, () => { scheduleLiveRefresh(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'agenda_excepciones_sucursal_bloques' }, () => { scheduleLiveRefresh(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'citas_reagendaciones' }, () => { scheduleLiveRefresh(); })
-      .subscribe((status) => {
-        realtimeStatusRef.current = status;
-        // Se omite el refresh en SUBSCRIBED para evitar ráfaga doble de red en el montaje,
-        // ya que el useEffect superior ya dispara fetchCitas.
-      });
+    if (!isAuthenticated || !canOperateWithSucursal || !selectedSucursalId) {
+      setLiveStatus('idle');
+      return undefined;
+    }
+
+    const source = new EventSource(buildOperationalEventsUrl(selectedSucursalId), { withCredentials: true });
+    setLiveStatus('connecting');
+
+    source.onopen = () => {
+      setLiveStatus('connected');
+    };
+
+    source.addEventListener('ready', () => {
+      setLiveStatus('connected');
+    });
+
+    source.addEventListener('ping', () => {
+      // Heartbeat del backend; no dispara refresh.
+    });
+
+    source.addEventListener('citas.operativas.changed', () => {
+      setLiveStatus('connected');
+      scheduleLiveRefresh();
+    });
+
+    source.onerror = () => {
+      setLiveStatus('reconnecting');
+    };
+
     return () => {
       if (liveRefreshTimeoutRef.current) {
         window.clearTimeout(liveRefreshTimeoutRef.current);
         liveRefreshTimeoutRef.current = null;
       }
-      try {
-        supabase.removeChannel(channel);
-      } catch {
-        // ignore teardown errors
-      }
+      source.close();
     };
-  }, [canOperateWithSucursal, isAuthenticated, scheduleLiveRefresh]);
-  useEffect(() => {
-    if (!isAuthenticated) return undefined;
-    if (!canOperateWithSucursal) return undefined;
-    const handleFocus = () => {
-      scheduleLiveRefresh({ immediate: true });
-    };
-    const handleVisibility = () => {
-      if (!document.hidden) scheduleLiveRefresh({ immediate: true });
-    };
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => {
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
-  }, [canOperateWithSucursal, isAuthenticated, scheduleLiveRefresh]);
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      if (!isAuthenticated) return;
-      if (!canOperateWithSucursal) return;
-      if (typeof document !== 'undefined' && document.hidden) return;
-      const channelHealthy = realtimeStatusRef.current === 'SUBSCRIBED';
-      scheduleLiveRefresh({ immediate: !channelHealthy });
-    }, LIVE_REFRESH_POLL_MS);
-    return () => window.clearInterval(intervalId);
-  }, [canOperateWithSucursal, isAuthenticated, scheduleLiveRefresh]);
+  }, [canOperateWithSucursal, isAuthenticated, scheduleLiveRefresh, selectedSucursalId]);
 
   function handleSucursalSelectionChange(nextId) {
     const safeId = String(nextId || '').trim();
@@ -1478,6 +1485,10 @@ export default function AdminAgendamientoCitasPage() {
           </div>
 
           <div className={`grid gap-2 ${canManageEmergency ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-sm font-semibold min-[390px]:text-base" onClick={handleManualRefresh} disabled={loading || !canOperateWithSucursal}>
+              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+              Actualizar
+            </Button>
             <Button type="button" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-sm font-semibold min-[390px]:text-base" onClick={openAssistantDialog}>
               <CalendarPlus size={15} />
               Nueva cita
@@ -1493,6 +1504,9 @@ export default function AdminAgendamientoCitasPage() {
               </Button>
             ) : null}
           </div>
+          {liveStatusLabel ? (
+            <p className="text-xs text-[var(--mf-text-2)]">{liveStatusLabel}</p>
+          ) : null}
 
           {hiddenOperationalCount > 0 ? (
             <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-xs text-[var(--mf-text-2)]">
@@ -1547,7 +1561,10 @@ export default function AdminAgendamientoCitasPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm text-[var(--mf-text-2)]">{loading ? 'Cargando...' : `${citas.length} cita(s)`}</span>
+              <span className="text-sm text-[var(--mf-text-2)]">
+                {loading ? 'Cargando...' : `${citas.length} cita(s)`}
+                {liveStatusLabel ? <span className="ml-2">{liveStatusLabel}</span> : null}
+              </span>
               <ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" />
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -1568,6 +1585,10 @@ export default function AdminAgendamientoCitasPage() {
               {activeFilterCount > 0 ? (
                 <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={clearAllFilters}>Limpiar</Button>
               ) : null}
+              <Button type="button" variant="outline" className="gap-2" onClick={handleManualRefresh} disabled={loading || !canOperateWithSucursal}>
+                <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+                Actualizar
+              </Button>
               <Button type="button" className="gap-2" onClick={openAssistantDialog}>
                 <CalendarPlus size={15} />
                 Nueva cita
