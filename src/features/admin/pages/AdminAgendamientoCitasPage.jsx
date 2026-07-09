@@ -1515,7 +1515,7 @@ export default function AdminAgendamientoCitasPage() {
             {canManageEmergency ? (
               <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-center text-sm font-semibold min-[390px]:text-base" onClick={() => setBatchDialogOpen(true)}>
                 <AlertTriangle size={14} />
-                Reagendación masiva
+                Reagendación
               </Button>
             ) : null}
           </div>
