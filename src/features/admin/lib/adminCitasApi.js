@@ -127,9 +127,18 @@ export async function createAdminCitasDiaInhabilitado(payload) {
 }
 
 export async function createAdminCitasExcepcionSucursal(payload) {
+  const mode = payload?.modo_excepcion_codigo || 'cierre_total';
+  const body = {
+    id_sucursal: payload?.id_sucursal,
+    fecha: payload?.fecha,
+    modo_excepcion_codigo: mode,
+    motivo: payload?.motivo ?? null,
+  };
+  if (mode !== 'cierre_total' && Array.isArray(payload?.bloques)) {
+    body.bloques = payload.bloques;
+  }
   return createAdminCitasDiaInhabilitado({
-    modo_excepcion_codigo: 'cierre_total',
-    ...payload,
+    ...body,
   });
 }
 
