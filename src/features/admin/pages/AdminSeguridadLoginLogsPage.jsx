@@ -110,6 +110,8 @@ function formatReasonCode(value) {
     LOGIN_PROVIDER_ERROR: 'Error de proveedor',
     LOGIN_INTERNAL_ERROR: 'Error interno controlado',
     LOGIN_SESSION_LIMIT: 'Limite de sesion',
+    LOGIN_RATE_LIMITED: 'Login limitado por demasiados intentos',
+    LOGIN_TEMPORARILY_LOCKED: 'Usuario bloqueado temporalmente',
   };
   return dictionary[code] || 'Evento controlado';
 }

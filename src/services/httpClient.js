@@ -212,18 +212,22 @@ function createNetworkUnavailableError(cause) {
   return error;
 }
 
+function getResponseErrorCode(data) {
+  return String(data?.error?.code || data?.code || "").trim().toUpperCase();
+}
+
 export function abortInFlightRequests(reason = "request_aborted") {
   inFlightControllers.forEach((controller) => controller.abort(reason));
   inFlightControllers.clear();
   inFlightRequests.clear();
 }
 
-function notifySessionInvalidation(reason) {
+function notifySessionInvalidation(reason, details = {}) {
   if (sessionInvalidated) return;
   sessionInvalidated = true;
   abortInFlightRequests(reason);
   if (typeof sessionInvalidationHandler === "function") {
-    sessionInvalidationHandler({ reason });
+    sessionInvalidationHandler({ reason, ...details });
   }
 }
 
@@ -328,6 +332,7 @@ export function request(path, options = {}) {
       err.status = response.status;
       err.data = data;
       err.headers = response.headers;
+      err.code = getResponseErrorCode(data);
       if (response.status === 401 && isExpectedPublicAuthMe401(path, baseUrl)) {
         err.expectedUnauthenticated = true;
       }
@@ -336,7 +341,10 @@ export function request(path, options = {}) {
         !skipAuthInvalidation &&
         shouldInvalidateSessionOn401(path, baseUrl)
       ) {
-        notifySessionInvalidation("private_endpoint_401");
+        const reason = err.code === "AUTH_SESSION_IDLE_EXPIRED"
+          ? "AUTH_SESSION_IDLE_EXPIRED"
+          : "private_endpoint_401";
+        notifySessionInvalidation(reason, { code: err.code || null });
       }
       throw err;
     }

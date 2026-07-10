@@ -101,6 +101,16 @@ function normalizeDisplayText(value, fallback = '-') {
   return normalized || fallback;
 }
 
+function humanizeCode(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return 'Alerta de seguridad';
+  return normalized
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
 function formatDateTime(value) {
   if (!value) return '-';
   const parsed = new Date(value);
@@ -117,6 +127,7 @@ function toDatetimeLocal(value) {
 }
 
 function formatAlertType(value) {
+  const code = String(value || '').trim();
   const map = {
     muchos_fallos_misma_ip: 'Muchos fallos misma IP',
     muchos_fallos_mismo_usuario: 'Muchos fallos mismo usuario',
@@ -124,7 +135,7 @@ function formatAlertType(value) {
     intentos_contra_super_admin: 'Intentos contra super admin',
     cliente_intenta_nueva_sesion: 'Nueva sesion cliente',
   };
-  return map[String(value || '').trim()] || 'Alerta de seguridad';
+  return map[code] || humanizeCode(code);
 }
 
 function formatImpactLevel(value) {
@@ -214,6 +225,22 @@ export default function AdminSeguridadAlertasPage() {
     || filters.toAt !== DEFAULT_FILTERS.toAt
     || Number(filters.limit) !== Number(DEFAULT_FILTERS.limit)
   ), [filters]);
+
+  const alertTypeOptions = useMemo(() => {
+    const options = [...ALERT_TYPE_OPTIONS];
+    const known = new Set(options.map((option) => option.value));
+    rows.forEach((row) => {
+      const tipo = String(row?.tipo || '').trim();
+      if (!tipo || known.has(tipo)) return;
+      known.add(tipo);
+      options.push({ value: tipo, label: formatAlertType(tipo) });
+    });
+    const draftType = String(draftFilters.tipo || '').trim();
+    if (draftType && draftType !== 'all' && !known.has(draftType)) {
+      options.push({ value: draftType, label: formatAlertType(draftType) });
+    }
+    return options;
+  }, [draftFilters.tipo, rows]);
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -416,7 +443,7 @@ export default function AdminSeguridadAlertasPage() {
                 value={draftFilters.tipo}
                 onChange={(event) => setDraftFilters((prev) => ({ ...prev, tipo: event.target.value }))}
               >
-                {ALERT_TYPE_OPTIONS.map((option) => (
+                {alertTypeOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>

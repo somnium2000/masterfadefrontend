@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
-import { useAuth } from '../../../context/AuthContext.jsx';
+import { consumeIdleSessionMessage, useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { supabase } from '../../../config/supabaseClient.js';
 import AuthLandingBrandBlock from '../components/AuthLandingBrandBlock.jsx';
@@ -139,6 +139,13 @@ export default function LoginPage() {
       navigate(`/reset-password${hash}`, { replace: true });
     }
   }, [location.hash, navigate]);
+
+  useEffect(() => {
+    const idleMessage = consumeIdleSessionMessage();
+    if (!idleMessage) return;
+    setError(idleMessage);
+    notifications.error(idleMessage, { dedupeKey: 'auth-idle-session-expired' });
+  }, [notifications]);
 
   async function onSubmit(event) {
     event.preventDefault();

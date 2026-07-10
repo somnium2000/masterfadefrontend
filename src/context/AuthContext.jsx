@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   abortInFlightRequests,
   http,
@@ -8,6 +9,11 @@ import {
 import { supabase } from '../config/supabaseClient.js';
 
 const AuthContext = createContext(null);
+const IDLE_SESSION_TIMEOUT_MS = 20 * 60 * 1000;
+const IDLE_MOUSEMOVE_THROTTLE_MS = 5000;
+const IDLE_SESSION_MESSAGE = 'Sesión expirada por inactividad. Vuelve a iniciar sesión.';
+const IDLE_SESSION_MESSAGE_KEY = 'mf_idle_session_message';
+const SESSION_ACTIVITY_EVENTS = ['click', 'keydown', 'touchstart', 'scroll'];
 
 function normalizeRoles(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
@@ -85,7 +91,41 @@ function isPublicBookingPath(pathname) {
   return path === '/agendar' || path.startsWith('/agendar/');
 }
 
+function shouldTrackIdleSession(pathname) {
+  const path = String(pathname || '').trim();
+  if (!path) return false;
+  if (path === '/') return false;
+  if (path === '/login' || path === '/register') return false;
+  if (path === '/forgot-password' || path === '/reset-password') return false;
+  if (path.startsWith('/auth/callback')) return false;
+  if (path === '/servicios' || path === '/promociones' || path === '/barberos') return false;
+  if (isPublicBookingPath(path)) return false;
+  return true;
+}
+
+function persistIdleSessionMessage() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(IDLE_SESSION_MESSAGE_KEY, IDLE_SESSION_MESSAGE);
+  } catch {
+    // no-op
+  }
+}
+
+export function consumeIdleSessionMessage() {
+  if (typeof window === 'undefined') return '';
+  try {
+    const message = String(window.sessionStorage.getItem(IDLE_SESSION_MESSAGE_KEY) || '').trim();
+    if (message) window.sessionStorage.removeItem(IDLE_SESSION_MESSAGE_KEY);
+    return message;
+  } catch {
+    return '';
+  }
+}
+
 export function AuthProvider({ children }) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const initialPathname = typeof window !== 'undefined' ? String(window.location?.pathname || '').trim() : '';
   const shouldHydrateOnBoot = shouldHydrateForPath(initialPathname);
   const [token, setToken] = useState('');
@@ -97,8 +137,14 @@ export function AuthProvider({ children }) {
   const [clienteId, setClienteId] = useState(null);
   const [isHydrating, setIsHydrating] = useState(shouldHydrateOnBoot);
   const [isHydrated, setIsHydrated] = useState(!shouldHydrateOnBoot);
+  const idleTimerRef = useRef(null);
+  const lastMouseMoveAtRef = useRef(0);
+  const idleExpirationHandledRef = useRef(false);
 
   const applyUserState = useCallback((nextUser) => {
+    if (nextUser?.id_usuario) {
+      idleExpirationHandledRef.current = false;
+    }
     setUser(nextUser);
     setRoles(normalizeRoles(nextUser?.roles));
     setBranchIds(normalizeBranchIds(nextUser?.branch_ids));
@@ -225,12 +271,95 @@ export function AuthProvider({ children }) {
     }
   }, [invalidateSession]);
 
+  const expireIdleSession = useCallback(async () => {
+    if (idleExpirationHandledRef.current) return;
+    idleExpirationHandledRef.current = true;
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+    persistIdleSessionMessage();
+    abortInFlightRequests('AUTH_SESSION_IDLE_EXPIRED');
+    clearSessionState();
+    if (supabase) {
+      void supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+    }
+    try {
+      await http.post('/v1/auth/logout', {}, {
+        skipAuthInvalidation: true,
+      });
+    } catch {
+      // no-op: la sesion local ya quedo cerrada para UX.
+    }
+    navigate('/login', { replace: true });
+  }, [clearSessionState, navigate]);
+
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+    }
+    idleTimerRef.current = setTimeout(() => {
+      void expireIdleSession();
+    }, IDLE_SESSION_TIMEOUT_MS);
+  }, [expireIdleSession]);
+
   useEffect(() => {
-    const unsubscribe = registerSessionInvalidationHandler(() => {
+    const unsubscribe = registerSessionInvalidationHandler((event) => {
+      const reason = String(event?.reason || event?.code || '').trim().toUpperCase();
+      if (reason === 'AUTH_SESSION_IDLE_EXPIRED') {
+        void expireIdleSession();
+        return;
+      }
       invalidateSession('private_endpoint_401');
     });
     return unsubscribe;
-  }, [invalidateSession]);
+  }, [expireIdleSession, invalidateSession]);
+
+  useEffect(() => {
+    if (!user?.id_usuario || !shouldTrackIdleSession(location.pathname)) {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+      return undefined;
+    }
+
+    resetIdleTimer();
+
+    const resetFromActivity = () => {
+      resetIdleTimer();
+    };
+    const resetFromMouseMove = () => {
+      const now = Date.now();
+      if (now - lastMouseMoveAtRef.current < IDLE_MOUSEMOVE_THROTTLE_MS) return;
+      lastMouseMoveAtRef.current = now;
+      resetIdleTimer();
+    };
+
+    SESSION_ACTIVITY_EVENTS.forEach((eventName) => {
+      window.addEventListener(eventName, resetFromActivity, { passive: true });
+    });
+    window.addEventListener('mousemove', resetFromMouseMove, { passive: true });
+
+    return () => {
+      SESSION_ACTIVITY_EVENTS.forEach((eventName) => {
+        window.removeEventListener(eventName, resetFromActivity);
+      });
+      window.removeEventListener('mousemove', resetFromMouseMove);
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+    };
+  }, [location.pathname, location.search, resetIdleTimer, user?.id_usuario]);
+
+  useEffect(() => {
+    return () => {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const currentPathname = window.location?.pathname || '';
