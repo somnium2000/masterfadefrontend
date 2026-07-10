@@ -403,10 +403,28 @@ export default function useBookingCatalogs({
       return;
     }
 
-    setSelectedBranchId((prev) =>
-      branchList.some((branch) => branch.id_sucursal === prev) ? prev : branchList[0]?.id_sucursal || ''
+    const validBranchIds = new Set(
+      branchList.map((branch) => String(branch?.id_sucursal || '').trim()).filter(Boolean)
     );
-  }, [branchList]);
+    const current = String(selectedBranchId || '').trim();
+    if (current && validBranchIds.has(current)) return;
+
+    const nextBranchId = branchList.length === 1 ? String(branchList[0]?.id_sucursal || '').trim() : '';
+    if (current || !nextBranchId) {
+      branchDataCacheRef.current.clear();
+      setBarbers([]);
+      setServices([]);
+      setPackages([]);
+      setPromotions([]);
+      if (typeof setAvailabilityError === 'function') {
+        setAvailabilityError('');
+      }
+      if (typeof setBookingBlocks === 'function') {
+        setBookingBlocks([createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })]);
+      }
+    }
+    setSelectedBranchId(nextBranchId);
+  }, [branchList, selectedBranchId, setAvailabilityError, setBookingBlocks]);
 
   useEffect(() => {
     void fetchBranchData();

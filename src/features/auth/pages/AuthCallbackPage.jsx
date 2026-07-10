@@ -176,6 +176,10 @@ export default function AuthCallbackPage() {
       const hashRefreshToken = String(hash.get('refresh_token') || '').trim();
 
       if (socialConfirmToken) {
+        // AM: Evita reintentos multiples del callback social por re-render.
+        exchangeStartedRef.current = true;
+        runStarted = true;
+
         try {
           setPendingSocialConfirmation(null);
           setShowInvalidUserAuthBox(false);

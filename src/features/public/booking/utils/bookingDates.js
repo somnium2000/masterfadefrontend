@@ -17,10 +17,46 @@ function getAvailabilityPeriodCount(value) {
   return Number.isFinite(total) ? Math.max(0, total) : null;
 }
 
+export function normalizeAvailabilityDateKey(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : '';
+}
+
+function getAvailabilityPayload(value) {
+  if (!value || typeof value !== 'object') return null;
+  if (Array.isArray(value.disponibilidad)) return value;
+  if (value.data && typeof value.data === 'object') {
+    return getAvailabilityPayload(value.data);
+  }
+  return null;
+}
+
+export function getAvailabilityEntries(value) {
+  const payload = getAvailabilityPayload(value);
+  return Array.isArray(payload?.disponibilidad) ? payload.disponibilidad : [];
+}
+
+export function buildAvailabilityMap(value) {
+  return getAvailabilityEntries(value).reduce((acc, item) => {
+    const dateKey = normalizeAvailabilityDateKey(item?.fecha);
+    if (!dateKey) return acc;
+    acc[dateKey] = {
+      ...item,
+      fecha: dateKey,
+    };
+    return acc;
+  }, {});
+}
+
 export function hasRealDayAvailability(dayInfo) {
   if (!dayInfo || dayInfo.disponible !== true) return false;
 
-  if (Array.isArray(dayInfo.slots) && !dayInfo.slots.some((slot) => slot?.disponible !== false)) {
+  if (
+    Array.isArray(dayInfo.slots)
+    && dayInfo.slots.length > 0
+    && !dayInfo.slots.some((slot) => slot?.disponible !== false)
+  ) {
     return false;
   }
 
