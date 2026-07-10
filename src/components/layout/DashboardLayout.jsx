@@ -15,11 +15,12 @@ import { getRoleLabel, resolveHomePath } from '../../features/home/lib/roleRouti
 import PremiumBottomNav from '../navigation/PremiumBottomNav.jsx';
 
 // ── Definición de módulos del sidebar ────────────────────────────────────────────────────────
-function buildNavModules(basePath, role) {
+function buildNavModules(basePath, role, roles = []) {
     const isBarbero = role === 'barbero';
     const isCliente = role === 'cliente';
     const isSecurityRole = role === 'security_admin' || role === 'security_auditor';
     const canSeeSecurityModule = role === 'super_admin';
+    const canSeeSecurityAudit = roles.includes('root');
 
     if (isBarbero) {
         return [
@@ -58,7 +59,9 @@ function buildNavModules(basePath, role) {
                     { id: 'seg-login-logs', label: 'Login Logs', path: `${basePath}/seguridad/login-logs` },
                     { id: 'seg-sesiones', label: 'Sesiones', path: `${basePath}/seguridad/sesiones` },
                     { id: 'seg-usuarios', label: 'Usuarios', path: `${basePath}/seguridad/usuarios` },
-                    { id: 'seg-alertas', label: 'Alertas', path: `${basePath}/seguridad/alertas` },
+                    ...(canSeeSecurityAudit
+                        ? [{ id: 'seg-alertas', label: 'Auditoria', path: `${basePath}/seguridad/alertas` }]
+                        : []),
                 ],
             },
         ];
@@ -147,7 +150,9 @@ function buildNavModules(basePath, role) {
                     { id: 'seg-login-logs', label: 'Login Logs', path: `${basePath}/seguridad/login-logs` },
                     { id: 'seg-sesiones', label: 'Sesiones', path: `${basePath}/seguridad/sesiones` },
                     { id: 'seg-usuarios', label: 'Usuarios', path: `${basePath}/seguridad/usuarios` },
-                    { id: 'seg-alertas', label: 'Alertas', path: `${basePath}/seguridad/alertas` },
+                    ...(canSeeSecurityAudit
+                        ? [{ id: 'seg-alertas', label: 'Auditoria', path: `${basePath}/seguridad/alertas` }]
+                        : []),
                 ],
             }]
             : []),
@@ -328,7 +333,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     const basePath = String(basePathOverride || '').trim() || resolvedHomePath;
-    const modules = buildNavModules(basePath, currentRole);
+    const modules = buildNavModules(basePath, currentRole, roles);
 
     // Módulo activo: el que cuya path coincide más con la ubicación actual
     const activeModule = resolveActiveModule(modules, location.pathname);
@@ -349,6 +354,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
 
     const sidebarWidth = isCollapsed ? 72 : 260;
     const isSecurityRole = currentRole === 'security_admin' || currentRole === 'security_auditor';
+    const canSeeSecurityAudit = roles.includes('root');
 
     // Mobile nav items
     const mobileItems = currentRole === 'barbero'
@@ -363,7 +369,9 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                 { id: 'seg-login-logs', label: 'Login Logs', icon: Shield, onClick: () => navigate(`${basePath}/seguridad/login-logs`) },
                 { id: 'seg-sesiones', label: 'Sesiones', icon: CalendarDays, onClick: () => navigate(`${basePath}/seguridad/sesiones`) },
                 { id: 'seg-usuarios', label: 'Usuarios', icon: Users, onClick: () => navigate(`${basePath}/seguridad/usuarios`) },
-                { id: 'seg-alertas', label: 'Alertas', icon: BarChart3, onClick: () => navigate(`${basePath}/seguridad/alertas`) },
+                ...(canSeeSecurityAudit
+                    ? [{ id: 'seg-alertas', label: 'Auditoria', icon: BarChart3, onClick: () => navigate(`${basePath}/seguridad/alertas`) }]
+                    : []),
                 { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
             ]
             : [

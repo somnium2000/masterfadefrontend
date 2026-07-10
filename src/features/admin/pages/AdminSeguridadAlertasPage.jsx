@@ -193,11 +193,9 @@ export default function AdminSeguridadAlertasPage() {
   const notifications = useNotifications();
   const { roles } = useAuth();
   const realtimeChannels = useMemo(() => ['security.alerts.changed'], []);
+  const isRoot = useMemo(() => roles.includes('root'), [roles]);
 
-  const canWrite = useMemo(
-    () => roles.includes('super_admin') || roles.includes('security_admin'),
-    [roles]
-  );
+  const canWrite = isRoot;
 
   const [rows, setRows] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: DEFAULT_FILTERS.limit, total: 0, total_pages: 1 });
@@ -243,6 +241,11 @@ export default function AdminSeguridadAlertasPage() {
   }, [draftFilters.tipo, rows]);
 
   const fetchRows = useCallback(async () => {
+    if (!isRoot) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError('');
     try {
@@ -275,10 +278,10 @@ export default function AdminSeguridadAlertasPage() {
     } finally {
       setLoading(false);
     }
-  }, [filters, navigate, page]);
+  }, [filters, isRoot, navigate, page]);
 
   const realtime = useSecurityRealtime({
-    enabled: true,
+    enabled: isRoot,
     channels: realtimeChannels,
     signalDebounceMs: 500,
     maxReconnectAttempts: 5,
@@ -288,8 +291,13 @@ export default function AdminSeguridadAlertasPage() {
   });
 
   useEffect(() => {
+    if (!isRoot) {
+      navigate('/unauthorized', { replace: true });
+      return;
+    }
+
     void fetchRows();
-  }, [fetchRows]);
+  }, [fetchRows, isRoot, navigate]);
 
   function applyFilters() {
     setPage(1);
@@ -374,15 +382,20 @@ export default function AdminSeguridadAlertasPage() {
   const safePage = Math.max(1, Number(pagination?.page || page));
   const totalPages = Math.max(1, Number(pagination?.total_pages || 1));
 
+  if (!isRoot) return null;
+
   return (
     <div className="space-y-4 px-2 pb-4 sm:px-4 sm:pb-6">
       <header className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div className="space-y-1">
             <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Seguridad</p>
-            <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Alertas</h1>
+            <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Auditoria de Seguridad</h1>
             <p className="text-sm text-[var(--mf-text-2)]">
-              Vista resumida por riesgo y flujo de resolucion con comentario obligatorio.
+              Registro tecnico de eventos de seguridad. Solo requiere accion en casos revisados por root.
+            </p>
+            <p className="text-xs text-[var(--mf-text-2)]">
+              Eventos generados por intentos fallidos, limites de sesion, bloqueos y actividad anomala.
             </p>
             <p className="text-xs text-[var(--mf-text-2)]">
               {realtime.freshnessLabel}
@@ -510,12 +523,12 @@ export default function AdminSeguridadAlertasPage() {
       </section>
 
       {error ? <ErrorBanner message={error} onRetry={() => void fetchRows()} /> : null}
-      {loading && !error ? <LoadingSpinner label="Consultando alertas de seguridad..." /> : null}
+      {loading && !error ? <LoadingSpinner label="Consultando auditoria de seguridad..." /> : null}
 
       {!loading && !error && rows.length === 0 ? (
         <EmptyState
           icon={Siren}
-          title="No hay alertas para los filtros aplicados"
+          title="No hay eventos para los filtros aplicados"
           description="Ajusta los criterios para ver la actividad relevante."
         />
       ) : null}
@@ -659,8 +672,8 @@ export default function AdminSeguridadAlertasPage() {
             setDetailLoading(false);
           }
         }}
-        title="Detalle de alerta"
-        description="Vista ampliada de la alerta seleccionada."
+        title="Detalle de evento"
+        description="Vista ampliada del evento seleccionado."
       >
         {detailLoading ? <LoadingSpinner label="Cargando detalle..." /> : null}
         {!detailLoading && detailError ? <ErrorBanner message={detailError} /> : null}
