@@ -429,6 +429,16 @@
   display: block;
 }
 
+/* AM: fallback robusto para SVG inline de proveedores sociales en builds desplegados. */
+.mf-social-icon-wrap > svg {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  display: block;
+  flex: 0 0 18px;
+}
+
 .mf-social-text {
   font-size: 13px;
   font-weight: 600;
