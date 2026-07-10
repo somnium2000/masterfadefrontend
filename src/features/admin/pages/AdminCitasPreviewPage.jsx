@@ -793,10 +793,25 @@ export default function AdminCitasPreviewPage() {
       return;
     }
 
-    setSelectedBranchId((prev) =>
-      branchList.some((branch) => branch.id_sucursal === prev) ? prev : branchList[0]?.id_sucursal || ''
+    const validBranchIds = new Set(
+      branchList.map((branch) => String(branch?.id_sucursal || '').trim()).filter(Boolean)
     );
-  }, [branchList]);
+    const current = String(selectedBranchId || '').trim();
+    if (current && validBranchIds.has(current)) return;
+
+    const nextBranchId = branchList.length === 1 ? String(branchList[0]?.id_sucursal || '').trim() : '';
+    if (current || !nextBranchId) {
+      availabilityCacheRef.current.clear();
+      slotsCacheRef.current.clear();
+      setAvailabilityMap({});
+      setSlots([]);
+      setBarbers([]);
+      setServices([]);
+      setPackages([]);
+      setBookingBlocks([createBookingBlock({ alias: 'Titular' })]);
+    }
+    setSelectedBranchId(nextBranchId);
+  }, [branchList, selectedBranchId]);
 
   useEffect(() => {
     void fetchBranchData();
