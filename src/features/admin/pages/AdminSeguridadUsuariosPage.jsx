@@ -85,6 +85,10 @@ function StateBadge({ value }) {
   return <span className={className}>{normalizeDisplayText(normalized, 'desconocido')}</span>;
 }
 
+function isProtectedSecurityUser(row) {
+  return row?.is_protected === true || row?.protected === true || row?.es_protegido === true;
+}
+
 function buildUserDisplayName(row) {
   const names = [row?.nombres, row?.apellidos].filter(Boolean).join(' ').trim();
   if (names) return names;
@@ -103,6 +107,9 @@ function resolveListErrorMessage(error) {
 }
 
 function resolveActionMessage(error) {
+  const code = String(error?.data?.error?.code || error?.code || '').trim().toUpperCase();
+  if (code === 'ROOT_USER_PROTECTED') return 'El usuario root protegido no puede ser bloqueado ni inactivado.';
+  if (code === 'ROOT_USER_PROTECTION_CHECK_FAILED') return 'No se pudo validar si el usuario esta protegido.';
   const status = Number(error?.status || 0);
   if (status === 409) return 'No fue posible completar la accion solicitada por politica de seguridad.';
   if (status === 404) return 'El usuario ya no se encuentra disponible para esta accion.';
@@ -115,7 +122,7 @@ export default function AdminSeguridadUsuariosPage() {
   const { roles } = useAuth();
 
   const canWrite = useMemo(
-    () => roles.includes('super_admin') || roles.includes('security_admin'),
+    () => roles.includes('super_admin') || roles.includes('security_admin') || roles.includes('root'),
     [roles]
   );
 
@@ -201,6 +208,13 @@ export default function AdminSeguridadUsuariosPage() {
 
   async function confirmAccessChange() {
     if (!confirmTarget?.id_usuario || !confirmTarget?.nextState || actionLoadingId) return;
+    if (confirmTarget.isProtected === true && confirmTarget.nextState !== 'activo') {
+      setConfirmTarget(null);
+      notifications.error('El usuario root protegido no puede ser bloqueado ni inactivado.', {
+        dedupeKey: 'security-users-root-protected',
+      });
+      return;
+    }
     setActionLoadingId(confirmTarget.id_usuario);
     try {
       await updateAdminSecurityUserAccessState(confirmTarget.id_usuario, confirmTarget.nextState);
@@ -268,7 +282,7 @@ export default function AdminSeguridadUsuariosPage() {
               className="mt-1"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Buscar por nombre o correo enmascarado..."
+              placeholder="Buscar por nombre o correo..."
             />
           </div>
           <div>
@@ -381,6 +395,8 @@ export default function AdminSeguridadUsuariosPage() {
               {rows.map((row) => {
                 const nextState = resolveTargetState(row.estado_acceso);
                 const isActivating = nextState === 'activo';
+                const protectedUser = isProtectedSecurityUser(row);
+                const isProtectedBlockAction = protectedUser && nextState !== 'activo';
                 return (
                   <TableRow key={row.id_usuario} className="border-[var(--mf-nav-border)]">
                     <TableCell>{buildUserDisplayName(row)}</TableCell>
@@ -394,7 +410,9 @@ export default function AdminSeguridadUsuariosPage() {
                     </TableCell>
                     <TableCell>{formatDateTime(row.last_login_at)}</TableCell>
                     <TableCell className="text-center">
-                      {canWrite ? (
+                      {canWrite && isProtectedBlockAction ? (
+                        <span className="mf-badge mf-badge-gold">Root protegido</span>
+                      ) : canWrite ? (
                         <Button
                           type="button"
                           size="sm"
@@ -406,6 +424,7 @@ export default function AdminSeguridadUsuariosPage() {
                             nextState,
                             label: buildUserDisplayName(row),
                             actionLabel: isActivating ? 'Activar' : 'Bloquear',
+                            isProtected: protectedUser,
                           })}
                         >
                           {isActivating ? 'Activar' : 'Bloquear'}
@@ -424,6 +443,8 @@ export default function AdminSeguridadUsuariosPage() {
           {rows.map((row) => {
             const nextState = resolveTargetState(row.estado_acceso);
             const isActivating = nextState === 'activo';
+            const protectedUser = isProtectedSecurityUser(row);
+            const isProtectedBlockAction = protectedUser && nextState !== 'activo';
             return (
               <SecurityResponsiveCard
                 key={row.id_usuario}
@@ -437,7 +458,9 @@ export default function AdminSeguridadUsuariosPage() {
                   { key: 'forcePwd', label: 'Forzar cambio', value: row.force_password_change === true ? 'Si' : row.force_password_change === false ? 'No' : 'No disponible' },
                   { key: 'lastLogin', label: 'Ultimo login', value: formatDateTime(row.last_login_at) },
                 ]}
-                actions={canWrite ? (
+                actions={canWrite && isProtectedBlockAction ? (
+                  <span className="mf-badge mf-badge-gold">Root protegido</span>
+                ) : canWrite ? (
                   <Button
                     type="button"
                     size="sm"
@@ -449,6 +472,7 @@ export default function AdminSeguridadUsuariosPage() {
                       nextState,
                       label: buildUserDisplayName(row),
                       actionLabel: isActivating ? 'Activar' : 'Bloquear',
+                      isProtected: protectedUser,
                     })}
                   >
                     {isActivating ? 'Activar' : 'Bloquear'}
