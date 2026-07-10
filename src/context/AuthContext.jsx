@@ -11,8 +11,12 @@ import { supabase } from '../config/supabaseClient.js';
 const AuthContext = createContext(null);
 const IDLE_SESSION_TIMEOUT_MS = 20 * 60 * 1000;
 const IDLE_MOUSEMOVE_THROTTLE_MS = 5000;
+const IDLE_BACKEND_TOUCH_THROTTLE_MS = 60 * 1000;
 const IDLE_SESSION_MESSAGE = 'Sesión expirada por inactividad. Vuelve a iniciar sesión.';
 const IDLE_SESSION_MESSAGE_KEY = 'mf_idle_session_message';
+const SESSION_LAST_ACTIVITY_KEY = 'mf_session_last_activity_at';
+const SESSION_LAST_BACKEND_TOUCH_KEY = 'mf_session_last_backend_touch_at';
+const SESSION_IDLE_EXPIRED_KEY = 'mf_session_idle_expired_at';
 const SESSION_ACTIVITY_EVENTS = ['click', 'keydown', 'touchstart', 'scroll'];
 
 function normalizeRoles(value) {
@@ -112,6 +116,34 @@ function persistIdleSessionMessage() {
   }
 }
 
+function readSharedTimestamp(key) {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const value = Number(window.localStorage.getItem(key) || 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeSharedTimestamp(key, value = Date.now()) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, String(value));
+  } catch {
+    // no-op
+  }
+}
+
+function removeSharedTimestamp(key) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // no-op
+  }
+}
+
 export function consumeIdleSessionMessage() {
   if (typeof window === 'undefined') return '';
   try {
@@ -140,10 +172,14 @@ export function AuthProvider({ children }) {
   const idleTimerRef = useRef(null);
   const lastMouseMoveAtRef = useRef(0);
   const idleExpirationHandledRef = useRef(false);
+  const backendTouchInFlightRef = useRef(false);
 
   const applyUserState = useCallback((nextUser) => {
     if (nextUser?.id_usuario) {
       idleExpirationHandledRef.current = false;
+      const now = Date.now();
+      writeSharedTimestamp(SESSION_LAST_ACTIVITY_KEY, now);
+      removeSharedTimestamp(SESSION_IDLE_EXPIRED_KEY);
     }
     setUser(nextUser);
     setRoles(normalizeRoles(nextUser?.roles));
@@ -263,6 +299,7 @@ export function AuthProvider({ children }) {
   }, [hydrateSession]);
 
   const logout = useCallback(async () => {
+    removeSharedTimestamp(SESSION_IDLE_EXPIRED_KEY);
     invalidateSession('logout');
     try {
       await http.post('/v1/auth/logout', {}, { skipAuthInvalidation: true });
@@ -271,12 +308,15 @@ export function AuthProvider({ children }) {
     }
   }, [invalidateSession]);
 
-  const expireIdleSession = useCallback(async () => {
+  const expireIdleSession = useCallback(async ({ broadcast = true } = {}) => {
     if (idleExpirationHandledRef.current) return;
     idleExpirationHandledRef.current = true;
     if (idleTimerRef.current) {
       clearTimeout(idleTimerRef.current);
       idleTimerRef.current = null;
+    }
+    if (broadcast) {
+      writeSharedTimestamp(SESSION_IDLE_EXPIRED_KEY);
     }
     persistIdleSessionMessage();
     abortInFlightRequests('AUTH_SESSION_IDLE_EXPIRED');
@@ -294,14 +334,54 @@ export function AuthProvider({ children }) {
     navigate('/login', { replace: true });
   }, [clearSessionState, navigate]);
 
+  const touchBackendSession = useCallback(async () => {
+    if (backendTouchInFlightRef.current) return;
+    const now = Date.now();
+    const lastSharedTouchAt = readSharedTimestamp(SESSION_LAST_BACKEND_TOUCH_KEY);
+    if (now - lastSharedTouchAt < IDLE_BACKEND_TOUCH_THROTTLE_MS) return;
+
+    backendTouchInFlightRef.current = true;
+    writeSharedTimestamp(SESSION_LAST_BACKEND_TOUCH_KEY, now);
+    try {
+      await http.post('/v1/auth/session/touch', {}, {
+        cache: false,
+        dedupe: false,
+      });
+    } catch (error) {
+      if (String(error?.code || error?.data?.error?.code || '').trim().toUpperCase() === 'AUTH_SESSION_IDLE_EXPIRED') {
+        void expireIdleSession();
+      }
+    } finally {
+      backendTouchInFlightRef.current = false;
+    }
+  }, [expireIdleSession]);
+
   const resetIdleTimer = useCallback(() => {
     if (idleTimerRef.current) {
       clearTimeout(idleTimerRef.current);
     }
+    const now = Date.now();
+    const lastActivityAt = readSharedTimestamp(SESSION_LAST_ACTIVITY_KEY) || now;
+    const expiresInMs = Math.max(0, IDLE_SESSION_TIMEOUT_MS - (now - lastActivityAt));
     idleTimerRef.current = setTimeout(() => {
-      void expireIdleSession();
-    }, IDLE_SESSION_TIMEOUT_MS);
+      const latestActivityAt = readSharedTimestamp(SESSION_LAST_ACTIVITY_KEY) || lastActivityAt;
+      if (Date.now() - latestActivityAt >= IDLE_SESSION_TIMEOUT_MS) {
+        void expireIdleSession();
+        return;
+      }
+      resetIdleTimer();
+    }, expiresInMs);
   }, [expireIdleSession]);
+
+  const recordSessionActivity = useCallback(({ touchBackend = true } = {}) => {
+    if (!user?.id_usuario || !shouldTrackIdleSession(location.pathname)) return;
+    writeSharedTimestamp(SESSION_LAST_ACTIVITY_KEY);
+    removeSharedTimestamp(SESSION_IDLE_EXPIRED_KEY);
+    resetIdleTimer();
+    if (touchBackend) {
+      void touchBackendSession();
+    }
+  }, [location.pathname, resetIdleTimer, touchBackendSession, user?.id_usuario]);
 
   useEffect(() => {
     const unsubscribe = registerSessionInvalidationHandler((event) => {
@@ -324,17 +404,17 @@ export function AuthProvider({ children }) {
       return undefined;
     }
 
-    resetIdleTimer();
-
     const resetFromActivity = () => {
-      resetIdleTimer();
+      recordSessionActivity();
     };
     const resetFromMouseMove = () => {
       const now = Date.now();
       if (now - lastMouseMoveAtRef.current < IDLE_MOUSEMOVE_THROTTLE_MS) return;
       lastMouseMoveAtRef.current = now;
-      resetIdleTimer();
+      recordSessionActivity();
     };
+
+    recordSessionActivity();
 
     SESSION_ACTIVITY_EVENTS.forEach((eventName) => {
       window.addEventListener(eventName, resetFromActivity, { passive: true });
@@ -351,7 +431,30 @@ export function AuthProvider({ children }) {
         idleTimerRef.current = null;
       }
     };
-  }, [location.pathname, location.search, resetIdleTimer, user?.id_usuario]);
+  }, [location.pathname, location.search, recordSessionActivity, user?.id_usuario]);
+
+  useEffect(() => {
+    if (!user?.id_usuario || !shouldTrackIdleSession(location.pathname)) return undefined;
+
+    const handleStorage = (event) => {
+      if (event.key === SESSION_LAST_ACTIVITY_KEY && event.newValue) {
+        resetIdleTimer();
+        return;
+      }
+      if (event.key === SESSION_IDLE_EXPIRED_KEY && event.newValue) {
+        void expireIdleSession({ broadcast: false });
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [expireIdleSession, location.pathname, resetIdleTimer, user?.id_usuario]);
+
+  useEffect(() => {
+    recordSessionActivity();
+  }, [location.key, recordSessionActivity]);
 
   useEffect(() => {
     return () => {
