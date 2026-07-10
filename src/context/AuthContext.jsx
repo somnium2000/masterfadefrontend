@@ -17,6 +17,7 @@ const IDLE_SESSION_MESSAGE_KEY = 'mf_idle_session_message';
 const SESSION_LAST_ACTIVITY_KEY = 'mf_session_last_activity_at';
 const SESSION_LAST_BACKEND_TOUCH_KEY = 'mf_session_last_backend_touch_at';
 const SESSION_IDLE_EXPIRED_KEY = 'mf_session_idle_expired_at';
+const SESSION_MANUAL_LOGOUT_KEY = 'mf_session_manual_logout_at';
 const SESSION_ACTIVITY_EVENTS = ['click', 'keydown', 'touchstart', 'scroll'];
 
 function normalizeRoles(value) {
@@ -299,6 +300,7 @@ export function AuthProvider({ children }) {
   }, [hydrateSession]);
 
   const logout = useCallback(async () => {
+    writeSharedTimestamp(SESSION_MANUAL_LOGOUT_KEY);
     removeSharedTimestamp(SESSION_IDLE_EXPIRED_KEY);
     invalidateSession('logout');
     try {
@@ -443,6 +445,15 @@ export function AuthProvider({ children }) {
       }
       if (event.key === SESSION_IDLE_EXPIRED_KEY && event.newValue) {
         void expireIdleSession({ broadcast: false });
+        return;
+      }
+      if (event.key === SESSION_MANUAL_LOGOUT_KEY && event.newValue) {
+        if (idleTimerRef.current) {
+          clearTimeout(idleTimerRef.current);
+          idleTimerRef.current = null;
+        }
+        invalidateSession('manual_logout_other_tab');
+        navigate('/login', { replace: true });
       }
     };
 
@@ -450,7 +461,7 @@ export function AuthProvider({ children }) {
     return () => {
       window.removeEventListener('storage', handleStorage);
     };
-  }, [expireIdleSession, location.pathname, resetIdleTimer, user?.id_usuario]);
+  }, [expireIdleSession, invalidateSession, location.pathname, navigate, resetIdleTimer, user?.id_usuario]);
 
   useEffect(() => {
     recordSessionActivity();
