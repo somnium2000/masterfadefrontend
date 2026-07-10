@@ -1,4 +1,4 @@
-export const ROLE_PRIORITY = ['root', 'super_admin', 'admin', 'security_admin', 'security_auditor', 'barbero', 'cliente'];
+export const ROLE_PRIORITY = ['super_admin', 'root', 'admin', 'security_admin', 'security_auditor', 'barbero', 'cliente'];
 export const ACTIVE_SCREEN_ROLES = ['root', 'super_admin', 'admin', 'security_admin', 'security_auditor', 'barbero', 'cliente'];
 
 export const ROLE_HOME_PATHS = {
