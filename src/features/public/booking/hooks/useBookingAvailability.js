@@ -7,6 +7,7 @@ import {
   buildCuratedSlots,
   buildDefaultSlots,
   buildDynamicSlots,
+  buildAvailabilityMap,
   createEmptyCuratedSlots,
   hasRealDayAvailability,
 } from '../utils/bookingDates.js';
@@ -303,13 +304,7 @@ export default function useBookingAvailability({
         if (controller.signal.aborted) return null;
         if (requestSeq !== availabilityRequestSeqRef.current) return null;
 
-        const payload = response?.data ?? response;
-        const list = Array.isArray(payload?.disponibilidad) ? payload.disponibilidad : [];
-        const nextMap = list.reduce((acc, item) => {
-          if (!item?.fecha) return acc;
-          acc[item.fecha] = item;
-          return acc;
-        }, {});
+        const nextMap = buildAvailabilityMap(response);
 
         setFreshCacheValue(availabilityCacheRef, cacheKey, nextMap);
         setAvailabilityMap(nextMap);
@@ -520,13 +515,7 @@ export default function useBookingAvailability({
       { signal }
     );
     if (signal?.aborted || requestSeq !== availabilityRequestSeqRef.current) return null;
-    const payload = response?.data ?? response;
-    const list = Array.isArray(payload?.disponibilidad) ? payload.disponibilidad : [];
-    const partialMap = list.reduce((acc, item) => {
-      if (!item?.fecha) return acc;
-      acc[item.fecha] = item;
-      return acc;
-    }, {});
+    const partialMap = buildAvailabilityMap(response);
     availabilityCacheRef.current.clear();
     setAvailabilityMap((current) => ({ ...current, ...partialMap }));
     return partialMap;
