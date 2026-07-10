@@ -151,6 +151,10 @@ export async function revokeAdminSecuritySession(idSesion) {
   return http.post(`/v1/admin/seguridad/sesiones/${encodeURIComponent(String(idSesion || ''))}/revocar`, {});
 }
 
+export async function revokeAllAdminSecuritySessions() {
+  return http.post('/v1/admin/seguridad/sesiones/revocar-todas', {});
+}
+
 export async function listAdminSecurityUsers(params = {}) {
   const query = sanitizeUserParams(params);
   return http.get(`/v1/admin/seguridad/usuarios${toQueryString(query)}`);

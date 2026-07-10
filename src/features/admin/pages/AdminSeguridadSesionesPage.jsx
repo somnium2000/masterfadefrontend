@@ -25,6 +25,7 @@ import {
   getAdminSecuritySessionDetail,
   listAdminSecuritySessions,
   listAdminSecurityUsers,
+  revokeAllAdminSecuritySessions,
   revokeAdminSecuritySession,
 } from '../lib/adminSeguridadApi.js';
 import useSecurityRealtime from '../lib/useSecurityRealtime.js';
@@ -141,7 +142,7 @@ export default function AdminSeguridadSesionesPage() {
   const realtimeChannels = useMemo(() => ['security.sessions.changed'], []);
 
   const canWrite = useMemo(
-    () => roles.includes('super_admin') || roles.includes('security_admin'),
+    () => roles.includes('super_admin') || roles.includes('security_admin') || roles.includes('root'),
     [roles]
   );
 
@@ -155,6 +156,8 @@ export default function AdminSeguridadSesionesPage() {
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState('');
+  const [bulkRevokeOpen, setBulkRevokeOpen] = useState(false);
+  const [bulkRevokeLoading, setBulkRevokeLoading] = useState(false);
   const [userDirectory, setUserDirectory] = useState({});
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -304,6 +307,7 @@ export default function AdminSeguridadSesionesPage() {
       await revokeAdminSecuritySession(confirmTarget.id_sesion);
       notifications.success('Sesion cerrada correctamente.', { dedupeKey: 'security-sessions-revoke-ok' });
       setConfirmTarget(null);
+      setActionLoadingId('');
       await fetchRows();
     } catch (requestError) {
       if (requestError?.status === 401) {
@@ -329,6 +333,36 @@ export default function AdminSeguridadSesionesPage() {
       }
     } finally {
       setActionLoadingId('');
+    }
+  }
+
+  async function confirmBulkRevoke() {
+    if (bulkRevokeLoading) return;
+    setBulkRevokeLoading(true);
+    try {
+      const response = await revokeAllAdminSecuritySessions();
+      const payload = response?.data || response || {};
+      const revokedCount = Number(payload?.revocadas || 0);
+      setBulkRevokeOpen(false);
+      setBulkRevokeLoading(false);
+      notifications.success(`Se cerraron ${revokedCount} sesion(es) correctamente.`, {
+        dedupeKey: 'security-sessions-revoke-all-ok',
+      });
+      await fetchRows();
+    } catch (requestError) {
+      if (requestError?.status === 401) {
+        navigate('/login', { replace: true });
+        return;
+      }
+      if (requestError?.status === 403) {
+        navigate('/unauthorized', { replace: true });
+        return;
+      }
+      notifications.error('No fue posible cerrar todas las sesiones activas en este momento.', {
+        dedupeKey: 'security-sessions-revoke-all-error',
+      });
+    } finally {
+      setBulkRevokeLoading(false);
     }
   }
 
@@ -447,6 +481,16 @@ export default function AdminSeguridadSesionesPage() {
                 <Search size={14} />
                 Aplicar filtros
               </Button>
+              {canWrite ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={bulkRevokeLoading}
+                  onClick={() => setBulkRevokeOpen(true)}
+                >
+                  Cerrar todas las sesiones
+                </Button>
+              ) : null}
               {hasActiveFilters ? (
                 <Button type="button" variant="ghost" className="hidden gap-2 md:inline-flex" onClick={resetFilters}>
                   <RotateCcw size={14} />
@@ -662,6 +706,22 @@ export default function AdminSeguridadSesionesPage() {
         requireComment={false}
         showCommentInput={false}
         onConfirm={confirmRevoke}
+        tone="warning"
+      />
+
+      <SecurityActionConfirmModal
+        open={bulkRevokeOpen}
+        onOpenChange={(open) => {
+          if (!open && !bulkRevokeLoading) setBulkRevokeOpen(false);
+        }}
+        title="Cerrar todas las sesiones activas"
+        description="Se revocaran todas las sesiones activas excepto tu sesion actual. Esta accion requiere confirmacion."
+        confirmLabel="Cerrar todas"
+        cancelLabel="Cancelar"
+        loading={bulkRevokeLoading}
+        requireComment={false}
+        showCommentInput={false}
+        onConfirm={confirmBulkRevoke}
         tone="warning"
       />
     </div>
