@@ -18,8 +18,12 @@ export async function getAdminCitasOperativasContexto() {
   return http.get('/v1/admin/citas/operativas/contexto');
 }
 
-export async function listAdminCitasOperativas(params = {}) {
-  return http.get(`/v1/admin/citas/operativas${toQueryString(params)}`);
+export async function listAdminCitasOperativas(params = {}, options = {}) {
+  return http.get(`/v1/admin/citas/operativas${toQueryString(params)}`, {
+    cache: false,
+    dedupe: false,
+    ...options,
+  });
 }
 
 export async function getAdminCitasOperativasCompletadasHoy(params = {}) {
