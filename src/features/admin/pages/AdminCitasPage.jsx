@@ -920,11 +920,17 @@ export default function AdminCitasPage() {
     }
   }, [handleAuthError, notifications, selectedBranchId]);
 
-  const fetchBlocks = useCallback(async () => {
+  const fetchBlocks = useCallback(async ({ force = false } = {}) => {
     if (!selectedBarberId) return false;
     setBlocksLoading(true);
     try {
-      const response = await listAdminCitasBloqueos({ id_empleado: selectedBarberId });
+      const response = await listAdminCitasBloqueos(
+        { id_empleado: selectedBarberId },
+        {
+          cache: false,
+          dedupe: !force,
+        }
+      );
       const payload = response?.data ?? response;
       setBlocks(Array.isArray(payload?.bloqueos) ? payload.bloqueos : []);
       return true;
@@ -937,11 +943,17 @@ export default function AdminCitasPage() {
     }
   }, [handleAuthError, notifications, selectedBarberId]);
 
-  const fetchDaysOff = useCallback(async () => {
+  const fetchDaysOff = useCallback(async ({ force = false } = {}) => {
     if (!selectedBarberId) return false;
     setDaysOffLoading(true);
     try {
-      const response = await listAdminCitasDiasInhabilitados({ id_empleado: selectedBarberId });
+      const response = await listAdminCitasDiasInhabilitados(
+        { id_empleado: selectedBarberId },
+        {
+          cache: false,
+          dedupe: !force,
+        }
+      );
       const payload = response?.data ?? response;
       setDaysOff(Array.isArray(payload?.dias_inhabilitados) ? payload.dias_inhabilitados : []);
       return true;
@@ -954,11 +966,17 @@ export default function AdminCitasPage() {
     }
   }, [handleAuthError, notifications, selectedBarberId]);
 
-  const fetchBranchDaysOff = useCallback(async () => {
+  const fetchBranchDaysOff = useCallback(async ({ force = false } = {}) => {
     if (!selectedBranchId) return false;
     setBranchDaysOffLoading(true);
     try {
-      const response = await listAdminCitasExcepcionesSucursal({ id_sucursal: selectedBranchId });
+      const response = await listAdminCitasExcepcionesSucursal(
+        { id_sucursal: selectedBranchId },
+        {
+          cache: false,
+          dedupe: !force,
+        }
+      );
       const payload = response?.data ?? response;
       setBranchDaysOff(Array.isArray(payload?.dias_inhabilitados) ? payload.dias_inhabilitados : []);
       return true;
@@ -1325,8 +1343,14 @@ export default function AdminCitasPage() {
       }
       setRestrictionDialogOpen(false);
       notifications.success('Restricción guardada.', { dedupeKey: 'citas-restriction-save-ok' });
+      if (selectedBarberId) {
+        configLoadCacheRef.current.delete(`restricciones:${selectedBarberId}`);
+      }
       resetPreviewAvailabilityState();
-      await Promise.all([fetchBlocks(), fetchDaysOff()]);
+      await Promise.all([
+        fetchBlocks({ force: true }),
+        fetchDaysOff({ force: true }),
+      ]);
       await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1342,8 +1366,11 @@ export default function AdminCitasPage() {
     try {
       await deleteAdminCitasBloqueo(idBloqueo);
       notifications.warning('Bloqueo eliminado.', { dedupeKey: 'citas-block-delete-ok' });
+      if (selectedBarberId) {
+        configLoadCacheRef.current.delete(`restricciones:${selectedBarberId}`);
+      }
       resetPreviewAvailabilityState();
-      await fetchBlocks();
+      await fetchBlocks({ force: true });
       await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1359,8 +1386,11 @@ export default function AdminCitasPage() {
     try {
       await deleteAdminCitasDiaInhabilitado(idBloqueo);
       notifications.warning('Día inhabilitado eliminado.', { dedupeKey: 'citas-dayoff-delete-ok' });
+      if (selectedBarberId) {
+        configLoadCacheRef.current.delete(`restricciones:${selectedBarberId}`);
+      }
       resetPreviewAvailabilityState();
-      await fetchDaysOff();
+      await fetchDaysOff({ force: true });
       await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1378,8 +1408,11 @@ export default function AdminCitasPage() {
         id_sucursal: selectedBranchId,
       });
       notifications.warning('Excepción de sucursal eliminada.', { dedupeKey: 'citas-branch-dayoff-delete-ok' });
+      if (selectedBranchId) {
+        configLoadCacheRef.current.delete(`branchDays:${selectedBranchId}`);
+      }
       resetPreviewAvailabilityState();
-      await fetchBranchDaysOff();
+      await fetchBranchDaysOff({ force: true });
       await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1470,8 +1503,11 @@ export default function AdminCitasPage() {
       setBranchDayOffDialogOpen(false);
       resetBranchExceptionForm();
       notifications.success('Excepción de sucursal creada.', { dedupeKey: 'citas-branch-dayoff-create-ok' });
+      if (selectedBranchId) {
+        configLoadCacheRef.current.delete(`branchDays:${selectedBranchId}`);
+      }
       resetPreviewAvailabilityState();
-      await fetchBranchDaysOff();
+      await fetchBranchDaysOff({ force: true });
       await refreshPreviewAvailabilityAfterAgendaChange();
     } catch (err) {
       if (handleAuthError(err)) return;

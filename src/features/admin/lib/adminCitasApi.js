@@ -94,8 +94,12 @@ export async function putAdminCitasSucursalHorarios(idSucursal, payload) {
   return http.put(`/v1/admin/citas/sucursales/${encodeURIComponent(idSucursal)}/horarios`, payload);
 }
 
-export async function listAdminCitasBloqueos(params = {}) {
-  return http.get(`/v1/admin/citas/bloqueos${toQueryString(params)}`);
+export async function listAdminCitasBloqueos(params = {}, options = {}) {
+  return http.get(`/v1/admin/citas/bloqueos${toQueryString(params)}`, {
+    cache: false,
+    dedupe: false,
+    ...options,
+  });
 }
 
 export async function listAdminCitasBloqueosEmpleado(params = {}) {
@@ -118,12 +122,16 @@ export async function deleteAdminCitasBloqueoEmpleado(idBloqueo) {
   return deleteAdminCitasBloqueo(idBloqueo);
 }
 
-export async function listAdminCitasDiasInhabilitados(params = {}) {
-  return http.get(`/v1/admin/citas/dias-inhabilitados${toQueryString(params)}`);
+export async function listAdminCitasDiasInhabilitados(params = {}, options = {}) {
+  return http.get(`/v1/admin/citas/dias-inhabilitados${toQueryString(params)}`, {
+    cache: false,
+    dedupe: false,
+    ...options,
+  });
 }
 
-export async function listAdminCitasExcepcionesSucursal(params = {}) {
-  return listAdminCitasDiasInhabilitados({ ...params, scope: 'sucursal' });
+export async function listAdminCitasExcepcionesSucursal(params = {}, options = {}) {
+  return listAdminCitasDiasInhabilitados({ ...params, scope: 'sucursal' }, options);
 }
 
 export async function createAdminCitasDiaInhabilitado(payload) {
