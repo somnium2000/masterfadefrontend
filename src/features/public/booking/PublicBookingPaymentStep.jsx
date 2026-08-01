@@ -154,6 +154,7 @@ export default function PublicBookingPaymentStep() {
   const [hostedModalOpen, setHostedModalOpen] = useState(false);
   const [hostedResultReceived, setHostedResultReceived] = useState(false);
   const [hostedModalError, setHostedModalError] = useState(null);
+  const [hostedLaunchConsumed, setHostedLaunchConsumed] = useState(false);
   const [paymentForm, setPaymentForm] = useState(INITIAL_PAYMENT_FORM);
   const [fieldErrors, setFieldErrors] = useState({});
   const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(() => {
@@ -264,7 +265,8 @@ export default function PublicBookingPaymentStep() {
     setHostedModalOpen(false);
     setHostedResultReceived(false);
     setHostedModalError(null);
-  }, [paymentIntent?.id_intent]);
+    setHostedLaunchConsumed(false);
+  }, [paymentLaunch]);
 
   const handleFieldChange = (field) => (event) => {
     const rawValue = event.target.value;
@@ -298,7 +300,7 @@ export default function PublicBookingPaymentStep() {
   };
 
   const handleOpenHostedModal = () => {
-    if (!hasHostedLaunch || hostedSessionExpired) {
+    if (!hasHostedLaunch || hostedSessionExpired || hostedLaunchConsumed) {
       setHostedModalError(hostedSessionExpired ? 'session_expired' : 'launch_unavailable');
       return;
     }
@@ -356,6 +358,7 @@ export default function PublicBookingPaymentStep() {
     if (hostedModalError) return 'Error de carga';
     if (hostedResultReceived) return 'Resultado recibido. Verifica el estado con MasterFade.';
     if (hostedModalOpen) return 'Portal abierto';
+    if (hostedLaunchConsumed) return 'Portal iniciado. Verifica el estado del pago con MasterFade.';
     if (loadingIntent || creatingPaymentIntent) return 'Preparando pago';
     return paymentIntent?.id_intent ? paymentUiState.text : 'Preparando pago';
   })();
@@ -567,7 +570,7 @@ export default function PublicBookingPaymentStep() {
               </div>
             )}
             <BookingActions inline className="public-booking-payment-actions mt-4 flex-col items-stretch gap-3 sm:flex-row sm:items-end">
-              {!paymentSimulationAction.canShow && hasHostedLaunch ? (
+              {!paymentSimulationAction.canShow && hasHostedLaunch && !hostedLaunchConsumed ? (
                 <Button
                   className="w-full sm:w-auto"
                   onClick={handleOpenHostedModal}
@@ -661,6 +664,7 @@ export default function PublicBookingPaymentStep() {
           onResult={handleHostedResult}
           onClose={() => setHostedModalOpen(false)}
           onError={handleHostedError}
+          onSubmitted={() => setHostedLaunchConsumed(true)}
         />
       </div>
     </div>

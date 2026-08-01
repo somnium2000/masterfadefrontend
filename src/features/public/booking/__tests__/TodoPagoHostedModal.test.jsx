@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import PublicBookingPaymentStep, {
   resolvePaymentSimulationAction,
 } from '../PublicBookingPaymentStep.jsx';
-import TodoPagoHostedModal from '../components/TodoPagoHostedModal.jsx';
+import TodoPagoHostedModal, {
+  TODO_PAGO_LOAD_TIMEOUT_MS,
+} from '../components/TodoPagoHostedModal.jsx';
 
 const bookingFlowMock = vi.hoisted(() => ({ current: null }));
 
@@ -60,6 +62,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
@@ -89,30 +92,34 @@ describe('TodoPagoHostedModal', () => {
     expect(screen.queryByText('private-tenant-value')).toBeNull();
   });
 
-  test('rechaza postMessage con origin incorrecto', () => {
+  test('rechaza postMessage con origin incorrecto', async () => {
     const { props } = renderModal();
     const iframe = screen.getByTitle('Portal de pago TodoPago');
+    await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1));
     dispatchProviderMessage(iframe, { origin: 'https://attacker.example.test' });
     expect(props.onResult).not.toHaveBeenCalled();
   });
 
-  test('rechaza postMessage con source incorrecto', () => {
+  test('rechaza postMessage con source incorrecto', async () => {
     const { props } = renderModal();
     const iframe = screen.getByTitle('Portal de pago TodoPago');
+    await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1));
     dispatchProviderMessage(iframe, { source: window });
     expect(props.onResult).not.toHaveBeenCalled();
   });
 
-  test('rechaza postMessage con JSON invalido', () => {
+  test('rechaza postMessage con JSON invalido', async () => {
     const { props } = renderModal();
     const iframe = screen.getByTitle('Portal de pago TodoPago');
+    await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1));
     dispatchProviderMessage(iframe, { data: { accion: 'Resultado', valor: '{invalid-json' } });
     expect(props.onResult).not.toHaveBeenCalled();
   });
 
-  test('acepta un resultado valido como senal visual', () => {
+  test('acepta un resultado valido como senal visual', async () => {
     const { props } = renderModal();
     const iframe = screen.getByTitle('Portal de pago TodoPago');
+    await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1));
     dispatchProviderMessage(iframe);
     expect(props.onResult).toHaveBeenCalledOnce();
     expect(props.onResult).toHaveBeenCalledWith({ estado: 'recibido' });
@@ -131,6 +138,100 @@ describe('TodoPagoHostedModal', () => {
     unmount();
     expect(document.activeElement).toBe(opener);
     opener.remove();
+  });
+
+  test('cerrar y reabrir el mismo launch no ejecuta un segundo submit', async () => {
+    const view = renderModal();
+    await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1));
+
+    view.rerender(<TodoPagoHostedModal {...view.props} open={false} />);
+    view.rerender(<TodoPagoHostedModal {...view.props} open />);
+
+    await screen.findByText('Lanzamiento ya enviado');
+    expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1);
+  });
+
+  test('un launch nuevo permite otro submit', async () => {
+    const view = renderModal();
+    await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1));
+    const nextLaunch = {
+      ...launch,
+      action: `${ALLOWED_ORIGIN}/modal/new`,
+      fields: { opaqueSession: 'next-private-session-value' },
+    };
+
+    view.rerender(<TodoPagoHostedModal {...view.props} launch={nextLaunch} />);
+
+    await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(2));
+  });
+
+  test('acepta solo el primer postMessage valido del mismo launch', async () => {
+    const { props } = renderModal();
+    const iframe = screen.getByTitle('Portal de pago TodoPago');
+    await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1));
+
+    dispatchProviderMessage(iframe);
+    dispatchProviderMessage(iframe, {
+      data: { accion: 'Resultado', valor: JSON.stringify({ estado: 'duplicado' }) },
+    });
+
+    expect(props.onResult).toHaveBeenCalledOnce();
+    expect(props.onResult).toHaveBeenCalledWith({ estado: 'recibido' });
+  });
+
+  test('la carga inicial de about:blank no marca el portal como abierto', async () => {
+    renderModal();
+    const iframe = screen.getByTitle('Portal de pago TodoPago');
+    await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1));
+
+    fireEvent.load(iframe);
+
+    expect(screen.getByText('Cargando portal')).not.toBeNull();
+    expect(screen.queryByText('Portal abierto')).toBeNull();
+  });
+
+  test('el timeout de carga reporta error una sola vez', async () => {
+    vi.useFakeTimers();
+    const { props } = renderModal();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(TODO_PAGO_LOAD_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(TODO_PAGO_LOAD_TIMEOUT_MS);
+    });
+
+    expect(props.onError).toHaveBeenCalledOnce();
+    expect(props.onError).toHaveBeenCalledWith({ code: 'TODOPAGO_PORTAL_LOAD_TIMEOUT' });
+    expect(screen.getByText('Error de carga')).not.toBeNull();
+  });
+
+  test('cambiar launch limpia el resultado y error anteriores', async () => {
+    const invalidLaunch = { ...launch, allowedMessageOrigin: '' };
+    const view = renderModal({ launch: invalidLaunch });
+    await screen.findByText('Error de carga');
+
+    view.rerender(<TodoPagoHostedModal {...view.props} launch={launch} />);
+    await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Error de carga')).toBeNull();
+    const iframe = screen.getByTitle('Portal de pago TodoPago');
+    dispatchProviderMessage(iframe);
+    expect(screen.getByText('Resultado recibido')).not.toBeNull();
+
+    const nextLaunch = {
+      ...launch,
+      action: `${ALLOWED_ORIGIN}/modal/retry`,
+      fields: { opaqueSession: 'replacement-private-session-value' },
+    };
+    view.rerender(<TodoPagoHostedModal {...view.props} launch={nextLaunch} />);
+
+    await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('Resultado recibido')).toBeNull();
+    expect(screen.queryByText('Error de carga')).toBeNull();
+    expect(screen.getByText('Cargando portal')).not.toBeNull();
   });
 });
 
@@ -189,6 +290,8 @@ describe('integracion del shell TodoPago', () => {
     dispatchProviderMessage(iframe);
 
     expect(screen.getAllByText(/Resultado recibido/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Continuar con TodoPago' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Verificar estado del pago' })).not.toBeNull();
     expect(refreshPaymentStatus).not.toHaveBeenCalled();
     expect(completePaymentSimulation).not.toHaveBeenCalled();
     expect(confirmHoldWithoutPayment).not.toHaveBeenCalled();

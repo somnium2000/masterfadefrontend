@@ -1,14 +1,16 @@
 import { Loader2, ShieldCheck, X } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button } from '../../../../components/ui/button.jsx';
 
 export const TODO_PAGO_RESULT_MAX_LENGTH = 16_384;
+export const TODO_PAGO_LOAD_TIMEOUT_MS = 30_000;
 
 const MODAL_STATUS_COPY = {
   preparing: 'Preparando pago',
   loading: 'Cargando portal',
   open: 'Portal abierto',
   result: 'Resultado recibido',
+  consumed: 'Lanzamiento ya enviado',
   error: 'Error de carga',
   expired: 'Sesión expirada',
 };
@@ -50,12 +52,28 @@ function isExpired(expiresAt) {
   return Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now();
 }
 
+function clearTimer(timerRef) {
+  if (timerRef.current === null) return;
+  window.clearTimeout(timerRef.current);
+  timerRef.current = null;
+}
+
+function hasNavigatedAwayFromBlank(iframe) {
+  try {
+    const href = String(iframe?.contentWindow?.location?.href || '');
+    return Boolean(href) && href !== 'about:blank';
+  } catch {
+    return true;
+  }
+}
+
 export default function TodoPagoHostedModal({
   open,
   launch,
   onResult,
   onClose,
   onError,
+  onSubmitted,
 }) {
   const generatedId = useId();
   const iframeName = useMemo(
@@ -66,18 +84,48 @@ export default function TodoPagoHostedModal({
   const iframeRef = useRef(null);
   const formRef = useRef(null);
   const restoreFocusRef = useRef(null);
-  const submittedRef = useRef(false);
-  const callbacksRef = useRef({ onResult, onClose, onError });
+  const loadWatchdogRef = useRef(null);
+  const activeLaunchRef = useRef(launch);
+  const consumedRef = useRef({ launch, value: false });
+  const messageHandledRef = useRef({ launch, value: false });
+  const errorReportedRef = useRef({ launch, value: false });
+  const callbacksRef = useRef({ onResult, onClose, onError, onSubmitted });
   const [status, setStatus] = useState('preparing');
+  const [statusLaunch, setStatusLaunch] = useState(launch);
   const normalizedLaunch = useMemo(() => normalizeLaunch(launch), [launch]);
 
   useEffect(() => {
-    callbacksRef.current = { onResult, onClose, onError };
-  }, [onClose, onError, onResult]);
+    callbacksRef.current = { onResult, onClose, onError, onSubmitted };
+  }, [onClose, onError, onResult, onSubmitted]);
+
+  const reportErrorOnce = useCallback((code, nextStatus = 'error') => {
+    if (errorReportedRef.current.launch !== launch) {
+      errorReportedRef.current = { launch, value: false };
+    }
+    if (errorReportedRef.current.value) return;
+    errorReportedRef.current.value = true;
+    setStatus(nextStatus);
+    callbacksRef.current.onError?.({ code });
+  }, [launch]);
+
+  useEffect(() => {
+    if (activeLaunchRef.current === launch) return undefined;
+
+    activeLaunchRef.current = launch;
+    consumedRef.current = { launch, value: false };
+    messageHandledRef.current = { launch, value: false };
+    errorReportedRef.current = { launch, value: false };
+    clearTimer(loadWatchdogRef);
+    const resetId = window.setTimeout(() => {
+      setStatusLaunch(launch);
+      setStatus('preparing');
+    }, 0);
+    return () => window.clearTimeout(resetId);
+  }, [launch]);
 
   useEffect(() => {
     if (!open) {
-      submittedRef.current = false;
+      clearTimer(loadWatchdogRef);
       return undefined;
     }
 
@@ -103,39 +151,52 @@ export default function TodoPagoHostedModal({
     if (!open) return undefined;
     let expirationId = null;
     const startId = window.setTimeout(() => {
+      if (consumedRef.current.launch === launch && consumedRef.current.value) {
+        setStatus('consumed');
+        return;
+      }
+
       setStatus('preparing');
       if (!normalizedLaunch) {
-        setStatus('error');
-        callbacksRef.current.onError?.({ code: 'TODOPAGO_LAUNCH_INVALID' });
+        reportErrorOnce('TODOPAGO_LAUNCH_INVALID');
         return;
       }
       if (isExpired(normalizedLaunch.expiresAt)) {
-        setStatus('expired');
-        callbacksRef.current.onError?.({ code: 'TODOPAGO_SESSION_EXPIRED' });
+        reportErrorOnce('TODOPAGO_SESSION_EXPIRED', 'expired');
         return;
       }
-      if (!iframeRef.current || !formRef.current || submittedRef.current) return;
+      if (!iframeRef.current || !formRef.current) return;
 
-      submittedRef.current = true;
+      consumedRef.current = { launch, value: true };
+      messageHandledRef.current = { launch, value: false };
       setStatus('loading');
       HTMLFormElement.prototype.submit.call(formRef.current);
+      callbacksRef.current.onSubmitted?.();
+
+      clearTimer(loadWatchdogRef);
+      loadWatchdogRef.current = window.setTimeout(() => {
+        loadWatchdogRef.current = null;
+        reportErrorOnce('TODOPAGO_PORTAL_LOAD_TIMEOUT');
+      }, TODO_PAGO_LOAD_TIMEOUT_MS);
 
       if (!normalizedLaunch.expiresAt) return;
       const expiresInMs = new Date(normalizedLaunch.expiresAt).getTime() - Date.now();
       expirationId = window.setTimeout(() => {
-        setStatus('expired');
-        callbacksRef.current.onError?.({ code: 'TODOPAGO_SESSION_EXPIRED' });
+        reportErrorOnce('TODOPAGO_SESSION_EXPIRED', 'expired');
       }, Math.min(expiresInMs, 2_147_483_647));
     }, 0);
     return () => {
       window.clearTimeout(startId);
+      clearTimer(loadWatchdogRef);
       if (expirationId !== null) window.clearTimeout(expirationId);
     };
-  }, [normalizedLaunch, open]);
+  }, [launch, normalizedLaunch, open, reportErrorOnce]);
 
   useEffect(() => {
     if (!open || !normalizedLaunch) return undefined;
     const handleMessage = (event) => {
+      if (consumedRef.current.launch !== launch || !consumedRef.current.value) return;
+      if (messageHandledRef.current.launch === launch && messageHandledRef.current.value) return;
       if (event.origin !== normalizedLaunch.allowedMessageOrigin) return;
       if (event.source !== iframeRef.current?.contentWindow) return;
       if (!isObject(event.data) || event.data.accion !== 'Resultado') return;
@@ -149,17 +210,22 @@ export default function TodoPagoHostedModal({
       }
       if (!isObject(parsedResult)) return;
 
+      messageHandledRef.current = { launch, value: true };
       setStatus('result');
       callbacksRef.current.onResult?.(parsedResult);
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [normalizedLaunch, open]);
+  }, [launch, normalizedLaunch, open]);
 
   if (!open) return null;
 
-  const showPortal = normalizedLaunch && status !== 'error' && status !== 'expired';
-  const showLoader = status === 'preparing' || status === 'loading';
+  const displayStatus = statusLaunch === launch ? status : 'preparing';
+  const showPortal = normalizedLaunch
+    && displayStatus !== 'consumed'
+    && displayStatus !== 'error'
+    && displayStatus !== 'expired';
+  const showLoader = displayStatus === 'preparing' || displayStatus === 'loading';
 
   return (
     <div className="todopago-hosted-backdrop" data-testid="todopago-hosted-backdrop">
@@ -181,9 +247,9 @@ export default function TodoPagoHostedModal({
           </Button>
         </header>
 
-        <div className={`todopago-hosted-status is-${status}`} role="status" aria-live="polite">
+        <div className={`todopago-hosted-status is-${displayStatus}`} role="status" aria-live="polite">
           {showLoader ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
-          <span>{MODAL_STATUS_COPY[status]}</span>
+          <span>{MODAL_STATUS_COPY[displayStatus]}</span>
         </div>
 
         {showPortal ? (
@@ -194,15 +260,15 @@ export default function TodoPagoHostedModal({
               name={iframeName}
               title="Portal de pago TodoPago"
               src="about:blank"
-              onLoad={() => {
-                if (submittedRef.current) setStatus((current) => (
+              onLoad={(event) => {
+                if (consumedRef.current.launch !== launch || !consumedRef.current.value) return;
+                if (!hasNavigatedAwayFromBlank(event.currentTarget)) return;
+                clearTimer(loadWatchdogRef);
+                setStatus((current) => (
                   current === 'loading' || current === 'preparing' ? 'open' : current
                 ));
               }}
-              onError={() => {
-                setStatus('error');
-                callbacksRef.current.onError?.({ code: 'TODOPAGO_PORTAL_LOAD_ERROR' });
-              }}
+              onError={() => reportErrorOnce('TODOPAGO_PORTAL_LOAD_ERROR')}
             />
             <form
               ref={formRef}
