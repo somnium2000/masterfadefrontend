@@ -5,6 +5,7 @@ import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import { formatCurrencyHnl, normalizeBookingPaymentUiState } from './bookingUtils.js';
 import BookingActions from './components/BookingActions.jsx';
 import BookingStepHeader from './components/BookingStepHeader.jsx';
+import TodoPagoHostedModal from './components/TodoPagoHostedModal.jsx';
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
@@ -85,17 +86,6 @@ function isLocalHostname(value) {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
 
-function isQaHostname(value) {
-  return String(value || '').trim().toLowerCase() === 'qa.masterfadeapp.com';
-}
-
-function isProductionHostname(value) {
-  const hostname = String(value || '').trim().toLowerCase();
-  return hostname === 'masterfadeapp.com'
-    || hostname === 'www.masterfadeapp.com'
-    || hostname === 'api.masterfadeapp.com';
-}
-
 function readEnvFlag(value) {
   return String(value || '').trim().toLowerCase() === 'true';
 }
@@ -105,38 +95,37 @@ function normalizePaymentProvider(value) {
   return provider === 'payment-simulator' ? 'simulator' : provider;
 }
 
-function resolvePaymentSimulationAction() {
-  const hostname = typeof window !== 'undefined' ? window.location?.hostname : '';
+export function resolvePaymentSimulationAction({
+  hostname = typeof window !== 'undefined' ? window.location?.hostname : '',
+  provider = import.meta.env.VITE_PAYMENT_PROVIDER || import.meta.env.VITE_PAYMENT_PROVIDER_CODE || '',
+  mockEnabled = import.meta.env.VITE_ENABLE_MOCK_PAYMENT,
+  simulatorEnabled = import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR,
+} = {}) {
   const localHost = isLocalHostname(hostname);
-  const provider = normalizePaymentProvider(
-    import.meta.env.VITE_PAYMENT_PROVIDER
-    || import.meta.env.VITE_PAYMENT_PROVIDER_CODE
-    || ''
-  );
-  const mockEnabled = readEnvFlag(import.meta.env.VITE_ENABLE_MOCK_PAYMENT);
-  const simulatorEnabled = readEnvFlag(import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR);
-  const qaSimulationEnabled = readEnvFlag(import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION);
+  const normalizedProvider = normalizePaymentProvider(provider);
+  const canUseMock = readEnvFlag(mockEnabled);
+  const canUseSimulator = readEnvFlag(simulatorEnabled);
 
-  let action = { canShow: false, type: null, provider, reason: 'host_not_allowed' };
-  if (!provider) {
-    action = { canShow: false, type: null, provider, reason: 'provider_missing' };
-  } else if (isProductionHostname(hostname)) {
-    action = { canShow: false, type: null, provider, reason: 'production_blocked' };
+  let action = { canShow: false, type: null, provider: normalizedProvider, reason: 'host_not_allowed' };
+  if (!normalizedProvider) {
+    action = { canShow: false, type: null, provider: normalizedProvider, reason: 'provider_missing' };
   } else if (localHost) {
-    if (provider === 'mock' && mockEnabled) {
-      action = { canShow: true, type: 'mock', provider, reason: 'local_mock_enabled' };
-    } else if ((provider === 'todopago' || provider === 'simulator') && simulatorEnabled && qaSimulationEnabled) {
-      action = { canShow: true, type: 'simulator', provider, reason: 'local_todopago_simulator_enabled' };
+    if (normalizedProvider === 'mock' && canUseMock) {
+      action = { canShow: true, type: 'mock', provider: normalizedProvider, reason: 'local_mock_enabled' };
+    } else if ((normalizedProvider === 'todopago' || normalizedProvider === 'simulator') && canUseSimulator) {
+      action = { canShow: true, type: 'simulator', provider: normalizedProvider, reason: 'local_todopago_simulator_enabled' };
     } else {
-      action = { canShow: false, type: null, provider, reason: 'local_payment_simulation_not_configured' };
+      action = { canShow: false, type: null, provider: normalizedProvider, reason: 'local_payment_simulation_not_configured' };
     }
-  } else if (isQaHostname(hostname)) {
-    action = (provider === 'simulator' || provider === 'todopago') && simulatorEnabled && qaSimulationEnabled
-      ? { canShow: true, type: 'simulator', provider, reason: 'qa_simulator_enabled' }
-      : { canShow: false, type: null, provider, reason: 'qa_simulator_not_configured' };
   }
 
   return action;
+}
+
+function launchIsExpired(launch) {
+  if (!launch?.expiresAt) return false;
+  const expiresAtMs = new Date(launch.expiresAt).getTime();
+  return Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now();
 }
 
 export default function PublicBookingPaymentStep() {
@@ -162,6 +151,9 @@ export default function PublicBookingPaymentStep() {
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [hostedModalOpen, setHostedModalOpen] = useState(false);
+  const [hostedResultReceived, setHostedResultReceived] = useState(false);
+  const [hostedModalError, setHostedModalError] = useState(null);
   const [paymentForm, setPaymentForm] = useState(INITIAL_PAYMENT_FORM);
   const [fieldErrors, setFieldErrors] = useState({});
   const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(() => {
@@ -181,6 +173,9 @@ export default function PublicBookingPaymentStep() {
     paymentResult,
     holdTotalToPay,
   });
+  const paymentLaunch = paymentIntent?.launch;
+  const hasHostedLaunch = paymentLaunch?.type === 'iframe_post';
+  const hostedSessionExpired = holdExpired || launchIsExpired(paymentLaunch);
   const maskedCardLabel = useMemo(() => maskCardNumber(paymentForm.cardNumber), [paymentForm.cardNumber]);
   const cardBrand = useMemo(() => detectCardBrand(paymentForm.cardNumber), [paymentForm.cardNumber]);
   const cardBrandLabel = CARD_BRAND_LABELS[cardBrand];
@@ -265,6 +260,12 @@ export default function PublicBookingPaymentStep() {
     }
   }, [paymentResult?.booking_confirmed]);
 
+  useEffect(() => {
+    setHostedModalOpen(false);
+    setHostedResultReceived(false);
+    setHostedModalError(null);
+  }, [paymentIntent?.id_intent]);
+
   const handleFieldChange = (field) => (event) => {
     const rawValue = event.target.value;
     let nextValue = rawValue;
@@ -294,6 +295,24 @@ export default function PublicBookingPaymentStep() {
   const handleVerifyPaymentStatus = async () => {
     if (checkingPaymentStatus) return;
     await refreshPaymentStatus();
+  };
+
+  const handleOpenHostedModal = () => {
+    if (!hasHostedLaunch || hostedSessionExpired) {
+      setHostedModalError(hostedSessionExpired ? 'session_expired' : 'launch_unavailable');
+      return;
+    }
+    setHostedModalError(null);
+    setHostedModalOpen(true);
+  };
+
+  const handleHostedResult = () => {
+    setHostedResultReceived(true);
+    setHostedModalError(null);
+  };
+
+  const handleHostedError = (error) => {
+    setHostedModalError(error?.code === 'TODOPAGO_SESSION_EXPIRED' ? 'session_expired' : 'load_error');
   };
 
   const handleMockPay = async () => {
@@ -331,12 +350,24 @@ export default function PublicBookingPaymentStep() {
     await cancelBookingFlow('payment_step');
   };
 
+  const hostedStatusText = (() => {
+    if (checkingPaymentStatus) return 'Verificando pago';
+    if (hostedModalError === 'session_expired' || hostedSessionExpired) return 'Sesión expirada';
+    if (hostedModalError) return 'Error de carga';
+    if (hostedResultReceived) return 'Resultado recibido. Verifica el estado con MasterFade.';
+    if (hostedModalOpen) return 'Portal abierto';
+    if (loadingIntent || creatingPaymentIntent) return 'Preparando pago';
+    return paymentIntent?.id_intent ? paymentUiState.text : 'Preparando pago';
+  })();
+
   return (
     <div className="citas-confirm-wrap public-booking-payment-wrap">
       <div className="citas-surface p-3 sm:p-5">
         <BookingStepHeader
           title="Pasarela de pago segura"
-          subtitle="Simula la experiencia MasterFade/TodoPago en entorno de prueba sin ejecutar un cobro real."
+          subtitle={paymentSimulationAction.canShow
+            ? 'Simula la experiencia MasterFade/TodoPago localmente sin ejecutar un cobro real.'
+            : 'Continúa el pago en el portal alojado de TodoPago y verifica después el estado con MasterFade.'}
           headingLevel="h3"
           titleClassName="citas-confirm-title"
           subtitleClassName="citas-selected-date mt-2"
@@ -344,11 +375,15 @@ export default function PublicBookingPaymentStep() {
         <div className="mt-3 grid gap-2 sm:gap-3">
           <div className="public-booking-payment-note">
             <ShieldCheck size={14} />
-            <span>Entorno de prueba: esta pantalla solo simula la pasarela y no procesa cargos reales.</span>
+            <span>{paymentSimulationAction.canShow
+              ? 'Simulador local: esta pantalla no procesa cargos reales.'
+              : 'El portal de TodoPago se abre aislado dentro de una ventana segura.'}</span>
           </div>
           <div className="public-booking-payment-note">
             <ShieldCheck size={14} />
-            <span>MasterFade no guarda PAN ni CVV. Esos datos viven solo en este formulario local y se limpian al salir.</span>
+            <span>{paymentSimulationAction.canShow
+              ? 'Los datos ficticios viven solo en el simulador local y se limpian al salir.'
+              : 'MasterFade no solicita ni muestra datos de tarjeta en este flujo.'}</span>
           </div>
         </div>
         {holdCountdownLabel ? (
@@ -376,7 +411,8 @@ export default function PublicBookingPaymentStep() {
         ) : null}
 
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
-          <div className="public-booking-contact-card public-booking-payment-gateway-card">
+          {paymentSimulationAction.canShow ? (
+            <div className="public-booking-contact-card public-booking-payment-gateway-card">
             <div className="w-full overflow-hidden rounded-2xl border border-[var(--mf-border)] bg-[linear-gradient(135deg,rgba(16,24,40,0.96),rgba(31,41,55,0.92))] p-3 text-white shadow-[0_14px_40px_rgba(15,23,42,0.28)] sm:p-4">
               <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] text-white/70 sm:text-[11px] sm:tracking-[0.28em]">
                 <span>MasterFade Pay</span>
@@ -487,13 +523,24 @@ export default function PublicBookingPaymentStep() {
             <div className="mt-3 rounded-xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-3 text-xs leading-relaxed text-[var(--mf-text-2)]">
               Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.
             </div>
-          </div>
+            </div>
+          ) : (
+            <div className="public-booking-contact-card public-booking-payment-gateway-card">
+              <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
+                <ShieldCheck size={30} className="text-[var(--mf-accent)]" />
+                <h4 className="citas-confirm-subtitle">Pago alojado por TodoPago</h4>
+                <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
+                  Los datos sensibles se ingresan únicamente en el portal del proveedor. La reserva solo cambia cuando el backend verifica el pago.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="public-booking-contact-card">
             <h4 className="citas-confirm-subtitle">Estado de la pasarela</h4>
             <div className="public-booking-payment-note mt-2">
               <ShieldCheck size={14} />
-              <span>{paymentIntent?.id_intent ? paymentUiState.text : 'Primero crea el intento para habilitar la simulacion del checkout.'}</span>
+              <span>{hostedStatusText}</span>
             </div>
             {!paymentIntent?.id_intent ? (
               <Button className="mt-3 w-full gap-2 sm:w-auto" onClick={handleCreateIntent} disabled={loadingIntent || creatingPaymentIntent}>
@@ -506,9 +553,11 @@ export default function PublicBookingPaymentStep() {
                 <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || effectiveTotalToPay)}</p>
                 <p>Intent: {paymentIntent.id_intent}</p>
                 <p>Proveedor: {paymentSimulationAction.provider || 'no_configurado'}</p>
-                {paymentIntent.payment_url ? (
+                {paymentSimulationAction.canShow
+                  && paymentIntent.launch?.type === 'redirect'
+                  && paymentIntent.launch?.action ? (
                   <a
-                    href={paymentIntent.payment_url}
+                    href={paymentIntent.launch.action}
                     className="inline-flex items-center gap-2 text-[var(--mf-accent)]"
                   >
                     Abrir checkout del proveedor
@@ -518,6 +567,15 @@ export default function PublicBookingPaymentStep() {
               </div>
             )}
             <BookingActions inline className="public-booking-payment-actions mt-4 flex-col items-stretch gap-3 sm:flex-row sm:items-end">
+              {!paymentSimulationAction.canShow && hasHostedLaunch ? (
+                <Button
+                  className="w-full sm:w-auto"
+                  onClick={handleOpenHostedModal}
+                  disabled={hostedSessionExpired || checkingPaymentStatus}
+                >
+                  Continuar con TodoPago
+                </Button>
+              ) : null}
               <Button
                 className="w-full sm:w-auto"
                 variant="outline"
@@ -597,6 +655,13 @@ export default function PublicBookingPaymentStep() {
             <span>{formatCurrencyHnl(effectiveTotalToPay)}</span>
           </div>
         </div>
+        <TodoPagoHostedModal
+          open={hostedModalOpen}
+          launch={paymentLaunch}
+          onResult={handleHostedResult}
+          onClose={() => setHostedModalOpen(false)}
+          onError={handleHostedError}
+        />
       </div>
     </div>
   );
