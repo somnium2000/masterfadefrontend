@@ -5,7 +5,9 @@ import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import { formatCurrencyHnl, normalizeBookingPaymentUiState } from './bookingUtils.js';
 import BookingActions from './components/BookingActions.jsx';
 import BookingStepHeader from './components/BookingStepHeader.jsx';
-import TodoPagoHostedModal from './components/TodoPagoHostedModal.jsx';
+import TodoPagoHostedModal, {
+  createTodoPagoLaunchKey,
+} from './components/TodoPagoHostedModal.jsx';
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
@@ -175,6 +177,7 @@ export default function PublicBookingPaymentStep() {
     holdTotalToPay,
   });
   const paymentLaunch = paymentIntent?.launch;
+  const paymentLaunchKey = createTodoPagoLaunchKey(paymentLaunch);
   const hasHostedLaunch = paymentLaunch?.type === 'iframe_post';
   const hostedSessionExpired = holdExpired || launchIsExpired(paymentLaunch);
   const maskedCardLabel = useMemo(() => maskCardNumber(paymentForm.cardNumber), [paymentForm.cardNumber]);
@@ -266,7 +269,7 @@ export default function PublicBookingPaymentStep() {
     setHostedResultReceived(false);
     setHostedModalError(null);
     setHostedLaunchConsumed(false);
-  }, [paymentLaunch]);
+  }, [paymentLaunchKey]);
 
   const handleFieldChange = (field) => (event) => {
     const rawValue = event.target.value;

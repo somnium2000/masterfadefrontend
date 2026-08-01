@@ -19,9 +19,39 @@ function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function normalizeLaunch(launch) {
-  if (!isObject(launch) || launch.type !== 'iframe_post' || launch.method !== 'POST') return null;
-  if (!isObject(launch.fields)) return null;
+function createLaunchDescriptor(launch) {
+  if (!isObject(launch)) return null;
+  const fields = isObject(launch.fields)
+    ? Object.entries(launch.fields)
+      .map(([name, value]) => [String(name), String(value ?? '')])
+      .sort(([leftName], [rightName]) => {
+        if (leftName < rightName) return -1;
+        if (leftName > rightName) return 1;
+        return 0;
+      })
+    : null;
+
+  return {
+    action: String(launch.action ?? ''),
+    method: String(launch.method ?? ''),
+    allowedMessageOrigin: String(launch.allowedMessageOrigin ?? ''),
+    expiresAt: launch.expiresAt == null ? null : String(launch.expiresAt),
+    fields,
+  };
+}
+
+export function createTodoPagoLaunchKey(launch) {
+  return JSON.stringify(createLaunchDescriptor(launch));
+}
+
+function normalizeLaunchKey(launchKey) {
+  let launch;
+  try {
+    launch = JSON.parse(launchKey);
+  } catch {
+    return null;
+  }
+  if (!isObject(launch) || launch.method !== 'POST' || !Array.isArray(launch.fields)) return null;
 
   let action;
   let allowedOrigin;
@@ -39,10 +69,7 @@ function normalizeLaunch(launch) {
     action: action.toString(),
     allowedMessageOrigin: allowedOrigin.origin,
     expiresAt: launch.expiresAt || null,
-    fields: Object.entries(launch.fields).map(([name, value]) => ({
-      name: String(name),
-      value: String(value ?? ''),
-    })),
+    fields: launch.fields.map(([name, value]) => ({ name, value })),
   };
 }
 
@@ -85,47 +112,57 @@ export default function TodoPagoHostedModal({
   const formRef = useRef(null);
   const restoreFocusRef = useRef(null);
   const loadWatchdogRef = useRef(null);
-  const activeLaunchRef = useRef(launch);
-  const consumedRef = useRef({ launch, value: false });
-  const messageHandledRef = useRef({ launch, value: false });
-  const errorReportedRef = useRef({ launch, value: false });
+  const expirationTimerRef = useRef(null);
+  const launchKey = createTodoPagoLaunchKey(launch);
+  const activeLaunchKeyRef = useRef(launchKey);
+  const consumedRef = useRef({ launchKey, value: false });
+  const messageHandledRef = useRef({ launchKey, value: false });
+  const terminalStateRef = useRef({ launchKey, value: null });
   const callbacksRef = useRef({ onResult, onClose, onError, onSubmitted });
   const [status, setStatus] = useState('preparing');
-  const [statusLaunch, setStatusLaunch] = useState(launch);
-  const normalizedLaunch = useMemo(() => normalizeLaunch(launch), [launch]);
+  const [statusLaunchKey, setStatusLaunchKey] = useState(launchKey);
+  const launchType = launch?.type;
+  const normalizedLaunch = useMemo(
+    () => (launchType === 'iframe_post' ? normalizeLaunchKey(launchKey) : null),
+    [launchKey, launchType]
+  );
 
   useEffect(() => {
     callbacksRef.current = { onResult, onClose, onError, onSubmitted };
   }, [onClose, onError, onResult, onSubmitted]);
 
   const reportErrorOnce = useCallback((code, nextStatus = 'error') => {
-    if (errorReportedRef.current.launch !== launch) {
-      errorReportedRef.current = { launch, value: false };
+    if (terminalStateRef.current.launchKey !== launchKey) {
+      terminalStateRef.current = { launchKey, value: null };
     }
-    if (errorReportedRef.current.value) return;
-    errorReportedRef.current.value = true;
+    if (terminalStateRef.current.value !== null) return;
+    terminalStateRef.current.value = 'error';
+    clearTimer(loadWatchdogRef);
+    clearTimer(expirationTimerRef);
     setStatus(nextStatus);
     callbacksRef.current.onError?.({ code });
-  }, [launch]);
+  }, [launchKey]);
 
   useEffect(() => {
-    if (activeLaunchRef.current === launch) return undefined;
+    if (activeLaunchKeyRef.current === launchKey) return undefined;
 
-    activeLaunchRef.current = launch;
-    consumedRef.current = { launch, value: false };
-    messageHandledRef.current = { launch, value: false };
-    errorReportedRef.current = { launch, value: false };
+    activeLaunchKeyRef.current = launchKey;
+    consumedRef.current = { launchKey, value: false };
+    messageHandledRef.current = { launchKey, value: false };
+    terminalStateRef.current = { launchKey, value: null };
     clearTimer(loadWatchdogRef);
+    clearTimer(expirationTimerRef);
     const resetId = window.setTimeout(() => {
-      setStatusLaunch(launch);
+      setStatusLaunchKey(launchKey);
       setStatus('preparing');
     }, 0);
     return () => window.clearTimeout(resetId);
-  }, [launch]);
+  }, [launchKey]);
 
   useEffect(() => {
     if (!open) {
       clearTimer(loadWatchdogRef);
+      clearTimer(expirationTimerRef);
       return undefined;
     }
 
@@ -149,10 +186,11 @@ export default function TodoPagoHostedModal({
 
   useEffect(() => {
     if (!open) return undefined;
-    let expirationId = null;
     const startId = window.setTimeout(() => {
-      if (consumedRef.current.launch === launch && consumedRef.current.value) {
-        setStatus('consumed');
+      if (consumedRef.current.launchKey === launchKey && consumedRef.current.value) {
+        if (terminalStateRef.current.launchKey !== launchKey || terminalStateRef.current.value === null) {
+          setStatus('consumed');
+        }
         return;
       }
 
@@ -167,8 +205,9 @@ export default function TodoPagoHostedModal({
       }
       if (!iframeRef.current || !formRef.current) return;
 
-      consumedRef.current = { launch, value: true };
-      messageHandledRef.current = { launch, value: false };
+      consumedRef.current = { launchKey, value: true };
+      messageHandledRef.current = { launchKey, value: false };
+      terminalStateRef.current = { launchKey, value: null };
       setStatus('loading');
       HTMLFormElement.prototype.submit.call(formRef.current);
       callbacksRef.current.onSubmitted?.();
@@ -181,22 +220,24 @@ export default function TodoPagoHostedModal({
 
       if (!normalizedLaunch.expiresAt) return;
       const expiresInMs = new Date(normalizedLaunch.expiresAt).getTime() - Date.now();
-      expirationId = window.setTimeout(() => {
+      expirationTimerRef.current = window.setTimeout(() => {
+        expirationTimerRef.current = null;
         reportErrorOnce('TODOPAGO_SESSION_EXPIRED', 'expired');
       }, Math.min(expiresInMs, 2_147_483_647));
     }, 0);
     return () => {
       window.clearTimeout(startId);
       clearTimer(loadWatchdogRef);
-      if (expirationId !== null) window.clearTimeout(expirationId);
+      clearTimer(expirationTimerRef);
     };
-  }, [launch, normalizedLaunch, open, reportErrorOnce]);
+  }, [launchKey, normalizedLaunch, open, reportErrorOnce]);
 
   useEffect(() => {
     if (!open || !normalizedLaunch) return undefined;
     const handleMessage = (event) => {
-      if (consumedRef.current.launch !== launch || !consumedRef.current.value) return;
-      if (messageHandledRef.current.launch === launch && messageHandledRef.current.value) return;
+      if (consumedRef.current.launchKey !== launchKey || !consumedRef.current.value) return;
+      if (terminalStateRef.current.launchKey === launchKey && terminalStateRef.current.value !== null) return;
+      if (messageHandledRef.current.launchKey === launchKey && messageHandledRef.current.value) return;
       if (event.origin !== normalizedLaunch.allowedMessageOrigin) return;
       if (event.source !== iframeRef.current?.contentWindow) return;
       if (!isObject(event.data) || event.data.accion !== 'Resultado') return;
@@ -210,17 +251,20 @@ export default function TodoPagoHostedModal({
       }
       if (!isObject(parsedResult)) return;
 
-      messageHandledRef.current = { launch, value: true };
+      messageHandledRef.current = { launchKey, value: true };
+      terminalStateRef.current = { launchKey, value: 'result' };
+      clearTimer(loadWatchdogRef);
+      clearTimer(expirationTimerRef);
       setStatus('result');
       callbacksRef.current.onResult?.(parsedResult);
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [launch, normalizedLaunch, open]);
+  }, [launchKey, normalizedLaunch, open]);
 
   if (!open) return null;
 
-  const displayStatus = statusLaunch === launch ? status : 'preparing';
+  const displayStatus = statusLaunchKey === launchKey ? status : 'preparing';
   const showPortal = normalizedLaunch
     && displayStatus !== 'consumed'
     && displayStatus !== 'error'
@@ -261,7 +305,7 @@ export default function TodoPagoHostedModal({
               title="Portal de pago TodoPago"
               src="about:blank"
               onLoad={(event) => {
-                if (consumedRef.current.launch !== launch || !consumedRef.current.value) return;
+                if (consumedRef.current.launchKey !== launchKey || !consumedRef.current.value) return;
                 if (!hasNavigatedAwayFromBlank(event.currentTarget)) return;
                 clearTimer(loadWatchdogRef);
                 setStatus((current) => (

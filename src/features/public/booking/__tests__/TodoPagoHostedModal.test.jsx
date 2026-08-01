@@ -22,6 +22,7 @@ const launch = {
   action: `${ALLOWED_ORIGIN}/modal`,
   method: 'POST',
   fields: {
+    idTransaccion: 'transaction-private-value',
     opaqueSession: 'private-session-value',
     tenant: 'private-tenant-value',
   },
@@ -140,25 +141,37 @@ describe('TodoPagoHostedModal', () => {
     opener.remove();
   });
 
-  test('cerrar y reabrir el mismo launch no ejecuta un segundo submit', async () => {
+  test('cerrar y reabrir con un clon profundo del launch no ejecuta otro submit', async () => {
     const view = renderModal();
     await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1));
+    const clonedLaunch = JSON.parse(JSON.stringify(launch));
+    clonedLaunch.fields = {
+      tenant: clonedLaunch.fields.tenant,
+      opaqueSession: clonedLaunch.fields.opaqueSession,
+      idTransaccion: clonedLaunch.fields.idTransaccion,
+    };
 
-    view.rerender(<TodoPagoHostedModal {...view.props} open={false} />);
-    view.rerender(<TodoPagoHostedModal {...view.props} open />);
+    view.rerender(<TodoPagoHostedModal {...view.props} launch={clonedLaunch} open={false} />);
+    view.rerender(<TodoPagoHostedModal {...view.props} launch={clonedLaunch} open />);
 
     await screen.findByText('Lanzamiento ya enviado');
     expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1);
   });
 
-  test('un launch nuevo permite otro submit', async () => {
+  test.each([
+    ['idTransaccion', (current) => ({
+      ...current,
+      fields: { ...current.fields, idTransaccion: 'next-transaction-private-value' },
+    })],
+    ['action', (current) => ({ ...current, action: `${ALLOWED_ORIGIN}/modal/new` })],
+    ['fields', (current) => ({
+      ...current,
+      fields: { ...current.fields, tenant: 'next-private-tenant-value' },
+    })],
+  ])('un launch con %s diferente permite otro submit', async (_field, mutateLaunch) => {
     const view = renderModal();
     await waitFor(() => expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1));
-    const nextLaunch = {
-      ...launch,
-      action: `${ALLOWED_ORIGIN}/modal/new`,
-      fields: { opaqueSession: 'next-private-session-value' },
-    };
+    const nextLaunch = mutateLaunch(launch);
 
     view.rerender(<TodoPagoHostedModal {...view.props} launch={nextLaunch} />);
 
@@ -206,6 +219,63 @@ describe('TodoPagoHostedModal', () => {
 
     expect(props.onError).toHaveBeenCalledOnce();
     expect(props.onError).toHaveBeenCalledWith({ code: 'TODOPAGO_PORTAL_LOAD_TIMEOUT' });
+    expect(screen.getByText('Error de carga')).not.toBeNull();
+  });
+
+  test('resultado valido cancela el watchdog de carga', async () => {
+    vi.useFakeTimers();
+    const { props } = renderModal();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const iframe = screen.getByTitle('Portal de pago TodoPago');
+
+    dispatchProviderMessage(iframe);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(TODO_PAGO_LOAD_TIMEOUT_MS);
+    });
+
+    expect(props.onResult).toHaveBeenCalledOnce();
+    expect(props.onError).not.toHaveBeenCalled();
+    expect(screen.getByText('Resultado recibido')).not.toBeNull();
+  });
+
+  test('resultado valido cancela el temporizador de expiracion', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-01T12:00:00.000Z'));
+    const expiringLaunch = { ...launch, expiresAt: '2026-08-01T12:00:05.000Z' };
+    const { props } = renderModal({ launch: expiringLaunch });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const iframe = screen.getByTitle('Portal de pago TodoPago');
+
+    dispatchProviderMessage(iframe);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+
+    expect(props.onResult).toHaveBeenCalledOnce();
+    expect(props.onError).not.toHaveBeenCalled();
+    expect(screen.getByText('Resultado recibido')).not.toBeNull();
+  });
+
+  test('error de carga cancela la expiracion y no vuelve a llamar onError', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-01T12:00:00.000Z'));
+    const expiringLaunch = { ...launch, expiresAt: '2026-08-01T12:01:00.000Z' };
+    const { props } = renderModal({ launch: expiringLaunch });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(TODO_PAGO_LOAD_TIMEOUT_MS);
+    });
+
+    expect(props.onError).toHaveBeenCalledOnce();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(TODO_PAGO_LOAD_TIMEOUT_MS);
+    });
+
+    expect(props.onError).toHaveBeenCalledOnce();
     expect(screen.getByText('Error de carga')).not.toBeNull();
   });
 
@@ -281,7 +351,7 @@ describe('integracion del shell TodoPago', () => {
       membershipCompanionNotice: '',
     };
 
-    render(<PublicBookingPaymentStep />);
+    const view = render(<PublicBookingPaymentStep />);
     expect(screen.queryByLabelText('Numero de tarjeta')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Continuar con TodoPago' }));
     const iframe = await screen.findByTitle('Portal de pago TodoPago');
@@ -295,5 +365,29 @@ describe('integracion del shell TodoPago', () => {
     expect(refreshPaymentStatus).not.toHaveBeenCalled();
     expect(completePaymentSimulation).not.toHaveBeenCalled();
     expect(confirmHoldWithoutPayment).not.toHaveBeenCalled();
+
+    bookingFlowMock.current = {
+      ...bookingFlowMock.current,
+      paymentIntent: {
+        ...bookingFlowMock.current.paymentIntent,
+        launch: JSON.parse(JSON.stringify(launch)),
+      },
+    };
+    view.rerender(<PublicBookingPaymentStep />);
+    expect(screen.queryByRole('button', { name: 'Continuar con TodoPago' })).toBeNull();
+    expect(HTMLFormElement.prototype.submit).toHaveBeenCalledTimes(1);
+
+    bookingFlowMock.current = {
+      ...bookingFlowMock.current,
+      paymentIntent: {
+        ...bookingFlowMock.current.paymentIntent,
+        launch: { ...launch, action: `${ALLOWED_ORIGIN}/modal/replacement` },
+      },
+    };
+    view.rerender(<PublicBookingPaymentStep />);
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: 'Continuar con TodoPago' })
+    ).not.toBeNull());
+    expect(screen.queryByText(/Resultado recibido/)).toBeNull();
   });
 });
