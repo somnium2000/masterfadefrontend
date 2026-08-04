@@ -284,4 +284,46 @@ export async function deleteClienteProfileImage() {
   return normalizeResponsePayload(response);
 }
 
+export async function getClienteAccountDeletionPreview() {
+  const response = await http.get(`${BASE}/me/account-deletion/preview`, { cache: false });
+  return normalizeResponsePayload(response);
+}
+
+export async function createClienteAccountDeletionRequest({ idempotencyKey } = {}) {
+  const response = await http.post(`${BASE}/me/account-deletion/requests`, {
+    idempotency_key: String(idempotencyKey || "").trim(),
+  }, { dedupe: false });
+  return normalizeResponsePayload(response);
+}
+
+export async function confirmClienteAccountDeletionRequest(requestId, payload = {}) {
+  const safeRequestId = String(requestId || "").trim();
+  if (!safeRequestId) {
+    throw new Error("No se pudo identificar la solicitud de eliminacion.");
+  }
+  const response = await http.post(`${BASE}/me/account-deletion/requests/${encodeURIComponent(safeRequestId)}/confirm`, {
+    reauth_token: payload.reauth_token,
+    confirmacion_texto: payload.confirmacion_texto,
+    acepta_perder_masterpuntos: payload.acepta_perder_masterpuntos === true,
+    acepta_cancelar_membresia: payload.acepta_cancelar_membresia === true,
+    acepta_historial_anonimizado: payload.acepta_historial_anonimizado === true,
+    acepta_irreversibilidad: payload.acepta_irreversibilidad === true,
+  }, { dedupe: false });
+  return normalizeResponsePayload(response);
+}
+
+export async function executePublicAccountDeletion(reference, executionToken) {
+  const safeReference = String(reference || "").trim();
+  const safeToken = String(executionToken || "").trim();
+  if (!safeReference || !safeToken) {
+    throw new Error("No se pudo validar la continuacion de eliminacion.");
+  }
+  const response = await http.post(
+    `/v1/public/account-deletion/requests/${encodeURIComponent(safeReference)}/execute`,
+    { execution_token: safeToken },
+    { token: "", dedupe: false }
+  );
+  return normalizeResponsePayload(response);
+}
+
 export { ALLOWED_PROFILE_IMAGE_TYPES, MAX_PROFILE_IMAGE_BYTES };

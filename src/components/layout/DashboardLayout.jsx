@@ -111,6 +111,7 @@ function buildNavModules(basePath, role, roles = []) {
                 { id: 'empleados', label: 'Empleados', path: `${basePath}/empleados` },
                 { id: 'clientes', label: 'Clientes', path: `${basePath}/clientes` },
                 { id: 'usuarios', label: 'Usuarios', path: `${basePath}/usuarios` },
+                { id: 'eliminacion-cuentas', label: 'Eliminacion de cuentas', path: `${basePath}/eliminacion-cuentas` },
             ],
         },
         {
@@ -334,6 +335,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
 
     const basePath = String(basePathOverride || '').trim() || resolvedHomePath;
     const modules = buildNavModules(basePath, currentRole, roles);
+    const canAccessInternalAccountDeletion = currentRole !== 'cliente';
 
     // Módulo activo: el que cuya path coincide más con la ubicación actual
     const activeModule = resolveActiveModule(modules, location.pathname);
@@ -350,6 +352,11 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
     async function handleLogout() {
         await logout();
         navigate('/login', { replace: true });
+    }
+
+    function handleAccountDeletionRequest() {
+        navigate('/mi-cuenta/eliminacion');
+        setMobileMenuOpen(false);
     }
 
     const sidebarWidth = isCollapsed ? 72 : 260;
@@ -449,19 +456,41 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                             ${isCollapsed ? 'p-2' : 'p-4'}
                         `}>
                             {isCollapsed ? (
-                                <button
-                                    type="button"
-                                    onClick={handleLogout}
-                                    title="Cerrar sesión"
-                                    className="flex h-9 w-full items-center justify-center rounded-xl text-[var(--mf-accent)] transition-colors hover:bg-[var(--mf-btn-bg)]"
-                                >
-                                    <LogOut size={17} strokeWidth={1.9} />
-                                </button>
+                                <div className="flex flex-col gap-1">
+                                    {canAccessInternalAccountDeletion ? (
+                                        <button
+                                            type="button"
+                                            onClick={handleAccountDeletionRequest}
+                                            title="Solicitar eliminacion de cuenta"
+                                            className="flex h-9 w-full items-center justify-center rounded-xl text-[var(--mf-text-2)] transition-colors hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-accent)]"
+                                        >
+                                            <UserRound size={17} strokeWidth={1.9} />
+                                        </button>
+                                    ) : null}
+                                    <button
+                                        type="button"
+                                        onClick={handleLogout}
+                                        title="Cerrar sesión"
+                                        className="flex h-9 w-full items-center justify-center rounded-xl text-[var(--mf-accent)] transition-colors hover:bg-[var(--mf-btn-bg)]"
+                                    >
+                                        <LogOut size={17} strokeWidth={1.9} />
+                                    </button>
+                                </div>
                             ) : (
                                 <>
                                     <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--mf-text-2)]">Sesión activa</p>
                                     <p className="mt-2 text-sm font-semibold text-[var(--mf-text)] truncate">{displayName}</p>
                                     <p className="mt-1 text-xs text-[var(--mf-accent)]">{getRoleLabel(currentRole)}</p>
+                                    {canAccessInternalAccountDeletion ? (
+                                        <button
+                                            type="button"
+                                            onClick={handleAccountDeletionRequest}
+                                            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] text-xs font-semibold text-[var(--mf-text)] transition-colors hover:border-[var(--mf-btn-border)] hover:bg-[var(--mf-btn-bg)]"
+                                        >
+                                            <UserRound size={14} strokeWidth={1.9} />
+                                            Solicitar eliminacion de cuenta
+                                        </button>
+                                    ) : null}
                                     <button
                                         type="button"
                                         onClick={handleLogout}
@@ -604,6 +633,16 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                                 <div className="mt-4 rounded-[20px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-4">
                                     <p className="text-xs text-[var(--mf-text-2)] truncate">{displayName}</p>
                                     <p className="mt-1 text-xs text-[var(--mf-accent)]">{getRoleLabel(currentRole)}</p>
+                                    {canAccessInternalAccountDeletion ? (
+                                        <button
+                                            type="button"
+                                            onClick={handleAccountDeletionRequest}
+                                            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] text-xs font-semibold text-[var(--mf-text)]"
+                                        >
+                                            <UserRound size={14} strokeWidth={1.9} />
+                                            Solicitar eliminacion de cuenta
+                                        </button>
+                                    ) : null}
                                     <button
                                         type="button"
                                         onClick={handleLogout}

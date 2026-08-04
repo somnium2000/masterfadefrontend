@@ -14,6 +14,9 @@ import MembershipPlansPage from './features/public/pages/MembershipPlansPage.jsx
 import PromotionsPage from './features/public/pages/PromotionsPage.jsx';
 import ServicesPage from './features/public/pages/ServicesPage.jsx';
 import BarbersLandingPage from './features/public/pages/BarbersLandingPage.jsx';
+import AccountDeletionProgressPage from './features/public/pages/AccountDeletionProgressPage.jsx';
+import InternalAccountDeletionRequestPage from './features/account/pages/InternalAccountDeletionRequestPage.jsx';
+import { INTERNAL_ACCOUNT_DELETION_ALLOWED_ROLES } from './features/account/lib/internalAccountDeletionFlow.js';
 import BookingLoadingState from './features/public/booking/components/BookingLoadingState.jsx';
 import { BOOKING_ROUTES } from './features/public/booking/constants/bookingRoutes.js';
 import { BOOKING_STEPS } from './features/public/booking/constants/bookingSteps.js';
@@ -36,6 +39,7 @@ import AdminEmpleadosPage from './features/admin/pages/AdminEmpleadosPage.jsx';
 import AdminSucursalesPage from './features/admin/pages/AdminSucursalesPage.jsx';
 import AdminClientesPage from './features/admin/pages/AdminClientesPage.jsx';
 import AdminUsuariosPage from './features/admin/pages/AdminUsuariosPage.jsx';
+import AdminAccountDeletionPage from './features/admin/pages/AdminAccountDeletionPage.jsx';
 import AdminConfiguracionComunicacionPage from './features/admin/pages/AdminConfiguracionComunicacionPage.jsx';
 import AdminConfiguracionPromocionesPage from './features/admin/pages/AdminConfiguracionPromocionesPage.jsx';
 import AdminCitasPage from './features/admin/pages/AdminCitasPage.jsx';
@@ -96,6 +100,31 @@ function SecurityDashboardShell() {
   return <DashboardLayout pageRole={pageRole} basePathOverride="/home/security" />;
 }
 
+function InternalAccountDeletionDashboardShell() {
+  const { roles } = useAuth();
+  const isSecurityAuditorOnly = roles.includes('security_auditor') && !roles.includes('security_admin');
+  const pageRole = roles.includes('barbero')
+    && !roles.some((role) => ['super_admin', 'root', 'admin', 'security_admin', 'security_auditor'].includes(role))
+      ? 'barbero'
+      : isSecurityAuditorOnly
+        ? 'security_auditor'
+        : roles.includes('security_admin')
+          ? 'security_admin'
+          : roles.includes('admin')
+            ? 'admin'
+            : 'super_admin';
+  const basePath = resolveHomePath(roles)
+    || (pageRole === 'barbero'
+      ? '/home/barbero'
+      : pageRole === 'security_admin' || pageRole === 'security_auditor'
+        ? '/home/security'
+        : pageRole === 'admin'
+          ? '/home/admin'
+          : '/home/super');
+
+  return <DashboardLayout pageRole={pageRole} basePathOverride={basePath} />;
+}
+
 function App() {
   const { isAuthenticated } = useAuth();
 
@@ -111,6 +140,7 @@ function App() {
       <Route path="/servicios" element={<ServicesPage />} />
       <Route path="/promociones" element={<PromotionsPage />} />
       <Route path="/barberos" element={<BarbersLandingPage />} />
+      <Route path="/eliminacion-de-cuenta" element={<AccountDeletionProgressPage />} />
       <Route
         path={BOOKING_ROUTES.root}
         element={
@@ -175,6 +205,17 @@ function App() {
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
       <Route
+        path="/mi-cuenta/eliminacion"
+        element={
+          <ProtectedRoute allowedRoles={INTERNAL_ACCOUNT_DELETION_ALLOWED_ROLES}>
+            <InternalAccountDeletionDashboardShell />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<RouteErrorBoundary><InternalAccountDeletionRequestPage /></RouteErrorBoundary>} />
+      </Route>
+
+      <Route
         path="/home"
         element={
           <ProtectedRoute>
@@ -198,6 +239,7 @@ function App() {
         <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
         <Route path="clientes" element={<RouteErrorBoundary><AdminClientesPage /></RouteErrorBoundary>} />
         <Route path="usuarios" element={<RouteErrorBoundary><AdminUsuariosPage /></RouteErrorBoundary>} />
+        <Route path="eliminacion-cuentas" element={<RouteErrorBoundary><AdminAccountDeletionPage /></RouteErrorBoundary>} />
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
         <Route path="catalog/cortesias" element={<RouteErrorBoundary><AdminCortesiasCatalogPage /></RouteErrorBoundary>} />
@@ -255,6 +297,7 @@ function App() {
         <Route path="empleados" element={<UnderConstructionPage title="Personas · Empleados" subtitle="Acceso temporalmente en definición para rol admin." />} />
         <Route path="clientes" element={<UnderConstructionPage title="Personas · Clientes" subtitle="Acceso temporalmente en definición para rol admin." />} />
         <Route path="usuarios" element={<UnderConstructionPage title="Personas · Usuarios" subtitle="Acceso temporalmente en definición para rol admin." />} />
+        <Route path="eliminacion-cuentas" element={<RouteErrorBoundary><AdminAccountDeletionPage /></RouteErrorBoundary>} />
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
         <Route path="catalog/cortesias" element={<RouteErrorBoundary><AdminCortesiasCatalogPage /></RouteErrorBoundary>} />
