@@ -3828,6 +3828,10 @@ const agendaAutoLoadKeyRef = useRef('');
     restorePaymentContext,
   ]);
 
+  const paymentTitularEmail = String(
+    resolveBlockContactState(bookingBlocks[0], 0).email || ''
+  ).trim().toLowerCase();
+
   const contextValue = useMemo(
     () => ({
       mode: 'public',
@@ -3903,6 +3907,7 @@ const agendaAutoLoadKeyRef = useRef('');
       holdTotalToPay,
       paymentIntent,
       paymentResult,
+      paymentTitularEmail,
       bookingSuccessResult,
       pendingCompanionFocusId,
       pendingFieldFocus,
@@ -4049,6 +4054,7 @@ const agendaAutoLoadKeyRef = useRef('');
       holdTotalToPay,
       paymentIntent,
       paymentResult,
+      paymentTitularEmail,
       bookingSuccessResult,
       pendingCompanionFocusId,
       pendingFieldFocus,

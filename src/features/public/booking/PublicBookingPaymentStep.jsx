@@ -20,16 +20,22 @@ const TODO_PAGO_SIMULATION_SCENARIOS = [
 ];
 const INITIAL_PAYMENT_FORM = {
   cardholderName: '',
-  receiptEmail: '',
   phone: '',
   cardNumber: '',
   expiry: '',
   cvv: '',
   billingAddress: '',
   billingCity: '',
-  billingState: '',
+  billingState: 'HN-FM',
   billingCountry: 'HN',
 };
+const HONDURAS_DEPARTMENTS = [
+  ['HN-AT', 'Atlantida'], ['HN-CH', 'Choluteca'], ['HN-CL', 'Colon'], ['HN-CM', 'Comayagua'],
+  ['HN-CP', 'Copan'], ['HN-CR', 'Cortes'], ['HN-EP', 'El Paraiso'], ['HN-FM', 'Francisco Morazan'],
+  ['HN-GD', 'Gracias a Dios'], ['HN-IB', 'Islas de la Bahia'], ['HN-IN', 'Intibuca'], ['HN-LE', 'Lempira'],
+  ['HN-LP', 'La Paz'], ['HN-OC', 'Ocotepeque'], ['HN-OL', 'Olancho'], ['HN-SB', 'Santa Barbara'],
+  ['HN-VA', 'Valle'], ['HN-YO', 'Yoro'],
+];
 
 function normalizeDigits(value) {
   return String(value || '').replace(/\D+/g, '');
@@ -52,12 +58,14 @@ function formatExpiry(value) {
   return `${digits.slice(0, 2)}/${digits.slice(2)}`;
 }
 
-function formatPhone(value) {
-  return normalizeDigits(value).slice(0, 15);
+export function toPixelPayCardExpire(value) {
+  const match = String(value || '').trim().match(/^(0[1-9]|1[0-2])\/([0-9]{2})$/);
+  if (!match) throw new Error('La expiracion debe tener formato MM/AA.');
+  return `${match[2]}${match[1]}`;
 }
 
-function isValidEmail(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+function formatPhone(value) {
+  return normalizeDigits(value).slice(0, 15);
 }
 
 function validatePaymentForm(form) {
@@ -67,9 +75,6 @@ function validatePaymentForm(form) {
 
   if (!String(form.cardholderName || '').trim()) {
     errors.cardholderName = 'Ingresa el nombre del titular.';
-  }
-  if (!isValidEmail(form.receiptEmail)) {
-    errors.receiptEmail = 'Ingresa un correo valido para el comprobante.';
   }
   if (normalizeDigits(form.phone).length < 8) {
     errors.phone = 'Ingresa un telefono valido.';
@@ -85,8 +90,10 @@ function validatePaymentForm(form) {
   }
   if (!String(form.billingAddress || '').trim()) errors.billingAddress = 'Ingresa la direccion de facturacion.';
   if (!String(form.billingCity || '').trim()) errors.billingCity = 'Ingresa la ciudad.';
-  if (!String(form.billingState || '').trim()) errors.billingState = 'Ingresa el departamento o estado.';
-  if (!String(form.billingCountry || '').trim()) errors.billingCountry = 'Ingresa el pais.';
+  if (!HONDURAS_DEPARTMENTS.some(([code]) => code === form.billingState)) {
+    errors.billingState = 'Selecciona un departamento valido.';
+  }
+  if (form.billingCountry !== 'HN') errors.billingCountry = 'El pais de facturacion debe ser Honduras.';
 
   return errors;
 }
@@ -161,6 +168,7 @@ export default function PublicBookingPaymentStep() {
     membershipHasContext,
     membershipUxMessage,
     membershipCompanionNotice,
+    paymentTitularEmail,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
@@ -358,7 +366,7 @@ export default function PublicBookingPaymentStep() {
           card: {
             number: paymentForm.cardNumber,
             holder: paymentForm.cardholderName,
-            expire: paymentForm.expiry,
+            expire: toPixelPayCardExpire(paymentForm.expiry),
             cvv: paymentForm.cvv,
           },
           billing: {
@@ -543,17 +551,16 @@ export default function PublicBookingPaymentStep() {
               </div>
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-receipt-email">Correo para comprobante</label>
+              <label className="mf-label" htmlFor="pay-receipt-email">Correo del titular para comprobante</label>
               <input
                 id="pay-receipt-email"
                 className="mf-input"
-                placeholder="cliente@correo.com"
                 autoComplete="email"
                 inputMode="email"
-                value={paymentForm.receiptEmail}
-                onChange={handleFieldChange('receiptEmail')}
+                value={paymentTitularEmail || ''}
+                readOnly
               />
-              {fieldErrors.receiptEmail ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.receiptEmail}</p> : null}
+              <p className="mt-1 text-xs text-[var(--mf-text-2)]">Se usa el correo ya validado del titular de la reserva.</p>
             </div>
             <div className="public-booking-form-row mt-2">
               <label className="mf-label" htmlFor="pay-phone">Telefono de contacto</label>
@@ -583,12 +590,14 @@ export default function PublicBookingPaymentStep() {
                   </div>
                   <div className="public-booking-form-row">
                     <label className="mf-label" htmlFor="pay-billing-state">Departamento</label>
-                    <input id="pay-billing-state" className="mf-input" autoComplete="address-level1" value={paymentForm.billingState} onChange={handleFieldChange('billingState')} />
+                    <select id="pay-billing-state" className="mf-select" autoComplete="address-level1" value={paymentForm.billingState} onChange={handleFieldChange('billingState')}>
+                      {HONDURAS_DEPARTMENTS.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
+                    </select>
                     {fieldErrors.billingState ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingState}</p> : null}
                   </div>
                   <div className="public-booking-form-row">
                     <label className="mf-label" htmlFor="pay-billing-country">Pais</label>
-                    <input id="pay-billing-country" className="mf-input" autoComplete="country" value={paymentForm.billingCountry} onChange={handleFieldChange('billingCountry')} />
+                    <input id="pay-billing-country" className="mf-input" autoComplete="country" value="HN" readOnly />
                     {fieldErrors.billingCountry ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingCountry}</p> : null}
                   </div>
                 </div>
