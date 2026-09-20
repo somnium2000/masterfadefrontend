@@ -148,6 +148,23 @@ export async function completePublicSimulatorPayment(payload) {
   return http.post('/v1/public/pagos/simulator/event', payload);
 }
 
+export async function salePublicPixelPay(payload, options = {}) {
+  return unwrapResponseData(await http.post('/v1/public/pagos/pixelpay/sale', payload, {
+    ...options,
+    sensitiveBody: true,
+    dedupe: false,
+    cache: false,
+  }));
+}
+
+export async function queryPublicPixelPayStatus(payload, options = {}) {
+  return unwrapResponseData(await http.post('/v1/public/pagos/pixelpay/status', payload, {
+    ...options,
+    dedupe: false,
+    cache: false,
+  }));
+}
+
 // AM: Consulta de estado de membresía para propuesta automática de servicios cubiertos en booking autenticado.
 export async function getClienteMembershipEstado(options = {}) {
   return http.get('/v1/cliente/planes/estado', options);

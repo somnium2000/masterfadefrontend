@@ -854,6 +854,8 @@ const agendaAutoLoadKeyRef = useRef('');
     fetchPaymentStatusOnce,
     completeMockPaymentOnce,
     completeSimulatorPaymentOnce,
+    salePixelPayOnce,
+    queryPixelPayStatusOnce,
     isCurrentPaymentGroup,
   } = useBookingPayment({
     currentGroupId: holdResult?.id_grupo_cita || '',
@@ -3639,6 +3641,39 @@ const agendaAutoLoadKeyRef = useRef('');
     return completeMockPayment();
   }, [completeMockPayment, completeSimulatorPayment]);
 
+  const completePixelPayPayment = useCallback(async ({ card, billing }) => {
+    const groupId = String(holdResult?.id_grupo_cita || '').trim();
+    const intentId = String(paymentIntent?.id_intent || '').trim();
+    const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
+    const titularEmail = String(titularContact.email || '').trim().toLowerCase();
+    if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
+    try {
+      const result = await salePixelPayOnce({ groupId, intentId, titularEmail, card, billing });
+      if (result?.booking_confirmed) {
+        await refreshPaymentStatus();
+      } else if (result?.pending_confirmation) {
+        try {
+          await queryPixelPayStatusOnce({ groupId, intentId, titularEmail });
+        } catch {
+          // AM: Un estado incierto permanece pendiente; nunca se reintenta el cobro.
+        }
+      }
+      return result;
+    } catch (err) {
+      notifications.error(extractMessage(err), { dedupeKey: 'public-booking-pixelpay-error' });
+      throw err;
+    }
+  }, [
+    bookingBlocks,
+    holdResult?.id_grupo_cita,
+    notifications,
+    paymentIntent?.id_intent,
+    queryPixelPayStatusOnce,
+    refreshPaymentStatus,
+    resolveBlockContactState,
+    salePixelPayOnce,
+  ]);
+
   const startCheckout = useCallback(async () => {
     if (paymentResult?.booking_confirmed) return true;
     if (!allBlocksComplete) {
@@ -3857,6 +3892,7 @@ const agendaAutoLoadKeyRef = useRef('');
       checkingPaymentStatus,
       completeMockPayment,
       completePaymentSimulation,
+      completePixelPayPayment,
       startCheckout,
       holdDurationMin,
       holdExpiresAtIso,
@@ -4002,6 +4038,7 @@ const agendaAutoLoadKeyRef = useRef('');
       checkingPaymentStatus,
       completeMockPayment,
       completePaymentSimulation,
+      completePixelPayPayment,
       startCheckout,
       holdDurationMin,
       holdExpiresAtIso,

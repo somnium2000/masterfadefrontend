@@ -25,6 +25,10 @@ const INITIAL_PAYMENT_FORM = {
   cardNumber: '',
   expiry: '',
   cvv: '',
+  billingAddress: '',
+  billingCity: '',
+  billingState: '',
+  billingCountry: 'HN',
 };
 
 function normalizeDigits(value) {
@@ -79,6 +83,10 @@ function validatePaymentForm(form) {
   if (![3, 4].includes(normalizeDigits(form.cvv).length)) {
     errors.cvv = 'Ingresa un CVV de 3 o 4 digitos.';
   }
+  if (!String(form.billingAddress || '').trim()) errors.billingAddress = 'Ingresa la direccion de facturacion.';
+  if (!String(form.billingCity || '').trim()) errors.billingCity = 'Ingresa la ciudad.';
+  if (!String(form.billingState || '').trim()) errors.billingState = 'Ingresa el departamento o estado.';
+  if (!String(form.billingCountry || '').trim()) errors.billingCountry = 'Ingresa el pais.';
 
   return errors;
 }
@@ -111,6 +119,8 @@ export function resolvePaymentSimulationAction({
   let action = { canShow: false, type: null, provider: normalizedProvider, reason: 'host_not_allowed' };
   if (!normalizedProvider) {
     action = { canShow: false, type: null, provider: normalizedProvider, reason: 'provider_missing' };
+  } else if (normalizedProvider === 'pixelpay') {
+    action = { canShow: true, type: 'pixelpay', provider: normalizedProvider, reason: 'pixelpay_direct' };
   } else if (localHost) {
     if (normalizedProvider === 'mock' && canUseMock) {
       action = { canShow: true, type: 'mock', provider: normalizedProvider, reason: 'local_mock_enabled' };
@@ -145,6 +155,7 @@ export default function PublicBookingPaymentStep() {
     refreshPaymentStatus,
     checkingPaymentStatus,
     completePaymentSimulation,
+    completePixelPayPayment,
     holdPricing,
     holdTotalToPay,
     membershipHasContext,
@@ -264,6 +275,11 @@ export default function PublicBookingPaymentStep() {
     }
   }, [paymentResult?.booking_confirmed]);
 
+  useEffect(() => () => {
+    setPaymentForm(INITIAL_PAYMENT_FORM);
+    setFieldErrors({});
+  }, []);
+
   useEffect(() => {
     setHostedModalOpen(false);
     setHostedResultReceived(false);
@@ -337,9 +353,27 @@ export default function PublicBookingPaymentStep() {
           window.sessionStorage.removeItem(TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY);
         }
       }
-      await completePaymentSimulation({ provider: paymentSimulationAction.type });
-      resetSensitiveFields();
+      if (paymentSimulationAction.type === 'pixelpay') {
+        await completePixelPayPayment({
+          card: {
+            number: paymentForm.cardNumber,
+            holder: paymentForm.cardholderName,
+            expire: paymentForm.expiry,
+            cvv: paymentForm.cvv,
+          },
+          billing: {
+            address: paymentForm.billingAddress,
+            city: paymentForm.billingCity,
+            state: paymentForm.billingState,
+            country: paymentForm.billingCountry,
+            phone: paymentForm.phone,
+          },
+        });
+      } else {
+        await completePaymentSimulation({ provider: paymentSimulationAction.type });
+      }
     } finally {
+      resetSensitiveFields();
       setProcessingPayment(false);
     }
   };
@@ -371,7 +405,9 @@ export default function PublicBookingPaymentStep() {
       <div className="citas-surface p-3 sm:p-5">
         <BookingStepHeader
           title="Pasarela de pago segura"
-          subtitle={paymentSimulationAction.canShow
+          subtitle={paymentSimulationAction.type === 'pixelpay'
+            ? 'Procesa el pago directo mediante PixelPay Sandbox para el entorno QA.'
+            : paymentSimulationAction.canShow
             ? 'Simula la experiencia MasterFade/TodoPago localmente sin ejecutar un cobro real.'
             : 'Continúa el pago en el portal alojado de TodoPago y verifica después el estado con MasterFade.'}
           headingLevel="h3"
@@ -381,13 +417,17 @@ export default function PublicBookingPaymentStep() {
         <div className="mt-3 grid gap-2 sm:gap-3">
           <div className="public-booking-payment-note">
             <ShieldCheck size={14} />
-            <span>{paymentSimulationAction.canShow
+            <span>{paymentSimulationAction.type === 'pixelpay'
+              ? 'PixelPay Sandbox: usa exclusivamente una tarjeta de prueba.'
+              : paymentSimulationAction.canShow
               ? 'Simulador local: esta pantalla no procesa cargos reales.'
               : 'El portal de TodoPago se abre aislado dentro de una ventana segura.'}</span>
           </div>
           <div className="public-booking-payment-note">
             <ShieldCheck size={14} />
-            <span>{paymentSimulationAction.canShow
+            <span>{paymentSimulationAction.type === 'pixelpay'
+              ? 'PAN y CVV permanecen solo en memoria y se limpian al terminar el intento.'
+              : paymentSimulationAction.canShow
               ? 'Los datos ficticios viven solo en el simulador local y se limpian al salir.'
               : 'MasterFade no solicita ni muestra datos de tarjeta en este flujo.'}</span>
           </div>
@@ -441,7 +481,9 @@ export default function PublicBookingPaymentStep() {
               </div>
             </div>
 
-            <h4 className="citas-confirm-subtitle mt-4">Datos para la simulacion</h4>
+            <h4 className="citas-confirm-subtitle mt-4">
+              {paymentSimulationAction.type === 'pixelpay' ? 'Datos de pago de prueba' : 'Datos para la simulacion'}
+            </h4>
             <div className="public-booking-form-row mt-2">
               <label className="mf-label" htmlFor="pay-cardholder-name">Nombre del titular</label>
               <input
@@ -526,8 +568,36 @@ export default function PublicBookingPaymentStep() {
               />
               {fieldErrors.phone ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.phone}</p> : null}
             </div>
+            {paymentSimulationAction.type === 'pixelpay' ? (
+              <>
+                <div className="public-booking-form-row mt-2">
+                  <label className="mf-label" htmlFor="pay-billing-address">Direccion de facturacion</label>
+                  <input id="pay-billing-address" className="mf-input" autoComplete="street-address" value={paymentForm.billingAddress} onChange={handleFieldChange('billingAddress')} />
+                  {fieldErrors.billingAddress ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingAddress}</p> : null}
+                </div>
+                <div className="mt-2 grid gap-3 md:grid-cols-3">
+                  <div className="public-booking-form-row">
+                    <label className="mf-label" htmlFor="pay-billing-city">Ciudad</label>
+                    <input id="pay-billing-city" className="mf-input" autoComplete="address-level2" value={paymentForm.billingCity} onChange={handleFieldChange('billingCity')} />
+                    {fieldErrors.billingCity ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingCity}</p> : null}
+                  </div>
+                  <div className="public-booking-form-row">
+                    <label className="mf-label" htmlFor="pay-billing-state">Departamento</label>
+                    <input id="pay-billing-state" className="mf-input" autoComplete="address-level1" value={paymentForm.billingState} onChange={handleFieldChange('billingState')} />
+                    {fieldErrors.billingState ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingState}</p> : null}
+                  </div>
+                  <div className="public-booking-form-row">
+                    <label className="mf-label" htmlFor="pay-billing-country">Pais</label>
+                    <input id="pay-billing-country" className="mf-input" autoComplete="country" value={paymentForm.billingCountry} onChange={handleFieldChange('billingCountry')} />
+                    {fieldErrors.billingCountry ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingCountry}</p> : null}
+                  </div>
+                </div>
+              </>
+            ) : null}
             <div className="mt-3 rounded-xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-3 text-xs leading-relaxed text-[var(--mf-text-2)]">
-              Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.
+              {paymentSimulationAction.type === 'pixelpay'
+                ? 'Los datos se envian una sola vez al backend y de ahi a PixelPay Sandbox. No se almacenan en el navegador ni en MasterFade.'
+                : 'Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.'}
             </div>
             </div>
           ) : (
@@ -612,7 +682,9 @@ export default function PublicBookingPaymentStep() {
               {paymentSimulationAction.canShow ? (
                 <Button className="w-full sm:w-auto" onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
-                  {paymentSimulationAction.type === 'simulator' ? 'Ejecutar simulator' : 'Simular pago exitoso'}
+                  {paymentSimulationAction.type === 'pixelpay'
+                    ? 'Pagar con PixelPay Sandbox'
+                    : paymentSimulationAction.type === 'simulator' ? 'Ejecutar simulator' : 'Simular pago exitoso'}
                 </Button>
               ) : null}
             </BookingActions>

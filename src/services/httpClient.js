@@ -94,6 +94,8 @@ function shouldSkipCsrfPrefetch(path, baseUrl) {
     "/v1/public/pagos/crear-intent",
     "/v1/public/pagos/mock-completar",
     "/v1/public/pagos/simulator/event",
+    "/v1/public/pagos/pixelpay/sale",
+    "/v1/public/pagos/pixelpay/status",
   ]);
 
   return (
@@ -256,13 +258,16 @@ export function request(path, options = {}) {
     dedupe = true,
     cache = isSafeMethod(method),
     cacheTtlMs = SAFE_RESPONSE_CACHE_TTL_MS,
+    sensitiveBody = false,
   } = options;
 
   const baseUrl = import.meta.env.VITE_API_URL;
   const url = joinUrl(baseUrl, path);
-  const requestKey = buildRequestKey(method, url, body);
-  const canDedupe = Boolean(dedupe && !signal);
-  if (cache) {
+  // AM: Un body sensible nunca participa en claves, cache ni deduplicacion.
+  const requestKey = sensitiveBody ? null : buildRequestKey(method, url, body);
+  const canDedupe = Boolean(!sensitiveBody && dedupe && !signal);
+  const canCache = Boolean(!sensitiveBody && cache);
+  if (canCache) {
     const cached = safeResponseCache.get(requestKey);
     if (cached && cached.expiresAt > Date.now()) return cached.data;
     if (cached) safeResponseCache.delete(requestKey);
@@ -349,7 +354,7 @@ export function request(path, options = {}) {
       throw err;
     }
 
-    if (cache) {
+    if (canCache) {
       safeResponseCache.set(requestKey, {
         data,
         expiresAt: Date.now() + Math.max(0, Number(cacheTtlMs || 0)),

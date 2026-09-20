@@ -4,6 +4,8 @@ import {
   completePublicSimulatorPayment,
   createPublicPaymentIntent,
   getPublicPaymentStatus,
+  queryPublicPixelPayStatus,
+  salePublicPixelPay,
 } from '../publicBookingApi.js';
 import {
   buildMockPaymentPayload,
@@ -99,6 +101,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
   const statusRequestRef = useRef(null);
   const paymentIntentRef = useRef(null);
   const paymentStateSeqRef = useRef(0);
+  const pixelPaySaleRef = useRef(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -107,6 +110,10 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
       if (statusRequestRef.current?.controller) {
         statusRequestRef.current.controller.abort('booking_payment_unmounted');
       }
+      if (pixelPaySaleRef.current?.controller) {
+        pixelPaySaleRef.current.controller.abort('booking_payment_unmounted');
+      }
+      pixelPaySaleRef.current = null;
     };
   }, []);
 
@@ -146,6 +153,10 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
       statusRequestRef.current.controller.abort('booking_payment_cleared');
     }
     statusRequestRef.current = null;
+    if (pixelPaySaleRef.current?.controller) {
+      pixelPaySaleRef.current.controller.abort('booking_payment_cleared');
+    }
+    pixelPaySaleRef.current = null;
     createIntentRef.current = null;
     paymentIntentRef.current = null;
     paymentStateSeqRef.current += 1;
@@ -325,6 +336,52 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     return payload || true;
   }, [isCurrentPaymentGroup]);
 
+  const salePixelPayOnce = useCallback(async ({ groupId, intentId, titularEmail, card, billing }) => {
+    const normalizedGroupId = safeText(groupId);
+    const normalizedIntentId = safeText(intentId);
+    const normalizedEmail = safeText(titularEmail).toLowerCase();
+    if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return null;
+    if (!isCurrentPaymentGroup(normalizedGroupId)) return null;
+    if (pixelPaySaleRef.current?.promise) return pixelPaySaleRef.current.promise;
+
+    const controller = new AbortController();
+    const promise = (async () => {
+      const response = await salePublicPixelPay({
+        id_grupo_cita: normalizedGroupId,
+        id_intent: normalizedIntentId,
+        titular_email: normalizedEmail,
+        card_number: safeText(card?.number),
+        card_holder: safeText(card?.holder),
+        card_expire: safeText(card?.expire),
+        card_cvv: safeText(card?.cvv),
+        billing_address: safeText(billing?.address),
+        billing_country: safeText(billing?.country),
+        billing_state: safeText(billing?.state),
+        billing_city: safeText(billing?.city),
+        billing_phone: safeText(billing?.phone),
+      }, { signal: controller.signal });
+      if (mountedRef.current && isCurrentPaymentGroup(normalizedGroupId)) {
+        setPaymentResultState(response);
+      }
+      return response;
+    })();
+    pixelPaySaleRef.current = { controller, promise };
+    try {
+      return await promise;
+    } finally {
+      if (pixelPaySaleRef.current?.promise === promise) pixelPaySaleRef.current = null;
+    }
+  }, [isCurrentPaymentGroup]);
+
+  const queryPixelPayStatusOnce = useCallback(async ({ groupId, intentId, titularEmail }) => {
+    const response = await queryPublicPixelPayStatus({
+      id_grupo_cita: safeText(groupId),
+      id_intent: safeText(intentId),
+      titular_email: safeText(titularEmail).toLowerCase(),
+    });
+    return response;
+  }, []);
+
   return {
     paymentIntent: paymentIntentState,
     paymentResult: paymentResultState,
@@ -340,6 +397,8 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     fetchPaymentStatusOnce,
     completeMockPaymentOnce,
     completeSimulatorPaymentOnce,
+    salePixelPayOnce,
+    queryPixelPayStatusOnce,
     isCurrentPaymentGroup,
   };
 }
