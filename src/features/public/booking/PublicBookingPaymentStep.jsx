@@ -64,6 +64,11 @@ export function toPixelPayCardExpire(value) {
   return `${match[2]}${match[1]}`;
 }
 
+export function buildPaymentCardProviderLabel({ providerType, cardBrand, cardBrandLabel }) {
+  const providerLabel = providerType === 'pixelpay' ? 'PixelPay Sandbox' : 'TodoPago test';
+  return cardBrand === 'unknown' ? providerLabel : `${cardBrandLabel} · ${providerLabel}`;
+}
+
 function formatPhone(value) {
   return normalizeDigits(value).slice(0, 15);
 }
@@ -470,7 +475,11 @@ export default function PublicBookingPaymentStep() {
             <div className="w-full overflow-hidden rounded-2xl border border-[var(--mf-border)] bg-[linear-gradient(135deg,rgba(16,24,40,0.96),rgba(31,41,55,0.92))] p-3 text-white shadow-[0_14px_40px_rgba(15,23,42,0.28)] sm:p-4">
               <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] text-white/70 sm:text-[11px] sm:tracking-[0.28em]">
                 <span>MasterFade Pay</span>
-                <span>{cardBrand === 'unknown' ? 'TodoPago test' : `${cardBrandLabel} · TodoPago test`}</span>
+                <span>{buildPaymentCardProviderLabel({
+                  providerType: paymentSimulationAction.type,
+                  cardBrand,
+                  cardBrandLabel,
+                })}</span>
               </div>
               <div className="mt-6 break-words text-base font-semibold tracking-[0.16em] sm:mt-8 sm:text-xl sm:tracking-[0.28em]">
                 {maskedCardLabel}
