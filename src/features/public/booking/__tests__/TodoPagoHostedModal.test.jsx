@@ -390,4 +390,39 @@ describe('integracion del shell TodoPago', () => {
     ).not.toBeNull());
     expect(screen.queryByText(/Resultado recibido/)).toBeNull();
   });
+
+  test('permite verificar manualmente aun cuando el hold ya expiro', async () => {
+    vi.stubEnv('VITE_PAYMENT_PROVIDER', 'todopago');
+    vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'false');
+    const refreshPaymentStatus = vi.fn().mockResolvedValue(null);
+    bookingFlowMock.current = {
+      bookingBlocksSummary: [],
+      cancelBookingFlow: vi.fn(),
+      createPaymentIntentForHold: vi.fn(),
+      creatingPaymentIntent: false,
+      goToConfirm: vi.fn(),
+      holdExpired: true,
+      holdExpiresAtIso: '2026-08-01T12:00:00.000Z',
+      holdRemainingMs: 0,
+      paymentIntent: {
+        id_intent: 'intent-expired-hold',
+        monto_hnl: 100,
+      },
+      paymentResult: null,
+      refreshPaymentStatus,
+      checkingPaymentStatus: false,
+      completePaymentSimulation: vi.fn(),
+      confirmHoldWithoutPayment: vi.fn(),
+      holdPricing: { subtotal_hnl: 100, cubierto_por_plan_hnl: 0, total_pagar_hnl: 100 },
+      holdTotalToPay: 100,
+      membershipHasContext: false,
+      membershipUxMessage: '',
+      membershipCompanionNotice: '',
+    };
+
+    render(<PublicBookingPaymentStep />);
+    fireEvent.click(screen.getByRole('button', { name: 'Verificar estado del pago' }));
+
+    await waitFor(() => expect(refreshPaymentStatus).toHaveBeenCalledTimes(1));
+  });
 });

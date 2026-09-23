@@ -107,6 +107,17 @@ const PROFILE_FIELD_LABELS = Object.freeze({
   correo_principal: 'Correo',
 });
 
+export function claimExpiredHoldPaymentStatusCheck(checkRef, { groupId, intentId } = {}) {
+  const normalizedGroupId = String(groupId || '').trim();
+  const normalizedIntentId = String(intentId || '').trim();
+  if (!checkRef || !normalizedGroupId || !normalizedIntentId) return false;
+
+  const checkKey = `${normalizedGroupId}|${normalizedIntentId}`;
+  if (checkRef.current === checkKey) return false;
+  checkRef.current = checkKey;
+  return true;
+}
+
 function getContactValidationFeedback(contactState, blockIndex) {
   const errors = contactState?.errors || {};
   const field = CONTACT_ERROR_FIELD_ORDER.find((key) => String(errors?.[key] || '').trim());
@@ -340,6 +351,7 @@ const holdSelectionFingerprintRef = useRef('');
 const holderProfileHydratedRef = useRef(false);
 const paymentAutoBootstrapAttemptRef = useRef('');
 const paymentReturnStatusCheckRef = useRef('');
+const expiredHoldPaymentStatusCheckRef = useRef('');
 const invalidHoldSelectionFingerprintRef = useRef('');
 const agendaAutoLoadKeyRef = useRef('');
   const [servicesCanScroll, setServicesCanScroll] = useState(false);
@@ -3764,6 +3776,14 @@ const agendaAutoLoadKeyRef = useRef('');
     if (paymentResult?.booking_confirmed) return;
     if (!holdResult || !holdExpired) return;
     if (paymentIntent?.id_intent) {
+      const shouldCheckStatus = claimExpiredHoldPaymentStatusCheck(
+        expiredHoldPaymentStatusCheckRef,
+        {
+          groupId: holdResult?.id_grupo_cita,
+          intentId: paymentIntent.id_intent,
+        }
+      );
+      if (!shouldCheckStatus) return;
       notifications.info('La reserva temporal vencio, pero ya hay un pago iniciado. Verifica el estado antes de cambiar de horario.', {
         dedupeKey: 'public-booking-payment-hold-expired-status-check',
       });
