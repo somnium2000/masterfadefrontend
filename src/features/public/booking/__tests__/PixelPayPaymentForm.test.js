@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildPaymentCardProviderLabel,
+  getPixelPayReconciliationNotice,
   shouldQueryPixelPayProviderOnManualVerify,
   toPixelPayCardExpire,
 } from '../PublicBookingPaymentStep.jsx';
@@ -38,6 +39,12 @@ describe('PixelPay manual status verification', () => {
       providerType: 'simulator',
       paymentResult: { pending_confirmation: true },
     })).toBe(false);
+  });
+
+  it('advierte conciliacion manual sin invitar a pagar nuevamente', () => {
+    expect(getPixelPayReconciliationNotice({ manual_reconciliation_required: true }))
+      .toBe('Tu pago requiere verificación. No vuelvas a realizar el pago.');
+    expect(getPixelPayReconciliationNotice({ pending_confirmation: true })).toBe('');
   });
 });
 

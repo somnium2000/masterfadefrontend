@@ -81,6 +81,13 @@ export function shouldQueryPixelPayProviderOnManualVerify({
     .toLowerCase() === 'pendiente_confirmacion';
 }
 
+export function getPixelPayReconciliationNotice(paymentResult) {
+  if (paymentResult?.manual_reconciliation_required === true) {
+    return 'Tu pago requiere verificación. No vuelvas a realizar el pago.';
+  }
+  return '';
+}
+
 function formatPhone(value) {
   return normalizeDigits(value).slice(0, 15);
 }
@@ -195,6 +202,7 @@ export default function PublicBookingPaymentStep() {
   const [hostedLaunchConsumed, setHostedLaunchConsumed] = useState(false);
   const [paymentForm, setPaymentForm] = useState(INITIAL_PAYMENT_FORM);
   const [fieldErrors, setFieldErrors] = useState({});
+  const reconciliationNotice = getPixelPayReconciliationNotice(paymentResult);
   const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(() => {
     if (typeof window === 'undefined') return TODO_PAGO_SIMULATION_SCENARIOS[0].value;
     try {
@@ -664,6 +672,11 @@ export default function PublicBookingPaymentStep() {
                 <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || effectiveTotalToPay)}</p>
                 <p>Intent: {paymentIntent.id_intent}</p>
                 <p>Proveedor: {paymentSimulationAction.provider || 'no_configurado'}</p>
+                {reconciliationNotice ? (
+                  <p role="status" className="rounded-lg border border-[var(--mf-warning)]/40 bg-[var(--mf-warning)]/10 p-3 font-medium text-[var(--mf-text-1)]">
+                    {reconciliationNotice}
+                  </p>
+                ) : null}
                 {paymentSimulationAction.canShow
                   && paymentIntent.launch?.type === 'redirect'
                   && paymentIntent.launch?.action ? (
