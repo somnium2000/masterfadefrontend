@@ -29,6 +29,10 @@ describe('PixelPay manual status verification', () => {
     })).toBe(true);
     expect(shouldQueryPixelPayProviderOnManualVerify({
       providerType: 'pixelpay',
+      paymentResult: { manual_reconciliation_required: true },
+    })).toBe(true);
+    expect(shouldQueryPixelPayProviderOnManualVerify({
+      providerType: 'pixelpay',
       paymentIntent: { estado_intent_codigo: 'pendiente_confirmacion' },
     })).toBe(true);
     expect(shouldQueryPixelPayProviderOnManualVerify({

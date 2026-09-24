@@ -306,6 +306,59 @@ describe('TodoPagoHostedModal', () => {
 });
 
 describe('integracion del shell TodoPago', () => {
+  test('PixelPay en conciliacion manual oculta cobro y conserva verificacion manual', async () => {
+    vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay');
+    vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'false');
+    const refreshPaymentStatus = vi.fn().mockResolvedValue(null);
+    const completePixelPayPayment = vi.fn();
+    bookingFlowMock.current = {
+      bookingBlocksSummary: [],
+      cancelBookingFlow: vi.fn(),
+      createPaymentIntentForHold: vi.fn(),
+      creatingPaymentIntent: false,
+      goToConfirm: vi.fn(),
+      holdExpired: true,
+      holdExpiresAtIso: '2026-09-24T12:00:00.000Z',
+      holdRemainingMs: 0,
+      paymentIntent: {
+        id_intent: 'intent-pixelpay-manual',
+        monto_hnl: 1,
+        estado_intent_codigo: 'pendiente_confirmacion',
+      },
+      paymentResult: {
+        pending_confirmation: true,
+        manual_reconciliation_required: true,
+        estado_intent_codigo: 'expirado',
+      },
+      refreshPaymentStatus,
+      checkingPaymentStatus: false,
+      completePaymentSimulation: vi.fn(),
+      completePixelPayPayment,
+      confirmHoldWithoutPayment: vi.fn(),
+      holdPricing: { subtotal_hnl: 1, cubierto_por_plan_hnl: 0, total_pagar_hnl: 1 },
+      holdTotalToPay: 1,
+      membershipHasContext: false,
+      membershipUxMessage: '',
+      membershipCompanionNotice: '',
+    };
+
+    const view = render(<PublicBookingPaymentStep />);
+
+    expect(screen.getByText('Tu pago requiere verificación. No vuelvas a realizar el pago.')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Verificar estado del pago' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pagar con PixelPay Sandbox' })).toBeNull();
+    expect(screen.queryByLabelText('Numero de tarjeta')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Verificar estado del pago' }));
+    await waitFor(() => expect(refreshPaymentStatus).toHaveBeenCalledTimes(1));
+    expect(refreshPaymentStatus).toHaveBeenCalledWith({ queryPixelPayProvider: true });
+    expect(completePixelPayPayment).not.toHaveBeenCalled();
+
+    view.rerender(<PublicBookingPaymentStep />);
+    expect(refreshPaymentStatus).toHaveBeenCalledTimes(1);
+    expect(completePixelPayPayment).not.toHaveBeenCalled();
+  });
+
   test.each(['qa.masterfadeapp.com', 'staging.masterfadeapp.com', 'masterfadeapp.com'])(
     'bloquea el simulador fuera de localhost: %s',
     (hostname) => {

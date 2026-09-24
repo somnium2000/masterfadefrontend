@@ -118,6 +118,27 @@ export function claimExpiredHoldPaymentStatusCheck(checkRef, { groupId, intentId
   return true;
 }
 
+export function hasUnresolvedPaymentEvidence(paymentState = {}) {
+  if (paymentState?.manual_reconciliation_required === true) return true;
+  if (paymentState?.pending_confirmation === true) return true;
+  return String(paymentState?.estado_intent_codigo || '')
+    .trim()
+    .toLowerCase() === 'pendiente_confirmacion';
+}
+
+export function shouldPreserveUnresolvedPaymentState({
+  currentResult,
+  nextResult,
+  paymentIntent,
+} = {}) {
+  if (nextResult?.booking_confirmed === true) return false;
+  const nextState = String(nextResult?.estado_intent_codigo || '').trim().toLowerCase();
+  if (nextState === 'fallido') return false;
+  return hasUnresolvedPaymentEvidence(nextResult)
+    || hasUnresolvedPaymentEvidence(currentResult)
+    || hasUnresolvedPaymentEvidence(paymentIntent);
+}
+
 function getContactValidationFeedback(contactState, blockIndex) {
   const errors = contactState?.errors || {};
   const field = CONTACT_ERROR_FIELD_ORDER.find((key) => String(errors?.[key] || '').trim());
@@ -3538,7 +3559,20 @@ const agendaAutoLoadKeyRef = useRef('');
           }
         }
       }
-      setPaymentResult(payload);
+      const preserveUnresolvedPayment = shouldPreserveUnresolvedPaymentState({
+        currentResult: paymentResult,
+        nextResult: payload,
+        paymentIntent,
+      });
+      const resolvedPayload = preserveUnresolvedPayment
+        ? {
+            ...payload,
+            pending_confirmation: true,
+            manual_reconciliation_required: payload?.manual_reconciliation_required === true
+              || paymentResult?.manual_reconciliation_required === true,
+          }
+        : payload;
+      setPaymentResult(resolvedPayload);
       if (payload?.booking_confirmed) {
         const citasConfirmadas = extractConfirmedAppointments(payload);
         const codigoCita = extractBookingCode(payload);
@@ -3567,15 +3601,17 @@ const agendaAutoLoadKeyRef = useRef('');
           created_at: new Date().toISOString(),
         });
       }
-      const intentState = String(payload?.estado_intent_codigo || '').trim().toLowerCase();
-      if (!payload?.booking_confirmed && (intentState === 'expirado' || intentState === 'fallido')) {
+      const intentState = String(resolvedPayload?.estado_intent_codigo || '').trim().toLowerCase();
+      if (!resolvedPayload?.booking_confirmed
+        && !preserveUnresolvedPayment
+        && (intentState === 'expirado' || intentState === 'fallido')) {
         recoverToAgendaForReselection(
           'No fue posible completar el pago con el horario reservado. Elige una nueva hora para continuar.',
           { dedupeKey: 'public-booking-payment-recover-status-terminal' }
         );
         return null;
       }
-      return payload;
+      return resolvedPayload;
     } catch (err) {
       if (err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('aborted')) {
         return null;
@@ -3595,6 +3631,18 @@ const agendaAutoLoadKeyRef = useRef('');
         return null;
       }
       if (shouldRecoverFromPaymentError(errorCode)) {
+        if (hasUnresolvedPaymentEvidence(paymentResult)
+          || hasUnresolvedPaymentEvidence(paymentIntent)) {
+          setPaymentResult((current) => ({
+            ...(current && typeof current === 'object' ? current : {}),
+            pending_confirmation: true,
+          }));
+          notifications.warning(
+            'El horario temporal ya no esta reservado, pero el pago sigue pendiente de verificacion.',
+            { dedupeKey: 'public-booking-payment-expired-unresolved' }
+          );
+          return null;
+        }
         recoverToAgendaForReselection(
           'Tu reserva temporal ya no está disponible. Selecciona un nuevo horario para continuar.',
           { dedupeKey: 'public-booking-payment-recover-status-error' }
@@ -3615,7 +3663,8 @@ const agendaAutoLoadKeyRef = useRef('');
     location.pathname,
     location.search,
     notifications,
-    paymentIntent?.id_intent,
+    paymentIntent,
+    paymentResult,
     queryPixelPayStatusOnce,
     rewardBookingContext,
     rewardModeActive,
@@ -3797,6 +3846,13 @@ const agendaAutoLoadKeyRef = useRef('');
     if (paymentResult?.booking_confirmed) return;
     if (!holdResult || !holdExpired) return;
     if (paymentIntent?.id_intent) {
+      if (hasUnresolvedPaymentEvidence(paymentResult)
+        || hasUnresolvedPaymentEvidence(paymentIntent)) {
+        notifications.info('La reserva temporal vencio, pero el pago sigue pendiente de verificacion.', {
+          dedupeKey: 'public-booking-payment-hold-expired-unresolved',
+        });
+        return;
+      }
       const shouldCheckStatus = claimExpiredHoldPaymentStatusCheck(
         expiredHoldPaymentStatusCheckRef,
         {
@@ -3820,8 +3876,8 @@ const agendaAutoLoadKeyRef = useRef('');
     holdResult,
     location.pathname,
     notifications,
-    paymentIntent?.id_intent,
-    paymentResult?.booking_confirmed,
+    paymentIntent,
+    paymentResult,
     recoverToAgendaForReselection,
     refreshPaymentStatus,
   ]);

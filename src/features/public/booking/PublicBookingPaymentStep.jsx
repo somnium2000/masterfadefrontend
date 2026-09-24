@@ -75,6 +75,7 @@ export function shouldQueryPixelPayProviderOnManualVerify({
   paymentResult,
 } = {}) {
   if (String(providerType || '').trim().toLowerCase() !== 'pixelpay') return false;
+  if (paymentResult?.manual_reconciliation_required === true) return true;
   if (paymentResult?.pending_confirmation === true) return true;
   return String(paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || '')
     .trim()
@@ -495,7 +496,7 @@ export default function PublicBookingPaymentStep() {
         ) : null}
 
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
-          {paymentSimulationAction.canShow ? (
+          {paymentSimulationAction.canShow && !pixelPayPendingConfirmation ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
             <div className="w-full overflow-hidden rounded-2xl border border-[var(--mf-border)] bg-[linear-gradient(135deg,rgba(16,24,40,0.96),rgba(31,41,55,0.92))] p-3 text-white shadow-[0_14px_40px_rgba(15,23,42,0.28)] sm:p-4">
               <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] text-white/70 sm:text-[11px] sm:tracking-[0.28em]">
@@ -727,7 +728,7 @@ export default function PublicBookingPaymentStep() {
                   </select>
                 </div>
               ) : null}
-              {paymentSimulationAction.canShow ? (
+              {paymentSimulationAction.canShow && !pixelPayPendingConfirmation ? (
                 <Button
                   className="w-full sm:w-auto"
                   onClick={handleMockPay}
