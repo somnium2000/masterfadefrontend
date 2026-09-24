@@ -102,6 +102,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
   const paymentIntentRef = useRef(null);
   const paymentStateSeqRef = useRef(0);
   const pixelPaySaleRef = useRef(null);
+  const pixelPayStatusRef = useRef(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -113,7 +114,11 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
       if (pixelPaySaleRef.current?.controller) {
         pixelPaySaleRef.current.controller.abort('booking_payment_unmounted');
       }
+      if (pixelPayStatusRef.current?.controller) {
+        pixelPayStatusRef.current.controller.abort('booking_payment_unmounted');
+      }
       pixelPaySaleRef.current = null;
+      pixelPayStatusRef.current = null;
     };
   }, []);
 
@@ -157,6 +162,10 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
       pixelPaySaleRef.current.controller.abort('booking_payment_cleared');
     }
     pixelPaySaleRef.current = null;
+    if (pixelPayStatusRef.current?.controller) {
+      pixelPayStatusRef.current.controller.abort('booking_payment_cleared');
+    }
+    pixelPayStatusRef.current = null;
     createIntentRef.current = null;
     paymentIntentRef.current = null;
     paymentStateSeqRef.current += 1;
@@ -374,13 +383,35 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
   }, [isCurrentPaymentGroup]);
 
   const queryPixelPayStatusOnce = useCallback(async ({ groupId, intentId, titularEmail }) => {
-    const response = await queryPublicPixelPayStatus({
-      id_grupo_cita: safeText(groupId),
-      id_intent: safeText(intentId),
-      titular_email: safeText(titularEmail).toLowerCase(),
-    });
-    return response;
-  }, []);
+    const normalizedGroupId = safeText(groupId);
+    const normalizedIntentId = safeText(intentId);
+    const normalizedEmail = safeText(titularEmail).toLowerCase();
+    if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return null;
+    if (!isCurrentPaymentGroup(normalizedGroupId)) return null;
+    const requestKey = `${normalizedGroupId}|${normalizedIntentId}|${normalizedEmail}`;
+    if (pixelPayStatusRef.current?.key === requestKey) return pixelPayStatusRef.current.promise;
+
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const promise = (async () => {
+      setCheckingPaymentStatus(true);
+      const response = await queryPublicPixelPayStatus({
+        id_grupo_cita: normalizedGroupId,
+        id_intent: normalizedIntentId,
+        titular_email: normalizedEmail,
+      }, { signal: controller?.signal });
+      if (mountedRef.current && isCurrentPaymentGroup(normalizedGroupId)) {
+        setPaymentResultState(response);
+      }
+      return response;
+    })();
+    pixelPayStatusRef.current = { key: requestKey, controller, promise };
+    try {
+      return await promise;
+    } finally {
+      if (pixelPayStatusRef.current?.promise === promise) pixelPayStatusRef.current = null;
+      if (mountedRef.current) setCheckingPaymentStatus(false);
+    }
+  }, [isCurrentPaymentGroup]);
 
   return {
     paymentIntent: paymentIntentState,

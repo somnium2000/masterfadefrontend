@@ -69,6 +69,18 @@ export function buildPaymentCardProviderLabel({ providerType, cardBrand, cardBra
   return cardBrand === 'unknown' ? providerLabel : `${cardBrandLabel} · ${providerLabel}`;
 }
 
+export function shouldQueryPixelPayProviderOnManualVerify({
+  providerType,
+  paymentIntent,
+  paymentResult,
+} = {}) {
+  if (String(providerType || '').trim().toLowerCase() !== 'pixelpay') return false;
+  if (paymentResult?.pending_confirmation === true) return true;
+  return String(paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || '')
+    .trim()
+    .toLowerCase() === 'pendiente_confirmacion';
+}
+
 function formatPhone(value) {
   return normalizeDigits(value).slice(0, 15);
 }
@@ -200,6 +212,11 @@ export default function PublicBookingPaymentStep() {
     paymentResult,
     holdTotalToPay,
   });
+  const pixelPayPendingConfirmation = shouldQueryPixelPayProviderOnManualVerify({
+    providerType: paymentSimulationAction.type,
+    paymentIntent,
+    paymentResult,
+  });
   const paymentLaunch = paymentIntent?.launch;
   const paymentLaunchKey = createTodoPagoLaunchKey(paymentLaunch);
   const hasHostedLaunch = paymentLaunch?.type === 'iframe_post';
@@ -328,7 +345,7 @@ export default function PublicBookingPaymentStep() {
 
   const handleVerifyPaymentStatus = async () => {
     if (checkingPaymentStatus) return;
-    await refreshPaymentStatus();
+    await refreshPaymentStatus({ queryPixelPayProvider: pixelPayPendingConfirmation });
   };
 
   const handleOpenHostedModal = () => {
@@ -698,7 +715,11 @@ export default function PublicBookingPaymentStep() {
                 </div>
               ) : null}
               {paymentSimulationAction.canShow ? (
-                <Button className="w-full sm:w-auto" onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
+                <Button
+                  className="w-full sm:w-auto"
+                  onClick={handleMockPay}
+                  disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation}
+                >
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
                   {paymentSimulationAction.type === 'pixelpay'
                     ? 'Pagar con PixelPay Sandbox'

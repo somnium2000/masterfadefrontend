@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildPaymentCardProviderLabel,
+  shouldQueryPixelPayProviderOnManualVerify,
   toPixelPayCardExpire,
 } from '../PublicBookingPaymentStep.jsx';
 
@@ -16,6 +17,27 @@ describe('PixelPay card_expire', () => {
   it('rechaza mes o formato invalido', () => {
     expect(() => toPixelPayCardExpire('13/30')).toThrow(/MM\/AA/);
     expect(() => toPixelPayCardExpire('3012')).toThrow(/MM\/AA/);
+  });
+});
+
+describe('PixelPay manual status verification', () => {
+  it('consulta proveedor solo cuando el intent PixelPay esta pendiente de confirmacion', () => {
+    expect(shouldQueryPixelPayProviderOnManualVerify({
+      providerType: 'pixelpay',
+      paymentResult: { pending_confirmation: true },
+    })).toBe(true);
+    expect(shouldQueryPixelPayProviderOnManualVerify({
+      providerType: 'pixelpay',
+      paymentIntent: { estado_intent_codigo: 'pendiente_confirmacion' },
+    })).toBe(true);
+    expect(shouldQueryPixelPayProviderOnManualVerify({
+      providerType: 'pixelpay',
+      paymentIntent: { estado_intent_codigo: 'link_generado' },
+    })).toBe(false);
+    expect(shouldQueryPixelPayProviderOnManualVerify({
+      providerType: 'simulator',
+      paymentResult: { pending_confirmation: true },
+    })).toBe(false);
   });
 });
 

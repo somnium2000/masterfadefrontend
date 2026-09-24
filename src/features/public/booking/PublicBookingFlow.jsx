@@ -3484,14 +3484,16 @@ const agendaAutoLoadKeyRef = useRef('');
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
 
     try {
-      const payload = await fetchPaymentStatusOnce({
-        groupId,
-        intentId,
-        titularEmail,
-        retries: options?.retries ?? 0,
-        retryDelayMs: options?.retryDelayMs ?? 1200,
-        shouldRetry: shouldRetryPaymentStatus,
-      });
+      const payload = options?.queryPixelPayProvider === true
+        ? await queryPixelPayStatusOnce({ groupId, intentId, titularEmail })
+        : await fetchPaymentStatusOnce({
+            groupId,
+            intentId,
+            titularEmail,
+            retries: options?.retries ?? 0,
+            retryDelayMs: options?.retryDelayMs ?? 1200,
+            shouldRetry: shouldRetryPaymentStatus,
+          });
       if (!payload || !isCurrentPaymentGroup(groupId)) return null;
       let rewardFinalization = null;
       if (payload?.booking_confirmed && rewardModeActive) {
@@ -3580,6 +3582,18 @@ const agendaAutoLoadKeyRef = useRef('');
       }
       const apiError = err?.data?.error || err?.error || {};
       const errorCode = String(apiError?.code || '').trim().toUpperCase();
+      if (errorCode === 'PIXELPAY_PAYMENT_UUID_MISSING') {
+        setPaymentResult((current) => ({
+          ...(current && typeof current === 'object' ? current : {}),
+          pending_confirmation: true,
+          estado_intent_codigo: 'pendiente_confirmacion',
+        }));
+        notifications.warning(
+          'PixelPay todavía no entregó un identificador consultable. El pago requiere confirmación; no vuelvas a pagarlo.',
+          { dedupeKey: 'public-booking-pixelpay-uuid-missing' }
+        );
+        return null;
+      }
       if (shouldRecoverFromPaymentError(errorCode)) {
         recoverToAgendaForReselection(
           'Tu reserva temporal ya no está disponible. Selecciona un nuevo horario para continuar.',
@@ -3602,6 +3616,7 @@ const agendaAutoLoadKeyRef = useRef('');
     location.search,
     notifications,
     paymentIntent?.id_intent,
+    queryPixelPayStatusOnce,
     rewardBookingContext,
     rewardModeActive,
     resolveBlockContactState,
@@ -3663,15 +3678,21 @@ const agendaAutoLoadKeyRef = useRef('');
       const result = await salePixelPayOnce({ groupId, intentId, titularEmail, card, billing });
       if (result?.booking_confirmed) {
         await refreshPaymentStatus();
-      } else if (result?.pending_confirmation) {
-        try {
-          await queryPixelPayStatusOnce({ groupId, intentId, titularEmail });
-        } catch {
-          // AM: Un estado incierto permanece pendiente; nunca se reintenta el cobro.
-        }
       }
       return result;
     } catch (err) {
+      const errorCode = String(err?.data?.error?.code || err?.error?.code || '').trim().toUpperCase();
+      if (errorCode === 'PIXELPAY_REQUEST_REJECTED') {
+        setPaymentResult({
+          pending_confirmation: false,
+          estado_intent_codigo: 'fallido',
+        });
+      } else if (!errorCode || errorCode === 'PIXELPAY_SALE_ERROR') {
+        setPaymentResult({
+          pending_confirmation: true,
+          estado_intent_codigo: 'pendiente_confirmacion',
+        });
+      }
       notifications.error(extractMessage(err), { dedupeKey: 'public-booking-pixelpay-error' });
       throw err;
     }
@@ -3680,10 +3701,10 @@ const agendaAutoLoadKeyRef = useRef('');
     holdResult?.id_grupo_cita,
     notifications,
     paymentIntent?.id_intent,
-    queryPixelPayStatusOnce,
     refreshPaymentStatus,
     resolveBlockContactState,
     salePixelPayOnce,
+    setPaymentResult,
   ]);
 
   const startCheckout = useCallback(async () => {
