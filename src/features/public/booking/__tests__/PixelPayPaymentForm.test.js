@@ -48,7 +48,10 @@ describe('PixelPay manual status verification', () => {
   it('advierte conciliacion manual sin invitar a pagar nuevamente', () => {
     expect(getPixelPayReconciliationNotice({ manual_reconciliation_required: true }))
       .toBe('Tu pago requiere verificación. No vuelvas a realizar el pago.');
-    expect(getPixelPayReconciliationNotice({ pending_confirmation: true })).toBe('');
+    expect(getPixelPayReconciliationNotice({ pending_confirmation: true }))
+      .toBe('Tu pago requiere verificación. No vuelvas a realizar el pago.');
+    expect(getPixelPayReconciliationNotice({ estado_intent_codigo: 'pendiente_confirmacion' }))
+      .toBe('Tu pago requiere verificación. No vuelvas a realizar el pago.');
   });
 });
 

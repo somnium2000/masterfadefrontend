@@ -83,7 +83,14 @@ export function shouldQueryPixelPayProviderOnManualVerify({
 }
 
 export function getPixelPayReconciliationNotice(paymentResult) {
-  if (paymentResult?.manual_reconciliation_required === true) {
+  const intentState = String(paymentResult?.estado_intent_codigo || '')
+    .trim()
+    .toLowerCase();
+  if (
+    paymentResult?.manual_reconciliation_required === true
+    || paymentResult?.pending_confirmation === true
+    || intentState === 'pendiente_confirmacion'
+  ) {
     return 'Tu pago requiere verificación. No vuelvas a realizar el pago.';
   }
   return '';

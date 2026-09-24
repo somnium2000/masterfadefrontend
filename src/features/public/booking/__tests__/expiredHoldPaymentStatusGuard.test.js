@@ -55,6 +55,17 @@ describe('expired hold payment status guard', () => {
     })).toBe(true);
   });
 
+  test('hard reload toma pendiente_confirmacion del backend como fuente de verdad', () => {
+    expect(shouldPreserveUnresolvedPaymentState({
+      currentResult: null,
+      nextResult: {
+        booking_confirmed: false,
+        estado_intent_codigo: 'pendiente_confirmacion',
+      },
+      paymentIntent: { estado_intent_codigo: 'link_generado' },
+    })).toBe(true);
+  });
+
   test('estado terminal fallido permite volver a agenda', () => {
     expect(shouldPreserveUnresolvedPaymentState({
       currentResult: { pending_confirmation: true },

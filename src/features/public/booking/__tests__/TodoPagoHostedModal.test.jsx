@@ -306,7 +306,7 @@ describe('TodoPagoHostedModal', () => {
 });
 
 describe('integracion del shell TodoPago', () => {
-  test('PixelPay en conciliacion manual oculta cobro y conserva verificacion manual', async () => {
+  test('PixelPay restaurado pendiente oculta cobro y conserva una verificacion manual', async () => {
     vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay');
     vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'false');
     const refreshPaymentStatus = vi.fn().mockResolvedValue(null);
@@ -323,12 +323,12 @@ describe('integracion del shell TodoPago', () => {
       paymentIntent: {
         id_intent: 'intent-pixelpay-manual',
         monto_hnl: 1,
-        estado_intent_codigo: 'pendiente_confirmacion',
+        estado_intent_codigo: 'link_generado',
       },
       paymentResult: {
         pending_confirmation: true,
-        manual_reconciliation_required: true,
-        estado_intent_codigo: 'expirado',
+        estado_intent_codigo: 'pendiente_confirmacion',
+        booking_confirmed: false,
       },
       refreshPaymentStatus,
       checkingPaymentStatus: false,

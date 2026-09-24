@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import useBookingPayment from '../hooks/useBookingPayment.js';
 import {
+  getPublicPaymentStatus,
   queryPublicPixelPayStatus,
   salePublicPixelPay,
 } from '../publicBookingApi.js';
@@ -85,5 +86,78 @@ describe('useBookingPayment PixelPay guards', () => {
     expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
     expect(window.sessionStorage.getItem('4111111111111111')).toBeNull();
     expect(JSON.stringify(window.sessionStorage)).not.toContain('999');
+  });
+
+  it('hard reload restaura contexto antiguo y reconstruye pendiente_confirmacion desde backend', async () => {
+    window.sessionStorage.setItem('masterfade.publicBookingPayment.v1', JSON.stringify({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      titular_email: EMAIL,
+      paymentIntent: {
+        id_grupo_cita: GROUP_ID,
+        id_intent: INTENT_ID,
+        estado_intent_codigo: 'link_generado',
+      },
+    }));
+    getPublicPaymentStatus.mockResolvedValue({
+      estado_intent_codigo: 'pendiente_confirmacion',
+      booking_confirmed: false,
+    });
+    const { result, rerender } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+
+    await act(async () => {
+      const restored = result.current.restorePaymentContext(GROUP_ID);
+      await result.current.fetchPaymentStatusOnce({
+        groupId: restored.id_grupo_cita,
+        intentId: restored.id_intent,
+        titularEmail: restored.titular_email,
+      });
+    });
+
+    expect(getPublicPaymentStatus).toHaveBeenCalledTimes(1);
+    expect(result.current.paymentIntent.estado_intent_codigo).toBe('link_generado');
+    expect(result.current.paymentResult).toMatchObject({
+      estado_intent_codigo: 'pendiente_confirmacion',
+      booking_confirmed: false,
+    });
+    expect(window.sessionStorage.getItem('masterfade.publicBookingPayment.v1')).not.toBeNull();
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+    expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+
+    rerender();
+    expect(getPublicPaymentStatus).toHaveBeenCalledTimes(1);
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+    expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+  });
+
+  it('otra sesion restaura solo ids y acepta el estado pendiente del backend', async () => {
+    window.sessionStorage.setItem('masterfade.publicBookingPayment.v1', JSON.stringify({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      titular_email: EMAIL,
+    }));
+    getPublicPaymentStatus.mockResolvedValue({
+      estado_intent_codigo: 'pendiente_confirmacion',
+      booking_confirmed: false,
+    });
+    const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+
+    await act(async () => {
+      const restored = result.current.restorePaymentContext(GROUP_ID);
+      await result.current.fetchPaymentStatusOnce({
+        groupId: restored.id_grupo_cita,
+        intentId: restored.id_intent,
+        titularEmail: restored.titular_email,
+      });
+    });
+
+    expect(result.current.paymentIntent).toEqual({
+      id_intent: INTENT_ID,
+      id_grupo_cita: GROUP_ID,
+    });
+    expect(result.current.paymentResult.estado_intent_codigo).toBe('pendiente_confirmacion');
+    expect(getPublicPaymentStatus).toHaveBeenCalledTimes(1);
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+    expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
   });
 });
