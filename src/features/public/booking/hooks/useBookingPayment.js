@@ -13,8 +13,11 @@ import {
   buildPaymentStatusParams,
   buildSimulatorPaymentPayload,
 } from '../bookingPayloadBuilders.js';
+import {
+  BOOKING_PAYMENT_CONTEXT_STORAGE_KEY,
+  readBookingPaymentContext,
+} from '../paymentResumeContext.js';
 
-const PAYMENT_CONTEXT_STORAGE_KEY = 'masterfade.publicBookingPayment.v1';
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
 
 function safeText(value) {
@@ -22,36 +25,14 @@ function safeText(value) {
   return normalized || '';
 }
 
-function readStoredPaymentContext(groupId = '') {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.sessionStorage.getItem(PAYMENT_CONTEXT_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
-    const storedGroupId = safeText(parsed.id_grupo_cita);
-    if (groupId && storedGroupId && storedGroupId !== groupId) return null;
-    return {
-      id_grupo_cita: storedGroupId,
-      id_intent: safeText(parsed.id_intent),
-      titular_email: safeText(parsed.titular_email).toLowerCase(),
-      paymentIntent: parsed.paymentIntent && typeof parsed.paymentIntent === 'object'
-        ? parsed.paymentIntent
-        : null,
-    };
-  } catch {
-    return null;
-  }
-}
-
 function writeStoredPaymentContext(context) {
   if (typeof window === 'undefined') return;
   try {
     if (!context) {
-      window.sessionStorage.removeItem(PAYMENT_CONTEXT_STORAGE_KEY);
+      window.sessionStorage.removeItem(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY);
       return;
     }
-    window.sessionStorage.setItem(PAYMENT_CONTEXT_STORAGE_KEY, JSON.stringify(context));
+    window.sessionStorage.setItem(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY, JSON.stringify(context));
   } catch {
     // no-op
   }
@@ -178,17 +159,25 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     setCheckingPaymentStatus(false);
   }, []);
 
-  const restorePaymentContext = useCallback((groupId = '') => {
-    const stored = readStoredPaymentContext(groupId);
-    if (!stored?.id_intent || !stored?.id_grupo_cita) return null;
-    if (!isCurrentPaymentGroup(stored.id_grupo_cita)) return null;
-    const restoredIntent = stored.paymentIntent || {
-      id_intent: stored.id_intent,
-      id_grupo_cita: stored.id_grupo_cita,
+  const restorePaymentContext = useCallback((groupId = '', fallbackContext = null) => {
+    const stored = readBookingPaymentContext(groupId);
+    const context = stored || (fallbackContext && typeof fallbackContext === 'object'
+      ? {
+          id_grupo_cita: safeText(fallbackContext.id_grupo_cita),
+          id_intent: safeText(fallbackContext.id_intent),
+          titular_email: safeText(fallbackContext.titular_email).toLowerCase(),
+          paymentIntent: null,
+        }
+      : null);
+    if (!context?.id_intent || !context?.id_grupo_cita) return null;
+    if (!isCurrentPaymentGroup(context.id_grupo_cita)) return null;
+    const restoredIntent = context.paymentIntent || {
+      id_intent: context.id_intent,
+      id_grupo_cita: context.id_grupo_cita,
     };
     paymentIntentRef.current = restoredIntent;
     setPaymentIntentState(restoredIntent);
-    return stored;
+    return context;
   }, [isCurrentPaymentGroup]);
 
   const createPaymentIntentOnce = useCallback(async ({ groupId, titularEmail, payload }) => {
