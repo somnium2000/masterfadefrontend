@@ -32,7 +32,7 @@ vi.mock('../publicBookingApi.js', () => ({
   validatePublicBookingContacts: vi.fn(),
 }));
 
-function PaymentReloadHarness() {
+function PaymentReloadHarness({ holdPricing = null, bookingBlocksSummary = [] } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const checkedRef = useRef('');
@@ -116,7 +116,7 @@ function PaymentReloadHarness() {
     <>
       <output data-testid="pathname">{location.pathname}</output>
       <PublicBookingProvider value={{
-        bookingBlocksSummary: [],
+        bookingBlocksSummary,
         cancelBookingFlow: vi.fn(),
         createPaymentIntentForHold: vi.fn(),
         creatingPaymentIntent: false,
@@ -131,7 +131,7 @@ function PaymentReloadHarness() {
         completePaymentSimulation: vi.fn(),
         completePixelPayPayment,
         confirmHoldWithoutPayment: vi.fn(),
-        holdPricing: null,
+        holdPricing,
         holdTotalToPay: 0,
         membershipHasContext: false,
         membershipUxMessage: '',
@@ -168,10 +168,10 @@ function writePendingContext(intentId = INTENT_ID) {
   }));
 }
 
-function renderPaymentFlow(initialEntry = '/agendar/pagar') {
+function renderPaymentFlow(initialEntry = '/agendar/pagar', providerOverrides = {}) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
-      <PaymentReloadHarness />
+      <PaymentReloadHarness {...providerOverrides} />
     </MemoryRouter>
   );
 }
@@ -237,6 +237,8 @@ describe('PublicBookingFlow payment hard reload integration', () => {
     expect(await screen.findByText('Verificando pago')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Pagar con PixelPay Sandbox' })).toBeNull();
     expect(screen.queryByText('L 0.00')).toBeNull();
+    expect(screen.queryByText('Total servicios')).toBeNull();
+    expect(screen.queryByText('Subtotal')).toBeNull();
     expect(salePublicPixelPay).not.toHaveBeenCalled();
 
     resolveStatus({
@@ -250,6 +252,9 @@ describe('PublicBookingFlow payment hard reload integration', () => {
 
     expect(await screen.findByText('Monto: L 1.00')).toBeTruthy();
     expect(screen.getByText('Total a pagar').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 1.00');
+    expect(screen.queryByText('Total servicios')).toBeNull();
+    expect(screen.queryByText('Subtotal')).toBeNull();
+    expect(screen.queryByText('L 0.00')).toBeNull();
     fillPixelPayForm();
     fireEvent.click(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' }));
 
@@ -278,6 +283,90 @@ describe('PublicBookingFlow payment hard reload integration', () => {
     expect(screen.queryByLabelText('Numero de tarjeta')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Pagar con PixelPay Sandbox' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Verificar estado del pago' })).toBeTruthy();
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+  });
+
+  test('flujo con holdPricing conserva subtotal, cobertura y total canonicos', async () => {
+    writeStandardContext();
+    getPublicPaymentStatus.mockResolvedValue({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      estado_intent_codigo: 'link_generado',
+      booking_confirmed: false,
+      monto_hnl: 8,
+      moneda_codigo: 'HNL',
+    });
+    renderPaymentFlow('/agendar/pagar', {
+      holdPricing: {
+        subtotal_hnl: 10,
+        cubierto_por_plan_hnl: 2,
+        extras_a_pagar_hnl: 8,
+        total_pagar_hnl: 8,
+      },
+    });
+
+    expect(await screen.findByText('Monto: L 8.00')).toBeTruthy();
+    expect(screen.getByText('Total servicios').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 10.00');
+    expect(screen.getByText('Cubierto por tu plan').nextSibling.textContent.replace(/\s/g, ' ')).toBe('-L 2.00');
+    expect(screen.getByText('Total a pagar').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 8.00');
+  });
+
+  test('bookingBlocks validos conservan subtotal fallback real', async () => {
+    writeStandardContext();
+    getPublicPaymentStatus.mockResolvedValue({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      estado_intent_codigo: 'link_generado',
+      booking_confirmed: false,
+      monto_hnl: 8,
+      moneda_codigo: 'HNL',
+    });
+    renderPaymentFlow('/agendar/pagar', {
+      bookingBlocksSummary: [
+        { id: 'block-1', alias: 'Titular', total_hnl: 5, selectedServices: [] },
+        { id: 'block-2', alias: 'Acompanante', total_hnl: 3, selectedServices: [] },
+      ],
+    });
+
+    expect(await screen.findByText('Monto: L 8.00')).toBeTruthy();
+    expect(screen.getByText('Total servicios').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 8.00');
+    expect(screen.getByText('Total a pagar').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 8.00');
+  });
+
+  test('monto promocional recuperado no inventa subtotal', async () => {
+    writeStandardContext();
+    getPublicPaymentStatus.mockResolvedValue({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      estado_intent_codigo: 'link_generado',
+      booking_confirmed: false,
+      monto_hnl: 7,
+      moneda_codigo: 'HNL',
+    });
+    renderPaymentFlow();
+
+    expect(await screen.findByText('Monto: L 7.00')).toBeTruthy();
+    expect(screen.getByText('Total a pagar').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 7.00');
+    expect(screen.queryByText('Total servicios')).toBeNull();
+    expect(screen.queryByText('Subtotal')).toBeNull();
+  });
+
+  test('monto backend cero real permanece visible sin inventar desglose', async () => {
+    writeStandardContext();
+    getPublicPaymentStatus.mockResolvedValue({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      estado_intent_codigo: 'link_generado',
+      booking_confirmed: false,
+      monto_hnl: 0,
+      moneda_codigo: 'HNL',
+    });
+    renderPaymentFlow();
+
+    expect(await screen.findByText('Monto: L 0.00')).toBeTruthy();
+    expect(screen.getByText('Total a pagar').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 0.00');
+    expect(screen.queryByText('Total servicios')).toBeNull();
+    expect(screen.queryByText('Subtotal')).toBeNull();
     expect(salePublicPixelPay).not.toHaveBeenCalled();
   });
 

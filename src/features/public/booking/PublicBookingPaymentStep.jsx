@@ -123,6 +123,26 @@ export function resolvePaymentAmount({
   return 0;
 }
 
+function isCanonicalPaymentAmount(value) {
+  return toCanonicalPaymentAmount(value) !== null;
+}
+
+export function resolvePaymentBreakdownVisibility({
+  holdPricing,
+  bookingBlocksSummary,
+} = {}) {
+  const hasHoldPricing = Boolean(
+    holdPricing
+    && typeof holdPricing === 'object'
+    && isCanonicalPaymentAmount(holdPricing.subtotal_hnl)
+    && isCanonicalPaymentAmount(holdPricing.total_pagar_hnl)
+  );
+  const blocks = Array.isArray(bookingBlocksSummary) ? bookingBlocksSummary : [];
+  const hasBookingBlocks = blocks.length > 0
+    && blocks.every((block) => isCanonicalPaymentAmount(block?.total_hnl));
+  return hasHoldPricing || hasBookingBlocks;
+}
+
 function formatPhone(value) {
   return normalizeDigits(value).slice(0, 15);
 }
@@ -299,6 +319,10 @@ export default function PublicBookingPaymentStep() {
     holdPricing,
     holdTotalToPay,
     fallbackTotal: fallbackSubtotal,
+  });
+  const hasCanonicalBreakdown = resolvePaymentBreakdownVisibility({
+    holdPricing,
+    bookingBlocksSummary,
   });
   const safeCoveredByPlan = Math.max(0, Number(effectiveCoveredByPlan || 0));
   const safeExtras = Math.max(0, Number(effectiveExtras || 0));
@@ -798,23 +822,25 @@ export default function PublicBookingPaymentStep() {
               <span>{formatCurrencyHnl(block.total_hnl)}</span>
             </div>
           ))}
-          <div className="citas-confirm-row mt-3">
-            <span>{subtotalLabel}</span>
-            <span>{paymentRestoring ? 'Verificando...' : formatCurrencyHnl(effectiveSubtotal)}</span>
-          </div>
-          {hasPlanCoverage ? (
+          {hasCanonicalBreakdown ? (
+            <div className="citas-confirm-row mt-3">
+              <span>{subtotalLabel}</span>
+              <span>{formatCurrencyHnl(effectiveSubtotal)}</span>
+            </div>
+          ) : null}
+          {hasCanonicalBreakdown && hasPlanCoverage ? (
             <div className="citas-confirm-row">
               <span>{membershipHasContext ? 'Cubierto por tu membresia' : 'Cubierto por tu plan'}</span>
               <span>-{formatCurrencyHnl(safeCoveredByPlan)}</span>
             </div>
           ) : null}
-          {hasSaldoToPay ? (
+          {hasCanonicalBreakdown && hasSaldoToPay ? (
             <div className="citas-confirm-row">
               <span>{membershipHasContext ? 'Extras y acompanantes' : 'Saldo a pagar'}</span>
               <span>{formatCurrencyHnl(safeExtras)}</span>
             </div>
           ) : null}
-          {isFullyCoveredByPlan ? (
+          {hasCanonicalBreakdown && isFullyCoveredByPlan ? (
             <div className="public-booking-payment-note mt-2">
               <span>Cubierto completamente por tu plan.</span>
             </div>

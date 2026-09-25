@@ -3,6 +3,7 @@ import {
   buildPaymentCardProviderLabel,
   getPixelPayReconciliationNotice,
   resolvePaymentAmount,
+  resolvePaymentBreakdownVisibility,
   shouldQueryPixelPayProviderOnManualVerify,
   toPixelPayCardExpire,
 } from '../PublicBookingPaymentStep.jsx';
@@ -43,6 +44,34 @@ describe('PixelPay recovered amount', () => {
       paymentIntent: { monto_hnl: -1 },
       holdPricing: { total_pagar_hnl: '1.00' },
     })).toBe(1);
+  });
+});
+
+describe('PixelPay payment breakdown visibility', () => {
+  it('oculta desglose cuando solo existe el monto final recuperado', () => {
+    expect(resolvePaymentBreakdownVisibility({
+      holdPricing: null,
+      bookingBlocksSummary: [],
+    })).toBe(false);
+  });
+
+  it('muestra desglose canonico de holdPricing', () => {
+    expect(resolvePaymentBreakdownVisibility({
+      holdPricing: {
+        subtotal_hnl: 10,
+        cubierto_por_plan_hnl: 2,
+        extras_a_pagar_hnl: 8,
+        total_pagar_hnl: 8,
+      },
+      bookingBlocksSummary: [],
+    })).toBe(true);
+  });
+
+  it('acepta bookingBlocks validos como fallback real', () => {
+    expect(resolvePaymentBreakdownVisibility({
+      holdPricing: null,
+      bookingBlocksSummary: [{ total_hnl: 5 }, { total_hnl: 3 }],
+    })).toBe(true);
   });
 });
 
