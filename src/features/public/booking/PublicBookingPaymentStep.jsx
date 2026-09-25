@@ -127,20 +127,59 @@ function isCanonicalPaymentAmount(value) {
   return toCanonicalPaymentAmount(value) !== null;
 }
 
-export function resolvePaymentBreakdownVisibility({
+function hasRealBookingSelection(block) {
+  const selectedServices = Array.isArray(block?.selectedServices) ? block.selectedServices : [];
+  const selectedServiceIds = Array.isArray(block?.selectedServiceIdsEffective)
+    ? block.selectedServiceIdsEffective
+    : [];
+  return Boolean(block?.selectedPackage)
+    || selectedServices.length > 0
+    || selectedServiceIds.length > 0;
+}
+
+export function isCanonicalBookingBlock(block) {
+  return Boolean(
+    block
+    && block.isComplete === true
+    && hasRealBookingSelection(block)
+    && isCanonicalPaymentAmount(block.total_hnl)
+  );
+}
+
+export function resolveCanonicalBookingBlocks(bookingBlocksSummary) {
+  const blocks = Array.isArray(bookingBlocksSummary) ? bookingBlocksSummary : [];
+  return blocks.filter(isCanonicalBookingBlock);
+}
+
+function hasCanonicalOptionalAmount(source, field) {
+  const value = source?.[field];
+  return value === null || value === undefined || value === '' || isCanonicalPaymentAmount(value);
+}
+
+export function resolvePaymentBreakdown({
   holdPricing,
   bookingBlocksSummary,
 } = {}) {
-  const hasHoldPricing = Boolean(
+  const hasAggregateFromHoldPricing = Boolean(
     holdPricing
     && typeof holdPricing === 'object'
     && isCanonicalPaymentAmount(holdPricing.subtotal_hnl)
     && isCanonicalPaymentAmount(holdPricing.total_pagar_hnl)
+    && hasCanonicalOptionalAmount(holdPricing, 'cubierto_por_plan_hnl')
+    && hasCanonicalOptionalAmount(holdPricing, 'extras_a_pagar_hnl')
   );
   const blocks = Array.isArray(bookingBlocksSummary) ? bookingBlocksSummary : [];
-  const hasBookingBlocks = blocks.length > 0
-    && blocks.every((block) => isCanonicalPaymentAmount(block?.total_hnl));
-  return hasHoldPricing || hasBookingBlocks;
+  const canonicalBlocks = resolveCanonicalBookingBlocks(blocks);
+  const hasAggregateFromBlocks = blocks.length > 0 && canonicalBlocks.length === blocks.length;
+
+  return {
+    canonicalBlocks,
+    hasAggregateBreakdown: hasAggregateFromHoldPricing || hasAggregateFromBlocks,
+    hasBlockBreakdown: canonicalBlocks.length > 0,
+    source: hasAggregateFromHoldPricing
+      ? 'hold_pricing'
+      : hasAggregateFromBlocks ? 'booking_blocks' : 'none',
+  };
 }
 
 function formatPhone(value) {
@@ -290,24 +329,32 @@ export default function PublicBookingPaymentStep() {
   const cardBrand = useMemo(() => detectCardBrand(paymentForm.cardNumber), [paymentForm.cardNumber]);
   const cardBrandLabel = CARD_BRAND_LABELS[cardBrand];
 
+  const paymentBreakdown = useMemo(
+    () => resolvePaymentBreakdown({ holdPricing, bookingBlocksSummary }),
+    [bookingBlocksSummary, holdPricing]
+  );
+  const { canonicalBlocks, hasAggregateBreakdown, source: breakdownSource } = paymentBreakdown;
+
   const fallbackSubtotal = useMemo(
-    () => bookingBlocksSummary.reduce((total, block) => total + Number(block?.total_hnl || 0), 0),
-    [bookingBlocksSummary]
+    () => canonicalBlocks.reduce((total, block) => total + Number(block.total_hnl), 0),
+    [canonicalBlocks]
   );
 
   const fallbackCoveredByPlan = useMemo(
     () =>
-      bookingBlocksSummary.reduce((total, block) => {
+      canonicalBlocks.reduce((total, block) => {
         const services = Array.isArray(block?.selectedServices) ? block.selectedServices : [];
         return total + services.reduce((lineTotal, service) => {
           if (!service?.coveredByPlan) return lineTotal;
           return lineTotal + Number(service?.precio_hnl || 0);
         }, 0);
       }, 0),
-    [bookingBlocksSummary]
+    [canonicalBlocks]
   );
 
-  const effectiveSubtotal = Number(holdPricing?.subtotal_hnl ?? fallbackSubtotal ?? 0);
+  const effectiveSubtotal = Number(
+    breakdownSource === 'hold_pricing' ? holdPricing.subtotal_hnl : fallbackSubtotal
+  );
   const effectiveCoveredByPlan = Number(holdPricing?.cubierto_por_plan_hnl ?? fallbackCoveredByPlan ?? 0);
   const effectiveExtras = Number(
     holdPricing?.extras_a_pagar_hnl
@@ -318,18 +365,14 @@ export default function PublicBookingPaymentStep() {
     paymentIntent,
     holdPricing,
     holdTotalToPay,
-    fallbackTotal: fallbackSubtotal,
-  });
-  const hasCanonicalBreakdown = resolvePaymentBreakdownVisibility({
-    holdPricing,
-    bookingBlocksSummary,
+    fallbackTotal: breakdownSource === 'booking_blocks' ? fallbackSubtotal : null,
   });
   const safeCoveredByPlan = Math.max(0, Number(effectiveCoveredByPlan || 0));
   const safeExtras = Math.max(0, Number(effectiveExtras || 0));
   const hasPlanCoverage = safeCoveredByPlan > 0;
   const hasSaldoToPay = hasPlanCoverage && safeExtras > 0;
   const isFullyCoveredByPlan = hasPlanCoverage && safeExtras <= 0;
-  const hasPackageSelection = bookingBlocksSummary.some((block) => (
+  const hasPackageSelection = canonicalBlocks.some((block) => (
     block?.selection_type === 'package'
     || block?.selection_type === 'mixed'
     || block?.selectedPackage
@@ -816,31 +859,31 @@ export default function PublicBookingPaymentStep() {
 
         <div className="citas-confirm-services mt-4">
           <h4 className="citas-confirm-subtitle">Resumen para cobro</h4>
-          {bookingBlocksSummary.map((block) => (
+          {canonicalBlocks.map((block) => (
             <div key={block.id} className="citas-confirm-service-item">
               <span>{block.alias}</span>
               <span>{formatCurrencyHnl(block.total_hnl)}</span>
             </div>
           ))}
-          {hasCanonicalBreakdown ? (
+          {hasAggregateBreakdown ? (
             <div className="citas-confirm-row mt-3">
               <span>{subtotalLabel}</span>
               <span>{formatCurrencyHnl(effectiveSubtotal)}</span>
             </div>
           ) : null}
-          {hasCanonicalBreakdown && hasPlanCoverage ? (
+          {hasAggregateBreakdown && hasPlanCoverage ? (
             <div className="citas-confirm-row">
               <span>{membershipHasContext ? 'Cubierto por tu membresia' : 'Cubierto por tu plan'}</span>
               <span>-{formatCurrencyHnl(safeCoveredByPlan)}</span>
             </div>
           ) : null}
-          {hasCanonicalBreakdown && hasSaldoToPay ? (
+          {hasAggregateBreakdown && hasSaldoToPay ? (
             <div className="citas-confirm-row">
               <span>{membershipHasContext ? 'Extras y acompanantes' : 'Saldo a pagar'}</span>
               <span>{formatCurrencyHnl(safeExtras)}</span>
             </div>
           ) : null}
-          {hasCanonicalBreakdown && isFullyCoveredByPlan ? (
+          {hasAggregateBreakdown && isFullyCoveredByPlan ? (
             <div className="public-booking-payment-note mt-2">
               <span>Cubierto completamente por tu plan.</span>
             </div>

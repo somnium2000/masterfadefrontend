@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPaymentCardProviderLabel,
   getPixelPayReconciliationNotice,
+  isCanonicalBookingBlock,
+  resolveCanonicalBookingBlocks,
   resolvePaymentAmount,
-  resolvePaymentBreakdownVisibility,
+  resolvePaymentBreakdown,
   shouldQueryPixelPayProviderOnManualVerify,
   toPixelPayCardExpire,
 } from '../PublicBookingPaymentStep.jsx';
@@ -48,30 +50,108 @@ describe('PixelPay recovered amount', () => {
 });
 
 describe('PixelPay payment breakdown visibility', () => {
-  it('oculta desglose cuando solo existe el monto final recuperado', () => {
-    expect(resolvePaymentBreakdownVisibility({
+  const placeholderBlock = {
+    id: 'placeholder',
+    alias: 'Titular',
+    total_hnl: 0,
+    isComplete: false,
+    selectedServices: [],
+    selectedServiceIdsEffective: [],
+    selectedPackage: null,
+    selection_type: 'services',
+  };
+  const realBlock = {
+    id: 'block-1',
+    alias: 'Titular',
+    total_hnl: 8,
+    isComplete: true,
+    selectedServices: [{ id_servicio: 'service-1', precio_hnl: 8 }],
+    selectedServiceIdsEffective: ['service-1'],
+    selectedPackage: null,
+    selection_type: 'services',
+  };
+
+  it('rechaza el placeholder real de PublicBookingFlow como fila y agregado', () => {
+    expect(isCanonicalBookingBlock(placeholderBlock)).toBe(false);
+    expect(resolvePaymentBreakdown({
       holdPricing: null,
-      bookingBlocksSummary: [],
-    })).toBe(false);
+      bookingBlocksSummary: [placeholderBlock],
+    })).toEqual({
+      canonicalBlocks: [],
+      hasAggregateBreakdown: false,
+      hasBlockBreakdown: false,
+      source: 'none',
+    });
   });
 
-  it('muestra desglose canonico de holdPricing', () => {
-    expect(resolvePaymentBreakdownVisibility({
+  it('separa holdPricing agregado de las filas placeholder', () => {
+    expect(resolvePaymentBreakdown({
       holdPricing: {
         subtotal_hnl: 10,
         cubierto_por_plan_hnl: 2,
         extras_a_pagar_hnl: 8,
         total_pagar_hnl: 8,
       },
-      bookingBlocksSummary: [],
-    })).toBe(true);
+      bookingBlocksSummary: [placeholderBlock],
+    })).toEqual({
+      canonicalBlocks: [],
+      hasAggregateBreakdown: true,
+      hasBlockBreakdown: false,
+      source: 'hold_pricing',
+    });
   });
 
-  it('acepta bookingBlocks validos como fallback real', () => {
-    expect(resolvePaymentBreakdownVisibility({
+  it('rechaza holdPricing si un campo opcional usado no es canonico', () => {
+    expect(resolvePaymentBreakdown({
+      holdPricing: {
+        subtotal_hnl: 10,
+        cubierto_por_plan_hnl: -2,
+        extras_a_pagar_hnl: 8,
+        total_pagar_hnl: 8,
+      },
+      bookingBlocksSummary: [placeholderBlock],
+    })).toMatchObject({
+      canonicalBlocks: [],
+      hasAggregateBreakdown: false,
+      hasBlockBreakdown: false,
+      source: 'none',
+    });
+  });
+
+  it('acepta un bloque completo con seleccion real', () => {
+    expect(isCanonicalBookingBlock(realBlock)).toBe(true);
+    expect(resolvePaymentBreakdown({
       holdPricing: null,
-      bookingBlocksSummary: [{ total_hnl: 5 }, { total_hnl: 3 }],
-    })).toBe(true);
+      bookingBlocksSummary: [realBlock],
+    })).toEqual({
+      canonicalBlocks: [realBlock],
+      hasAggregateBreakdown: true,
+      hasBlockBreakdown: true,
+      source: 'booking_blocks',
+    });
+  });
+
+  it('acepta cero real cuando el bloque esta completo y tiene seleccion', () => {
+    const coveredBlock = {
+      ...realBlock,
+      total_hnl: 0,
+      selectedServices: [{ id_servicio: 'service-1', precio_hnl: 0, coveredByPlan: true }],
+    };
+
+    expect(isCanonicalBookingBlock(coveredBlock)).toBe(true);
+    expect(resolveCanonicalBookingBlocks([coveredBlock])).toEqual([coveredBlock]);
+  });
+
+  it('filtra placeholder de las filas pero no deriva subtotal de bloques mixtos', () => {
+    expect(resolvePaymentBreakdown({
+      holdPricing: null,
+      bookingBlocksSummary: [realBlock, placeholderBlock],
+    })).toEqual({
+      canonicalBlocks: [realBlock],
+      hasAggregateBreakdown: false,
+      hasBlockBreakdown: true,
+      source: 'none',
+    });
   });
 });
 

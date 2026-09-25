@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React, { useEffect, useMemo, useRef } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { PublicBookingProvider } from '../BookingFlowContext.jsx';
@@ -16,6 +16,27 @@ const GROUP_ID = '11111111-2222-4333-8444-555555555555';
 const INTENT_ID = '99999999-9999-4999-8999-999999999999';
 const ALTERNATE_INTENT_ID = '88888888-8888-4888-8888-888888888888';
 const EMAIL = 'qa@example.com';
+const SERVICE_ID = '77777777-7777-4777-8777-777777777777';
+const PLACEHOLDER_BOOKING_BLOCK = {
+  id: 'placeholder',
+  alias: 'Titular',
+  total_hnl: 0,
+  isComplete: false,
+  selectedServices: [],
+  selectedServiceIdsEffective: [],
+  selectedPackage: null,
+  selection_type: 'services',
+};
+const REAL_BOOKING_BLOCK = {
+  id: 'block-1',
+  alias: 'Titular',
+  total_hnl: 8,
+  isComplete: true,
+  selectedServices: [{ id_servicio: SERVICE_ID, precio_hnl: 8 }],
+  selectedServiceIdsEffective: [SERVICE_ID],
+  selectedPackage: null,
+  selection_type: 'services',
+};
 
 vi.mock('../publicBookingApi.js', () => ({
   completePublicMockPayment: vi.fn(),
@@ -32,7 +53,10 @@ vi.mock('../publicBookingApi.js', () => ({
   validatePublicBookingContacts: vi.fn(),
 }));
 
-function PaymentReloadHarness({ holdPricing = null, bookingBlocksSummary = [] } = {}) {
+function PaymentReloadHarness({
+  holdPricing = null,
+  bookingBlocksSummary = [PLACEHOLDER_BOOKING_BLOCK],
+} = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const checkedRef = useRef('');
@@ -176,6 +200,10 @@ function renderPaymentFlow(initialEntry = '/agendar/pagar', providerOverrides = 
   );
 }
 
+function getPaymentSummary() {
+  return within(screen.getByText('Resumen para cobro').parentElement);
+}
+
 function fillPixelPayForm() {
   fireEvent.change(screen.getByLabelText('Nombre del titular'), { target: { value: 'CLIENTE QA' } });
   fireEvent.change(screen.getByLabelText('Numero de tarjeta'), { target: { value: '4111111111111111' } });
@@ -232,7 +260,7 @@ describe('PublicBookingFlow payment hard reload integration', () => {
       booking_confirmed: true,
       estado_intent_codigo: 'confirmado',
     });
-    renderPaymentFlow();
+    const view = renderPaymentFlow();
 
     expect(await screen.findByText('Verificando pago')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Pagar con PixelPay Sandbox' })).toBeNull();
@@ -255,6 +283,18 @@ describe('PublicBookingFlow payment hard reload integration', () => {
     expect(screen.queryByText('Total servicios')).toBeNull();
     expect(screen.queryByText('Subtotal')).toBeNull();
     expect(screen.queryByText('L 0.00')).toBeNull();
+    expect(getPaymentSummary().queryByText('Titular')).toBeNull();
+    expect(getPublicPaymentStatus).toHaveBeenCalledTimes(1);
+
+    view.rerender(<MemoryRouter initialEntries={['/agendar/pagar']}><PaymentReloadHarness /></MemoryRouter>);
+    await waitFor(() => expect(getPublicPaymentStatus).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('Monto: L 1.00')).toBeTruthy();
+    expect(getPaymentSummary().queryByText('Titular')).toBeNull();
+    expect(screen.queryByText('Total servicios')).toBeNull();
+    expect(screen.queryByText('Subtotal')).toBeNull();
+    expect(screen.queryByText('L 0.00')).toBeNull();
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+
     fillPixelPayForm();
     fireEvent.click(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' }));
 
@@ -309,6 +349,8 @@ describe('PublicBookingFlow payment hard reload integration', () => {
     expect(screen.getByText('Total servicios').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 10.00');
     expect(screen.getByText('Cubierto por tu plan').nextSibling.textContent.replace(/\s/g, ' ')).toBe('-L 2.00');
     expect(screen.getByText('Total a pagar').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 8.00');
+    expect(getPaymentSummary().queryByText('Titular')).toBeNull();
+    expect(screen.queryByText('L 0.00')).toBeNull();
   });
 
   test('bookingBlocks validos conservan subtotal fallback real', async () => {
@@ -323,13 +365,71 @@ describe('PublicBookingFlow payment hard reload integration', () => {
     });
     renderPaymentFlow('/agendar/pagar', {
       bookingBlocksSummary: [
-        { id: 'block-1', alias: 'Titular', total_hnl: 5, selectedServices: [] },
-        { id: 'block-2', alias: 'Acompanante', total_hnl: 3, selectedServices: [] },
+        {
+          ...REAL_BOOKING_BLOCK,
+          total_hnl: 5,
+          selectedServices: [{ id_servicio: SERVICE_ID, precio_hnl: 5 }],
+        },
+        {
+          ...REAL_BOOKING_BLOCK,
+          id: 'block-2',
+          alias: 'Acompanante',
+          total_hnl: 3,
+          selectedServices: [{ id_servicio: 'service-2', precio_hnl: 3 }],
+          selectedServiceIdsEffective: ['service-2'],
+        },
       ],
     });
 
     expect(await screen.findByText('Monto: L 8.00')).toBeTruthy();
+    expect(getPaymentSummary().getByText('Titular').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 5.00');
+    expect(getPaymentSummary().getByText('Acompanante').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 3.00');
     expect(screen.getByText('Total servicios').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 8.00');
+    expect(screen.getByText('Total a pagar').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 8.00');
+  });
+
+  test('cero real completo conserva fila y subtotal sin confundirlo con placeholder', async () => {
+    writeStandardContext();
+    getPublicPaymentStatus.mockResolvedValue({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      estado_intent_codigo: 'link_generado',
+      booking_confirmed: false,
+      monto_hnl: 0,
+      moneda_codigo: 'HNL',
+    });
+    renderPaymentFlow('/agendar/pagar', {
+      bookingBlocksSummary: [{
+        ...REAL_BOOKING_BLOCK,
+        total_hnl: 0,
+        selectedServices: [{ id_servicio: SERVICE_ID, precio_hnl: 0, coveredByPlan: true }],
+      }],
+    });
+
+    expect(await screen.findByText('Monto: L 0.00')).toBeTruthy();
+    expect(getPaymentSummary().getByText('Titular').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 0.00');
+    expect(screen.getByText('Total servicios').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 0.00');
+  });
+
+  test('bloques mixtos muestran solo filas reales y no inventan subtotal parcial', async () => {
+    writeStandardContext();
+    getPublicPaymentStatus.mockResolvedValue({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      estado_intent_codigo: 'link_generado',
+      booking_confirmed: false,
+      monto_hnl: 8,
+      moneda_codigo: 'HNL',
+    });
+    renderPaymentFlow('/agendar/pagar', {
+      bookingBlocksSummary: [REAL_BOOKING_BLOCK, PLACEHOLDER_BOOKING_BLOCK],
+    });
+
+    expect(await screen.findByText('Monto: L 8.00')).toBeTruthy();
+    expect(getPaymentSummary().getAllByText('Titular')).toHaveLength(1);
+    expect(getPaymentSummary().getByText('Titular').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 8.00');
+    expect(screen.queryByText('Total servicios')).toBeNull();
+    expect(screen.queryByText('Subtotal')).toBeNull();
     expect(screen.getByText('Total a pagar').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 8.00');
   });
 
@@ -403,6 +503,9 @@ describe('PublicBookingFlow payment hard reload integration', () => {
       titular_email: EMAIL,
     });
     expect(getPublicPaymentStatus.mock.calls[0][0].id_intent).not.toBe(INTENT_ID);
+    expect(getPaymentSummary().queryByText('Titular')).toBeNull();
+    expect(screen.queryByText('Total servicios')).toBeNull();
+    expect(screen.queryByText('L 0.00')).toBeNull();
     fillPixelPayForm();
     fireEvent.click(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' }));
     await waitFor(() => expect(salePublicPixelPay).toHaveBeenCalledTimes(1));
