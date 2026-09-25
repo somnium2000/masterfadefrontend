@@ -14,6 +14,7 @@ import { getPublicPaymentStatus, queryPublicPixelPayStatus, salePublicPixelPay }
 
 const GROUP_ID = '11111111-2222-4333-8444-555555555555';
 const INTENT_ID = '99999999-9999-4999-8999-999999999999';
+const ALTERNATE_INTENT_ID = '88888888-8888-4888-8888-888888888888';
 const EMAIL = 'qa@example.com';
 
 vi.mock('../publicBookingApi.js', () => ({
@@ -124,24 +125,24 @@ function PaymentReloadHarness() {
   );
 }
 
-function writeStandardContext() {
+function writeStandardContext(intentId = INTENT_ID) {
   window.sessionStorage.setItem('masterfade.publicBookingPayment.v1', JSON.stringify({
     id_grupo_cita: GROUP_ID,
-    id_intent: INTENT_ID,
+    id_intent: intentId,
     titular_email: EMAIL,
     paymentIntent: {
       id_grupo_cita: GROUP_ID,
-      id_intent: INTENT_ID,
+      id_intent: intentId,
       monto_hnl: 1,
       estado_intent_codigo: 'link_generado',
     },
   }));
 }
 
-function writePendingContext() {
+function writePendingContext(intentId = INTENT_ID) {
   window.sessionStorage.setItem('mf_pending_payment_context_v1', JSON.stringify({
     id_grupo_cita: GROUP_ID,
-    id_intent: INTENT_ID,
+    id_intent: intentId,
     titular_email: EMAIL,
   }));
 }
@@ -196,6 +197,54 @@ describe('PublicBookingFlow payment hard reload integration', () => {
     await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/agendar/pagar'));
     expect(getPublicPaymentStatus).not.toHaveBeenCalled();
     expect(salePublicPixelPay).not.toHaveBeenCalled();
+  });
+
+  test('query G1/I2 nunca es sustituido por storage G1/I1 y no cambia al rerender', async () => {
+    writeStandardContext(INTENT_ID);
+    getPublicPaymentStatus.mockResolvedValue({
+      estado_intent_codigo: 'pendiente_confirmacion', booking_confirmed: false,
+    });
+    const entry = `/agendar/pagar?id_grupo_cita=${GROUP_ID}&id_intent=${ALTERNATE_INTENT_ID}`;
+    const view = renderPaymentFlow(entry);
+
+    expect(await screen.findByText('Tu pago requiere verificación. No vuelvas a realizar el pago.')).toBeTruthy();
+    expect(screen.getByTestId('pathname').textContent).toBe('/agendar/pagar');
+    expect(getPublicPaymentStatus).toHaveBeenCalledTimes(1);
+    expect(getPublicPaymentStatus.mock.calls[0][0]).toMatchObject({
+      id_grupo_cita: GROUP_ID,
+      id_intent: ALTERNATE_INTENT_ID,
+      titular_email: EMAIL,
+    });
+    expect(getPublicPaymentStatus.mock.calls[0][0].id_intent).not.toBe(INTENT_ID);
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+    expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+
+    view.rerender(<MemoryRouter initialEntries={[entry]}><PaymentReloadHarness /></MemoryRouter>);
+    await waitFor(() => expect(getPublicPaymentStatus).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('pathname').textContent).toBe('/agendar/pagar');
+    expect(getPublicPaymentStatus.mock.calls[0][0].id_intent).toBe(ALTERNATE_INTENT_ID);
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+    expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+  });
+
+  test('pending G1/I2 no es sustituido por standard G1/I1', async () => {
+    writeStandardContext(INTENT_ID);
+    writePendingContext(ALTERNATE_INTENT_ID);
+    getPublicPaymentStatus.mockResolvedValue({
+      estado_intent_codigo: 'pendiente_confirmacion', booking_confirmed: false,
+    });
+    renderPaymentFlow();
+
+    expect(await screen.findByText('Tu pago requiere verificación. No vuelvas a realizar el pago.')).toBeTruthy();
+    expect(getPublicPaymentStatus).toHaveBeenCalledTimes(1);
+    expect(getPublicPaymentStatus.mock.calls[0][0]).toMatchObject({
+      id_grupo_cita: GROUP_ID,
+      id_intent: ALTERNATE_INTENT_ID,
+      titular_email: EMAIL,
+    });
+    expect(getPublicPaymentStatus.mock.calls[0][0].id_intent).not.toBe(INTENT_ID);
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+    expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
   });
 
   test('contexto pendiente especifico tambien localiza el intent y consulta backend', async () => {

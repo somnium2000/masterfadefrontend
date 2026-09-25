@@ -41,12 +41,14 @@ export function readPendingPaymentResumeContext() {
   return readSessionContext(PENDING_PAYMENT_CONTEXT_STORAGE_KEY);
 }
 
-export function readBookingPaymentContext(groupId = '') {
+export function readBookingPaymentContext({ groupId = '', intentId = '' } = {}) {
   const context = readSessionContext(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY, {
     includePaymentIntent: true,
   });
   const expectedGroupId = safeText(groupId);
+  const expectedIntentId = safeText(intentId);
   if (expectedGroupId && context?.id_grupo_cita !== expectedGroupId) return null;
+  if (expectedIntentId && context?.id_intent !== expectedIntentId) return null;
   return context;
 }
 
@@ -70,7 +72,6 @@ export function resolvePaymentResumeContext({
   if (!selected) return null;
   const matchingEmail = candidates.find((candidate) => (
     candidate.id_grupo_cita === selected.id_grupo_cita
-    && candidate.id_intent === selected.id_intent
     && candidate.titular_email
   ))?.titular_email || '';
   return {

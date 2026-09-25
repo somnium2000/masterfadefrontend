@@ -160,15 +160,21 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
   }, []);
 
   const restorePaymentContext = useCallback((groupId = '', fallbackContext = null) => {
-    const stored = readBookingPaymentContext(groupId);
-    const context = stored || (fallbackContext && typeof fallbackContext === 'object'
+    const fallback = fallbackContext && typeof fallbackContext === 'object'
       ? {
           id_grupo_cita: safeText(fallbackContext.id_grupo_cita),
           id_intent: safeText(fallbackContext.id_intent),
           titular_email: safeText(fallbackContext.titular_email).toLowerCase(),
           paymentIntent: null,
         }
-      : null);
+      : null;
+    const expectedGroupId = fallback?.id_grupo_cita || safeText(groupId);
+    const expectedIntentId = fallback?.id_intent || '';
+    const stored = readBookingPaymentContext({
+      groupId: expectedGroupId,
+      intentId: expectedIntentId,
+    });
+    const context = stored || fallback;
     if (!context?.id_intent || !context?.id_grupo_cita) return null;
     if (!isCurrentPaymentGroup(context.id_grupo_cita)) return null;
     const restoredIntent = context.paymentIntent || {

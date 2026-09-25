@@ -18,7 +18,9 @@ vi.mock('../publicBookingApi.js', () => ({
 }));
 
 const GROUP_ID = '11111111-2222-4333-8444-555555555555';
+const ALTERNATE_GROUP_ID = '22222222-3333-4444-8555-666666666666';
 const INTENT_ID = '99999999-9999-4999-8999-999999999999';
+const ALTERNATE_INTENT_ID = '88888888-8888-4888-8888-888888888888';
 const EMAIL = 'qa@example.com';
 
 describe('useBookingPayment PixelPay guards', () => {
@@ -159,5 +161,37 @@ describe('useBookingPayment PixelPay guards', () => {
     expect(getPublicPaymentStatus).toHaveBeenCalledTimes(1);
     expect(salePublicPixelPay).not.toHaveBeenCalled();
     expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+  });
+
+  it('ignora storage de otro grupo y respeta el contexto explicito completo', () => {
+    window.sessionStorage.setItem('masterfade.publicBookingPayment.v1', JSON.stringify({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      titular_email: EMAIL,
+      paymentIntent: {
+        id_grupo_cita: GROUP_ID,
+        id_intent: INTENT_ID,
+        estado_intent_codigo: 'link_generado',
+      },
+    }));
+    const { result } = renderHook(() => useBookingPayment({ currentGroupId: ALTERNATE_GROUP_ID }));
+
+    let restored;
+    act(() => {
+      restored = result.current.restorePaymentContext(ALTERNATE_GROUP_ID, {
+        id_grupo_cita: ALTERNATE_GROUP_ID,
+        id_intent: ALTERNATE_INTENT_ID,
+        titular_email: EMAIL,
+      });
+    });
+
+    expect(restored).toMatchObject({
+      id_grupo_cita: ALTERNATE_GROUP_ID,
+      id_intent: ALTERNATE_INTENT_ID,
+    });
+    expect(result.current.paymentIntent).toEqual({
+      id_grupo_cita: ALTERNATE_GROUP_ID,
+      id_intent: ALTERNATE_INTENT_ID,
+    });
   });
 });

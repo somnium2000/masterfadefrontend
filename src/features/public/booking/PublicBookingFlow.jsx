@@ -393,7 +393,7 @@ const agendaAutoLoadKeyRef = useRef('');
   } = activeBookingBlockState;
   const pendingResumeContext = useMemo(() => {
     return resolvePaymentResumeContext({ search: location.search });
-  }, [location.pathname, location.search]);
+  }, [location.search]);
   const isPendingPaymentResumeRoute = location.pathname.startsWith(BOOKING_ROUTES.payment) && Boolean(pendingResumeContext?.id_grupo_cita && pendingResumeContext?.id_intent);
   const {
     contextLoading,
