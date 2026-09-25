@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPaymentCardProviderLabel,
   getPixelPayReconciliationNotice,
+  resolvePaymentAmount,
   shouldQueryPixelPayProviderOnManualVerify,
   toPixelPayCardExpire,
 } from '../PublicBookingPaymentStep.jsx';
@@ -18,6 +19,30 @@ describe('PixelPay card_expire', () => {
   it('rechaza mes o formato invalido', () => {
     expect(() => toPixelPayCardExpire('13/30')).toThrow(/MM\/AA/);
     expect(() => toPixelPayCardExpire('3012')).toThrow(/MM\/AA/);
+  });
+});
+
+describe('PixelPay recovered amount', () => {
+  it('prioriza monto backend y conserva cero real', () => {
+    expect(resolvePaymentAmount({
+      paymentResult: { monto_hnl: 1 },
+      paymentIntent: { monto_hnl: 2 },
+      holdPricing: { total_pagar_hnl: 3 },
+      holdTotalToPay: 4,
+      fallbackTotal: 5,
+    })).toBe(1);
+    expect(resolvePaymentAmount({
+      paymentResult: { monto_hnl: 0 },
+      paymentIntent: { monto_hnl: 2 },
+    })).toBe(0);
+  });
+
+  it('descarta montos invalidos y usa el siguiente fallback canonico', () => {
+    expect(resolvePaymentAmount({
+      paymentResult: { monto_hnl: Number.NaN },
+      paymentIntent: { monto_hnl: -1 },
+      holdPricing: { total_pagar_hnl: '1.00' },
+    })).toBe(1);
   });
 });
 

@@ -96,6 +96,33 @@ export function getPixelPayReconciliationNotice(paymentResult) {
   return '';
 }
 
+function toCanonicalPaymentAmount(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+}
+
+export function resolvePaymentAmount({
+  paymentResult,
+  paymentIntent,
+  holdPricing,
+  holdTotalToPay,
+  fallbackTotal,
+} = {}) {
+  const candidates = [
+    paymentResult?.monto_hnl,
+    paymentIntent?.monto_hnl,
+    holdPricing?.total_pagar_hnl,
+    holdTotalToPay,
+    fallbackTotal,
+  ];
+  for (const candidate of candidates) {
+    const amount = toCanonicalPaymentAmount(candidate);
+    if (amount !== null) return amount;
+  }
+  return 0;
+}
+
 function formatPhone(value) {
   return normalizeDigits(value).slice(0, 15);
 }
@@ -201,6 +228,8 @@ export default function PublicBookingPaymentStep() {
     membershipUxMessage,
     membershipCompanionNotice,
     paymentTitularEmail,
+    paymentRestoring = false,
+    paymentCanExecuteSale = true,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
@@ -264,11 +293,13 @@ export default function PublicBookingPaymentStep() {
     holdPricing?.extras_a_pagar_hnl
     ?? Math.max(0, effectiveSubtotal - effectiveCoveredByPlan)
   );
-  const effectiveTotalToPay = Number(
-    holdPricing?.total_pagar_hnl
-    ?? holdTotalToPay
-    ?? 0
-  );
+  const effectiveTotalToPay = resolvePaymentAmount({
+    paymentResult,
+    paymentIntent,
+    holdPricing,
+    holdTotalToPay,
+    fallbackTotal: fallbackSubtotal,
+  });
   const safeCoveredByPlan = Math.max(0, Number(effectiveCoveredByPlan || 0));
   const safeExtras = Math.max(0, Number(effectiveExtras || 0));
   const hasPlanCoverage = safeCoveredByPlan > 0;
@@ -383,7 +414,7 @@ export default function PublicBookingPaymentStep() {
   };
 
   const handleMockPay = async () => {
-    if (processingPayment) return;
+    if (processingPayment || paymentRestoring || !paymentCanExecuteSale) return;
     const validationErrors = validatePaymentForm(paymentForm);
     if (Object.keys(validationErrors).length > 0) {
       setFieldErrors(validationErrors);
@@ -436,7 +467,7 @@ export default function PublicBookingPaymentStep() {
   };
 
   const hostedStatusText = (() => {
-    if (checkingPaymentStatus) return 'Verificando pago';
+    if (paymentRestoring || checkingPaymentStatus) return 'Verificando pago';
     if (hostedModalError === 'session_expired' || hostedSessionExpired) return 'Sesión expirada';
     if (hostedModalError) return 'Error de carga';
     if (hostedResultReceived) return 'Resultado recibido. Verifica el estado con MasterFade.';
@@ -503,7 +534,7 @@ export default function PublicBookingPaymentStep() {
         ) : null}
 
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
-          {paymentSimulationAction.canShow && !pixelPayPendingConfirmation ? (
+          {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
             <div className="w-full overflow-hidden rounded-2xl border border-[var(--mf-border)] bg-[linear-gradient(135deg,rgba(16,24,40,0.96),rgba(31,41,55,0.92))] p-3 text-white shadow-[0_14px_40px_rgba(15,23,42,0.28)] sm:p-4">
               <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] text-white/70 sm:text-[11px] sm:tracking-[0.28em]">
@@ -677,7 +708,7 @@ export default function PublicBookingPaymentStep() {
             ) : (
               <div className="mt-3 space-y-2 break-words text-sm leading-relaxed text-[var(--mf-text-2)] public-booking-payment-meta">
                 <p>Estado: {paymentUiState.text}</p>
-                <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || effectiveTotalToPay)}</p>
+                <p>Monto: {paymentRestoring ? 'Verificando...' : formatCurrencyHnl(effectiveTotalToPay)}</p>
                 <p>Intent: {paymentIntent.id_intent}</p>
                 <p>Proveedor: {paymentSimulationAction.provider || 'no_configurado'}</p>
                 {reconciliationNotice ? (
@@ -735,11 +766,11 @@ export default function PublicBookingPaymentStep() {
                   </select>
                 </div>
               ) : null}
-              {paymentSimulationAction.canShow && !pixelPayPendingConfirmation ? (
+              {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
                 <Button
                   className="w-full sm:w-auto"
                   onClick={handleMockPay}
-                  disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation}
+                  disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation || !paymentCanExecuteSale}
                 >
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
                   {paymentSimulationAction.type === 'pixelpay'
@@ -769,7 +800,7 @@ export default function PublicBookingPaymentStep() {
           ))}
           <div className="citas-confirm-row mt-3">
             <span>{subtotalLabel}</span>
-            <span>{formatCurrencyHnl(effectiveSubtotal)}</span>
+            <span>{paymentRestoring ? 'Verificando...' : formatCurrencyHnl(effectiveSubtotal)}</span>
           </div>
           {hasPlanCoverage ? (
             <div className="citas-confirm-row">
@@ -790,7 +821,7 @@ export default function PublicBookingPaymentStep() {
           ) : null}
           <div className="citas-confirm-row">
             <span>{membershipHasContext ? 'Total a pagar hoy' : 'Total a pagar'}</span>
-            <span>{formatCurrencyHnl(effectiveTotalToPay)}</span>
+            <span>{paymentRestoring ? 'Verificando...' : formatCurrencyHnl(effectiveTotalToPay)}</span>
           </div>
         </div>
         <TodoPagoHostedModal

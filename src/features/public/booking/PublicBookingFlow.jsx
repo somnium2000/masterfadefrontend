@@ -140,6 +140,40 @@ export function shouldPreserveUnresolvedPaymentState({
     || hasUnresolvedPaymentEvidence(paymentIntent);
 }
 
+export function resolvePaymentExecutionContext({
+  holdResult,
+  paymentIntent,
+  pendingResumeContext,
+  currentEmail,
+} = {}) {
+  const groupId = String(
+    holdResult?.id_grupo_cita
+    || paymentIntent?.id_grupo_cita
+    || pendingResumeContext?.id_grupo_cita
+    || ''
+  ).trim();
+  const intentId = String(
+    paymentIntent?.id_intent
+    || pendingResumeContext?.id_intent
+    || ''
+  ).trim();
+  const resumeMatches = Boolean(
+    groupId
+    && intentId
+    && pendingResumeContext?.id_grupo_cita === groupId
+    && pendingResumeContext?.id_intent === intentId
+  );
+  const normalizedCurrentEmail = String(currentEmail || '').trim().toLowerCase();
+  const restoredEmail = resumeMatches
+    ? String(pendingResumeContext?.titular_email || '').trim().toLowerCase()
+    : '';
+  return {
+    groupId,
+    intentId,
+    titularEmail: isValidEmail(normalizedCurrentEmail) ? normalizedCurrentEmail : restoredEmail,
+  };
+}
+
 function getContactValidationFeedback(contactState, blockIndex) {
   const errors = contactState?.errors || {};
   const field = CONTACT_ERROR_FIELD_ORDER.find((key) => String(errors?.[key] || '').trim());
@@ -3704,11 +3738,41 @@ const agendaAutoLoadKeyRef = useRef('');
     return completeMockPayment();
   }, [completeMockPayment, completeSimulatorPayment]);
 
+  const paymentExecutionContext = useMemo(() => {
+    const currentEmail = String(resolveBlockContactState(bookingBlocks[0], 0).email || '')
+      .trim()
+      .toLowerCase();
+    return resolvePaymentExecutionContext({
+      holdResult,
+      paymentIntent,
+      pendingResumeContext,
+      currentEmail,
+    });
+  }, [bookingBlocks, holdResult, paymentIntent, pendingResumeContext, resolveBlockContactState]);
+
+  const restoredPaymentMatches = Boolean(
+    paymentResult
+    && String(paymentResult?.id_grupo_cita || '').trim() === paymentExecutionContext.groupId
+    && String(paymentResult?.id_intent || '').trim() === paymentExecutionContext.intentId
+  );
+  const paymentRestoring = isPendingPaymentResumeRoute && !restoredPaymentMatches;
+  const backendPaymentState = String(
+    paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || ''
+  ).trim().toLowerCase();
+  const backendPaymentAmount = Number(paymentResult?.monto_hnl ?? paymentIntent?.monto_hnl);
+  const paymentCanExecuteSale = Boolean(
+    !paymentRestoring
+    && backendPaymentState === 'link_generado'
+    && Number.isFinite(backendPaymentAmount)
+    && backendPaymentAmount > 0
+    && paymentExecutionContext.groupId
+    && paymentExecutionContext.intentId
+    && isValidEmail(paymentExecutionContext.titularEmail)
+  );
+
   const completePixelPayPayment = useCallback(async ({ card, billing }) => {
-    const groupId = String(holdResult?.id_grupo_cita || '').trim();
-    const intentId = String(paymentIntent?.id_intent || '').trim();
-    const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
-    const titularEmail = String(titularContact.email || '').trim().toLowerCase();
+    const { groupId, intentId, titularEmail } = paymentExecutionContext;
+    if (!paymentCanExecuteSale) return null;
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
     try {
       const result = await salePixelPayOnce({ groupId, intentId, titularEmail, card, billing });
@@ -3733,12 +3797,10 @@ const agendaAutoLoadKeyRef = useRef('');
       throw err;
     }
   }, [
-    bookingBlocks,
-    holdResult?.id_grupo_cita,
     notifications,
-    paymentIntent?.id_intent,
+    paymentCanExecuteSale,
+    paymentExecutionContext,
     refreshPaymentStatus,
-    resolveBlockContactState,
     salePixelPayOnce,
     setPaymentResult,
   ]);
@@ -3925,9 +3987,7 @@ const agendaAutoLoadKeyRef = useRef('');
     restorePaymentContext,
   ]);
 
-  const paymentTitularEmail = String(
-    resolveBlockContactState(bookingBlocks[0], 0).email || ''
-  ).trim().toLowerCase();
+  const paymentTitularEmail = paymentExecutionContext.titularEmail;
 
   const contextValue = useMemo(
     () => ({
@@ -4005,6 +4065,8 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentIntent,
       paymentResult,
       paymentTitularEmail,
+      paymentRestoring,
+      paymentCanExecuteSale,
       bookingSuccessResult,
       pendingCompanionFocusId,
       pendingFieldFocus,
@@ -4152,6 +4214,8 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentIntent,
       paymentResult,
       paymentTitularEmail,
+      paymentRestoring,
+      paymentCanExecuteSale,
       bookingSuccessResult,
       pendingCompanionFocusId,
       pendingFieldFocus,

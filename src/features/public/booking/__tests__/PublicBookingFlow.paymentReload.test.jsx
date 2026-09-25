@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
 import React, { useEffect, useMemo, useRef } from 'react';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { PublicBookingProvider } from '../BookingFlowContext.jsx';
 import PublicBookingPaymentStep from '../PublicBookingPaymentStep.jsx';
-import { shouldPreserveUnresolvedPaymentState } from '../PublicBookingFlow.jsx';
+import { resolvePaymentExecutionContext, shouldPreserveUnresolvedPaymentState } from '../PublicBookingFlow.jsx';
 import useBookingPayment from '../hooks/useBookingPayment.js';
 import { resolvePaymentStepRedirect } from '../hooks/useBookingWizardNavigation.js';
 import { resolvePaymentResumeContext } from '../paymentResumeContext.js';
@@ -93,6 +93,24 @@ function PaymentReloadHarness() {
       ? payment.queryPixelPayStatusOnce(input)
       : payment.fetchPaymentStatusOnce(input);
   };
+  const paymentResultMatches = Boolean(
+    payment.paymentResult?.id_grupo_cita === resumeContext?.id_grupo_cita
+    && payment.paymentResult?.id_intent === resumeContext?.id_intent
+  );
+  const paymentRestoring = isPendingPaymentResumeRoute && !paymentResultMatches;
+  const paymentCanExecuteSale = Boolean(
+    paymentResultMatches
+    && payment.paymentResult?.estado_intent_codigo === 'link_generado'
+    && Number(payment.paymentResult?.monto_hnl) > 0
+    && resumeContext?.titular_email
+  );
+  const completePixelPayPayment = ({ card, billing }) => payment.salePixelPayOnce({
+    groupId: resumeContext.id_grupo_cita,
+    intentId: resumeContext.id_intent,
+    titularEmail: resumeContext.titular_email,
+    card,
+    billing,
+  });
 
   return (
     <>
@@ -111,13 +129,16 @@ function PaymentReloadHarness() {
         refreshPaymentStatus,
         checkingPaymentStatus: payment.checkingPaymentStatus,
         completePaymentSimulation: vi.fn(),
-        completePixelPayPayment: payment.salePixelPayOnce,
+        completePixelPayPayment,
         confirmHoldWithoutPayment: vi.fn(),
-        holdPricing: { subtotal_hnl: 1, cubierto_por_plan_hnl: 0, total_pagar_hnl: 1 },
-        holdTotalToPay: 1,
+        holdPricing: null,
+        holdTotalToPay: 0,
         membershipHasContext: false,
         membershipUxMessage: '',
         membershipCompanionNotice: '',
+        paymentTitularEmail: resumeContext?.titular_email || '',
+        paymentRestoring,
+        paymentCanExecuteSale,
       }}>
         <PublicBookingPaymentStep />
       </PublicBookingProvider>
@@ -153,6 +174,17 @@ function renderPaymentFlow(initialEntry = '/agendar/pagar') {
       <PaymentReloadHarness />
     </MemoryRouter>
   );
+}
+
+function fillPixelPayForm() {
+  fireEvent.change(screen.getByLabelText('Nombre del titular'), { target: { value: 'CLIENTE QA' } });
+  fireEvent.change(screen.getByLabelText('Numero de tarjeta'), { target: { value: '4111111111111111' } });
+  fireEvent.change(screen.getByLabelText('Expiracion'), { target: { value: '07/28' } });
+  fireEvent.change(screen.getByLabelText('CVV'), { target: { value: '999' } });
+  fireEvent.change(screen.getByLabelText('Telefono de contacto'), { target: { value: '99999999' } });
+  fireEvent.change(screen.getByLabelText('Direccion de facturacion'), { target: { value: 'Calle QA' } });
+  fireEvent.change(screen.getByLabelText('Ciudad'), { target: { value: 'San Pedro Sula' } });
+  fireEvent.change(screen.getByLabelText('Departamento'), { target: { value: 'HN-CR' } });
 }
 
 describe('PublicBookingFlow payment hard reload integration', () => {
@@ -192,6 +224,63 @@ describe('PublicBookingFlow payment hard reload integration', () => {
     expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
   });
 
+  test('F5 restaura monto L1 y permite una sola Sale manual con contexto recuperado', async () => {
+    writeStandardContext();
+    let resolveStatus;
+    getPublicPaymentStatus.mockReturnValue(new Promise((resolve) => { resolveStatus = resolve; }));
+    salePublicPixelPay.mockResolvedValue({
+      booking_confirmed: true,
+      estado_intent_codigo: 'confirmado',
+    });
+    renderPaymentFlow();
+
+    expect(await screen.findByText('Verificando pago')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Pagar con PixelPay Sandbox' })).toBeNull();
+    expect(screen.queryByText('L 0.00')).toBeNull();
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+
+    resolveStatus({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      estado_intent_codigo: 'link_generado',
+      booking_confirmed: false,
+      monto_hnl: 1,
+      moneda_codigo: 'HNL',
+    });
+
+    expect(await screen.findByText('Monto: L 1.00')).toBeTruthy();
+    expect(screen.getByText('Total a pagar').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 1.00');
+    fillPixelPayForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' }));
+
+    await waitFor(() => expect(salePublicPixelPay).toHaveBeenCalledTimes(1));
+    expect(salePublicPixelPay.mock.calls[0][0]).toMatchObject({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      titular_email: EMAIL,
+    });
+    expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+  });
+
+  test('pendiente_confirmacion conserva L1, oculta formulario y nunca habilita Sale', async () => {
+    writeStandardContext();
+    getPublicPaymentStatus.mockResolvedValue({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      estado_intent_codigo: 'pendiente_confirmacion',
+      booking_confirmed: false,
+      monto_hnl: 1,
+      moneda_codigo: 'HNL',
+    });
+    renderPaymentFlow();
+
+    expect(await screen.findByText('Monto: L 1.00')).toBeTruthy();
+    expect(screen.queryByLabelText('Numero de tarjeta')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pagar con PixelPay Sandbox' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Verificar estado del pago' })).toBeTruthy();
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+  });
+
   test('query params validos mantienen payment aunque agenda este incompleta', async () => {
     renderPaymentFlow(`/agendar/pagar?id_grupo_cita=${GROUP_ID}&id_intent=${INTENT_ID}`);
     await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/agendar/pagar'));
@@ -201,13 +290,22 @@ describe('PublicBookingFlow payment hard reload integration', () => {
 
   test('query G1/I2 nunca es sustituido por storage G1/I1 y no cambia al rerender', async () => {
     writeStandardContext(INTENT_ID);
+    salePublicPixelPay.mockResolvedValue({
+      pending_confirmation: true,
+      estado_intent_codigo: 'pendiente_confirmacion',
+    });
     getPublicPaymentStatus.mockResolvedValue({
-      estado_intent_codigo: 'pendiente_confirmacion', booking_confirmed: false,
+      id_grupo_cita: GROUP_ID,
+      id_intent: ALTERNATE_INTENT_ID,
+      estado_intent_codigo: 'link_generado',
+      booking_confirmed: false,
+      monto_hnl: 1,
+      moneda_codigo: 'HNL',
     });
     const entry = `/agendar/pagar?id_grupo_cita=${GROUP_ID}&id_intent=${ALTERNATE_INTENT_ID}`;
     const view = renderPaymentFlow(entry);
 
-    expect(await screen.findByText('Tu pago requiere verificación. No vuelvas a realizar el pago.')).toBeTruthy();
+    expect(await screen.findByText('Monto: L 1.00')).toBeTruthy();
     expect(screen.getByTestId('pathname').textContent).toBe('/agendar/pagar');
     expect(getPublicPaymentStatus).toHaveBeenCalledTimes(1);
     expect(getPublicPaymentStatus.mock.calls[0][0]).toMatchObject({
@@ -216,14 +314,22 @@ describe('PublicBookingFlow payment hard reload integration', () => {
       titular_email: EMAIL,
     });
     expect(getPublicPaymentStatus.mock.calls[0][0].id_intent).not.toBe(INTENT_ID);
-    expect(salePublicPixelPay).not.toHaveBeenCalled();
+    fillPixelPayForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' }));
+    await waitFor(() => expect(salePublicPixelPay).toHaveBeenCalledTimes(1));
+    expect(salePublicPixelPay.mock.calls[0][0]).toMatchObject({
+      id_grupo_cita: GROUP_ID,
+      id_intent: ALTERNATE_INTENT_ID,
+      titular_email: EMAIL,
+    });
+    expect(salePublicPixelPay.mock.calls[0][0].id_intent).not.toBe(INTENT_ID);
     expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
 
     view.rerender(<MemoryRouter initialEntries={[entry]}><PaymentReloadHarness /></MemoryRouter>);
     await waitFor(() => expect(getPublicPaymentStatus).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId('pathname').textContent).toBe('/agendar/pagar');
     expect(getPublicPaymentStatus.mock.calls[0][0].id_intent).toBe(ALTERNATE_INTENT_ID);
-    expect(salePublicPixelPay).not.toHaveBeenCalled();
+    expect(salePublicPixelPay).toHaveBeenCalledTimes(1);
     expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
   });
 
@@ -245,6 +351,32 @@ describe('PublicBookingFlow payment hard reload integration', () => {
     expect(getPublicPaymentStatus.mock.calls[0][0].id_intent).not.toBe(INTENT_ID);
     expect(salePublicPixelPay).not.toHaveBeenCalled();
     expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+  });
+
+  test('email actual valido tiene prioridad y un contexto de otro intent no se mezcla', () => {
+    expect(resolvePaymentExecutionContext({
+      paymentIntent: { id_grupo_cita: GROUP_ID, id_intent: ALTERNATE_INTENT_ID },
+      pendingResumeContext: {
+        id_grupo_cita: GROUP_ID,
+        id_intent: ALTERNATE_INTENT_ID,
+        titular_email: 'restored@example.com',
+      },
+      currentEmail: 'actual@example.com',
+    })).toEqual({
+      groupId: GROUP_ID,
+      intentId: ALTERNATE_INTENT_ID,
+      titularEmail: 'actual@example.com',
+    });
+
+    expect(resolvePaymentExecutionContext({
+      paymentIntent: { id_grupo_cita: GROUP_ID, id_intent: ALTERNATE_INTENT_ID },
+      pendingResumeContext: {
+        id_grupo_cita: GROUP_ID,
+        id_intent: INTENT_ID,
+        titular_email: 'historico@example.com',
+      },
+      currentEmail: '',
+    }).titularEmail).toBe('');
   });
 
   test('contexto pendiente especifico tambien localiza el intent y consulta backend', async () => {
