@@ -57,6 +57,37 @@ function dispatchProviderMessage(iframe, overrides = {}) {
   fireEvent(window, event);
 }
 
+function createBookingFlow(overrides = {}) {
+  return {
+    bookingBlocksSummary: [],
+    cancelBookingFlow: vi.fn(),
+    createPaymentIntentForHold: vi.fn(),
+    creatingPaymentIntent: false,
+    goToConfirm: vi.fn(),
+    holdExpired: false,
+    holdExpiresAtIso: '2099-08-01T12:00:00.000Z',
+    holdRemainingMs: 60_000,
+    paymentIntent: {
+      id_intent: 'intent-payment-ui',
+      monto_hnl: 1,
+      estado_intent_codigo: 'link_generado',
+    },
+    paymentResult: null,
+    refreshPaymentStatus: vi.fn(),
+    checkingPaymentStatus: false,
+    completePaymentSimulation: vi.fn(),
+    completePixelPayPayment: vi.fn(),
+    holdPricing: { subtotal_hnl: 1, cubierto_por_plan_hnl: 0, total_pagar_hnl: 1 },
+    holdTotalToPay: 1,
+    membershipHasContext: false,
+    membershipUxMessage: '',
+    membershipCompanionNotice: '',
+    paymentRestoring: false,
+    paymentCanExecuteSale: true,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => {});
 });
@@ -306,6 +337,19 @@ describe('TodoPagoHostedModal', () => {
 });
 
 describe('integracion del shell TodoPago', () => {
+  test('PixelPay normal muestra su formulario sin contenido TodoPago', () => {
+    vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay');
+    vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'false');
+    bookingFlowMock.current = createBookingFlow();
+
+    render(<PublicBookingPaymentStep />);
+
+    expect(screen.getByText('PixelPay Sandbox: usa exclusivamente una tarjeta de prueba.')).not.toBeNull();
+    expect(screen.getByLabelText('Numero de tarjeta')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' })).not.toBeNull();
+    expect(screen.queryByText(/TodoPago/i)).toBeNull();
+  });
+
   test('PixelPay restaurado pendiente oculta cobro y conserva una verificacion manual', async () => {
     vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay');
     vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'false');
@@ -345,8 +389,12 @@ describe('integracion del shell TodoPago', () => {
     const view = render(<PublicBookingPaymentStep />);
 
     expect(screen.getByText('Tu pago requiere verificación. No vuelvas a realizar el pago.')).not.toBeNull();
+    expect(screen.getByText('Pago con PixelPay Sandbox')).not.toBeNull();
+    expect(screen.getByText('Estamos verificando el resultado del pago con PixelPay. No vuelvas a realizar el pago.')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Verificar estado del pago' })).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Pagar con PixelPay Sandbox' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Continuar con TodoPago' })).toBeNull();
+    expect(screen.queryByText('Pago alojado por TodoPago')).toBeNull();
     expect(screen.queryByLabelText('Numero de tarjeta')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Verificar estado del pago' }));
@@ -357,6 +405,30 @@ describe('integracion del shell TodoPago', () => {
     view.rerender(<PublicBookingPaymentStep />);
     expect(refreshPaymentStatus).toHaveBeenCalledTimes(1);
     expect(completePixelPayPayment).not.toHaveBeenCalled();
+  });
+
+  test('PixelPay restaurando mantiene UI PixelPay y nunca muestra TodoPago', () => {
+    vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay');
+    vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'false');
+    bookingFlowMock.current = createBookingFlow({ paymentRestoring: true });
+
+    render(<PublicBookingPaymentStep />);
+
+    expect(screen.getByText('Pago con PixelPay Sandbox')).not.toBeNull();
+    expect(screen.queryByLabelText('Numero de tarjeta')).toBeNull();
+    expect(screen.queryByText(/TodoPago/i)).toBeNull();
+  });
+
+  test('simulator conserva su formulario y accion local', () => {
+    vi.stubEnv('VITE_PAYMENT_PROVIDER', 'simulator');
+    vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'true');
+    bookingFlowMock.current = createBookingFlow();
+
+    render(<PublicBookingPaymentStep />);
+
+    expect(screen.getByLabelText('Numero de tarjeta')).not.toBeNull();
+    expect(screen.getByText('TodoPago test')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Ejecutar simulator' })).not.toBeNull();
   });
 
   test.each(['qa.masterfadeapp.com', 'staging.masterfadeapp.com', 'masterfadeapp.com'])(

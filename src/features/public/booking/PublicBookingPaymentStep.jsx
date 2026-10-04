@@ -311,6 +311,7 @@ export default function PublicBookingPaymentStep() {
     }
   });
   const paymentSimulationAction = resolvePaymentSimulationAction();
+  const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
   const paymentUiState = normalizeBookingPaymentUiState({
     paymentIntent,
     paymentResult,
@@ -749,6 +750,16 @@ export default function PublicBookingPaymentStep() {
                 : 'Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.'}
             </div>
             </div>
+          ) : isPixelPayProvider ? (
+            <div className="public-booking-contact-card public-booking-payment-gateway-card">
+              <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
+                <ShieldCheck size={30} className="text-[var(--mf-accent)]" />
+                <h4 className="citas-confirm-subtitle">Pago con PixelPay Sandbox</h4>
+                <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
+                  Estamos verificando el resultado del pago con PixelPay. No vuelvas a realizar el pago.
+                </p>
+              </div>
+            </div>
           ) : (
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
               <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
@@ -893,14 +904,16 @@ export default function PublicBookingPaymentStep() {
             <span>{paymentRestoring ? 'Verificando...' : formatCurrencyHnl(effectiveTotalToPay)}</span>
           </div>
         </div>
-        <TodoPagoHostedModal
-          open={hostedModalOpen}
-          launch={paymentLaunch}
-          onResult={handleHostedResult}
-          onClose={() => setHostedModalOpen(false)}
-          onError={handleHostedError}
-          onSubmitted={() => setHostedLaunchConsumed(true)}
-        />
+        {!isPixelPayProvider ? (
+          <TodoPagoHostedModal
+            open={hostedModalOpen}
+            launch={paymentLaunch}
+            onResult={handleHostedResult}
+            onClose={() => setHostedModalOpen(false)}
+            onError={handleHostedError}
+            onSubmitted={() => setHostedLaunchConsumed(true)}
+          />
+        ) : null}
       </div>
     </div>
   );
