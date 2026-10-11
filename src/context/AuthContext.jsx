@@ -7,6 +7,7 @@ import {
   resetSessionInvalidation,
 } from '../services/httpClient.js';
 import { supabase } from '../config/supabaseClient.js';
+import { setAdminReportesSessionScope } from '../features/admin/lib/adminReportesApi.js';
 
 const AuthContext = createContext(null);
 const IDLE_SESSION_TIMEOUT_MS = 20 * 60 * 1000;
@@ -176,6 +177,12 @@ export function AuthProvider({ children }) {
   const backendTouchInFlightRef = useRef(false);
 
   const applyUserState = useCallback((nextUser) => {
+    setAdminReportesSessionScope({
+      userId: nextUser?.id_usuario,
+      roles: normalizeRoles(nextUser?.roles),
+      branchIds: normalizeBranchIds(nextUser?.branch_ids),
+      empresaId: nextUser?.empresa_id ?? null,
+    });
     if (nextUser?.id_usuario) {
       idleExpirationHandledRef.current = false;
       const now = Date.now();
