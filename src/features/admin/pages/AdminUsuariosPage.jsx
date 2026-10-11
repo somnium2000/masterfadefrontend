@@ -34,6 +34,7 @@ import {
   TableRow,
 } from '../../../components/ui/table.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import { useAuth } from '../../../context/AuthContext.jsx';
 import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
 import { replaceItemById } from '../../../lib/collectionState.js';
 
@@ -147,6 +148,10 @@ function getRoleCodes(roles) {
     .filter(Boolean);
 }
 
+export function isPrivilegedUsuario(usuario) {
+  return isProtectedRootUser(usuario) || getRoleCodes(usuario?.roles).includes('super_admin');
+}
+
 function formatRoleLabel(roleCode) {
   const normalized = String(roleCode || '').trim().toLowerCase();
   if (!normalized) return 'Sin rol';
@@ -160,6 +165,8 @@ function isActivationState(estadoAcceso) {
 
 export default function AdminUsuariosPage() {
   const navigate = useNavigate();
+  const { roles: actorRoles = [] } = useAuth();
+  const isAdminOnly = actorRoles.includes('admin') && !actorRoles.includes('super_admin');
   const [usuarios, setUsuarios] = useState([]);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState('');
@@ -181,27 +188,32 @@ export default function AdminUsuariosPage() {
     }
   });
 
+  const visibleUsuarios = useMemo(
+    () => (isAdminOnly ? usuarios.filter((usuario) => !isPrivilegedUsuario(usuario)) : usuarios),
+    [isAdminOnly, usuarios]
+  );
+
   const roleFilterOptions = useMemo(() => {
     const uniqueRoles = new Set();
-    usuarios.forEach((usuario) => {
+    visibleUsuarios.forEach((usuario) => {
       getRoleCodes(usuario?.roles).forEach((roleCode) => uniqueRoles.add(roleCode));
     });
     return Array.from(uniqueRoles);
-  }, [usuarios]);
+  }, [visibleUsuarios]);
 
   const origenFilterOptions = useMemo(() => {
     const origins = new Set();
-    usuarios.forEach((usuario) => {
+    visibleUsuarios.forEach((usuario) => {
       const value = String(usuario?.origen || 'interno').trim();
       if (value) origins.add(value);
     });
     return Array.from(origins);
-  }, [usuarios]);
+  }, [visibleUsuarios]);
 
   // AM: Filtro compuesto de usuarios para busqueda por texto y estado sin recargar API.
   const filteredUsuarios = useMemo(() => {
     const searchValue = search.trim().toLowerCase();
-    return usuarios.filter((usuario) => {
+    return visibleUsuarios.filter((usuario) => {
       if (searchValue) {
         const searchable = [
           usuario?.nombre_completo,
@@ -229,7 +241,7 @@ export default function AdminUsuariosPage() {
 
       return true;
     });
-  }, [filters, search, usuarios]);
+  }, [filters, search, visibleUsuarios]);
 
   const activeFilterCount = useMemo(
     () => Object.values(filters).filter((value) => value !== 'all').length,
@@ -358,7 +370,7 @@ export default function AdminUsuariosPage() {
   async function handleResendSetup(usuario) {
     const idUsuario = usuario?.id_usuario;
     if (!idUsuario || loadingUserId) return;
-    if (isProtectedRootUser(usuario)) {
+    if (isProtectedRootUser(usuario) || (isAdminOnly && isPrivilegedUsuario(usuario))) {
       notifications.error(PROTECTED_ROOT_MESSAGE, { dedupeKey: 'personas-usuarios-root-protected' });
       return;
     }
@@ -386,6 +398,7 @@ export default function AdminUsuariosPage() {
 
   async function handleToggleBlock(usuario) {
     const shouldActivate = isActivationState(usuario?.estado_acceso);
+    if (isAdminOnly && isPrivilegedUsuario(usuario)) return;
     if (!shouldActivate && isProtectedRootUser(usuario)) {
       notifications.error(PROTECTED_ROOT_MESSAGE, { dedupeKey: 'personas-usuarios-root-protected' });
       return;
@@ -401,6 +414,10 @@ export default function AdminUsuariosPage() {
     const usuario = confirmTarget;
     if (!usuario?.id_usuario) return;
     const shouldActivate = usuario?._action === 'activar';
+    if (isAdminOnly && isPrivilegedUsuario(usuario)) {
+      setConfirmTarget(null);
+      return;
+    }
     if (!shouldActivate && isProtectedRootUser(usuario)) {
       notifications.error(PROTECTED_ROOT_MESSAGE, { dedupeKey: 'personas-usuarios-root-protected' });
       setConfirmTarget(null);
@@ -539,7 +556,7 @@ export default function AdminUsuariosPage() {
         <EmptyState
           icon={ShieldCheck}
           title="Sin resultados"
-          description={usuarios.length ? 'No hay coincidencias con la busqueda o filtros actuales.' : 'Aun no hay usuarios internos habilitados.'}
+          description={visibleUsuarios.length ? 'No hay coincidencias con la busqueda o filtros actuales.' : 'Aun no hay usuarios internos habilitados.'}
         />
       )}
 
