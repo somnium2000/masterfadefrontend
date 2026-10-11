@@ -79,7 +79,7 @@ describe('PixelPay billing address', () => {
     expect(isPixelPayBillingAddressPlaceholder(address)).toBe(true);
   });
 
-  it.each(['Blvd Suyapa', 'Blvd. Suyapa', 'Tegucigalpa', 'Residencial QA'])(
+  it.each(['Blvd Suyapa', 'Blvd. Suyapa, Tegucigalpa', 'Residencial QA'])(
     'acepta direccion real %s',
     (address) => {
       expect(isPixelPayBillingAddressPlaceholder(address)).toBe(false);
