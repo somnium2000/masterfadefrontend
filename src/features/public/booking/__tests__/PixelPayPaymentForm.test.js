@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPaymentCardProviderLabel,
   getPixelPayReconciliationNotice,
+  isPixelPayBillingAddressPlaceholder,
+  isPixelPayCardExpireCurrentOrFuture,
   isCanonicalBookingBlock,
   resolveCanonicalBookingBlocks,
   resolvePaymentAmount,
   resolvePaymentBreakdown,
   shouldQueryPixelPayProviderOnManualVerify,
   toPixelPayCardExpire,
+  validatePaymentForm,
 } from '../PublicBookingPaymentStep.jsx';
 
 describe('PixelPay card_expire', () => {
@@ -22,6 +25,80 @@ describe('PixelPay card_expire', () => {
   it('rechaza mes o formato invalido', () => {
     expect(() => toPixelPayCardExpire('13/30')).toThrow(/MM\/AA/);
     expect(() => toPixelPayCardExpire('3012')).toThrow(/MM\/AA/);
+  });
+});
+
+describe('PixelPay expiry validity', () => {
+  const referenceDate = new Date('2026-10-10T16:51:50.000Z');
+
+  it.each([
+    ['10/26', true],
+    ['11/26', true],
+    ['12/28', true],
+    ['09/26', false],
+    ['12/25', false],
+    ['13/26', false],
+    ['1228', false],
+  ])('evalua %s sin depender del dia (%s)', (expiry, expected) => {
+    expect(isPixelPayCardExpireCurrentOrFuture(expiry, referenceDate)).toBe(expected);
+  });
+
+  it('muestra el error de tarjeta vencida antes de transformar o enviar', () => {
+    const errors = validatePaymentForm({
+      cardholderName: 'Cliente QA',
+      phone: '99999999',
+      cardNumber: '4111111111111111',
+      expiry: '09/26',
+      cvv: '999',
+      billingAddress: 'Blvd Suyapa',
+      billingCity: 'Tegucigalpa',
+      billingState: 'HN-FM',
+      billingCountry: 'HN',
+    }, referenceDate);
+    expect(errors.expiry).toBe('La tarjeta se encuentra vencida.');
+  });
+
+  it('distingue formato MM/AA invalido de una tarjeta vencida', () => {
+    const errors = validatePaymentForm({
+      cardholderName: 'Cliente QA',
+      phone: '99999999',
+      cardNumber: '4111111111111111',
+      expiry: '1228',
+      cvv: '999',
+      billingAddress: 'Blvd Suyapa',
+      billingCity: 'Tegucigalpa',
+      billingState: 'HN-FM',
+      billingCountry: 'HN',
+    }, referenceDate);
+    expect(errors.expiry).toBe('Ingresa una fecha MM/AA valida.');
+  });
+});
+
+describe('PixelPay billing address', () => {
+  it.each(['QA', ' qa ', 'TEST', 'N/A'])('rechaza placeholder exacto %s', (address) => {
+    expect(isPixelPayBillingAddressPlaceholder(address)).toBe(true);
+  });
+
+  it.each(['Blvd Suyapa', 'Blvd. Suyapa', 'Tegucigalpa', 'Residencial QA'])(
+    'acepta direccion real %s',
+    (address) => {
+      expect(isPixelPayBillingAddressPlaceholder(address)).toBe(false);
+    },
+  );
+
+  it('usa el mensaje visible seguro para placeholders', () => {
+    const errors = validatePaymentForm({
+      cardholderName: 'Cliente QA',
+      phone: '99999999',
+      cardNumber: '4111111111111111',
+      expiry: '11/26',
+      cvv: '999',
+      billingAddress: ' QA ',
+      billingCity: 'Tegucigalpa',
+      billingState: 'HN-FM',
+      billingCountry: 'HN',
+    }, new Date('2026-10-10T16:51:50.000Z'));
+    expect(errors.billingAddress).toBe('Ingresa una dirección de facturación válida.');
   });
 });
 

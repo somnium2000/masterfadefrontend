@@ -36,6 +36,9 @@ const HONDURAS_DEPARTMENTS = [
   ['HN-LP', 'La Paz'], ['HN-OC', 'Ocotepeque'], ['HN-OL', 'Olancho'], ['HN-SB', 'Santa Barbara'],
   ['HN-VA', 'Valle'], ['HN-YO', 'Yoro'],
 ];
+const PIXELPAY_BILLING_ADDRESS_PLACEHOLDERS = new Set([
+  'QA', 'TEST', 'PRUEBA', 'N/A', 'NA', 'NONE', 'NULL',
+]);
 
 function normalizeDigits(value) {
   return String(value || '').replace(/\D+/g, '');
@@ -62,6 +65,20 @@ export function toPixelPayCardExpire(value) {
   const match = String(value || '').trim().match(/^(0[1-9]|1[0-2])\/([0-9]{2})$/);
   if (!match) throw new Error('La expiracion debe tener formato MM/AA.');
   return `${match[2]}${match[1]}`;
+}
+
+export function isPixelPayBillingAddressPlaceholder(value) {
+  return PIXELPAY_BILLING_ADDRESS_PLACEHOLDERS.has(String(value || '').trim().toUpperCase());
+}
+
+export function isPixelPayCardExpireCurrentOrFuture(value, referenceDate = new Date()) {
+  const match = String(value || '').trim().match(/^(0[1-9]|1[0-2])\/([0-9]{2})$/);
+  if (!match) return false;
+  const expireMonth = Number(match[1]);
+  const expireYear = 2000 + Number(match[2]);
+  const currentYear = referenceDate.getUTCFullYear();
+  const currentMonth = referenceDate.getUTCMonth() + 1;
+  return expireYear > currentYear || (expireYear === currentYear && expireMonth >= currentMonth);
 }
 
 export function buildPaymentCardProviderLabel({ providerType, cardBrand, cardBrandLabel }) {
@@ -186,10 +203,10 @@ function formatPhone(value) {
   return normalizeDigits(value).slice(0, 15);
 }
 
-function validatePaymentForm(form) {
+export function validatePaymentForm(form, referenceDate = new Date()) {
   const errors = {};
   const expiryDigits = normalizeDigits(form.expiry);
-  const expiryMonth = Number(expiryDigits.slice(0, 2));
+  const expiryFormatValid = /^(0[1-9]|1[0-2])\/[0-9]{2}$/.test(String(form.expiry || '').trim());
 
   if (!String(form.cardholderName || '').trim()) {
     errors.cardholderName = 'Ingresa el nombre del titular.';
@@ -200,13 +217,17 @@ function validatePaymentForm(form) {
   if (normalizeDigits(form.cardNumber).length < 13) {
     errors.cardNumber = 'Ingresa un numero de tarjeta de prueba valido.';
   }
-  if (expiryDigits.length !== 4 || Number.isNaN(expiryMonth) || expiryMonth < 1 || expiryMonth > 12) {
+  if (expiryDigits.length !== 4 || !expiryFormatValid) {
     errors.expiry = 'Ingresa una fecha MM/AA valida.';
+  } else if (!isPixelPayCardExpireCurrentOrFuture(form.expiry, referenceDate)) {
+    errors.expiry = 'La tarjeta se encuentra vencida.';
   }
   if (![3, 4].includes(normalizeDigits(form.cvv).length)) {
     errors.cvv = 'Ingresa un CVV de 3 o 4 digitos.';
   }
-  if (!String(form.billingAddress || '').trim()) errors.billingAddress = 'Ingresa la direccion de facturacion.';
+  if (!String(form.billingAddress || '').trim() || isPixelPayBillingAddressPlaceholder(form.billingAddress)) {
+    errors.billingAddress = 'Ingresa una dirección de facturación válida.';
+  }
   if (!String(form.billingCity || '').trim()) errors.billingCity = 'Ingresa la ciudad.';
   if (!HONDURAS_DEPARTMENTS.some(([code]) => code === form.billingState)) {
     errors.billingState = 'Selecciona un departamento valido.';
