@@ -1099,14 +1099,14 @@ export default function AdminServicesCatalogPage() {
         );
     }
 
-    function BranchSummary({ servicio, selectedTariff, compact = false }) {
+    function BranchSummary({ servicio, selectedTariff }) {
         const activeTariffs = getActiveTariffs(servicio);
         if (sucursal) {
             if (!selectedTariff?.tarifa_activa) {
                 return <span className="text-sm text-[var(--mf-text-2)]">Sin tarifa activa en esta sucursal</span>;
             }
             return (
-                <div className={`grid gap-2 ${compact ? 'grid-cols-3' : 'grid-cols-1 min-[390px]:grid-cols-3'}`}>
+                <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-3">
                     <BranchConfigField label="Precio" value={formatServicePrice(selectedTariff.precio_hnl)} />
                     <BranchConfigField label="Duración" value={`${selectedTariff.duracion_min ?? '-'} min`} />
                     <BranchConfigField label="Buffer" value={`${selectedTariff.buffer_min ?? '-'} min`} />
@@ -1144,7 +1144,7 @@ export default function AdminServicesCatalogPage() {
                     <MoreHorizontal size={17} aria-hidden="true" />
                     <span className="hidden sm:inline">Acciones</span>
                 </summary>
-                <div className="absolute right-0 z-20 mt-1 grid min-w-[230px] gap-1 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-1.5 shadow-[var(--mf-shadow-soft)]">
+                <div className="absolute right-0 z-20 mt-1 grid w-[230px] max-w-[calc(100vw-2rem)] gap-1 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-1.5 shadow-[var(--mf-shadow-soft)]">
                     {globalMode ? (
                         <>
                             <Button type="button" variant="ghost" size="sm" className="justify-start gap-2" disabled={!resolveMutationBranchId(servicio)} onClick={() => openEditar(servicio)}>
@@ -1185,15 +1185,15 @@ export default function AdminServicesCatalogPage() {
 
     function ServicioList() {
         return (
-            <section aria-label="Lista de servicios" className="overflow-visible rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)]">
-                <div role="row" className="hidden grid-cols-[minmax(220px,1.5fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_auto] gap-4 border-b border-[var(--mf-nav-border)] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)] lg:grid">
+            <section aria-label="Lista de servicios" className="@container overflow-visible rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)]">
+                <div role="row" className="hidden grid-cols-[minmax(220px,1.5fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_auto] gap-4 border-b border-[var(--mf-nav-border)] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)] @[54rem]:grid">
                     <span>Servicio</span><span>Estado maestro</span><span>{sucursal ? 'Tarifa local' : 'Sucursales'}</span><span className="text-right">Acciones</span>
                 </div>
                 <div className="divide-y divide-[var(--mf-nav-border)]">
                     {paginatedServicios.map((servicio) => {
                         const selectedTariff = sucursal ? getSelectedBranchTariff(servicio, sucursal) : null;
                         return (
-                            <article key={buildServicioScopeKey(servicio)} role="row" className="grid min-w-0 gap-3 px-3 py-3 transition-colors hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_40%,transparent)] sm:px-4 lg:grid-cols-[minmax(220px,1.5fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_auto] lg:items-center lg:gap-4">
+                            <article key={buildServicioScopeKey(servicio)} role="row" className="grid min-w-0 gap-3 px-3 py-3 transition-colors hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_40%,transparent)] sm:px-4 @[54rem]:grid-cols-[minmax(220px,1.5fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_auto] @[54rem]:items-center @[54rem]:gap-4">
                                 <div className="flex min-w-0 items-start gap-3">
                                     <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Scissors size={16} /></span>
                                     <div className="min-w-0">
@@ -1202,7 +1202,7 @@ export default function AdminServicesCatalogPage() {
                                     </div>
                                 </div>
                                 <ServiceBadges servicio={servicio} selectedTariff={selectedTariff} />
-                                <BranchSummary servicio={servicio} selectedTariff={selectedTariff} compact />
+                                <BranchSummary servicio={servicio} selectedTariff={selectedTariff} />
                                 <ServiceActions servicio={servicio} selectedTariff={selectedTariff} />
                             </article>
                         );

@@ -90,7 +90,9 @@ afterEach(() => cleanup());
 describe('presentación responsive del catálogo de servicios', () => {
   test('muestra lista por defecto y conserva los mismos registros al alternar tarjetas y lista', async () => {
     await renderLoaded();
-    expect(screen.getByRole('region', { name: 'Lista de servicios' })).toBeInTheDocument();
+    const list = screen.getByRole('region', { name: 'Lista de servicios' });
+    expect(list).toHaveClass('@container');
+    expect(screen.getByText('Corte clásico').closest('[role="row"]')).toHaveClass('@[54rem]:grid-cols-[minmax(220px,1.5fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_auto]');
     expect(screen.getByRole('button', { name: 'Lista' })).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.click(screen.getByRole('button', { name: 'Tarjetas' }));
@@ -142,8 +144,10 @@ describe('presentación responsive del catálogo de servicios', () => {
   test('mantiene acciones y confirmación destructiva existentes', async () => {
     catalogApiMock.deactivateAdminServicioGlobal.mockResolvedValue({ data: {} });
     await renderLoaded();
-    fireEvent.click(screen.getByLabelText('Acciones de Corte clásico'));
-    fireEvent.click(screen.getByRole('button', { name: 'Desactivar globalmente' }));
+    const actionMenu = screen.getByLabelText('Acciones de Corte clásico').closest('details');
+    fireEvent.click(within(actionMenu).getByLabelText('Acciones de Corte clásico'));
+    expect(within(actionMenu).getByRole('button', { name: 'Editar servicio global' }).parentElement).toHaveClass('max-w-[calc(100vw-2rem)]');
+    fireEvent.click(within(actionMenu).getByRole('button', { name: 'Desactivar globalmente' }));
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveTextContent('Desactivar globalmente');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Desactivar globalmente' }));
