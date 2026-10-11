@@ -28,7 +28,6 @@ import DetailInfoModalContent from '../../../components/data/DetailInfoModalCont
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
-import ImageUploaderField from '../../../components/data/ImageUploaderField.jsx';
 import {
   Table,
   TableBody,
@@ -70,9 +69,6 @@ const FORM_DEFAULTS = {
   estado: true,
   consentimiento_marketing: false,
   acepta_terminos: false,
-  foto_perfil_asset_id: null,
-  foto_perfil_signed_url: '',
-  foto_perfil_modificada: false,
 };
 
 const CLIENTE_FILTER_DEFAULTS = {
@@ -150,9 +146,6 @@ export function mapClienteToForm(cliente) {
     estado: Boolean(cliente?.estado_cliente),
     consentimiento_marketing: Boolean(cliente?.consentimiento_marketing),
     acepta_terminos: Boolean(cliente?.acepta_terminos),
-    foto_perfil_asset_id: cliente?.foto_perfil_asset_id || null,
-    foto_perfil_signed_url: cliente?.foto_perfil_signed_url || '',
-    foto_perfil_modificada: false,
   };
 }
 
@@ -213,9 +206,6 @@ export function buildPayload(values) {
       acepta_terminos: Boolean(values.acepta_terminos),
     },
   };
-  if (values.foto_perfil_modificada) {
-    payload.cliente.foto_perfil_asset_id = values.foto_perfil_asset_id || null;
-  }
   return payload;
 }
 
@@ -751,33 +741,6 @@ export default function AdminClientesPage() {
               <Input className="mf-input mt-1" value={formValues.observaciones} onChange={(e) => setFormValues((p) => ({ ...p, observaciones: e.target.value }))} />
             </div>
 
-            <div className="sm:col-span-2">
-              {editingId ? (
-                <ImageUploaderField
-                  label="Foto de perfil privada"
-                  helperText="Imagen interna del cliente (bucket privado). La vista usa URL firmada temporal."
-                  scopeKey="private_client_profile"
-                  entityType="cliente"
-                  entityId={editingId}
-                  idSucursal={formValues.id_sucursal_origen || selectedCliente?.id_sucursal_origen || null}
-                  allowedMimeTypes={['image/jpeg', 'image/png', 'image/webp']}
-                  valueAssetId={formValues.foto_perfil_asset_id}
-                  initialPreviewUrl={formValues.foto_perfil_signed_url}
-                  onChange={(payload) => {
-                    setFormValues((prev) => ({
-                      ...prev,
-                      foto_perfil_asset_id: payload?.asset_id || null,
-                      foto_perfil_signed_url: payload?.signed_read_url || payload?.public_url || '',
-                      foto_perfil_modificada: true,
-                    }));
-                  }}
-                />
-              ) : (
-                <p className="rounded-lg border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_54%,transparent)] px-3 py-2 text-xs text-[var(--mf-text-2)]">
-                  Guarda primero el cliente para habilitar carga de foto de perfil privada.
-                </p>
-              )}
-            </div>
           </div>
 
           <div className="mt-3 rounded-[12px] border border-[var(--mf-nav-border)] p-3 text-sm">

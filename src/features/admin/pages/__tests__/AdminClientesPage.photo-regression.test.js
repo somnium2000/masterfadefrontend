@@ -1,7 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { buildPayload, mapClienteToForm } from '../AdminClientesPage.jsx';
-
-const ASSET_ID = '33333333-3333-4333-8333-333333333333';
 
 function formValues(overrides = {}) {
   return {
@@ -22,9 +21,6 @@ function formValues(overrides = {}) {
     tiene_acceso: true,
     consentimiento_marketing: true,
     acepta_terminos: true,
-    foto_perfil_asset_id: ASSET_ID,
-    foto_perfil_signed_url: 'https://storage.test/signed/client-profile',
-    foto_perfil_modificada: false,
     ...overrides,
   };
 }
@@ -49,18 +45,10 @@ describe('payload de edición de clientes', () => {
     });
   });
 
-  test('envía null únicamente cuando la fotografía fue retirada intencionalmente', () => {
-    const payload = buildPayload(formValues({
-      foto_perfil_asset_id: null,
-      foto_perfil_signed_url: '',
-      foto_perfil_modificada: true,
-    }));
-
-    expect(payload.cliente.foto_perfil_asset_id).toBeNull();
-  });
-
-  test('envía el nuevo asset cuando la fotografía fue reemplazada', () => {
-    const payload = buildPayload(formValues({ foto_perfil_modificada: true }));
-    expect(payload.cliente.foto_perfil_asset_id).toBe(ASSET_ID);
+  test('no ofrece controles administrativos para modificar la fotografía', () => {
+    const source = readFileSync(new URL('../AdminClientesPage.jsx', import.meta.url), 'utf8');
+    expect(source).not.toContain('ImageUploaderField');
+    expect(source).not.toContain('Guarda primero el cliente para habilitar carga de foto de perfil privada.');
+    expect(source).toContain('selectedCliente.foto_perfil_signed_url');
   });
 });
