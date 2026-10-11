@@ -225,7 +225,7 @@ function CortesiaForm({ values, onChange, branches, branchIds, lockBranchSelecti
   );
 }
 
-function validateForm(values) {
+function validateForm(values, { requireBranch = true } = {}) {
   const nombre = normalizeFormText(values.nombre);
   if (!nombre) return "El nombre es obligatorio.";
   if (nombre.length > 140) return "El nombre no puede exceder 140 caracteres.";
@@ -233,7 +233,7 @@ function validateForm(values) {
   const descripcion = normalizeFormText(values.descripcion);
   if (descripcion.length > 500) return "La descripción no puede exceder 500 caracteres.";
 
-  if (!Array.isArray(values.sucursales) || values.sucursales.length === 0) {
+  if (requireBranch && (!Array.isArray(values.sucursales) || values.sucursales.length === 0)) {
     return "Debes seleccionar al menos una sucursal.";
   }
 
@@ -270,6 +270,7 @@ export default function AdminCortesiasCatalogPage() {
   const [formValues, setFormValues] = useState(FORM_DEFAULTS);
   const [formError, setFormError] = useState("");
   const [formLoading, setFormLoading] = useState(false);
+  const [globalEditConfirmOpen, setGlobalEditConfirmOpen] = useState(false);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailTarget, setDetailTarget] = useState(null);
@@ -434,8 +435,24 @@ export default function AdminCortesiasCatalogPage() {
     setConfirmOpen(true);
   }
 
-  async function handleGuardar() {
-    const validationError = validateForm(formValues);
+  function buildEditBranchChanges() {
+    const initial = new Map((editTarget?.sucursales || []).map((item) => [item.id_sucursal, Boolean(item.activa)]));
+    const current = new Map(formValues.sucursales.map((item) => [item.id_sucursal, Boolean(item.activa)]));
+    const branchIdsToCompare = new Set([...initial.keys(), ...current.keys()]);
+
+    return [...branchIdsToCompare]
+      .filter((branchId) => initial.get(branchId) !== current.get(branchId))
+      .map((branchId) => ({ id_sucursal: branchId, activa: current.get(branchId) ?? false }));
+  }
+
+  function hasGlobalFieldChanges() {
+    if (!editTarget) return false;
+    return normalizeFormText(formValues.nombre) !== normalizeFormText(editTarget.nombre)
+      || normalizeFormText(formValues.descripcion) !== normalizeFormText(editTarget.descripcion);
+  }
+
+  async function saveForm() {
+    const validationError = validateForm(formValues, { requireBranch: !editTarget });
     if (validationError) {
       setFormError(validationError);
       return;
@@ -448,16 +465,18 @@ export default function AdminCortesiasCatalogPage() {
       const payload = {
         nombre: normalizeFormText(formValues.nombre),
         descripcion: normalizeFormText(formValues.descripcion) || null,
-        sucursales: formValues.sucursales.map((item) => ({
-          id_sucursal: item.id_sucursal,
-          activa: Boolean(item.activa),
-        })),
       };
 
       if (editTarget) {
+        const branchChanges = buildEditBranchChanges();
+        if (branchChanges.length > 0) payload.sucursales = branchChanges;
         await updateAdminCortesia(editTarget.id, payload);
         notifications.success("Cortesía actualizada");
       } else {
+        payload.sucursales = formValues.sucursales.map((item) => ({
+          id_sucursal: item.id_sucursal,
+          activa: Boolean(item.activa),
+        }));
         await createAdminCortesia(payload);
         notifications.success("Cortesía creada");
       }
@@ -470,6 +489,24 @@ export default function AdminCortesiasCatalogPage() {
     } finally {
       setFormLoading(false);
     }
+  }
+
+  function handleGuardar() {
+    const validationError = validateForm(formValues, { requireBranch: !editTarget });
+    if (validationError) {
+      setFormError(validationError);
+      return;
+    }
+    if (hasGlobalFieldChanges()) {
+      setGlobalEditConfirmOpen(true);
+      return;
+    }
+    void saveForm();
+  }
+
+  function handleConfirmGlobalEdit() {
+    setGlobalEditConfirmOpen(false);
+    void saveForm();
   }
 
   async function handleConfirmState() {
@@ -788,6 +825,18 @@ export default function AdminCortesiasCatalogPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ActionConfirmDialog
+        open={globalEditConfirmOpen}
+        onOpenChange={(open) => { if (!formLoading) setGlobalEditConfirmOpen(open); }}
+        tone="warning"
+        title="Modificar información global"
+        description="Estás modificando el nombre o la descripción de una cortesía compartida. Este cambio se reflejará en todas las sucursales donde esté asociada. ¿Deseas continuar?"
+        confirmLabel="Confirmar cambios"
+        cancelLabel="Cancelar"
+        loading={formLoading}
+        onConfirm={handleConfirmGlobalEdit}
+      />
 
       <ActionConfirmDialog
         open={confirmOpen}
