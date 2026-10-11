@@ -18,6 +18,10 @@ import {
     RotateCcw,
     X,
     Scissors,
+    List,
+    LayoutGrid,
+    ChevronLeft,
+    ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import {
@@ -39,17 +43,6 @@ import {
 } from '../../../components/ui/dialog.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from '../../../components/ui/table.jsx';
-import ViewToggle from '../../../components/data/ViewToggle.jsx';
-import DataCard from '../../../components/data/DataCard.jsx';
-import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import HoverActionButton from '../../../components/data/HoverActionButton.jsx';
 import DetailInfoModalContent from '../../../components/data/DetailInfoModalContent.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
@@ -89,6 +82,8 @@ const PACKAGE_FILTER_DEFAULTS = {
     composicion: 'all',
     idSucursal: 'all',
 };
+
+const PACKAGES_PAGE_SIZE = 10;
 
 const PACKAGE_STATE_FILTER_LABELS = {
     activo: 'Estado: Activo',
@@ -201,6 +196,11 @@ function getItemsSearchText(paquete) {
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
+}
+
+function getPackageCompositionSummary(paquete) {
+    if (!Array.isArray(paquete?.items) || paquete.items.length === 0) return 'Sin servicios incluidos';
+    return paquete.items.map((item) => `${item?.nombre_servicio || item?.id_servicio}${Number(item?.cantidad) > 1 ? ` ×${Number(item.cantidad)}` : ''}`).join(' · ');
 }
 
 function groupPaquetesByMaster(list = []) {
@@ -425,7 +425,7 @@ function PackageItemsEditor({ items, onChange, serviciosList }) {
                 const currentId = String(item?.id_servicio || '').trim();
 
                 return (
-                    <div key={`${index}-${currentId || 'new'}`} className="grid grid-cols-[1fr_auto_auto] items-center gap-2">
+                    <div key={`${index}-${currentId || 'new'}`} className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto_auto]">
                         <select
                             value={currentId}
                             onChange={(event) => updateItem(index, 'id_servicio', event.target.value)}
@@ -448,7 +448,7 @@ function PackageItemsEditor({ items, onChange, serviciosList }) {
                             min="1"
                             value={item.cantidad}
                             onChange={(event) => updateItem(index, 'cantidad', event.target.value)}
-                            className="w-[86px] text-center"
+                            className="w-full text-center sm:w-[86px]"
                             placeholder="1"
                         />
 
@@ -580,7 +580,8 @@ function PaqueteForm({
             ) : null}
 
             {isOfferOnly ? null : (
-                <>
+                <section className="space-y-3 rounded-[14px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_72%,transparent)] p-3" aria-labelledby="package-master-fields">
+                    <div><h3 id="package-master-fields" className="text-xs font-semibold uppercase tracking-widest text-[var(--mf-accent)]">Información maestra</h3><p className="mt-1 text-xs text-[var(--mf-text-2)]">Identidad compartida por todas las ofertas del paquete.</p></div>
                     <div className="flex flex-col gap-1">
                         <Label htmlFor="fp-nombre">Nombre del paquete maestro *</Label>
                         <Input
@@ -600,11 +601,12 @@ function PaqueteForm({
                             placeholder="Descripcion opcional"
                         />
                     </div>
-                </>
+                </section>
             )}
 
             {isEditMaster || isCreate ? null : (
-                <>
+                <section className="space-y-3 rounded-[14px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_72%,transparent)] p-3" aria-labelledby="package-offer-fields">
+                    <div><h3 id="package-offer-fields" className="text-xs font-semibold uppercase tracking-widest text-[var(--mf-accent)]">Oferta de sucursal</h3><p className="mt-1 text-xs text-[var(--mf-text-2)]">Precio, visibilidad y orden aplicados únicamente a esta sucursal.</p></div>
                     <div className="flex flex-col gap-1">
                         <Label htmlFor="fp-precio">Precio HNL de la oferta *</Label>
                         <Input
@@ -640,7 +642,7 @@ function PaqueteForm({
                             placeholder="100"
                         />
                     </div>
-                </>
+                </section>
             )}
 
             {isOfferOnly ? null : (
@@ -670,16 +672,8 @@ export default function AdminPackagesCatalogPage() {
     const [loading, setLoading] = useState(false);
     const [listError, setListError] = useState('');
 
-    const [view, setView] = useState(
-        () => {
-            try {
-                const stored = localStorage.getItem('mf-view-paquetes');
-                return stored === 'table' || stored === 'cards' ? stored : 'cards';
-            } catch {
-                return 'cards';
-            }
-        }
-    );
+    const [view, setView] = useState('list');
+    const [page, setPage] = useState(1);
 
     const [search, setSearch] = useState('');
     const [filtersOpen, setFiltersOpen] = useState(false);
@@ -764,6 +758,20 @@ export default function AdminPackagesCatalogPage() {
             return true;
         });
     }, [branchNameById, displayPaquetes, filters, search, sucursal]);
+
+    const pageCount = Math.max(1, Math.ceil(filteredPaquetes.length / PACKAGES_PAGE_SIZE));
+    const paginatedPaquetes = useMemo(
+        () => filteredPaquetes.slice((page - 1) * PACKAGES_PAGE_SIZE, page * PACKAGES_PAGE_SIZE),
+        [filteredPaquetes, page]
+    );
+
+    useEffect(() => {
+        setPage(1);
+    }, [filters, search, sucursal, view]);
+
+    useEffect(() => {
+        setPage((current) => Math.min(current, pageCount));
+    }, [pageCount]);
 
     const activeFilterCount = useMemo(
         () => Object.values(filters).filter((value) => value !== 'all').length,
@@ -1379,7 +1387,14 @@ export default function AdminPackagesCatalogPage() {
                             <p className="text-sm text-[var(--mf-text-2)]">
                                 {loading ? 'Cargando...' : `${filteredPaquetes.length} de ${displayPaquetes.length} paquete(s)`}
                             </p>
-                            <ViewToggle defaultView={view} onViewChange={setView} storageKey="paquetes" />
+                            <div className="inline-flex rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-1" role="group" aria-label="Vista del catálogo">
+                                <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')} className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors ${view === 'list' ? 'bg-[var(--mf-accent)] text-[var(--mf-accent-text)]' : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]'}`}>
+                                    <List size={14} /> Lista
+                                </button>
+                                <button type="button" aria-pressed={view === 'cards'} onClick={() => setView('cards')} className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors ${view === 'cards' ? 'bg-[var(--mf-accent)] text-[var(--mf-accent-text)]' : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]'}`}>
+                                    <LayoutGrid size={14} /> Tarjetas
+                                </button>
+                            </div>
                         </div>
 
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -1464,109 +1479,51 @@ export default function AdminPackagesCatalogPage() {
                 />
             ) : null}
 
-            {!loading && !listError && filteredPaquetes.length > 0 && view === 'cards' ? (
-                <CardsCarousel
-                    items={filteredPaquetes}
-                    getItemKey={(paquete) => `${paquete?.id_paquete || 'pkg'}:${sucursal ? paquete?.id_sucursal || 'all' : 'master'}`}
-                    renderItem={(paquete, index, pageIndex) => (
-                        <DataCard
-                            key={`${paquete.id_paquete || 'pkg'}:${sucursal ? paquete.id_sucursal || 'all' : 'master'}`}
-                            animationDelay={(pageIndex * 0.02) + (index * 0.05)}
-                            avatar={<Package size={16} />}
-                            title={paquete.nombre_paquete || 'Paquete'}
-                            subtitle={paquete.descripcion || 'Sin descripcion'}
-                            badge={sucursal ? <PackageStatusBadge activo={Boolean(paquete.activo)} /> : <span className="mf-badge mf-badge-gold">Maestro</span>}
-                            fields={[
-                                ...(!sucursal ? [{
-                                    label: 'Sucursales asociadas',
-                                    value: getPackageBranchSummary(paquete, branchNameById),
-                                }] : []),
-                                {
-                                    label: sucursal ? 'Precio en esta sucursal' : 'Precio por sucursal',
-                                    value: <span className="font-mono font-bold text-[var(--mf-accent)]">{sucursal ? formatPrice(paquete.precio_hnl) : getPackagePriceSummary(paquete)}</span>,
-                                },
-                                ...(sucursal ? [{ label: 'Orden visual en esta sucursal', value: Number(paquete.orden_visual ?? 100) }] : []),
-                                { label: 'Servicios', value: getItemsCount(paquete) },
-                                { label: 'Composicion', value: <PackageCompositionBadge itemsCount={getItemsCount(paquete)} /> },
-                                ...(sucursal
-                                    ? [{ label: 'Publico en esta sucursal', value: <PackageVisibilityBadge visiblePublico={Boolean(paquete.visible_publico)} /> }]
-                                    : [{ label: 'Resumen de ofertas', value: getPackageOfferStateSummary(paquete) }]),
-                                ...(sucursal ? [{ label: 'Estado en esta sucursal', value: <PackageStatusBadge activo={Boolean(paquete.activo)} /> }] : []),
-                            ]}
-                            actions={renderActions(paquete)}
-                        />
-                    )}
-                />
+            {!loading && !listError && paginatedPaquetes.length > 0 && view === 'list' ? (
+                <section aria-label="Lista de paquetes" className="@container overflow-visible rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)]">
+                    <div role="row" className="hidden grid-cols-[minmax(230px,1.35fr)_minmax(240px,1.35fr)_minmax(190px,.85fr)_auto] gap-4 border-b border-[var(--mf-nav-border)] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)] @[62rem]:grid">
+                        <span>Paquete maestro</span><span>Composición</span><span>{sucursal ? 'Oferta local' : 'Resumen comercial'}</span><span className="text-right">Acciones</span>
+                    </div>
+                    <div className="divide-y divide-[var(--mf-nav-border)]">
+                        {paginatedPaquetes.map((paquete) => (
+                            <article key={`${paquete.id_paquete || 'pkg'}:${sucursal ? paquete.id_sucursal || 'all' : 'master'}`} role="row" className="grid min-w-0 gap-3 px-3 py-3 transition-colors hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_40%,transparent)] sm:px-4 @[62rem]:grid-cols-[minmax(230px,1.35fr)_minmax(240px,1.35fr)_minmax(190px,.85fr)_auto] @[62rem]:items-center @[62rem]:gap-4">
+                                <div className="flex min-w-0 items-start gap-3">
+                                    <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Package size={17} /></span>
+                                    <div className="min-w-0"><h2 className="break-words text-sm font-semibold leading-5 text-[var(--mf-text)]">{paquete.nombre_paquete || 'Paquete'}</h2><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-[var(--mf-text-2)]">{paquete.descripcion || 'Sin descripción'}</p></div>
+                                </div>
+                                <div className="min-w-0"><div className="mb-1 flex flex-wrap items-center gap-2"><PackageCompositionBadge itemsCount={getItemsCount(paquete)} /><span className="text-xs text-[var(--mf-text-2)]">{getItemsCount(paquete)} servicios</span></div><p className="line-clamp-2 break-words text-xs leading-5 text-[var(--mf-text)]">{getPackageCompositionSummary(paquete)}</p></div>
+                                <div className="min-w-0 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_42%,transparent)] px-3 py-2">
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--mf-text-2)]">{sucursal ? 'Precio en esta sucursal' : 'Rango por sucursal'}</p><p className="mt-1 font-mono text-sm font-bold text-[var(--mf-accent)]">{sucursal ? formatPrice(paquete.precio_hnl) : getPackagePriceSummary(paquete)}</p>
+                                    <div className="mt-2 flex flex-wrap gap-1.5">{sucursal ? <><PackageStatusBadge activo={Boolean(paquete.activo)} /><PackageVisibilityBadge visiblePublico={Boolean(paquete.visible_publico)} /><span className="mf-badge mf-badge-muted">Orden {Number(paquete.orden_visual ?? 100)}</span></> : <span className="text-xs text-[var(--mf-text-2)]">{getPackageOfferStateSummary(paquete)}</span>}</div>
+                                    {!sucursal ? <details className="mt-2"><summary className="cursor-pointer text-xs font-medium text-[var(--mf-accent)]">Ver {getPackageOffers(paquete).length} oferta(s)</summary><ul className="mt-2 space-y-1.5">{getPackageOffers(paquete).map((offer) => <li key={offer.id_sucursal} className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--mf-text-2)]"><span>{branchNameById[offer.id_sucursal] || offer.id_sucursal}</span><span className="font-mono text-[var(--mf-text)]">{formatPrice(offer.precio_hnl)}</span></li>)}</ul></details> : null}
+                                </div>
+                                <div className="min-w-0 @[62rem]:justify-self-end">{renderActions(paquete)}</div>
+                            </article>
+                        ))}
+                    </div>
+                </section>
             ) : null}
 
-            {!loading && !listError && filteredPaquetes.length > 0 && view === 'table' ? (
-                <div className="mf-table-wrap">
-                    <Table>
-                        <TableHeader>
-                            <TableRow className="border-[var(--mf-nav-border)]">
-                                {!sucursal ? (
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursales asociadas</TableHead>
-                                ) : null}
-                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Paquete maestro</TableHead>
-                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">{sucursal ? 'Precio sucursal' : 'Precio por sucursal'}</TableHead>
-                                {sucursal ? (
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead>
-                                ) : null}
-                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Servicios</TableHead>
-                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Composicion</TableHead>
-                                {sucursal ? (
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Publico</TableHead>
-                                ) : null}
-                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">{sucursal ? 'Estado en esta sucursal' : 'Ofertas'}</TableHead>
-                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {filteredPaquetes.map((paquete) => (
-                                <TableRow key={`${paquete.id_paquete || 'pkg'}:${sucursal ? paquete.id_sucursal || 'all' : 'master'}`} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">
-                                    {!sucursal ? (
-                                        <TableCell className="text-[var(--mf-text-2)]">
-                                            {getPackageBranchSummary(paquete, branchNameById)}
-                                        </TableCell>
-                                    ) : null}
-                                    <TableCell className="font-medium text-[var(--mf-text)]">
-                                        <div>{paquete.nombre_paquete}</div>
-                                        {paquete.descripcion ? (
-                                            <div className="text-xs text-[var(--mf-text-2)] mt-0.5">{paquete.descripcion}</div>
-                                        ) : null}
-                                    </TableCell>
-                                    <TableCell className="text-right font-mono font-semibold text-[var(--mf-accent)]">
-                                        {sucursal ? formatPrice(paquete.precio_hnl) : getPackagePriceSummary(paquete)}
-                                    </TableCell>
-                                    {sucursal ? (
-                                        <TableCell className="text-center text-[var(--mf-text-2)]">
-                                            {Number(paquete.orden_visual ?? 100)}
-                                        </TableCell>
-                                    ) : null}
-                                    <TableCell className="text-center text-[var(--mf-text-2)]">
-                                        {getItemsCount(paquete)}
-                                    </TableCell>
-                                    <TableCell className="text-center hidden md:table-cell">
-                                        <PackageCompositionBadge itemsCount={getItemsCount(paquete)} />
-                                    </TableCell>
-                                    {sucursal ? (
-                                        <TableCell className="text-center hidden md:table-cell">
-                                            <PackageVisibilityBadge visiblePublico={Boolean(paquete.visible_publico)} />
-                                        </TableCell>
-                                    ) : null}
-                                    <TableCell className="text-center">
-                                        {sucursal ? <PackageStatusBadge activo={Boolean(paquete.activo)} /> : getPackageOfferStateSummary(paquete)}
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                        <div className="flex items-center justify-end gap-1.5">
-                                            {renderActions(paquete)}
-                                        </div>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                </div>
+            {!loading && !listError && paginatedPaquetes.length > 0 && view === 'cards' ? (
+                <section aria-label="Tarjetas de paquetes" className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                    {paginatedPaquetes.map((paquete) => (
+                        <article key={`${paquete.id_paquete || 'pkg'}:${sucursal ? paquete.id_sucursal || 'all' : 'master'}`} className="flex min-w-0 flex-col rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)] p-4 shadow-[var(--mf-shadow-soft)]">
+                            <header className="flex min-w-0 items-start gap-3"><span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Package size={17} /></span><div className="min-w-0 flex-1"><h2 className="break-words text-base font-semibold leading-5 text-[var(--mf-text)]">{paquete.nombre_paquete || 'Paquete'}</h2><p className="mt-1 line-clamp-2 break-words text-xs leading-5 text-[var(--mf-text-2)]">{paquete.descripcion || 'Sin descripción'}</p></div>{sucursal ? <PackageStatusBadge activo={Boolean(paquete.activo)} /> : <span className="mf-badge mf-badge-gold">Maestro</span>}</header>
+                            <div className="mt-3 flex flex-wrap items-center gap-2"><PackageCompositionBadge itemsCount={getItemsCount(paquete)} /><span className="text-xs text-[var(--mf-text-2)]">{getItemsCount(paquete)} servicios</span></div>
+                            <p className="mt-2 line-clamp-2 min-h-10 break-words text-xs leading-5 text-[var(--mf-text)]">{getPackageCompositionSummary(paquete)}</p>
+                            <div className="mt-3 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2"><p className="text-[10px] uppercase tracking-[0.1em] text-[var(--mf-text-2)]">{sucursal ? 'Precio local' : 'Rango por sucursal'}</p><p className="mt-1 font-mono font-bold text-[var(--mf-accent)]">{sucursal ? formatPrice(paquete.precio_hnl) : getPackagePriceSummary(paquete)}</p><div className="mt-2 flex flex-wrap gap-1.5">{sucursal ? <><PackageVisibilityBadge visiblePublico={Boolean(paquete.visible_publico)} /><span className="mf-badge mf-badge-muted">Orden {Number(paquete.orden_visual ?? 100)}</span></> : <span className="text-xs text-[var(--mf-text-2)]">{getPackageOfferStateSummary(paquete)}</span>}</div></div>
+                            {!sucursal ? <details className="mt-3"><summary className="cursor-pointer text-xs font-medium text-[var(--mf-accent)]">Ofertas por sucursal</summary><p className="mt-2 break-words text-xs text-[var(--mf-text-2)]">{getPackageBranchSummary(paquete, branchNameById)}</p></details> : null}
+                            <div className="mt-auto pt-4">{renderActions(paquete)}</div>
+                        </article>
+                    ))}
+                </section>
+            ) : null}
+
+            {!loading && !listError && filteredPaquetes.length > PACKAGES_PAGE_SIZE ? (
+                <nav aria-label="Paginación de paquetes" className="flex flex-col items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] px-3 py-2 sm:flex-row">
+                    <p className="text-xs text-[var(--mf-text-2)]">Página {page} de {pageCount} · {filteredPaquetes.length} resultados</p>
+                    <div className="flex items-center gap-2"><Button type="button" variant="outline" size="sm" className="min-h-9 gap-1" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="Página anterior"><ChevronLeft size={14} /> Anterior</Button><Button type="button" variant="outline" size="sm" className="min-h-9 gap-1" disabled={page === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))} aria-label="Página siguiente">Siguiente <ChevronRight size={14} /></Button></div>
+                </nav>
             ) : null}
 
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
