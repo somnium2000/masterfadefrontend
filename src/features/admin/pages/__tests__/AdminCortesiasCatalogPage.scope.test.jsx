@@ -56,6 +56,43 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("edición segura de cortesías", () => {
+  test("inicia en lista y alterna a tarjetas con el mismo registro", async () => {
+    await renderReady();
+    expect(screen.getByRole("button", { name: "Lista" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("region", { name: "Lista de cortesías" })).toHaveTextContent("Corte gratis");
+    fireEvent.click(screen.getByRole("button", { name: "Tarjetas" }));
+    expect(screen.getByRole("button", { name: "Tarjetas" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("region", { name: "Tarjetas de cortesías" })).toHaveTextContent("Corte gratis");
+  });
+
+  test("distingue asociaciones totales y activas", async () => {
+    api.listAdminCortesias.mockResolvedValue({ data: { cortesias: [{
+      ...courtesy,
+      sucursales: [
+        courtesy.sucursales[0],
+        { id: "31111111-1111-4111-8111-111111111111", id_sucursal: B, nombre_sucursal: "Norte", activa: false },
+      ],
+    }] } });
+    await renderReady();
+    expect(screen.getByText("2 asociada(s)")).toBeInTheDocument();
+    expect(screen.getByText("1 activa(s)")).toBeInTheDocument();
+  });
+
+  test("pagina localmente diez registros sin solicitar otra página", async () => {
+    const rows = Array.from({ length: 11 }, (_, index) => ({
+      ...courtesy,
+      id: `11111111-1111-4111-8111-${String(index + 1).padStart(12, "0")}`,
+      nombre: `Cortesía ${index + 1}`,
+    }));
+    api.listAdminCortesias.mockResolvedValue({ data: { cortesias: rows } });
+    render(<AdminCortesiasCatalogPage />);
+    expect(await screen.findByText("Cortesía 1")).toBeInTheDocument();
+    expect(screen.queryByText("Cortesía 11")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Siguiente/ }));
+    expect(await screen.findByText("Cortesía 11")).toBeInTheDocument();
+    expect(api.listAdminCortesias).toHaveBeenCalledTimes(1);
+  });
+
   test.each([["Nombre", "Corte global"], ["Descripción", "Descripción global"]])("cambiar %s muestra advertencia global", async (label, value) => {
     const dialog = await openEdit();
     fireEvent.change(within(dialog).getByLabelText(new RegExp(label)), { target: { value } });

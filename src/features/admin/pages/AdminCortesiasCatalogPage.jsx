@@ -10,6 +10,10 @@ import {
   ToggleLeft,
   ToggleRight,
   Eye,
+  LayoutGrid,
+  List,
+  ChevronLeft,
+  ChevronRight,
   RotateCcw,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext.jsx";
@@ -33,22 +37,14 @@ import {
 } from "../../../components/ui/dialog.jsx";
 import { Input } from "../../../components/ui/input.jsx";
 import { Label } from "../../../components/ui/label.jsx";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../../../components/ui/table.jsx";
 import ErrorBanner from "../../../components/data/ErrorBanner.jsx";
 import EmptyState from "../../../components/data/EmptyState.jsx";
 import LoadingSpinner from "../../../components/data/LoadingSpinner.jsx";
 import HoverActionButton from "../../../components/data/HoverActionButton.jsx";
 import DetailInfoModalContent from "../../../components/data/DetailInfoModalContent.jsx";
-import ViewToggle from "../../../components/data/ViewToggle.jsx";
-import CardsCarousel from "../../../components/data/CardsCarousel.jsx";
 import ActionConfirmDialog from "../../../components/feedback/ActionConfirmDialog.jsx";
+
+const PAGE_SIZE = 10;
 
 const FORM_DEFAULTS = {
   nombre: "",
@@ -92,7 +88,7 @@ function CompactActionButton({
       tone={tone}
       onClick={onClick}
       disabled={disabled}
-      className="h-8 w-8 rounded-lg px-0 hover:w-8 hover:px-0 hover:gap-0 focus-visible:w-8 focus-visible:px-0 focus-visible:gap-0"
+      className="h-10 w-10 rounded-lg px-0 hover:w-10 hover:px-0 hover:gap-0 focus-visible:w-10 focus-visible:px-0 focus-visible:gap-0 sm:h-8 sm:w-8 sm:hover:w-8 sm:focus-visible:w-8"
     />
   );
 }
@@ -165,29 +161,29 @@ function CortesiaForm({ values, onChange, branches, branchIds, lockBranchSelecti
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="cortesia-nombre">Nombre *</Label>
-        <Input
-          id="cortesia-nombre"
-          value={values.nombre}
-          onChange={(event) => onChange("nombre", event.target.value)}
-          placeholder="Ej. Corte de bienvenida"
-        />
-      </div>
+      <section className="space-y-3 rounded-xl border border-[var(--mf-nav-border)] p-3 sm:p-4" aria-labelledby="cortesia-global-fields">
+        <div>
+          <h3 id="cortesia-global-fields" className="text-sm font-semibold text-[var(--mf-text)]">Información compartida</h3>
+          <p className="text-xs text-[var(--mf-text-2)]">Estos datos se muestran en todas las sucursales asociadas.</p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-1">
+            <Label htmlFor="cortesia-nombre">Nombre *</Label>
+            <Input id="cortesia-nombre" value={values.nombre} onChange={(event) => onChange("nombre", event.target.value)} placeholder="Ej. Corte de bienvenida" />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <Label htmlFor="cortesia-descripcion">Descripción</Label>
+            <Input id="cortesia-descripcion" value={values.descripcion} onChange={(event) => onChange("descripcion", event.target.value)} placeholder="Describe la cortesía maestra" />
+          </div>
+        </div>
+      </section>
 
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="cortesia-descripcion">Descripción</Label>
-        <Input
-          id="cortesia-descripcion"
-          value={values.descripcion}
-          onChange={(event) => onChange("descripcion", event.target.value)}
-          placeholder="Describe la cortesía maestra"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label>Sucursales asociadas *</Label>
-        <div className="space-y-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+      <section className="space-y-2 rounded-xl border border-[var(--mf-nav-border)] p-3 sm:p-4" aria-labelledby="cortesia-branches-fields">
+        <div>
+          <h3 id="cortesia-branches-fields" className="text-sm font-semibold text-[var(--mf-text)]">Asociaciones por sucursal</h3>
+          <p className="text-xs text-[var(--mf-text-2)]">Selecciona las sucursales disponibles y define su estado operativo.</p>
+        </div>
+        <div className="space-y-2 rounded-xl bg-[var(--mf-btn-bg)] p-2 sm:p-3">
           {scopedBranches.map((branch) => {
             const selected = selectedById.get(branch.id_sucursal);
             return (
@@ -220,7 +216,7 @@ function CortesiaForm({ values, onChange, branches, branchIds, lockBranchSelecti
             <p className="text-xs text-[var(--mf-text-2)]">No hay sucursales disponibles para asociar.</p>
           ) : null}
         </div>
-      </div>
+      </section>
     </div>
   );
 }
@@ -263,7 +259,8 @@ export default function AdminCortesiasCatalogPage() {
   const [cortesias, setCortesias] = useState([]);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState("");
-  const [view, setView] = useState("cards");
+  const [view, setView] = useState("list");
+  const [page, setPage] = useState(1);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
@@ -316,6 +313,12 @@ export default function AdminCortesiasCatalogPage() {
   const activeFilterCount = useMemo(
     () => Object.values(filters).filter((value) => value !== "all").length + (search ? 1 : 0),
     [filters, search]
+  );
+
+  const pageCount = Math.max(1, Math.ceil(visibleCortesias.length / PAGE_SIZE));
+  const paginatedCortesias = useMemo(
+    () => visibleCortesias.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [page, visibleCortesias]
   );
 
   const mustSelectBranchForList = !isSuperAdmin && branchIds.length !== 1;
@@ -384,6 +387,14 @@ export default function AdminCortesiasCatalogPage() {
       setSucursal(branchIds[0]);
     }
   }, [branchIds, sucursal]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filters, search, sucursal]);
+
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
 
   function clearFilters() {
     setFilters({ ...FILTER_DEFAULTS });
@@ -597,7 +608,24 @@ export default function AdminCortesiasCatalogPage() {
           <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[560px]">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-[var(--mf-text-2)]">{visibleCortesias.length} de {cortesias.length} cortesía(s)</p>
-              <ViewToggle defaultView={view} onViewChange={setView} storageKey="cortesias" />
+              <div className="inline-flex items-center rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-1" role="group" aria-label="Vista del catálogo">
+                <button
+                  type="button"
+                  aria-pressed={view === "list"}
+                  onClick={() => setView("list")}
+                  className={`inline-flex min-h-10 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors sm:min-h-9 ${view === "list" ? "bg-[var(--mf-accent)] text-[var(--mf-accent-text)]" : "text-[var(--mf-text-2)] hover:text-[var(--mf-text)]"}`}
+                >
+                  <List size={14} /> Lista
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={view === "cards"}
+                  onClick={() => setView("cards")}
+                  className={`inline-flex min-h-10 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors sm:min-h-9 ${view === "cards" ? "bg-[var(--mf-accent)] text-[var(--mf-accent-text)]" : "text-[var(--mf-text-2)] hover:text-[var(--mf-text)]"}`}
+                >
+                  <LayoutGrid size={14} /> Tarjetas
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -630,90 +658,96 @@ export default function AdminCortesiasCatalogPage() {
         <EmptyState icon={Search} title="Sin resultados" description="No hay coincidencias con la búsqueda o filtros." />
       ) : null}
 
-      {!loading && !listError && visibleCortesias.length > 0 && view === "cards" ? (
-        <CardsCarousel
-          items={visibleCortesias}
-          getItemKey={(item) => item.id}
-          renderItem={(item) => (
-            <article
-              key={item.id}
-              className="overflow-hidden rounded-[18px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-3 shadow-[var(--mf-shadow-soft)]"
-            >
-              <header className="flex items-start justify-between gap-3">
-                <div className="flex min-w-0 items-start gap-2.5">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]">
-                    <Gift size={15} />
-                  </div>
+      {!loading && !listError && paginatedCortesias.length > 0 && view === "list" ? (
+        <section aria-label="Lista de cortesías" className="@container overflow-visible rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)]">
+          <div role="row" className="hidden grid-cols-[minmax(180px,1fr)_minmax(220px,1.35fr)_minmax(210px,1fr)_auto] gap-4 border-b border-[var(--mf-nav-border)] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)] @[58rem]:grid">
+            <span>Nombre</span><span>Descripción</span><span>{isGlobalView ? "Cobertura" : "Estado en sucursal"}</span><span className="text-right">Acciones</span>
+          </div>
+          <div className="divide-y divide-[var(--mf-nav-border)]">
+            {paginatedCortesias.map((item) => {
+              const scopes = Array.isArray(item.sucursales) ? item.sucursales : [];
+              const activeCount = scopes.filter((scope) => Boolean(scope.activa)).length;
+              return (
+                <article key={item.id} role="row" className="grid min-w-0 gap-3 px-3 py-3 transition-colors hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_40%,transparent)] sm:px-4 @[58rem]:grid-cols-[minmax(180px,1fr)_minmax(220px,1.35fr)_minmax(210px,1fr)_auto] @[58rem]:items-center @[58rem]:gap-4">
                   <div className="min-w-0">
-                    <p className="text-[22px] leading-none font-semibold text-[var(--mf-text)] truncate">{item.nombre || "Cortesía"}</p>
-                    <p className="mt-1 text-sm text-[var(--mf-text-2)] line-clamp-1">{item.descripcion || "Sin descripción"}</p>
+                    <p className="break-words text-sm font-semibold text-[var(--mf-text)]">{item.nombre || "Cortesía"}</p>
+                    <p className="mt-0.5 text-[11px] text-[var(--mf-text-2)] @[58rem]:hidden">Cortesía maestra</p>
                   </div>
-                </div>
-                <span className="mf-badge mf-badge-muted shrink-0">
-                  {isGlobalView ? `${(item.sucursales || []).length} sucursal(es)` : "Vista sucursal"}
-                </span>
-              </header>
-
-              <div className="mt-3 space-y-2 border-t border-[var(--mf-nav-border)] pt-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-accent)]">
-                  {isGlobalView ? "Sucursales asociadas" : "Estado en esta sucursal"}
-                </p>
-                {(Array.isArray(item.sucursales) ? item.sucursales : []).map((scope) => (
-                  <div key={scope.id} className="rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_50%,transparent)] px-2.5 py-2">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="text-sm leading-snug text-[var(--mf-text)]">
-                        {scope.nombre_sucursal || branchNameById[scope.id_sucursal] || scope.id_sucursal}
-                      </p>
-                      <div className="flex items-center gap-2 self-end sm:self-auto">
-                        <StatusBadge active={Boolean(scope.activa)} />
-                        {renderScopeActions(item, scope)}
+                  <p className="min-w-0 break-words text-sm leading-5 text-[var(--mf-text-2)] line-clamp-2">{item.descripcion || "Sin descripción"}</p>
+                  <div className="min-w-0">
+                    {isGlobalView ? (
+                      <details className="group">
+                        <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[var(--mf-accent)]/40">
+                          <span className="mf-badge mf-badge-muted">{scopes.length} asociada(s)</span>
+                          <span className="text-xs text-[var(--mf-text-2)]">{activeCount} activa(s)</span>
+                        </summary>
+                        <div className="mt-2 space-y-1.5">
+                          {scopes.map((scope) => (
+                            <div key={scope.id || scope.id_sucursal} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-2 py-1.5">
+                              <span className="min-w-0 truncate text-xs text-[var(--mf-text)]">{scope.nombre_sucursal || branchNameById[scope.id_sucursal] || scope.id_sucursal}</span>
+                              <div className="flex shrink-0 items-center gap-1.5"><StatusBadge active={Boolean(scope.activa)} />{renderScopeActions(item, scope)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    ) : scopes[0] ? (
+                      <div className="flex items-center justify-between gap-2">
+                        <StatusBadge active={Boolean(scopes[0].activa)} />
+                        {renderScopeActions(item, scopes[0])}
                       </div>
-                    </div>
+                    ) : <span className="text-xs text-[var(--mf-text-2)]">No asociada</span>}
                   </div>
-                ))}
-              </div>
-
-              <footer className="mt-3 flex items-center justify-end border-t border-[var(--mf-nav-border)] pt-2.5">
-                {renderMainActions(item)}
-              </footer>
-            </article>
-          )}
-        />
+                  <div className="flex items-center justify-end gap-1.5">{renderMainActions(item)}</div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
       ) : null}
 
-      {!loading && !listError && visibleCortesias.length > 0 && view === "table" ? (
-        <div className="mf-table-wrap">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-[var(--mf-nav-border)]">
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Descripción</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">{isGlobalView ? "Sucursales asociadas" : "Estado en sucursal"}</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visibleCortesias.map((item) => (
-                <TableRow key={item.id} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">
-                  <TableCell className="font-medium text-[var(--mf-text)]">{item.nombre}</TableCell>
-                  <TableCell className="text-[var(--mf-text-2)]">{item.descripcion || "-"}</TableCell>
-                  <TableCell className="space-y-2">
-                    {(Array.isArray(item.sucursales) ? item.sucursales : []).map((scope) => (
-                      <div key={scope.id} className="flex items-center justify-between gap-2 rounded-lg border border-[var(--mf-nav-border)] px-2 py-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-[var(--mf-text)]">{scope.nombre_sucursal || branchNameById[scope.id_sucursal] || scope.id_sucursal}</span>
-                          <StatusBadge active={Boolean(scope.activa)} />
-                        </div>
-                        {renderScopeActions(item, scope)}
-                      </div>
-                    ))}
-                  </TableCell>
-                  <TableCell className="text-right"><div className="flex items-center justify-end gap-1.5">{renderMainActions(item)}</div></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+      {!loading && !listError && paginatedCortesias.length > 0 && view === "cards" ? (
+        <section aria-label="Tarjetas de cortesías" className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+          {paginatedCortesias.map((item) => {
+            const scopes = Array.isArray(item.sucursales) ? item.sucursales : [];
+            const activeCount = scopes.filter((scope) => Boolean(scope.activa)).length;
+            return (
+              <article key={item.id} className="flex min-w-0 flex-col rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)] p-4">
+                <header className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Gift size={15} /></div>
+                  <div className="min-w-0 flex-1">
+                    <h2 className="break-words text-base font-semibold leading-5 text-[var(--mf-text)]">{item.nombre || "Cortesía"}</h2>
+                    <p className="mt-1 break-words text-sm leading-5 text-[var(--mf-text-2)] line-clamp-2">{item.descripcion || "Sin descripción"}</p>
+                  </div>
+                </header>
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[var(--mf-nav-border)] pt-3">
+                  {isGlobalView ? <><span className="mf-badge mf-badge-muted">{scopes.length} asociada(s)</span><span className="text-xs text-[var(--mf-text-2)]">{activeCount} activa(s)</span></> : scopes[0] ? <StatusBadge active={Boolean(scopes[0].activa)} /> : <span className="text-xs text-[var(--mf-text-2)]">No asociada</span>}
+                </div>
+                {isGlobalView && scopes.length > 0 ? (
+                  <details className="mt-2">
+                    <summary className="min-h-9 cursor-pointer list-none rounded-lg py-2 text-xs font-medium text-[var(--mf-accent)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--mf-accent)]/40">Ver estados por sucursal</summary>
+                    <div className="space-y-1.5">
+                      {scopes.map((scope) => <div key={scope.id || scope.id_sucursal} className="flex items-center justify-between gap-2 rounded-lg border border-[var(--mf-nav-border)] px-2 py-1.5"><span className="min-w-0 truncate text-xs">{scope.nombre_sucursal || branchNameById[scope.id_sucursal] || scope.id_sucursal}</span><div className="flex shrink-0 items-center gap-1.5"><StatusBadge active={Boolean(scope.activa)} />{renderScopeActions(item, scope)}</div></div>)}
+                    </div>
+                  </details>
+                ) : null}
+                <footer className="mt-auto flex items-center justify-between gap-2 pt-3">
+                  {!isGlobalView && scopes[0] ? renderScopeActions(item, scopes[0]) : <span />}
+                  <div className="flex items-center gap-1.5">{renderMainActions(item)}</div>
+                </footer>
+              </article>
+            );
+          })}
+        </section>
+      ) : null}
+
+      {!loading && !listError && visibleCortesias.length > PAGE_SIZE ? (
+        <nav aria-label="Paginación de cortesías" className="flex flex-col items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] px-3 py-2 sm:flex-row">
+          <p className="text-xs text-[var(--mf-text-2)]">Página {page} de {pageCount} · {visibleCortesias.length} resultados</p>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="min-h-9 gap-1" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={14} /> Anterior</Button>
+            <Button variant="outline" size="sm" className="min-h-9 gap-1" disabled={page === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}>Siguiente <ChevronRight size={14} /></Button>
+          </div>
+        </nav>
       ) : null}
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading) setDialogOpen(open); }}>
