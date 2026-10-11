@@ -126,7 +126,13 @@ function InternalAccountDeletionDashboardShell() {
 }
 
 function App() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user, roles, branchIds, empresaId } = useAuth();
+  const reportSessionKey = JSON.stringify({
+    userId: user?.id_usuario || null,
+    roles: [...roles].sort(),
+    branchIds: [...branchIds].sort(),
+    empresaId: empresaId ?? null,
+  });
 
   return (
     <Routes>
@@ -264,14 +270,14 @@ function App() {
         {/* Reportes */}
         {/* JK: Reportes usa tabs como navegacion principal y redirecciona por defecto a Ingresos. */}
         <Route path="reportes" element={<Navigate to="ingresos" replace />} />
-        <Route path="reportes/ingresos" element={<RouteErrorBoundary><AdminReportesIngresosPage /></RouteErrorBoundary>} />
-        <Route path="reportes/membresias" element={<RouteErrorBoundary><AdminReportesMembresiasPage /></RouteErrorBoundary>} />
-        <Route path="reportes/barberos" element={<RouteErrorBoundary><AdminReportesBarberosPage /></RouteErrorBoundary>} />
-        <Route path="reportes/concurrencia" element={<RouteErrorBoundary><AdminReportesConcurrenciaPage /></RouteErrorBoundary>} />
+        <Route path="reportes/ingresos" element={<RouteErrorBoundary><AdminReportesIngresosPage key={reportSessionKey} /></RouteErrorBoundary>} />
+        <Route path="reportes/membresias" element={<RouteErrorBoundary><AdminReportesMembresiasPage key={reportSessionKey} /></RouteErrorBoundary>} />
+        <Route path="reportes/barberos" element={<RouteErrorBoundary><AdminReportesBarberosPage key={reportSessionKey} /></RouteErrorBoundary>} />
+        <Route path="reportes/concurrencia" element={<RouteErrorBoundary><AdminReportesConcurrenciaPage key={reportSessionKey} /></RouteErrorBoundary>} />
         {/* JK: Sucursales oculto temporalmente en reportes; redirige a Ingresos. */}
         <Route path="reportes/sucursales" element={<Navigate to="../ingresos" replace />} />
         {/* JK: Compatibilidad temporal para ruta legacy del modulo anterior. */}
-        <Route path="reportes/ventas" element={<RouteErrorBoundary><AdminReportesIngresosPage /></RouteErrorBoundary>} />
+        <Route path="reportes/ventas" element={<RouteErrorBoundary><AdminReportesIngresosPage key={reportSessionKey} /></RouteErrorBoundary>} />
         {/* Masterpuntos */}
         <Route path="superpuntos" element={<RouteErrorBoundary><AdminMasterPuntosPage /></RouteErrorBoundary>} />
         {/* Configuración */}
@@ -294,9 +300,9 @@ function App() {
         <Route index element={<UnderConstructionPage title="Inicio" />} />
         <Route path="kpis" element={<UnderConstructionPage title="KPIs" />} />
         {/* Personas */}
-        <Route path="empleados" element={<UnderConstructionPage title="Personas · Empleados" subtitle="Acceso temporalmente en definición para rol admin." />} />
-        <Route path="clientes" element={<UnderConstructionPage title="Personas · Clientes" subtitle="Acceso temporalmente en definición para rol admin." />} />
-        <Route path="usuarios" element={<UnderConstructionPage title="Personas · Usuarios" subtitle="Acceso temporalmente en definición para rol admin." />} />
+        <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
+        <Route path="clientes" element={<RouteErrorBoundary><AdminClientesPage /></RouteErrorBoundary>} />
+        <Route path="usuarios" element={<RouteErrorBoundary><AdminUsuariosPage /></RouteErrorBoundary>} />
         <Route path="eliminacion-cuentas" element={<RouteErrorBoundary><AdminAccountDeletionPage /></RouteErrorBoundary>} />
         {/* Servicios */}
         <Route path="catalog/servicios" element={<RouteErrorBoundary><AdminServicesCatalogPage /></RouteErrorBoundary>} />
@@ -319,17 +325,9 @@ function App() {
         <Route path="seguridad/alertas" element={<Navigate to="/unauthorized" replace />} />
         <Route path="seguridad/logs" element={<Navigate to="/unauthorized" replace />} />
         <Route path="seguridad/bitacoras" element={<Navigate to="/unauthorized" replace />} />
-        {/* Reportes */}
-        {/* JK: Reportes usa tabs como navegacion principal y redirecciona por defecto a Ingresos. */}
-        <Route path="reportes" element={<Navigate to="ingresos" replace />} />
-        <Route path="reportes/ingresos" element={<RouteErrorBoundary><AdminReportesIngresosPage /></RouteErrorBoundary>} />
-        <Route path="reportes/membresias" element={<RouteErrorBoundary><AdminReportesMembresiasPage /></RouteErrorBoundary>} />
-        <Route path="reportes/barberos" element={<RouteErrorBoundary><AdminReportesBarberosPage /></RouteErrorBoundary>} />
-        <Route path="reportes/concurrencia" element={<RouteErrorBoundary><AdminReportesConcurrenciaPage /></RouteErrorBoundary>} />
-        {/* JK: Sucursales oculto temporalmente en reportes; redirige a Ingresos. */}
-        <Route path="reportes/sucursales" element={<Navigate to="../ingresos" replace />} />
-        {/* JK: Compatibilidad temporal para ruta legacy del modulo anterior. */}
-        <Route path="reportes/ventas" element={<RouteErrorBoundary><AdminReportesIngresosPage /></RouteErrorBoundary>} />
+        {/* Reportes financieros exclusivos de super_admin. */}
+        <Route path="reportes" element={<Navigate to="/unauthorized" replace />} />
+        <Route path="reportes/*" element={<Navigate to="/unauthorized" replace />} />
         {/* Masterpuntos */}
         <Route path="superpuntos" element={<RouteErrorBoundary><AdminMasterPuntosPage /></RouteErrorBoundary>} />
         {/* Configuración */}

@@ -15,7 +15,7 @@ import { getRoleLabel, resolveHomePath } from '../../features/home/lib/roleRouti
 import PremiumBottomNav from '../navigation/PremiumBottomNav.jsx';
 
 // ── Definición de módulos del sidebar ────────────────────────────────────────────────────────
-function buildNavModules(basePath, role, roles = []) {
+export function buildNavModules(basePath, role, roles = []) {
     const isBarbero = role === 'barbero';
     const isCliente = role === 'cliente';
     const isSecurityRole = role === 'security_admin' || role === 'security_auditor';
@@ -157,7 +157,7 @@ function buildNavModules(basePath, role, roles = []) {
                 ],
             }]
             : []),
-        {
+        ...(role === 'super_admin' ? [{
             id: 'reportes',
             label: 'Reportes',
             icon: BarChart3,
@@ -171,7 +171,7 @@ function buildNavModules(basePath, role, roles = []) {
                 { id: 'rep-barberos', label: 'Barberos', path: `${basePath}/reportes/barberos` },
                 { id: 'rep-concurrencia', label: 'Concurrencia', path: `${basePath}/reportes/concurrencia` },
             ],
-        },
+        }] : []),
         {
             id: 'superpuntos',
             label: 'Masterpuntos',

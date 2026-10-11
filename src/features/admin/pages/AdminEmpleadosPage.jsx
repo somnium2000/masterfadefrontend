@@ -38,6 +38,7 @@ import {
   TableRow,
 } from '../../../components/ui/table.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import { useAuth } from '../../../context/AuthContext.jsx';
 import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
 import { replaceItemById } from '../../../lib/collectionState.js';
 
@@ -150,6 +151,15 @@ function formatRoleLabels(roles, labelByCode) {
 
 function hasRole(roles, roleCode) {
   return normalizeRoleCodes(roles).includes(roleCode);
+}
+
+export function isPrivilegedEmployee(empleado) {
+  return hasRole(empleado?.roles, 'super_admin');
+}
+
+export function getAssignableEmployeeRoles(roleCodes, isAdminOnly) {
+  const normalized = normalizeRoleCodes(roleCodes);
+  return isAdminOnly ? normalized.filter((role) => role !== 'super_admin') : normalized;
 }
 
 function toggleRoleSelection(currentRoles, roleCode, enabled) {
@@ -276,6 +286,8 @@ function EstadoAccesoBadge({ estado }) {
 
 export default function AdminEmpleadosPage() {
   const navigate = useNavigate();
+  const { roles: actorRoles = [] } = useAuth();
+  const isAdminOnly = actorRoles.includes('admin') && !actorRoles.includes('super_admin');
   const [empleados, setEmpleados] = useState([]);
   const [sucursales, setSucursales] = useState([]);
   const [rolesCatalog, setRolesCatalog] = useState([]);
@@ -318,9 +330,9 @@ export default function AdminEmpleadosPage() {
         .filter((role) => ACTIVE_ROLE_CODES.includes(role))
       : [];
     const unique = [...new Set(catalogRoles)];
-    if (!unique.length) return ACTIVE_ROLE_CODES.map((role) => ({ value: role, label: DEFAULT_ROLE_LABELS[role] || role }));
-    return unique.map((role) => ({ value: role, label: DEFAULT_ROLE_LABELS[role] || role }));
-  }, [rolesCatalog]);
+    const availableRoles = getAssignableEmployeeRoles(unique.length ? unique : ACTIVE_ROLE_CODES, isAdminOnly);
+    return availableRoles.map((role) => ({ value: role, label: DEFAULT_ROLE_LABELS[role] || role }));
+  }, [isAdminOnly, rolesCatalog]);
 
   const roleLabelByCode = useMemo(() => {
     const map = { ...DEFAULT_ROLE_LABELS };
@@ -476,6 +488,10 @@ export default function AdminEmpleadosPage() {
     try {
       const response = await getAdminPersonaEmpleado(idEmpleado);
       const payload = response?.data ?? response;
+      if (isAdminOnly && isPrivilegedEmployee(payload?.empleado)) {
+        notifications.error('No puedes modificar una cuenta Super Admin.', { dedupeKey: 'personas-empleados-privileged' });
+        return;
+      }
       setEditingId(idEmpleado);
       setFormValues(mapEmpleadoToForm(payload?.empleado));
       setFormOpen(true);
@@ -501,7 +517,10 @@ export default function AdminEmpleadosPage() {
   }
 
   async function handleSubmit() {
-    const error = validateForm(formValues);
+    const safeFormValues = isAdminOnly
+      ? { ...formValues, roles: getAssignableEmployeeRoles(formValues.roles, true) }
+      : formValues;
+    const error = validateForm(safeFormValues);
     if (error) {
       setFormError(error);
       return;
@@ -510,7 +529,7 @@ export default function AdminEmpleadosPage() {
     setFormError('');
     setFormLoading(true);
     try {
-      const payload = buildPayload(formValues);
+      const payload = buildPayload(safeFormValues);
       const response = editingId
         ? await updateAdminPersonaEmpleado(editingId, payload)
         : await createAdminPersonaEmpleado(payload);
@@ -540,12 +559,17 @@ export default function AdminEmpleadosPage() {
   }
 
   function requestToggleLifecycle(empleado) {
+    if (isAdminOnly && isPrivilegedEmployee(empleado)) return;
     setConfirmTarget(empleado || null);
   }
 
   async function handleToggleLifecycle() {
     const empleado = confirmTarget;
     if (!empleado) return;
+    if (isAdminOnly && isPrivilegedEmployee(empleado)) {
+      setConfirmTarget(null);
+      return;
+    }
     const isActive = Boolean(empleado?.estado_laboral);
     setActionLoadingId(empleado.id_empleado);
     try {
@@ -580,6 +604,7 @@ export default function AdminEmpleadosPage() {
   function renderActions(empleado) {
     const loadingActions = actionLoadingId === empleado.id_empleado;
     const isActive = Boolean(empleado.estado_laboral);
+    const privilegedForAdmin = isAdminOnly && isPrivilegedEmployee(empleado);
     return (
       <div className="flex w-full flex-wrap items-center justify-start gap-2">
         <HoverActionButton
@@ -589,21 +614,25 @@ export default function AdminEmpleadosPage() {
           disabled={loadingActions}
           onClick={() => openDetail(empleado.id_empleado)}
         />
-        <HoverActionButton
-          icon={<Pencil size={14} strokeWidth={2} />}
-          label="Editar"
-          title="Editar empleado"
-          disabled={loadingActions}
-          onClick={() => openEdit(empleado.id_empleado)}
-        />
-        <HoverActionButton
-          icon={isActive ? <Ban size={14} strokeWidth={2} /> : <CheckCircle2 size={14} strokeWidth={2} />}
-          label={loadingActions ? (isActive ? 'Inactivando...' : 'Activando...') : (isActive ? 'Inactivar' : 'Activar')}
-          title={isActive ? 'Inactivar empleado' : 'Activar empleado'}
-          tone={isActive ? 'danger' : 'success'}
-          disabled={loadingActions}
-          onClick={() => requestToggleLifecycle(empleado)}
-        />
+        {!privilegedForAdmin ? (
+          <>
+            <HoverActionButton
+              icon={<Pencil size={14} strokeWidth={2} />}
+              label="Editar"
+              title="Editar empleado"
+              disabled={loadingActions}
+              onClick={() => openEdit(empleado.id_empleado)}
+            />
+            <HoverActionButton
+              icon={isActive ? <Ban size={14} strokeWidth={2} /> : <CheckCircle2 size={14} strokeWidth={2} />}
+              label={loadingActions ? (isActive ? 'Inactivando...' : 'Activando...') : (isActive ? 'Inactivar' : 'Activar')}
+              title={isActive ? 'Inactivar empleado' : 'Activar empleado'}
+              tone={isActive ? 'danger' : 'success'}
+              disabled={loadingActions}
+              onClick={() => requestToggleLifecycle(empleado)}
+            />
+          </>
+        ) : null}
       </div>
     );
   }
@@ -840,7 +869,9 @@ export default function AdminEmpleadosPage() {
                   );
                 })}
               </div>
-              <p className="mt-1 text-xs text-[var(--mf-text-2)]">Puedes asignar varios roles, incluyendo Super Admin + Barbero.</p>
+              {!isAdminOnly ? (
+                <p className="mt-1 text-xs text-[var(--mf-text-2)]">Puedes asignar varios roles, incluyendo Super Admin + Barbero.</p>
+              ) : null}
             </div>
             <div>
               <Label className="mf-label">Sucursal *</Label>
