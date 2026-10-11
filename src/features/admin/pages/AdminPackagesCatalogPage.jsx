@@ -322,6 +322,31 @@ function normalizeItemsForPayload(items = []) {
     }));
 }
 
+function packageItemsAreEquivalent(currentItems = [], nextItems = []) {
+    const canonicalize = (items) => normalizeItemsForPayload(items)
+        .map((item) => `${item.id_servicio}:${item.cantidad}`)
+        .sort();
+    const current = canonicalize(currentItems);
+    const next = canonicalize(nextItems);
+    return current.length === next.length && current.every((value, index) => value === next[index]);
+}
+
+function buildPackageMasterPatch(formValues, editTarget, mutationBranchId) {
+    const payload = {};
+    const nextName = formValues.nombre_paquete.trim();
+    const currentName = String(editTarget?.nombre_paquete ?? '').trim();
+    const nextDescription = formValues.descripcion.trim();
+    const currentDescription = String(editTarget?.descripcion ?? '').trim();
+    const nextItems = normalizeItemsForPayload(formValues.items);
+
+    if (nextName !== currentName) payload.nombre_paquete = nextName;
+    if (nextDescription !== currentDescription) payload.descripcion = nextDescription || null;
+    if (!packageItemsAreEquivalent(editTarget?.items, nextItems)) payload.items = nextItems;
+
+    if (Object.keys(payload).length === 0) return null;
+    return { ...payload, id_sucursal: mutationBranchId };
+}
+
 function validateForm(values, mode = 'create') {
     const isOfferOnly = mode === 'editOffer' || mode === 'addOffer';
     if (!isOfferOnly && !values.nombre_paquete.trim()) return 'El nombre del paquete es requerido.';
@@ -1117,12 +1142,7 @@ export default function AdminPackagesCatalogPage() {
                 orden_visual: Number(formValues.orden_visual),
             }
             : dialogMode === 'editMaster'
-                ? {
-                    nombre_paquete: formValues.nombre_paquete.trim(),
-                    descripcion: formValues.descripcion.trim() || undefined,
-                    items: normalizeItemsForPayload(formValues.items),
-                    id_sucursal: mutationBranchId,
-                }
+                ? buildPackageMasterPatch(formValues, editTarget, mutationBranchId)
                 : {
                     nombre_paquete: formValues.nombre_paquete.trim(),
                     descripcion: formValues.descripcion.trim() || undefined,
@@ -1134,6 +1154,12 @@ export default function AdminPackagesCatalogPage() {
                         orden_visual: Number(offer.orden_visual),
                     })),
                 };
+
+        if (dialogMode === 'editMaster' && !payload) {
+            setFormLoading(false);
+            setDialogOpen(false);
+            return;
+        }
 
         try {
             const response = editTarget
