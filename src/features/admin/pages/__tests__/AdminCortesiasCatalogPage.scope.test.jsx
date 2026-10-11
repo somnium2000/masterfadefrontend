@@ -81,15 +81,16 @@ describe("edición segura de cortesías", () => {
     const confirm = screen.getByRole("dialog", { name: "Modificar información global" });
     fireEvent.click(within(confirm).getByRole("button", { name: "Confirmar cambios" }));
     await waitFor(() => expect(api.updateAdminCortesia).toHaveBeenCalledTimes(1));
-    expect(api.updateAdminCortesia).toHaveBeenCalledWith(ID, { nombre: "Corte global", descripcion: "Original" });
+    expect(api.updateAdminCortesia).toHaveBeenCalledWith(ID, { nombre: "Corte global" });
   });
 
-  test("valores maestros equivalentes normalizados no muestran advertencia", async () => {
+  test("valores maestros equivalentes normalizados no ejecutan PATCH", async () => {
     const dialog = await openEdit();
     fireEvent.change(within(dialog).getByLabelText(/Nombre/), { target: { value: "  Corte gratis  " } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar cambios" }));
-    await waitFor(() => expect(api.updateAdminCortesia).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.updateAdminCortesia).not.toHaveBeenCalled());
     expect(screen.queryByRole("dialog", { name: "Modificar información global" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Editar cortesía maestra" })).not.toBeInTheDocument();
   });
 
   test("desmarcar asociación envía inactivación explícita y omite otras sucursales", async () => {
@@ -98,13 +99,28 @@ describe("edición segura de cortesías", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar cambios" }));
     await waitFor(() => expect(api.updateAdminCortesia).toHaveBeenCalledTimes(1));
     expect(api.updateAdminCortesia).toHaveBeenCalledWith(ID, expect.objectContaining({ sucursales: [{ id_sucursal: A, activa: false }] }));
+    expect(api.updateAdminCortesia.mock.calls[0][1]).not.toHaveProperty("nombre");
+    expect(api.updateAdminCortesia.mock.calls[0][1]).not.toHaveProperty("descripcion");
     expect(api.updateAdminCortesia.mock.calls[0][1].sucursales).not.toEqual(expect.arrayContaining([expect.objectContaining({ id_sucursal: B })]));
+  });
+
+  test("editar solo descripcion omite nombre", async () => {
+    const dialog = await openEdit();
+    fireEvent.change(within(dialog).getByLabelText("Descripción"), { target: { value: "Nueva descripción" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar cambios" }));
+    const confirm = screen.getByRole("dialog", { name: "Modificar información global" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Confirmar cambios" }));
+    await waitFor(() => expect(api.updateAdminCortesia).toHaveBeenCalledTimes(1));
+    expect(api.updateAdminCortesia).toHaveBeenCalledWith(ID, { descripcion: "Nueva descripción" });
   });
 
   test("error HTTP conserva formulario y presenta mensaje funcional", async () => {
     api.updateAdminCortesia.mockRejectedValue({ data: { error: { message: "No fue posible guardar" } } });
     const dialog = await openEdit();
+    fireEvent.change(within(dialog).getByLabelText("Descripción"), { target: { value: "Cambio con error" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar cambios" }));
+    const confirm = screen.getByRole("dialog", { name: "Modificar información global" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Confirmar cambios" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("No fue posible guardar");
     expect(screen.getByRole("dialog", { name: "Editar cortesía maestra" })).toBeInTheDocument();
   });

@@ -458,25 +458,38 @@ export default function AdminCortesiasCatalogPage() {
       return;
     }
 
+    const normalizedNombre = normalizeFormText(formValues.nombre);
+    const normalizedDescripcion = normalizeFormText(formValues.descripcion);
+    const payload = {};
+
+    if (editTarget) {
+      if (normalizedNombre !== normalizeFormText(editTarget.nombre)) payload.nombre = normalizedNombre;
+      if (normalizedDescripcion !== normalizeFormText(editTarget.descripcion)) {
+        payload.descripcion = normalizedDescripcion || null;
+      }
+      const branchChanges = buildEditBranchChanges();
+      if (branchChanges.length > 0) payload.sucursales = branchChanges;
+      if (Object.keys(payload).length === 0) {
+        setDialogOpen(false);
+        return;
+      }
+    } else {
+      payload.nombre = normalizedNombre;
+      payload.descripcion = normalizedDescripcion || null;
+      payload.sucursales = formValues.sucursales.map((item) => ({
+        id_sucursal: item.id_sucursal,
+        activa: Boolean(item.activa),
+      }));
+    }
+
     setFormLoading(true);
     setFormError("");
 
     try {
-      const payload = {
-        nombre: normalizeFormText(formValues.nombre),
-        descripcion: normalizeFormText(formValues.descripcion) || null,
-      };
-
       if (editTarget) {
-        const branchChanges = buildEditBranchChanges();
-        if (branchChanges.length > 0) payload.sucursales = branchChanges;
         await updateAdminCortesia(editTarget.id, payload);
         notifications.success("Cortesía actualizada");
       } else {
-        payload.sucursales = formValues.sucursales.map((item) => ({
-          id_sucursal: item.id_sucursal,
-          activa: Boolean(item.activa),
-        }));
         await createAdminCortesia(payload);
         notifications.success("Cortesía creada");
       }
