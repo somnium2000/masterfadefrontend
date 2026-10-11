@@ -42,7 +42,7 @@ import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialo
 import { replaceItemById } from '../../../lib/collectionState.js';
 
 const ACCESS_LABELS = {
-  pendiente_password: 'ContraseÃ±a pendiente',
+  pendiente_password: 'Contraseña pendiente',
   activo: 'Activo',
   bloqueado: 'Bloqueado',
   inactivo: 'Inactivo',
@@ -72,6 +72,7 @@ const FORM_DEFAULTS = {
   acepta_terminos: false,
   foto_perfil_asset_id: null,
   foto_perfil_signed_url: '',
+  foto_perfil_modificada: false,
 };
 
 const CLIENTE_FILTER_DEFAULTS = {
@@ -131,7 +132,7 @@ function normalizeUnicodeText(value) {
   return String(value || '').normalize('NFC').trim();
 }
 
-function mapClienteToForm(cliente) {
+export function mapClienteToForm(cliente) {
   return {
     nombres: cliente?.nombres || '',
     apellidos: cliente?.apellidos || '',
@@ -151,6 +152,7 @@ function mapClienteToForm(cliente) {
     acepta_terminos: Boolean(cliente?.acepta_terminos),
     foto_perfil_asset_id: cliente?.foto_perfil_asset_id || null,
     foto_perfil_signed_url: cliente?.foto_perfil_signed_url || '',
+    foto_perfil_modificada: false,
   };
 }
 
@@ -186,8 +188,8 @@ function validateForm(values, { isEditing, selectedCliente }) {
   return null;
 }
 
-function buildPayload(values) {
-  return {
+export function buildPayload(values) {
+  const payload = {
     persona: {
       nombres: normalizeUnicodeText(values.nombres),
       apellidos: normalizeUnicodeText(values.apellidos),
@@ -209,9 +211,12 @@ function buildPayload(values) {
       estado: Boolean(values.estado),
       consentimiento_marketing: Boolean(values.consentimiento_marketing),
       acepta_terminos: Boolean(values.acepta_terminos),
-      foto_perfil_asset_id: values.foto_perfil_asset_id || null,
     },
   };
+  if (values.foto_perfil_modificada) {
+    payload.cliente.foto_perfil_asset_id = values.foto_perfil_asset_id || null;
+  }
+  return payload;
 }
 
 function AccessBadge({ cliente }) {
@@ -763,6 +768,7 @@ export default function AdminClientesPage() {
                       ...prev,
                       foto_perfil_asset_id: payload?.asset_id || null,
                       foto_perfil_signed_url: payload?.signed_read_url || payload?.public_url || '',
+                      foto_perfil_modificada: true,
                     }));
                   }}
                 />
@@ -962,7 +968,7 @@ export default function AdminClientesPage() {
                 onChange={(event) => setFilters((prev) => ({ ...prev, estadoAcceso: event.target.value }))}
               >
                 <option value="all">Todos</option>
-                <option value="pendiente_password">ContraseÃ±a pendiente</option>
+                <option value="pendiente_password">Contraseña pendiente</option>
                 <option value="activo">Activo</option>
                 <option value="bloqueado">Bloqueado</option>
                 <option value="inactivo">Inactivo</option>
