@@ -220,6 +220,9 @@ export default function MembershipPlansPage() {
   const notifications = useNotifications();
   const isMountedRef = useRef(true);
   const selectedBranchRef = useRef("");
+  const validBranchIdsRef = useRef(new Set());
+  const branchRequestRef = useRef(0);
+  const planRequestRef = useRef(0);
   const isClienteSession = Boolean(isAuthenticated && Array.isArray(roles) && roles.includes("cliente"));
 
   const [status, setStatus] = useState("loading");
@@ -254,17 +257,17 @@ export default function MembershipPlansPage() {
 
   const loadPlansByBranch = useCallback(async (branchId) => {
     const safeBranchId = String(branchId || "").trim();
-    if (!safeBranchId) {
-      setPlans([]);
-      setStatus("idle");
-      return;
-    }
+    if (!safeBranchId || !validBranchIdsRef.current.has(safeBranchId)
+      || selectedBranchRef.current !== safeBranchId) return;
 
+    const requestId = ++planRequestRef.current;
+    const isCurrent = () => isMountedRef.current && requestId === planRequestRef.current
+      && selectedBranchRef.current === safeBranchId && validBranchIdsRef.current.has(safeBranchId);
     setStatus("loading");
     setErrorMessage("");
     try {
       const response = await listPublicPlansByBranch(safeBranchId);
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       const rawPlans = Array.isArray(response?.plans) ? response.plans : [];
       const normalizedPlans = rawPlans
         .map(normalizePublicPlan)
@@ -275,10 +278,30 @@ export default function MembershipPlansPage() {
         });
       setPlans(normalizedPlans);
       setStatus("success");
-    } catch (error) {
-      if (!isMountedRef.current) return;
-      setErrorMessage(error?.data?.error?.message || error?.message || "No se pudo cargar el catalogo de planes.");
+    } catch {
+      if (!isCurrent()) return;
+      setErrorMessage("No se pudo cargar el catalogo de planes.");
       setStatus("error");
+    }
+  }, []);
+
+  const loadBranches = useCallback(async () => {
+    const requestId = ++branchRequestRef.current;
+    setStatus("loading");
+    setErrorMessage("");
+    try {
+      const branchResult = await listPublicCatalogBranches();
+      if (!isMountedRef.current || requestId !== branchRequestRef.current) return;
+      const nextBranches = Array.isArray(branchResult?.branches)
+        ? branchResult.branches.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
+        : [];
+      validBranchIdsRef.current = new Set(nextBranches.map((branch) => String(branch.id_sucursal).trim()));
+      setBranches(nextBranches);
+      setStatus(nextBranches.length ? "idle" : "noBranches");
+    } catch {
+      if (!isMountedRef.current || requestId !== branchRequestRef.current) return;
+      setErrorMessage("No se pudieron cargar las sucursales.");
+      setStatus("branchesError");
     }
   }, []);
 
@@ -302,23 +325,8 @@ export default function MembershipPlansPage() {
 
   useEffect(() => {
     isMountedRef.current = true;
-    void (async () => {
-      setStatus("loading");
-      setErrorMessage("");
-      try {
-        const branchResult = await listPublicCatalogBranches();
-        if (!isMountedRef.current) return;
-        const nextBranches = Array.isArray(branchResult?.branches)
-          ? branchResult.branches.filter((branch) => branch?.id_sucursal)
-          : [];
-        setBranches(nextBranches);
-        setStatus("idle");
-      } catch (error) {
-        if (!isMountedRef.current) return;
-        setErrorMessage(error?.data?.error?.message || error?.message || "No se pudieron cargar las sucursales.");
-        setStatus("error");
-      }
-    })();
+    let active = true;
+    queueMicrotask(() => { if (active) void loadBranches(); });
 
     const unsubscribe = subscribeCatalogSync(() => {
       if (!isMountedRef.current) return;
@@ -328,10 +336,13 @@ export default function MembershipPlansPage() {
     });
 
     return () => {
+      active = false;
       isMountedRef.current = false;
+      branchRequestRef.current += 1;
+      planRequestRef.current += 1;
       unsubscribe();
     };
-  }, [loadPlansByBranch]);
+  }, [loadBranches, loadPlansByBranch]);
 
   useEffect(() => {
     void loadMembershipState();
@@ -339,8 +350,13 @@ export default function MembershipPlansPage() {
 
   function handleBranchChange(nextBranchId) {
     const safeId = String(nextBranchId || "").trim();
+    if (!validBranchIdsRef.current.has(safeId) || safeId === selectedBranchRef.current) return;
+    planRequestRef.current += 1;
     selectedBranchRef.current = safeId;
     setSelectedBranchId(safeId);
+    setPlans([]);
+    setStatus("loading");
+    setErrorMessage("");
     void loadPlansByBranch(safeId);
   }
 
@@ -539,10 +555,16 @@ export default function MembershipPlansPage() {
             </div>
           </div>
 
-          {!selectedBranchId && status !== "error" ? (
+          {!selectedBranchId && status === "idle" ? (
             <div className="mf-glass-surface mt-8 rounded-[28px] p-6 text-center">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Sucursal requerida</p>
               <p className="mt-4 text-sm leading-6 text-[var(--mf-text-2)]">Debes seleccionar una sucursal para ver los planes disponibles.</p>
+            </div>
+          ) : null}
+
+          {status === "noBranches" ? (
+            <div className="mf-glass-surface mt-8 rounded-[28px] p-6 text-center">
+              <p className="text-sm text-[var(--mf-text-2)]">No hay sucursales disponibles.</p>
             </div>
           ) : null}
 
@@ -555,11 +577,11 @@ export default function MembershipPlansPage() {
             </div>
           ) : null}
 
-          {status === "error" ? (
+          {status === "error" || status === "branchesError" ? (
             <div className="mf-glass-surface mt-8 rounded-[28px] p-6 text-center">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Error de membresias</p>
               <p className="mt-4 text-sm leading-6 text-[var(--mf-text-2)]">{errorMessage}</p>
-              <button type="button" onClick={() => void loadPlansByBranch(selectedBranchRef.current)} className="mf-accent-gradient mt-6 inline-flex h-11 items-center justify-center rounded-2xl px-5 text-sm font-semibold shadow-[var(--mf-shadow-accent)]">Reintentar</button>
+              <button type="button" onClick={() => void (status === "branchesError" ? loadBranches() : loadPlansByBranch(selectedBranchRef.current))} className="mf-accent-gradient mt-6 inline-flex h-11 items-center justify-center rounded-2xl px-5 text-sm font-semibold shadow-[var(--mf-shadow-accent)]">Reintentar</button>
             </div>
           ) : null}
 
