@@ -134,6 +134,17 @@ function normalizeBenefits(items = []) {
     });
 }
 
+function benefitsAreEquivalent(currentItems = [], nextItems = []) {
+  const canonicalize = (items) => normalizeBenefits(items)
+    .map((item) => {
+      const tipo = normalizeTipo(item?.tipo);
+      const id = tipo === "servicio" ? item.id_servicio : item.id_cortesia;
+      return `${tipo}:${String(id || "").trim()}:${Number(item.cantidad)}`;
+    })
+    .sort();
+  return JSON.stringify(canonicalize(currentItems)) === JSON.stringify(canonicalize(nextItems));
+}
+
 function sanitizeBenefitsByScope(items = [], services = [], courtesies = [], keepCourtesyIds = []) {
   const validServiceIds = new Set((Array.isArray(services) ? services : []).map((service) => String(service?.id_servicio || "")));
   const validCourtesyIds = new Set((Array.isArray(courtesies) ? courtesies : []).map((courtesy) => String(courtesy?.id_cortesia || "")));
@@ -429,6 +440,7 @@ function PlanServicesEditor({ items, onChange, services }) {
 
       {(Array.isArray(items) ? items : []).map((item, index) => {
         const currentServiceId = String(item?.id_servicio || "").trim();
+        const currentServiceExists = services.some((service) => String(service?.id_servicio || "") === currentServiceId);
         return (
           <div key={`${index}-${currentServiceId || "new-service"}`} className="grid grid-cols-1 gap-2 rounded-xl border border-[var(--mf-nav-border)] p-2 sm:grid-cols-[1fr_90px_auto] sm:items-center">
             <select
@@ -437,6 +449,9 @@ function PlanServicesEditor({ items, onChange, services }) {
               className="mf-select"
             >
               <option value="">Seleccionar servicio</option>
+              {currentServiceId && !currentServiceExists ? (
+                <option value={currentServiceId}>{String(item?.nombre || "Servicio heredado")} (No disponible)</option>
+              ) : null}
               {services.map((service) => {
                 const optionId = String(service.id_servicio || "");
                 const isTaken = selectedServiceIds.has(optionId) && optionId !== currentServiceId;
@@ -516,7 +531,7 @@ function PlanCourtesiesEditor({ items, onChange, courtesias, existingCourtesyIds
               className="mf-select"
             >
               <option value="">Seleccionar cortesia</option>
-              {isCurrentFromLegacy ? <option value={currentCourtesyId}>Cortesia heredada</option> : null}
+              {isCurrentFromLegacy ? <option value={currentCourtesyId}>{String(item?.nombre || "Cortesia heredada")} (No disponible)</option> : null}
               {scopedOptions.map((courtesy) => {
                 const optionId = String(courtesy.id_cortesia || "");
                 const isTaken = selectedCourtesyIds.has(optionId) && optionId !== currentCourtesyId;
@@ -795,6 +810,7 @@ export default function AdminPlansCatalogPage() {
   const [formValues, setFormValues] = useState(FORM_DEFAULTS);
   const [formBranchId, setFormBranchId] = useState("");
   const [formOriginalCourtesyIds, setFormOriginalCourtesyIds] = useState([]);
+  const [formOriginalMaster, setFormOriginalMaster] = useState(null);
   const [formError, setFormError] = useState("");
   const [formLoading, setFormLoading] = useState(false);
 
@@ -1060,7 +1076,7 @@ export default function AdminPlansCatalogPage() {
   }, [canManagePlans, fetchCatalogOptionsForBranch, fetchPlanes, sucursal]);
 
   useEffect(() => {
-    if (!dialogOpen) return;
+    if (!dialogOpen || dialogMode === "editMaster") return;
     setFormValues((previous) => {
       const nextBenefits = sanitizeBenefitsByScope(previous?.beneficios, services, courtesies, formOriginalCourtesyIds);
       if (nextBenefits.length === (Array.isArray(previous?.beneficios) ? previous.beneficios.length : 0)) {
@@ -1069,7 +1085,7 @@ export default function AdminPlansCatalogPage() {
       // AM: Limpia beneficios inválidos si cambia la sucursal o el set de servicios operativos.
       return { ...previous, beneficios: nextBenefits };
     });
-  }, [courtesies, dialogOpen, formOriginalCourtesyIds, services]);
+  }, [courtesies, dialogMode, dialogOpen, formOriginalCourtesyIds, services]);
 
   function handleFormChange(field, value) {
     setFormValues((previous) => ({ ...previous, [field]: value }));
@@ -1142,6 +1158,7 @@ export default function AdminPlansCatalogPage() {
     setDialogMode("create");
     setFormBranchId(branchId);
     setFormOriginalCourtesyIds([]);
+    setFormOriginalMaster(null);
     setEditTarget(null);
     setFormValues({
       ...FORM_DEFAULTS,
@@ -1165,7 +1182,7 @@ export default function AdminPlansCatalogPage() {
       return;
     }
 
-    const { scopedServices, scopedCourtesies } = await fetchCatalogOptionsForBranch(branchId);
+    await fetchCatalogOptionsForBranch(branchId);
     setDialogMode("editMaster");
     setFormBranchId(branchId);
     setEditTarget(plan);
@@ -1174,16 +1191,20 @@ export default function AdminPlansCatalogPage() {
       .map((item) => String(item?.id_cortesia || "").trim())
       .filter(Boolean);
     setFormOriginalCourtesyIds(existingCourtesyIds);
-    const nextBenefits = sanitizeBenefitsByScope(normalizeBenefits(plan?.beneficios), scopedServices, scopedCourtesies, existingCourtesyIds);
-    setFormValues({
+    const nextBenefits = normalizeBenefits(plan?.beneficios);
+    const originalMaster = {
       nombre_plan: plan?.nombre_plan || "",
       descripcion: plan?.descripcion || "",
-      precio_hnl: "",
       periodo_membresia_codigo: String(plan?.periodo_membresia_codigo || "mensual").toLowerCase(),
       categoria_nivel: normalizePlanCategory(plan?.categoria_nivel, DEFAULT_PLAN_CATEGORY),
+      beneficios: nextBenefits,
+    };
+    setFormOriginalMaster(originalMaster);
+    setFormValues({
+      ...originalMaster,
+      precio_hnl: "",
       visible_publico: true,
       orden_visual: "100",
-      beneficios: nextBenefits,
     });
     setFormError("");
     setDialogOpen(true);
@@ -1201,6 +1222,7 @@ export default function AdminPlansCatalogPage() {
     setFormBranchId(branchId);
     setEditTarget({ ...(plan || {}), _mutation_branch_id: branchId });
     setFormOriginalCourtesyIds([]);
+    setFormOriginalMaster(null);
     setFormValues({
       ...FORM_DEFAULTS,
       precio_hnl: Number(offerData?.precio_hnl ?? 0).toString(),
@@ -1222,6 +1244,7 @@ export default function AdminPlansCatalogPage() {
     setFormBranchId("");
     setEditTarget(plan || null);
     setFormOriginalCourtesyIds([]);
+    setFormOriginalMaster(null);
     setFormValues({
       ...FORM_DEFAULTS,
       precio_hnl: "",
@@ -1268,12 +1291,15 @@ export default function AdminPlansCatalogPage() {
     }
 
     const normalizedFormBenefits = normalizeBenefits(formValues?.beneficios);
+    const benefitsChanged = dialogMode === "editMaster"
+      ? !benefitsAreEquivalent(formOriginalMaster?.beneficios, normalizedFormBenefits)
+      : true;
     const validServiceIds = new Set((Array.isArray(services) ? services : []).map((service) => String(service?.id_servicio || "")));
     const invalidServiceBenefit = normalizedFormBenefits.find((item) => {
       if (normalizeTipo(item?.tipo) !== "servicio") return false;
       return !validServiceIds.has(String(item?.id_servicio || ""));
     });
-    if (dialogMode !== "editOffer" && dialogMode !== "addOffer" && invalidServiceBenefit) {
+    if (dialogMode !== "editOffer" && dialogMode !== "addOffer" && benefitsChanged && invalidServiceBenefit) {
       // AM: Defensa en UI ante manipulación de payload o cambios de sucursal durante edición.
       setFormError("Uno o más servicios seleccionados no son operativos en la sucursal actual.");
       return;
@@ -1281,15 +1307,21 @@ export default function AdminPlansCatalogPage() {
 
     const courtesyById = new Map((Array.isArray(courtesies) ? courtesies : []).map((courtesy) => [String(courtesy?.id_cortesia || ""), courtesy]));
     const existingCourtesySet = new Set((Array.isArray(formOriginalCourtesyIds) ? formOriginalCourtesyIds : []).map((id) => String(id || "")));
+    const originalCourtesyQuantityById = new Map(
+      normalizeBenefits(formOriginalMaster?.beneficios)
+        .filter((item) => normalizeTipo(item?.tipo) === "cortesia" && item?.id_cortesia)
+        .map((item) => [String(item.id_cortesia), Number(item.cantidad)])
+    );
     const invalidCourtesyBenefit = normalizedFormBenefits.find((item) => {
       if (normalizeTipo(item?.tipo) !== "cortesia") return false;
       const courtesyId = String(item?.id_cortesia || "");
       const courtesy = courtesyById.get(courtesyId);
-      if (!courtesy) return true;
+      const originalQuantity = originalCourtesyQuantityById.get(courtesyId);
+      if (!courtesy) return !existingCourtesySet.has(courtesyId) || Number(item.cantidad) > originalQuantity;
       if (courtesy.activa) return false;
-      return !existingCourtesySet.has(courtesyId);
+      return !existingCourtesySet.has(courtesyId) || Number(item.cantidad) > originalQuantity;
     });
-    if (dialogMode !== "editOffer" && dialogMode !== "addOffer" && invalidCourtesyBenefit) {
+    if (dialogMode !== "editOffer" && dialogMode !== "addOffer" && benefitsChanged && invalidCourtesyBenefit) {
       setFormError("Una o mas cortesias no son validas para la sucursal actual.");
       return;
     }
@@ -1358,14 +1390,24 @@ export default function AdminPlansCatalogPage() {
         orden_visual: Number(formValues.orden_visual),
       }
       : dialogMode === "editMaster"
-        ? {
-          nombre_plan: String(formValues.nombre_plan || "").trim(),
-          descripcion: String(formValues.descripcion || "").trim() || null,
-          periodo_membresia_codigo: "mensual",
-          categoria_nivel: normalizePlanCategory(formValues.categoria_nivel, DEFAULT_PLAN_CATEGORY),
-          beneficios: beneficiosPayload,
-          id_sucursal: branchId,
-        }
+        ? (() => {
+          const nextPayload = {};
+          const nextName = String(formValues.nombre_plan || "").trim();
+          const originalName = String(formOriginalMaster?.nombre_plan || "").trim();
+          const nextDescription = String(formValues.descripcion || "").trim() || null;
+          const originalDescription = String(formOriginalMaster?.descripcion || "").trim() || null;
+          const nextPeriod = String(formValues.periodo_membresia_codigo || "mensual").toLowerCase();
+          const originalPeriod = String(formOriginalMaster?.periodo_membresia_codigo || "mensual").toLowerCase();
+          const nextCategory = normalizePlanCategory(formValues.categoria_nivel, DEFAULT_PLAN_CATEGORY);
+          const originalCategory = normalizePlanCategory(formOriginalMaster?.categoria_nivel, DEFAULT_PLAN_CATEGORY);
+          if (nextName !== originalName) nextPayload.nombre_plan = nextName;
+          if (nextDescription !== originalDescription) nextPayload.descripcion = nextDescription;
+          if (nextPeriod !== originalPeriod) nextPayload.periodo_membresia_codigo = nextPeriod;
+          if (nextCategory !== originalCategory) nextPayload.categoria_nivel = nextCategory;
+          if (benefitsChanged) nextPayload.beneficios = beneficiosPayload;
+          if (Object.keys(nextPayload).length > 0) nextPayload.id_sucursal = branchId;
+          return nextPayload;
+        })()
         : dialogMode === "create"
           ? {
             nombre_plan: String(formValues.nombre_plan || "").trim(),
@@ -1393,6 +1435,12 @@ export default function AdminPlansCatalogPage() {
         };
 
     try {
+      if (dialogMode === "editMaster" && Object.keys(payload).length === 0) {
+        setDialogOpen(false);
+        setEditTarget(null);
+        setFormOriginalMaster(null);
+        return;
+      }
       if (editTarget?.id_plan) {
         const response = await updateAdminPlan(editTarget.id_plan, payload);
         setPlanes((current) => upsertScopedPlan(current, response?.data));
@@ -1409,6 +1457,7 @@ export default function AdminPlansCatalogPage() {
       setFormValues({ ...FORM_DEFAULTS });
       setFormBranchId(branchId);
       setFormOriginalCourtesyIds([]);
+      setFormOriginalMaster(null);
       void fetchPlanes({ silent: true });
     } catch (error) {
       setFormError(extractMessage(error));
