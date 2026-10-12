@@ -32,7 +32,7 @@ function formatPriceHnl(value) {
   return `L ${amount.toFixed(2)}`;
 }
 
-function ServiceCard({ item, compact = false }) {
+function ServiceCard({ item, compact = false, nonBookable = false }) {
   const displayPrice = formatPriceHnl(item?.precio_hnl);
   return (
     <motion.article
@@ -40,12 +40,14 @@ function ServiceCard({ item, compact = false }) {
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="mf-glass-surface flex w-[85vw] shrink-0 snap-start flex-col justify-between rounded-[28px] p-5 sm:w-[68vw] lg:w-[calc((100%-2rem)/3)]"
+      className={nonBookable
+        ? 'mf-glass-surface flex min-w-0 flex-col justify-between rounded-[28px] p-5'
+        : 'mf-glass-surface flex w-[85vw] shrink-0 snap-start flex-col justify-between rounded-[28px] p-5 sm:w-[68vw] lg:w-[calc((100%-2rem)/3)]'}
     >
       <div className="flex items-start gap-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">
-            {compact ? 'Informativo' : 'Servicio'}
+            {nonBookable ? 'No disponible para agendar' : compact ? 'Informativo' : 'Servicio'}
           </p>
           <h3 className="mf-font-display mt-3 text-[28px] leading-[0.95] text-[var(--mf-text)]">
             {item.nombre_servicio}
@@ -349,8 +351,9 @@ export default function ServicesPage() {
     navigate('/agendar/barberos');
   }
 
-  const agendableServices = services.filter((item) => item?.servicio_informativo !== true);
+  const agendableServices = services.filter((item) => item?.agendable === true && item?.servicio_informativo !== true);
   const informativeServices = services.filter((item) => item?.servicio_informativo === true);
+  const nonBookableServices = services.filter((item) => item?.agendable !== true && item?.servicio_informativo !== true);
 
   const navItems = [
     { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate('/') },
@@ -505,6 +508,17 @@ export default function ServicesPage() {
                       <ServiceCard key={item.id_servicio} item={item} compact />
                     ))}
                   </CatalogSection>
+
+                  {nonBookableServices.length > 0 ? (
+                    <section className="mt-8">
+                      <h2 className="mf-font-display text-[26px] text-[var(--mf-text)]">Servicios no disponibles para agendar</h2>
+                      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {nonBookableServices.map((item) => (
+                          <ServiceCard key={item.id_servicio} item={item} nonBookable />
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
                 </>
               )}
 

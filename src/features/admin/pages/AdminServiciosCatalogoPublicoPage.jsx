@@ -123,11 +123,15 @@ export default function AdminServiciosCatalogoPublicoPage() {
     return publicServices.filter((row) => `${row?.nombre_servicio || ''} ${row?.descripcion || ''}`.toLowerCase().includes(normalizedSearch));
   }, [publicServices, normalizedSearch]);
   const filteredAgendableServices = useMemo(
-    () => filteredServices.filter((row) => row?.servicio_informativo !== true),
+    () => filteredServices.filter((row) => row?.agendable === true && row?.servicio_informativo !== true),
     [filteredServices]
   );
   const filteredInformativeServices = useMemo(
     () => filteredServices.filter((row) => row?.servicio_informativo === true),
+    [filteredServices]
+  );
+  const filteredNonBookableServices = useMemo(
+    () => filteredServices.filter((row) => row?.agendable !== true && row?.servicio_informativo !== true),
     [filteredServices]
   );
 
@@ -189,7 +193,7 @@ export default function AdminServiciosCatalogoPublicoPage() {
       {errorMessage ? <ErrorBanner message={errorMessage} onRetry={() => void loadData(branchId)} /> : null}
       {loading ? <LoadingSpinner /> : null}
 
-      {!loading && !errorMessage && filteredAgendableServices.length === 0 && filteredInformativeServices.length === 0 && filteredPackages.length === 0 && filteredPlans.length === 0 ? (
+      {!loading && !errorMessage && filteredAgendableServices.length === 0 && filteredInformativeServices.length === 0 && filteredNonBookableServices.length === 0 && filteredPackages.length === 0 && filteredPlans.length === 0 ? (
         <EmptyState
           icon={Building2}
           title="Sin elementos publicados"
@@ -230,6 +234,28 @@ export default function AdminServiciosCatalogoPublicoPage() {
                 chips={[
                   { label: 'Tipo', value: 'Informativo' },
                   { label: 'Orden', value: Number(row.orden_visual ?? 100) },
+                  { label: 'Precio', value: `L ${Number(row.precio_hnl ?? 0).toFixed(2)}` },
+                ]}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {!loading && !errorMessage && filteredNonBookableServices.length > 0 ? (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">Servicios no disponibles para agendar</h2>
+          <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+            {filteredNonBookableServices.slice(0, 50).map((row) => (
+              <PublicCard
+                key={row.id_servicio}
+                icon={<Scissors size={14} />}
+                title={row.nombre_servicio}
+                subtitle={row.descripcion || 'Sin descripción'}
+                chips={[
+                  { label: 'Disponibilidad', value: 'No disponible para agendar' },
+                  { label: 'Orden', value: Number(row.orden_visual ?? 100) },
+                  { label: 'Duración', value: `${Number(row.duracion_min ?? 0)} min` },
                   { label: 'Precio', value: `L ${Number(row.precio_hnl ?? 0).toFixed(2)}` },
                 ]}
               />

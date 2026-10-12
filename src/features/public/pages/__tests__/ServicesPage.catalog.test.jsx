@@ -33,6 +33,7 @@ const branches = [
 const service = (name, informative = false) => ({
   id_servicio: name, nombre_servicio: name, precio_hnl: 150, duracion_min: 30,
   servicio_informativo: informative,
+  agendable: !informative, activo: true,
 });
 const pkg = (name) => ({
   id_paquete: name, nombre_paquete: name, precio_hnl: 300,
@@ -58,6 +59,45 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('catálogo público por sucursal', () => {
+  test('clasifica false y agendable ausente sin presentarlos como agendables', async () => {
+    const missing = { ...service('Sin confirmar'), descripcion: 'Dato incompleto' };
+    delete missing.agendable;
+    api.listPublicCatalogServices.mockResolvedValue({ services: [
+      service('Reservable'), service('Informativo', true),
+      { ...service('No reservable'), agendable: false, descripcion: 'Detalle conservado' }, missing,
+    ] });
+    render(<ServicesPage />);
+    const booked = (await screen.findByRole('heading', { name: 'Servicios agendables' })).closest('section');
+    await screen.findByText('No reservable');
+    expect(within(booked).getByText('Reservable')).toBeInTheDocument();
+    expect(within(booked).queryByText('No reservable')).not.toBeInTheDocument();
+    expect(within(booked).queryByText('Sin confirmar')).not.toBeInTheDocument();
+    const unavailable = screen.getByRole('heading', { name: 'Servicios no disponibles para agendar' }).closest('section');
+    expect(within(unavailable).getByText('No reservable')).toBeInTheDocument();
+    expect(within(unavailable).getByText('Sin confirmar')).toBeInTheDocument();
+    expect(within(unavailable).getByText('Detalle conservado')).toBeInTheDocument();
+    expect(within(unavailable).getAllByText('L 150.00')).toHaveLength(2);
+    expect(within(unavailable).getAllByText('30 min')).toHaveLength(2);
+    expect(within(unavailable).queryByText('Informativo')).not.toBeInTheDocument();
+    expect(screen.getAllByText('No reservable')).toHaveLength(1);
+    expect(api.listPublicCatalogServices).toHaveBeenCalledTimes(1);
+  });
+
+  test('catalogSync reclasifica un servicio sin duplicarlo ni agregar consultas', async () => {
+    api.listPublicCatalogServices.mockResolvedValueOnce({ services: [service('Corte actual')] })
+      .mockResolvedValueOnce({ services: [{ ...service('Corte actual'), agendable: false }] });
+    render(<ServicesPage />);
+    expect(await screen.findByText('Corte actual')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Servicios no disponibles para agendar' })).not.toBeInTheDocument();
+    await act(async () => sync.callback());
+    const unavailable = screen.getByRole('heading', { name: 'Servicios no disponibles para agendar' }).closest('section');
+    expect(within(unavailable).getByText('Corte actual')).toBeInTheDocument();
+    const booked = screen.getByRole('heading', { name: 'Servicios agendables' }).closest('section');
+    expect(within(booked).queryByText('Corte actual')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Corte actual')).toHaveLength(1);
+    expect(api.listPublicCatalogServices).toHaveBeenCalledTimes(2);
+    expect(api.listPublicCatalogPackages).toHaveBeenCalledTimes(2);
+  });
   test('selecciona la primera sucursal y conserva servicios, paquetes y navegación', async () => {
     render(<ServicesPage />);
     expect(await screen.findByText('Corte A')).toBeInTheDocument();
