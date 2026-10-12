@@ -16,6 +16,11 @@ import {
   Gift,
   Scissors,
   CalendarClock,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext.jsx";
 import {
@@ -38,17 +43,6 @@ import {
 } from "../../../components/ui/dialog.jsx";
 import { Input } from "../../../components/ui/input.jsx";
 import { Label } from "../../../components/ui/label.jsx";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../../../components/ui/table.jsx";
-import ViewToggle from "../../../components/data/ViewToggle.jsx";
-import DataCard from "../../../components/data/DataCard.jsx";
-import CardsCarousel from "../../../components/data/CardsCarousel.jsx";
 import HoverActionButton from "../../../components/data/HoverActionButton.jsx";
 import DetailInfoModalContent from "../../../components/data/DetailInfoModalContent.jsx";
 import EmptyState from "../../../components/data/EmptyState.jsx";
@@ -84,6 +78,7 @@ const FILTER_DEFAULTS = {
   idSucursal: "all",
 };
 const PLAN_BENEFIT_MAX_CANTIDAD = 999;
+const PLANS_PAGE_SIZE = 10;
 
 function extractMessage(error) {
   const code = String(error?.data?.error?.code || error?.response?.data?.error?.code || "").trim();
@@ -243,11 +238,6 @@ function getPlanPriceSummary(plan) {
   return min === max ? formatPlanPrice(min) : `${formatPlanPrice(min)} - ${formatPlanPrice(max)}`;
 }
 
-function getPlanBranchSummary(plan, branchNameById) {
-  const names = getPlanOffers(plan).map((offer) => branchNameById[offer?.id_sucursal] || offer?.id_sucursal).filter(Boolean);
-  return names.length ? names.join(", ") : "Sin sucursales asociadas";
-}
-
 function getPlanOfferStateSummary(plan) {
   const offers = getPlanOffers(plan);
   const activeCount = offers.filter((offer) => Boolean(offer?.activo)).length;
@@ -347,6 +337,36 @@ function PlanVisibilityBadge({ visible, activo = true }) {
 
 function PlanPeriodBadge({ period }) {
   return <span className="mf-badge mf-badge-gold">{formatPeriod(period)}</span>;
+}
+
+function PlanBenefitsSummary({ benefits }) {
+  const { servicios, cortesias } = splitBenefitsByType(benefits);
+  return (
+    <div className="grid min-w-0 grid-cols-2 gap-2" aria-label="Resumen de beneficios">
+      <div className="min-w-0 rounded-lg border border-[var(--mf-nav-border)] px-2.5 py-2">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--mf-text-2)]"><Scissors size={12} /> Servicios</div>
+        <div className="mt-1 text-sm font-semibold text-[var(--mf-text)]">{servicios.length} {servicios.length === 1 ? "tipo" : "tipos"}</div>
+      </div>
+      <div className="min-w-0 rounded-lg border border-[var(--mf-nav-border)] px-2.5 py-2">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--mf-text-2)]"><Gift size={12} /> Cortesías</div>
+        <div className="mt-1 text-sm font-semibold text-[var(--mf-text)]">{cortesias.length} {cortesias.length === 1 ? "tipo" : "tipos"}</div>
+      </div>
+    </div>
+  );
+}
+
+function PlanBenefitQuantityList({ benefits }) {
+  const normalized = Array.isArray(benefits) ? benefits : [];
+  if (!normalized.length) return <span className="text-xs text-[var(--mf-text-2)]">Sin beneficios</span>;
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1.5" aria-label="Beneficios incluidos">
+      {normalized.map((benefit, index) => (
+        <span key={`${benefit?.tipo || "benefit"}-${benefit?.id_servicio || benefit?.id_cortesia || index}`} className="max-w-full truncate rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-2 py-1 text-[11px] text-[var(--mf-text-2)]">
+          <strong className="text-[var(--mf-text)]">{Number(benefit?.cantidad || 0)}x</strong> {benefit?.nombre || (normalizeTipo(benefit?.tipo) === "servicio" ? "Servicio" : "Cortesía")}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function PlanCategoryBadge({ level }) {
@@ -687,86 +707,87 @@ function PlanForm({
       ) : null}
 
       {!isCreate && isAddOffer ? (
-        <div className="flex flex-col gap-1">
+        <section aria-labelledby="plan-offer-branch" className="rounded-xl border border-[var(--mf-nav-border)] p-3 sm:p-4">
+          <h3 id="plan-offer-branch" className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--mf-accent)]">Sucursal de la oferta</h3>
+          <div className="flex flex-col gap-1">
           <Label htmlFor="plan-branch">{isAddOffer ? "Sucursal *" : "Sucursal inicial de la oferta *"}</Label>
           <select id="plan-branch" className="mf-select" value={formBranchId} onChange={(event) => onBranchChange(event.target.value)}>
             <option value="">Seleccionar sucursal</option>
             {availableBranches.map((branch) => <option key={branch.id_sucursal} value={branch.id_sucursal}>{branch.nombre_sucursal}</option>)}
           </select>
-        </div>
+          </div>
+        </section>
       ) : null}
 
       {isOfferOnly ? null : (
-        <>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="plan-name">Nombre del plan *</Label>
-            <Input id="plan-name" value={values.nombre_plan} onChange={(event) => onChange("nombre_plan", event.target.value)} placeholder="Ej. Plan VIP" />
+        <section aria-labelledby="plan-master-data" className="rounded-xl border border-[var(--mf-nav-border)] p-3 sm:p-4">
+          <h3 id="plan-master-data" className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--mf-accent)]">Datos del plan maestro</h3>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <Label htmlFor="plan-name">Nombre del plan *</Label>
+              <Input id="plan-name" value={values.nombre_plan} onChange={(event) => onChange("nombre_plan", event.target.value)} placeholder="Ej. Plan VIP" />
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <Label htmlFor="plan-description">Descripcion</Label>
+              <Input id="plan-description" value={values.descripcion} onChange={(event) => onChange("descripcion", event.target.value)} placeholder="Descripcion comercial opcional" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="plan-period">Periodo</Label>
+              <Input id="plan-period" value="Mensual" readOnly />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="plan-category">Categoria visual</Label>
+              <select
+                id="plan-category"
+                className="mf-select"
+                value={String(normalizePlanCategory(values.categoria_nivel, DEFAULT_PLAN_CATEGORY))}
+                onChange={(event) => onChange("categoria_nivel", Number(event.target.value))}
+              >
+                {PLAN_CATEGORY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    Nivel {option.value} - {option.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-[var(--mf-text-2)]">
+                {PLAN_CATEGORY_OPTIONS.find((option) => option.value === normalizePlanCategory(values.categoria_nivel, DEFAULT_PLAN_CATEGORY))?.helper}
+              </p>
+            </div>
           </div>
-
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="plan-description">Descripcion</Label>
-            <Input id="plan-description" value={values.descripcion} onChange={(event) => onChange("descripcion", event.target.value)} placeholder="Descripcion comercial opcional" />
-          </div>
-        </>
+        </section>
       )}
 
       {isEditMaster || isCreate ? null : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="plan-price">Precio HNL *</Label>
-            <Input id="plan-price" type="number" min="0.01" step="0.01" value={values.precio_hnl} onChange={(event) => onChange("precio_hnl", event.target.value)} placeholder="2400.00" />
+        <section aria-labelledby="plan-offer-data" className="rounded-xl border border-[var(--mf-nav-border)] p-3 sm:p-4">
+          <h3 id="plan-offer-data" className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--mf-accent)]">Configuración de la oferta</h3>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="plan-price">Precio HNL *</Label>
+              <Input id="plan-price" type="number" min="0.01" step="0.01" value={values.precio_hnl} onChange={(event) => onChange("precio_hnl", event.target.value)} placeholder="2400.00" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="plan-order">Orden visual *</Label>
+              <Input id="plan-order" type="number" min="0" value={values.orden_visual} onChange={(event) => onChange("orden_visual", event.target.value)} placeholder="100" />
+            </div>
           </div>
-
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="plan-order">Orden visual *</Label>
-            <Input id="plan-order" type="number" min="0" value={values.orden_visual} onChange={(event) => onChange("orden_visual", event.target.value)} placeholder="100" />
-          </div>
-        </div>
+          <label className="mt-3 flex items-center justify-between rounded-xl bg-[var(--mf-btn-bg)] px-3 py-2.5 text-sm">
+            <span className="text-[var(--mf-text)]">Visible en catalogo publico</span>
+            <input type="checkbox" checked={Boolean(values.visible_publico)} onChange={(event) => onChange("visible_publico", event.target.checked)} className="h-4 w-4 accent-[var(--mf-accent)]" />
+          </label>
+        </section>
       )}
 
       {isOfferOnly ? null : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="plan-period">Periodo</Label>
-            <Input id="plan-period" value="Mensual" readOnly />
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="plan-category">Categoria visual</Label>
-            <select
-              id="plan-category"
-              className="mf-select"
-              value={String(normalizePlanCategory(values.categoria_nivel, DEFAULT_PLAN_CATEGORY))}
-              onChange={(event) => onChange("categoria_nivel", Number(event.target.value))}
-            >
-              {PLAN_CATEGORY_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  Nivel {option.value} - {option.label}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-[var(--mf-text-2)]">
-              {PLAN_CATEGORY_OPTIONS.find((option) => option.value === normalizePlanCategory(values.categoria_nivel, DEFAULT_PLAN_CATEGORY))?.helper}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {isEditMaster || isCreate ? null : (
-        <label className="flex items-center justify-between rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2.5 text-sm">
-          <span className="text-[var(--mf-text)]">Visible en catalogo publico</span>
-          <input type="checkbox" checked={Boolean(values.visible_publico)} onChange={(event) => onChange("visible_publico", event.target.checked)} className="h-4 w-4 accent-[var(--mf-accent)]" />
-        </label>
-      )}
-
-      {isOfferOnly ? null : (
-        <PlanBenefitsEditor
-          items={values.beneficios}
-          onChange={(nextItems) => onChange("beneficios", nextItems)}
-          services={services}
-          courtesias={courtesias}
-          existingCourtesyIds={existingCourtesyIds}
-        />
+        <section aria-labelledby="plan-benefits-data" className="rounded-xl border border-[var(--mf-nav-border)] p-3 sm:p-4">
+          <h3 id="plan-benefits-data" className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--mf-accent)]">Beneficios incluidos</h3>
+          <PlanBenefitsEditor
+            items={values.beneficios}
+            onChange={(nextItems) => onChange("beneficios", nextItems)}
+            services={services}
+            courtesias={courtesias}
+            existingCourtesyIds={existingCourtesyIds}
+          />
+        </section>
       )}
     </div>
   );
@@ -791,14 +812,9 @@ export default function AdminPlansCatalogPage() {
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState("");
 
-  const [view, setView] = useState(() => {
-    try {
-      const stored = localStorage.getItem("mf-view-planes");
-      return stored === "table" || stored === "cards" ? stored : "cards";
-    } catch {
-      return "cards";
-    }
-  });
+  const [view, setView] = useState("list");
+  const [page, setPage] = useState(1);
+  const [expandedPlanIds, setExpandedPlanIds] = useState(() => new Set());
 
   const [search, setSearch] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -872,6 +888,11 @@ export default function AdminPlansCatalogPage() {
       return true;
     });
   }, [displayPlanes, filters, search, sucursal]);
+  const pageCount = Math.max(1, Math.ceil(filteredPlanes.length / PLANS_PAGE_SIZE));
+  const paginatedPlanes = useMemo(() => {
+    const start = (page - 1) * PLANS_PAGE_SIZE;
+    return filteredPlanes.slice(start, start + PLANS_PAGE_SIZE);
+  }, [filteredPlanes, page]);
 
   const activeFilterCount = useMemo(() => Object.values(filters).filter((value) => value !== "all").length, [filters]);
 
@@ -1051,12 +1072,12 @@ export default function AdminPlansCatalogPage() {
   }
 
   useEffect(() => {
-    try {
-      localStorage.setItem("mf-view-planes", view);
-    } catch {
-      // AM: Evita romper render si localStorage no esta disponible.
-    }
-  }, [view]);
+    setPage(1);
+  }, [filters, search, sucursal]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
 
   useEffect(() => {
     if (!canManagePlans) {
@@ -1556,7 +1577,14 @@ export default function AdminPlansCatalogPage() {
           <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[560px]">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-[var(--mf-text-2)]">{filteredPlanes.length} de {displayPlanes.length} plan(es)</p>
-              <ViewToggle value={view} onChange={setView} storageKey="mf-view-planes" />
+              <div className="inline-flex rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-1" role="group" aria-label="Vista del catálogo">
+                <button type="button" aria-pressed={view === "list"} onClick={() => setView("list")} className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${view === "list" ? "bg-[var(--mf-accent)] text-[var(--mf-accent-text)]" : "text-[var(--mf-text-2)] hover:text-[var(--mf-text)]"}`}>
+                  <List size={14} /> Lista
+                </button>
+                <button type="button" aria-pressed={view === "cards"} onClick={() => setView("cards")} className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${view === "cards" ? "bg-[var(--mf-accent)] text-[var(--mf-accent-text)]" : "text-[var(--mf-text-2)] hover:text-[var(--mf-text)]"}`}>
+                  <LayoutGrid size={14} /> Tarjetas
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -1592,79 +1620,87 @@ export default function AdminPlansCatalogPage() {
 
       {!loading && !listError && displayPlanes.length > 0 && filteredPlanes.length === 0 ? <EmptyState icon={Search} title="Sin resultados" description="No hay coincidencias con la busqueda o filtros actuales." /> : null}
 
-      {!loading && !listError && filteredPlanes.length > 0 && view === "cards" ? (
-        <CardsCarousel
-          items={filteredPlanes}
-          getItemKey={(plan) => `${plan?.id_plan || "plan"}:${sucursal ? plan?.id_sucursal || "all" : "master"}`}
-          renderItem={(plan, index, pageIndex) => (
-            <DataCard
-              key={`${plan.id_plan || "plan"}:${sucursal ? plan.id_sucursal || "all" : "master"}`}
-              animationDelay={(pageIndex * 0.02) + (index * 0.05)}
-              avatar={<Crown size={16} />}
-              title={plan.nombre_plan || "Plan"}
-              subtitle={plan.descripcion || "Sin descripcion"}
-              badge={sucursal ? <PlanStatusBadge activo={Boolean(plan.activo)} /> : <span className="mf-badge mf-badge-gold">Maestro</span>}
-              fields={[
-                ...(!sucursal ? [{ label: "Sucursales asociadas", value: getPlanBranchSummary(plan, branchNameById) }] : []),
-                { label: "Categoria", value: <PlanCategoryBadge level={plan.categoria_nivel} /> },
-                { label: "Periodo", value: <PlanPeriodBadge period={plan.periodo_membresia_codigo} /> },
-                { label: sucursal ? "Precio en esta sucursal" : "Precio por sucursal", value: <span className="font-mono font-bold text-[var(--mf-accent)]">{sucursal ? formatPlanPrice(plan.precio_hnl) : getPlanPriceSummary(plan)}</span> },
-                ...(sucursal ? [{ label: "Orden visual en esta sucursal", value: Number(plan.orden_visual ?? 100) }] : []),
-                ...(sucursal ? [{ label: "Publico en esta sucursal", value: <PlanVisibilityBadge visible={Boolean(plan.visible_publico)} activo={Boolean(plan.activo)} /> }] : [{ label: "Resumen de ofertas", value: getPlanOfferStateSummary(plan) }]),
-                { label: "Servicios / Cortesias", value: (() => {
-                  const split = splitBenefitsByType(plan?.beneficios);
-                  return `${split.servicios.length} / ${split.cortesias.length}`;
-                })() },
-              ]}
-              actions={renderActions(plan)}
-            />
-          )}
-        />
+      {!loading && !listError && paginatedPlanes.length > 0 && view === "list" ? (
+        <section aria-label="Lista de planes" className="@container overflow-hidden rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)]">
+          <div role="row" className="hidden grid-cols-[minmax(230px,1.35fr)_minmax(220px,1fr)_minmax(210px,.85fr)_auto] gap-4 border-b border-[var(--mf-nav-border)] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)] @[62rem]:grid">
+            <span>Plan y categoría</span><span>Beneficios</span><span>{sucursal ? "Oferta local" : "Ofertas por sucursal"}</span><span className="text-right">Acciones</span>
+          </div>
+          <div className="divide-y divide-[var(--mf-nav-border)]">
+            {paginatedPlanes.map((plan) => {
+              const offers = getPlanOffers(plan);
+              const expanded = expandedPlanIds.has(plan.id_plan);
+              return (
+                <article key={`${plan.id_plan || "plan"}:${sucursal ? plan.id_sucursal || "all" : "master"}`} role="row" className="min-w-0 px-3 py-3 transition-colors hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_40%,transparent)] sm:px-4">
+                  <div className="grid min-w-0 gap-3 @[62rem]:grid-cols-[minmax(230px,1.35fr)_minmax(220px,1fr)_minmax(210px,.85fr)_auto] @[62rem]:items-center @[62rem]:gap-4">
+                    <div className="min-w-0 space-y-2">
+                      <div className="flex min-w-0 items-start gap-2.5">
+                        <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Crown size={15} /></span>
+                        <div className="min-w-0">
+                          <h2 className="truncate text-sm font-semibold text-[var(--mf-text)]" title={plan.nombre_plan || "Plan"}>{plan.nombre_plan || "Plan"}</h2>
+                          <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-[var(--mf-text-2)]">{plan.descripcion || "Sin descripción"}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5"><PlanCategoryBadge level={plan.categoria_nivel} /><PlanPeriodBadge period={plan.periodo_membresia_codigo} /></div>
+                    </div>
+                    <div className="min-w-0 space-y-2"><PlanBenefitsSummary benefits={plan.beneficios} /><PlanBenefitQuantityList benefits={plan.beneficios} /></div>
+                    <div className="min-w-0 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_45%,transparent)] p-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">{sucursal ? "Precio en esta sucursal" : "Rango por sucursal"}</p>
+                      <p className="mt-1 font-mono text-base font-bold text-[var(--mf-accent)]">{sucursal ? formatPlanPrice(plan.precio_hnl) : getPlanPriceSummary(plan)}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {sucursal ? <><PlanStatusBadge activo={Boolean(plan.activo)} /><PlanVisibilityBadge visible={Boolean(plan.visible_publico)} activo={Boolean(plan.activo)} /><span className="text-xs text-[var(--mf-text-2)]">Orden {Number(plan.orden_visual ?? 100)}</span></> : <span className="text-xs text-[var(--mf-text-2)]">{offers.length} sucursal(es) · {getPlanOfferStateSummary(plan)}</span>}
+                      </div>
+                      {!sucursal ? (
+                        <button type="button" aria-expanded={expanded} onClick={() => setExpandedPlanIds((current) => { const next = new Set(current); if (expanded) next.delete(plan.id_plan); else next.add(plan.id_plan); return next; })} className="mt-2 inline-flex min-h-9 items-center gap-1.5 text-xs font-semibold text-[var(--mf-accent)] hover:underline">
+                          Ver {offers.length} oferta(s) <ChevronDown size={14} className={expanded ? "rotate-180 transition-transform" : "transition-transform"} />
+                        </button>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap items-center justify-end gap-1.5 @[62rem]:max-w-[190px]">{renderActions(plan)}</div>
+                  </div>
+                  {!sucursal && expanded ? (
+                    <div className="mt-3 grid gap-2 border-t border-[var(--mf-nav-border)] pt-3 sm:grid-cols-2 xl:grid-cols-3" aria-label={`Ofertas de ${plan.nombre_plan || "plan"}`}>
+                      {offers.map((offer) => (
+                        <div key={offer.id_sucursal} className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-3 text-xs">
+                          <div className="flex items-start justify-between gap-2"><strong className="min-w-0 truncate text-[var(--mf-text)]">{branchNameById[offer.id_sucursal] || offer.id_sucursal}</strong><span className="font-mono font-semibold text-[var(--mf-accent)]">{formatPlanPrice(offer.precio_hnl)}</span></div>
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5"><PlanStatusBadge activo={Boolean(offer.activo)} /><PlanVisibilityBadge visible={Boolean(offer.visible_publico)} activo={Boolean(offer.activo)} /><span className="text-[var(--mf-text-2)]">Orden {Number(offer.orden_visual ?? 100)}</span></div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        </section>
       ) : null}
 
-      {!loading && !listError && filteredPlanes.length > 0 && view === "table" ? (
-        <div className="mf-table-wrap">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-[var(--mf-nav-border)]">
-                {!sucursal ? <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursales asociadas</TableHead> : null}
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Categoría</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Periodo</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">{sucursal ? "Precio sucursal" : "Precio por sucursal"}</TableHead>
-                {sucursal ? <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead> : null}
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Beneficios</TableHead>
-                {sucursal ? <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Publico</TableHead> : null}
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">{sucursal ? "Estado en esta sucursal" : "Ofertas"}</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredPlanes.map((plan) => (
-                <TableRow key={`${plan.id_plan || "plan"}:${sucursal ? plan.id_sucursal || "all" : "master"}`} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">
-                  {!sucursal ? <TableCell className="text-[var(--mf-text-2)]">{getPlanBranchSummary(plan, branchNameById)}</TableCell> : null}
-                  <TableCell className="font-medium text-[var(--mf-text)]">
-                    <div>{plan.nombre_plan}</div>
-                    {plan.descripcion ? <div className="text-xs text-[var(--mf-text-2)] mt-0.5">{plan.descripcion}</div> : null}
-                  </TableCell>
-                  <TableCell className="text-center"><PlanCategoryBadge level={plan.categoria_nivel} /></TableCell>
-                  <TableCell className="text-center"><PlanPeriodBadge period={plan.periodo_membresia_codigo} /></TableCell>
-                  <TableCell className="text-right font-mono font-semibold text-[var(--mf-accent)]">{sucursal ? formatPlanPrice(plan.precio_hnl) : getPlanPriceSummary(plan)}</TableCell>
-                  {sucursal ? <TableCell className="text-center text-[var(--mf-text-2)]">{Number(plan.orden_visual ?? 100)}</TableCell> : null}
-                  <TableCell className="text-center hidden md:table-cell text-[var(--mf-text-2)]">
-                    {(() => {
-                      const split = splitBenefitsByType(plan?.beneficios);
-                      return `${split.servicios.length} / ${split.cortesias.length}`;
-                    })()}
-                  </TableCell>
-                  {sucursal ? <TableCell className="text-center hidden md:table-cell"><PlanVisibilityBadge visible={Boolean(plan.visible_publico)} activo={Boolean(plan.activo)} /></TableCell> : null}
-                  <TableCell className="text-center">{sucursal ? <PlanStatusBadge activo={Boolean(plan.activo)} /> : getPlanOfferStateSummary(plan)}</TableCell>
-                  <TableCell className="text-right"><div className="flex items-center justify-end gap-1.5">{renderActions(plan)}</div></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+      {!loading && !listError && paginatedPlanes.length > 0 && view === "cards" ? (
+        <section aria-label="Tarjetas de planes" className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+          {paginatedPlanes.map((plan) => (
+            <article key={`${plan.id_plan || "plan"}:${sucursal ? plan.id_sucursal || "all" : "master"}`} className="flex min-w-0 flex-col gap-3 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4 shadow-[var(--mf-shadow-card)]">
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="min-w-0"><h2 className="truncate text-base font-semibold text-[var(--mf-text)]" title={plan.nombre_plan || "Plan"}>{plan.nombre_plan || "Plan"}</h2><p className="mt-1 line-clamp-2 min-h-10 text-xs leading-5 text-[var(--mf-text-2)]">{plan.descripcion || "Sin descripción"}</p></div>
+                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Crown size={16} /></span>
+              </div>
+              <div className="flex flex-wrap gap-1.5"><PlanCategoryBadge level={plan.categoria_nivel} /><PlanPeriodBadge period={plan.periodo_membresia_codigo} />{sucursal ? <PlanStatusBadge activo={Boolean(plan.activo)} /> : null}</div>
+              <PlanBenefitsSummary benefits={plan.beneficios} />
+              <PlanBenefitQuantityList benefits={plan.beneficios} />
+              <div className="mt-auto rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">{sucursal ? "Precio en esta sucursal" : "Rango por sucursal"}</p>
+                <p className="mt-1 font-mono text-lg font-bold text-[var(--mf-accent)]">{sucursal ? formatPlanPrice(plan.precio_hnl) : getPlanPriceSummary(plan)}</p>
+                <div className="mt-2 text-xs text-[var(--mf-text-2)]">{sucursal ? <div className="flex flex-wrap items-center gap-1.5"><PlanVisibilityBadge visible={Boolean(plan.visible_publico)} activo={Boolean(plan.activo)} /><span>Orden {Number(plan.orden_visual ?? 100)}</span></div> : <>{getPlanOffers(plan).length} sucursal(es) · {getPlanOfferStateSummary(plan)}</>}</div>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-1.5 border-t border-[var(--mf-nav-border)] pt-3">{renderActions(plan)}</div>
+            </article>
+          ))}
+        </section>
+      ) : null}
+
+      {!loading && !listError && filteredPlanes.length > PLANS_PAGE_SIZE ? (
+        <nav aria-label="Paginación de planes" className="flex flex-col items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] px-3 py-2 sm:flex-row">
+          <p className="text-xs text-[var(--mf-text-2)]">Mostrando {((page - 1) * PLANS_PAGE_SIZE) + 1}-{Math.min(page * PLANS_PAGE_SIZE, filteredPlanes.length)} de {filteredPlanes.length}</p>
+          <div className="flex items-center gap-2"><Button type="button" variant="outline" size="sm" className="min-h-9 gap-1" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="Página anterior"><ChevronLeft size={14} /> Anterior</Button><span className="min-w-20 text-center text-xs text-[var(--mf-text-2)]">Página {page} de {pageCount}</span><Button type="button" variant="outline" size="sm" className="min-h-9 gap-1" disabled={page === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))} aria-label="Página siguiente">Siguiente <ChevronRight size={14} /></Button></div>
+        </nav>
       ) : null}
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading) setDialogOpen(open); }}>
