@@ -73,3 +73,47 @@ test('solo no agendables no activa el empty state general', async () => {
   expect(screen.queryByText('Sin elementos publicados')).not.toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'Servicios agendables' })).not.toBeInTheDocument();
 });
+
+test('fallo de Servicios conserva Paquetes y VIP, evita vacio y recupera con reintento', async () => {
+  api.getPublicCatalog.mockResolvedValueOnce({ services: [], packages: [{ id_paquete: 'P', nombre_paquete: 'Combo', precio_hnl: 300 }], errors: { services: true, packages: false } });
+  render(<AdminServiciosCatalogoPublicoPage />);
+  expect(await screen.findByText('No se pudieron cargar los servicios.')).toBeInTheDocument();
+  expect(screen.getByText('Combo')).toBeInTheDocument();
+  expect(screen.getByText('Plan VIP')).toBeInTheDocument();
+  expect(screen.queryByText('Sin elementos publicados')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+  expect(await screen.findByText('Reservable')).toBeInTheDocument();
+  expect(screen.queryByText('No se pudieron cargar los servicios.')).not.toBeInTheDocument();
+  expect(api.getPublicCatalog).toHaveBeenCalledTimes(2);
+  expect(api.getPublicCatalog).toHaveBeenLastCalledWith({ id_sucursal: undefined });
+});
+
+test('fallo de Paquetes conserva clasificadores y precio; catalogSync recupera', async () => {
+  api.getPublicCatalog.mockResolvedValueOnce({ services: [service('Reservable', true), service('No reservable', false)], packages: [], errors: { services: false, packages: true } });
+  render(<AdminServiciosCatalogoPublicoPage />);
+  expect(await screen.findByText('No se pudieron cargar los paquetes.')).toBeInTheDocument();
+  expect(screen.getByText('Reservable')).toBeInTheDocument();
+  expect(screen.getByText('No reservable')).toBeInTheDocument();
+  expect(screen.getByText('Plan VIP')).toBeInTheDocument();
+  expect(screen.getAllByText('Precio: L 123.00')).toHaveLength(2);
+  await act(async () => sync.callback());
+  expect(await screen.findByText('Combo')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('ambos catalogos fallan sin ocultar VIP ni exponer detalle interno', async () => {
+  api.getPublicCatalog.mockRejectedValueOnce(new Error('SQL detalle privado'));
+  render(<AdminServiciosCatalogoPublicoPage />);
+  expect(await screen.findByText('No se pudieron cargar los servicios ni los paquetes.')).toBeInTheDocument();
+  expect(screen.getByText('Plan VIP')).toBeInTheDocument();
+  expect(screen.queryByText('SQL detalle privado')).not.toBeInTheDocument();
+  expect(screen.queryByText('Sin elementos publicados')).not.toBeInTheDocument();
+});
+
+test('catalogos vacios exitosos conservan empty state sin alertas', async () => {
+  api.getPublicCatalog.mockResolvedValue({ services: [], packages: [], errors: { services: false, packages: false } });
+  api.listPublicCatalogPlans.mockResolvedValue({ plans: [] });
+  render(<AdminServiciosCatalogoPublicoPage />);
+  expect(await screen.findByText('Sin elementos publicados')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});

@@ -75,3 +75,55 @@ test('busqueda del cliente sigue usando la sucursal y no normaliza como agendabl
   expect(within(document.getElementById('servicios')).queryByText('No reservable')).not.toBeInTheDocument();
   expect(api.getPublicCatalog).toHaveBeenCalledTimes(1);
 });
+
+test('fallo Servicios conserva paquete y cantidades, reintenta en sucursal almacenada', async () => {
+  localStorage.setItem('mf_cliente_catalog_sucursal', 'B');
+  api.getPublicCatalog.mockResolvedValueOnce({ services: [], packages: [{ id_paquete: 'P', nombre_paquete: 'Combo', precio_hnl: 300, items: [{ id_servicio: 'S', nombre_servicio: 'Corte', cantidad: 2 }] }], errors: { services: true, packages: false } });
+  render(<ClienteCatalogoPage />);
+  expect(await screen.findByText('No se pudieron cargar los servicios.')).toBeInTheDocument();
+  expect(screen.queryByText('No hay servicios publicados para esta sucursal.')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Paquetes Combos disponibles/ }));
+  expect(screen.getByText('Combo')).toBeInTheDocument();
+  expect(screen.getByText('L 300.00')).toBeInTheDocument();
+  expect(screen.getByText('- Corte x2')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+  await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: /Servicios Selecciona tu experiencia/ }));
+  expect(screen.getByText('Reservable')).toBeInTheDocument();
+  expect(screen.getByRole('combobox')).toHaveValue('B');
+  expect(api.getPublicCatalog).toHaveBeenCalledTimes(2);
+  expect(api.getPublicCatalog).toHaveBeenLastCalledWith({ id_sucursal: 'B' });
+  expect(notify).not.toHaveBeenCalled();
+});
+
+test('fallo Paquetes conserva Servicios y Promociones; no muestra vacio legitimo', async () => {
+  api.getPublicCatalog.mockResolvedValueOnce({ services: [service('Reservable', true), service('No reservable', false)], packages: [], errors: { services: false, packages: true } });
+  render(<ClienteCatalogoPage />);
+  expect(await screen.findByText('No se pudieron cargar los paquetes.')).toBeInTheDocument();
+  expect(screen.getByText('Reservable')).toBeInTheDocument();
+  expect(screen.getByText('No reservable')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Paquetes Combos disponibles/ }));
+  expect(screen.queryByText('No hay paquetes activos para esta sucursal.')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Promociones Beneficios vigentes/ }));
+  expect(screen.getByRole('heading', { name: 'Promocion vigente' })).toBeInTheDocument();
+});
+
+test('ambos catalogos fallan con error seguro y Promociones conservadas', async () => {
+  api.getPublicCatalog.mockRejectedValueOnce(new Error('SQL detalle privado'));
+  render(<ClienteCatalogoPage />);
+  expect(await screen.findByText('No se pudieron cargar los servicios ni los paquetes.')).toBeInTheDocument();
+  expect(screen.queryByText('SQL detalle privado')).not.toBeInTheDocument();
+  expect(screen.queryByText('No hay servicios publicados para esta sucursal.')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Promociones Beneficios vigentes/ }));
+  expect(screen.getByRole('heading', { name: 'Promocion vigente' })).toBeInTheDocument();
+  expect(notify).not.toHaveBeenCalled();
+});
+
+test('vacio legitimo del cliente muestra empty states y ninguna alerta', async () => {
+  api.getPublicCatalog.mockResolvedValue({ services: [], packages: [], errors: { services: false, packages: false } });
+  render(<ClienteCatalogoPage />);
+  expect(await screen.findByText('No hay servicios publicados para esta sucursal.')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Paquetes Combos disponibles/ }));
+  expect(screen.getByText('No hay paquetes activos para esta sucursal.')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});

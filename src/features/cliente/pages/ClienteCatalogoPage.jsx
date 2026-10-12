@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Package, Scissors, Search, Sparkles, Tag } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import {
   getPublicCatalog,
   listPublicCatalogBranches,
@@ -78,6 +79,7 @@ function CatalogRailSection({
   subtitle,
   items = [],
   emptyMessage,
+  loadError = false,
   renderItem,
   forceRail = false,
   expanded = false,
@@ -119,7 +121,7 @@ function CatalogRailSection({
 
       {expanded ? (
         <>
-          {useRail ? (
+          {useRail && !loadError ? (
             <div className="flex justify-end">
               <div className="hidden items-center gap-2 sm:flex">
                 <button
@@ -142,11 +144,11 @@ function CatalogRailSection({
             </div>
           ) : null}
 
-          {!items.length ? (
+          {!items.length ? (loadError ? null : (
             <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
               {emptyMessage}
             </p>
-          ) : useRail ? (
+          )) : useRail ? (
             <>
               <div
                 ref={trackRef}
@@ -183,6 +185,7 @@ function CatalogServicesTwoRowsSection({
   subtitle,
   items = [],
   emptyMessage,
+  loadError = false,
   renderItem,
   expanded = false,
   onActivate = () => {},
@@ -231,11 +234,11 @@ function CatalogServicesTwoRowsSection({
             </div>
           ) : null}
 
-          {!items.length ? (
+          {!items.length ? (loadError ? null : (
             <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
               {emptyMessage}
             </p>
-          ) : (
+          )) : (
             <div
               ref={trackRef}
               className="grid grid-flow-col grid-rows-2 auto-cols-[minmax(260px,1fr)] gap-3 overflow-x-auto pb-2 scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -360,6 +363,7 @@ export default function ClienteCatalogoPage() {
   const [branchId, setBranchId] = useState('');
   const [services, setServices] = useState([]);
   const [packages, setPackages] = useState([]);
+  const [catalogErrors, setCatalogErrors] = useState({ services: false, packages: false });
   const [promotions, setPromotions] = useState([]);
   const [activeSection, setActiveSection] = useState('servicios');
   const [search, setSearch] = useState('');
@@ -372,12 +376,15 @@ export default function ClienteCatalogoPage() {
     const [catalogPayload, promotionsPayload] = await Promise.all([
       normalizedSearch
         ? searchPublicCatalog({ q: normalizedSearch, id_sucursal: selectedBranchId || undefined })
-        : getPublicCatalog({ id_sucursal: selectedBranchId || undefined }),
+        : getPublicCatalog({ id_sucursal: selectedBranchId || undefined }).catch(() => ({
+          services: [], packages: [], errors: { services: true, packages: true },
+        })),
       listPublicCatalogPromotions({ id_sucursal: selectedBranchId || undefined }),
     ]);
 
     setServices(Array.isArray(catalogPayload?.services) ? catalogPayload.services : []);
     setPackages(Array.isArray(catalogPayload?.packages) ? catalogPayload.packages : []);
+    setCatalogErrors({ services: Boolean(catalogPayload?.errors?.services), packages: Boolean(catalogPayload?.errors?.packages) });
     setPromotions(Array.isArray(promotionsPayload?.promotions) ? promotionsPayload.promotions : []);
   }, []);
 
@@ -427,6 +434,14 @@ export default function ClienteCatalogoPage() {
       notifyError(error?.data?.error?.message || error?.message || 'No se pudo actualizar el catálogo para la sucursal.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleCatalogRetry() {
+    try {
+      await fetchCatalogData(branchId, search);
+    } catch {
+      notifyError('No se pudo recuperar el catálogo. Intenta nuevamente.');
     }
   }
 
@@ -528,6 +543,14 @@ export default function ClienteCatalogoPage() {
         </div>
       ) : (
         <>
+          {catalogErrors.services || catalogErrors.packages ? (
+            <ErrorBanner
+              message={catalogErrors.services && catalogErrors.packages
+                ? 'No se pudieron cargar los servicios ni los paquetes.'
+                : catalogErrors.services ? 'No se pudieron cargar los servicios.' : 'No se pudieron cargar los paquetes.'}
+              onRetry={() => void handleCatalogRetry()}
+            />
+          ) : null}
           <CatalogServicesTwoRowsSection
             sectionId="servicios"
             titleIcon={Scissors}
@@ -535,6 +558,7 @@ export default function ClienteCatalogoPage() {
             subtitle="Selecciona tu experiencia agendable."
             items={agendables}
             emptyMessage="No hay servicios publicados para esta sucursal."
+            loadError={catalogErrors.services}
             expanded={activeSection === 'servicios'}
             onActivate={() => setActiveSection('servicios')}
             renderItem={(item) => (
@@ -575,6 +599,7 @@ export default function ClienteCatalogoPage() {
             subtitle="Combos disponibles para clientes autenticados."
             items={packages}
             emptyMessage="No hay paquetes activos para esta sucursal."
+            loadError={catalogErrors.packages}
             forceRail
             expanded={activeSection === 'paquetes'}
             onActivate={() => setActiveSection('paquetes')}

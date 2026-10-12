@@ -54,6 +54,7 @@ export default function AdminServiciosCatalogoPublicoPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [catalogErrors, setCatalogErrors] = useState({ services: false, packages: false });
 
   const [publicServices, setPublicServices] = useState([]);
   const [publicPackages, setPublicPackages] = useState([]);
@@ -68,12 +69,15 @@ export default function AdminServiciosCatalogoPublicoPage() {
 
     try {
       const [catalogResult, plansResult] = await Promise.all([
-        getPublicCatalog({ id_sucursal: selectedBranchId || undefined }),
+        getPublicCatalog({ id_sucursal: selectedBranchId || undefined }).catch(() => ({
+          services: [], packages: [], errors: { services: true, packages: true },
+        })),
         listPublicCatalogPlans({ id_sucursal: selectedBranchId || undefined }),
       ]);
 
       setPublicServices(sortByVisualOrder(catalogResult?.services || [], 'nombre_servicio'));
       setPublicPackages(sortByVisualOrder(catalogResult?.packages || [], 'nombre_paquete'));
+      setCatalogErrors({ services: Boolean(catalogResult?.errors?.services), packages: Boolean(catalogResult?.errors?.packages) });
       setPublicPlans(sortByVisualOrder(plansResult?.plans || [], 'nombre_plan'));
     } catch (error) {
       setErrorMessage(extractMessage(error));
@@ -193,7 +197,16 @@ export default function AdminServiciosCatalogoPublicoPage() {
       {errorMessage ? <ErrorBanner message={errorMessage} onRetry={() => void loadData(branchId)} /> : null}
       {loading ? <LoadingSpinner /> : null}
 
-      {!loading && !errorMessage && filteredAgendableServices.length === 0 && filteredInformativeServices.length === 0 && filteredNonBookableServices.length === 0 && filteredPackages.length === 0 && filteredPlans.length === 0 ? (
+      {!loading && !errorMessage && (catalogErrors.services || catalogErrors.packages) ? (
+        <ErrorBanner
+          message={catalogErrors.services && catalogErrors.packages
+            ? 'No se pudieron cargar los servicios ni los paquetes.'
+            : catalogErrors.services ? 'No se pudieron cargar los servicios.' : 'No se pudieron cargar los paquetes.'}
+          onRetry={() => void loadData(branchId, { silent: true })}
+        />
+      ) : null}
+
+      {!loading && !errorMessage && !catalogErrors.services && !catalogErrors.packages && filteredAgendableServices.length === 0 && filteredInformativeServices.length === 0 && filteredNonBookableServices.length === 0 && filteredPackages.length === 0 && filteredPlans.length === 0 ? (
         <EmptyState
           icon={Building2}
           title="Sin elementos publicados"
