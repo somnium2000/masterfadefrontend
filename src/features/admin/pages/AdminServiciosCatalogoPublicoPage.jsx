@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, Package, Search, Scissors, Sparkles } from 'lucide-react';
 import { Label } from '../../../components/ui/label.jsx';
 import { Input } from '../../../components/ui/input.jsx';
@@ -49,6 +49,10 @@ function PublicCard({ icon, title, subtitle, chips = [] }) {
 }
 
 export default function AdminServiciosCatalogoPublicoPage() {
+  const isMountedRef = useRef(false);
+  const selectedBranchRef = useRef('');
+  const requestRef = useRef(0);
+  const branchesReadyRef = useRef(false);
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState('');
   const [search, setSearch] = useState('');
@@ -61,6 +65,10 @@ export default function AdminServiciosCatalogoPublicoPage() {
   const [publicPlans, setPublicPlans] = useState([]);
 
   const loadData = useCallback(async (selectedBranchId = '', options = {}) => {
+    if (!isMountedRef.current || !branchesReadyRef.current || selectedBranchId !== selectedBranchRef.current) return;
+    const requestId = ++requestRef.current;
+    const isCurrent = () => isMountedRef.current && requestId === requestRef.current
+      && selectedBranchId === selectedBranchRef.current;
     const silent = options?.silent === true;
     if (!silent) {
       setLoading(true);
@@ -75,51 +83,63 @@ export default function AdminServiciosCatalogoPublicoPage() {
         listPublicCatalogPlans({ id_sucursal: selectedBranchId || undefined }),
       ]);
 
+      if (!isCurrent()) return;
       setPublicServices(sortByVisualOrder(catalogResult?.services || [], 'nombre_servicio'));
       setPublicPackages(sortByVisualOrder(catalogResult?.packages || [], 'nombre_paquete'));
       setCatalogErrors({ services: Boolean(catalogResult?.errors?.services), packages: Boolean(catalogResult?.errors?.packages) });
       setPublicPlans(sortByVisualOrder(plansResult?.plans || [], 'nombre_plan'));
     } catch (error) {
+      if (!isCurrent()) return;
       setErrorMessage(extractMessage(error));
       setPublicServices([]);
       setPublicPackages([]);
       setPublicPlans([]);
     } finally {
-      if (!silent) {
+      if (isCurrent()) {
         setLoading(false);
       }
     }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const response = await listPublicCatalogBranches();
-        if (!mounted) return;
-        const nextBranches = Array.isArray(response?.branches) ? response.branches : [];
-        setBranches(nextBranches);
-        const preferredBranchId = nextBranches.length === 1 ? nextBranches[0].id_sucursal : '';
-        setBranchId(preferredBranchId);
-        await loadData(preferredBranchId);
-      } catch (error) {
-        if (!mounted) return;
-        setErrorMessage(extractMessage(error));
-        setLoading(false);
-      }
-    })();
+    isMountedRef.current = true;
+    let active = true;
+    const initialRequestId = ++requestRef.current;
+    queueMicrotask(() => {
+      if (!active) return;
+      void (async () => {
+        try {
+          const response = await listPublicCatalogBranches();
+          if (!isMountedRef.current || initialRequestId !== requestRef.current) return;
+          const nextBranches = Array.isArray(response?.branches) ? response.branches : [];
+          setBranches(nextBranches);
+          branchesReadyRef.current = true;
+          const preferredBranchId = nextBranches.length === 1 ? nextBranches[0].id_sucursal : '';
+          selectedBranchRef.current = preferredBranchId;
+          setBranchId(preferredBranchId);
+          await loadData(preferredBranchId);
+        } catch (error) {
+          if (!isMountedRef.current || initialRequestId !== requestRef.current) return;
+          setErrorMessage(extractMessage(error));
+          setLoading(false);
+        }
+      })();
+    });
 
     return () => {
-      mounted = false;
+      active = false;
+      isMountedRef.current = false;
+      branchesReadyRef.current = false;
+      requestRef.current += 1;
     };
   }, [loadData]);
 
   useEffect(() => {
     const unsubscribe = subscribeCatalogSync(() => {
-      void loadData(branchId, { silent: true });
+      void loadData(selectedBranchRef.current, { silent: true });
     });
     return unsubscribe;
-  }, [branchId, loadData]);
+  }, [loadData]);
 
   const normalizedSearch = String(search || '').trim().toLowerCase();
   const filteredServices = useMemo(() => {
@@ -166,6 +186,8 @@ export default function AdminServiciosCatalogoPublicoPage() {
               value={branchId}
               onChange={(event) => {
                 const nextBranchId = String(event.target.value || '');
+                requestRef.current += 1;
+                selectedBranchRef.current = nextBranchId;
                 setBranchId(nextBranchId);
                 void loadData(nextBranchId);
               }}

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { StrictMode } from 'react';
 import ClienteCatalogoPage from '../ClienteCatalogoPage.jsx';
 
 const api = vi.hoisted(() => ({ getPublicCatalog: vi.fn(), listPublicCatalogBranches: vi.fn(), listPublicCatalogPromotions: vi.fn(), searchPublicCatalog: vi.fn() }));
@@ -126,4 +127,186 @@ test('vacio legitimo del cliente muestra empty states y ninguna alerta', async (
   fireEvent.click(screen.getByRole('button', { name: /Paquetes Combos disponibles/ }));
   expect(screen.getByText('No hay paquetes activos para esta sucursal.')).toBeInTheDocument();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
+const catalog = (name) => ({ services: [service(`Servicio ${name}`, true)], packages: [{ id_paquete: name, nombre_paquete: `Paquete ${name}`, precio_hnl: 300, items: [] }] });
+const promotions = (name) => ({ promotions: [{ id_promocion: name, titulo: `Promo ${name}`, parrafos: [] }] });
+const chooseBranch = (value) => fireEvent.change(screen.getByRole('combobox'), { target: { value } });
+
+test('A/B conserva catalogo B y Promociones cuando A responde tarde', async () => {
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('Reservable');
+  const oldCatalog = deferred();
+  const oldPromo = deferred();
+  api.getPublicCatalog.mockImplementation(({ id_sucursal }) => id_sucursal === 'B' ? Promise.resolve(catalog('B')) : oldCatalog.promise);
+  api.listPublicCatalogPromotions.mockImplementation(({ id_sucursal }) => id_sucursal === 'B' ? Promise.resolve(promotions('B')) : oldPromo.promise);
+  chooseBranch('');
+  chooseBranch('B');
+  await screen.findByText('Servicio B');
+  await act(async () => { oldCatalog.resolve(catalog('Todas vieja')); oldPromo.resolve(promotions('Todas vieja')); });
+  expect(screen.getByText('Servicio B')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Paquetes Combos disponibles/ }));
+  expect(screen.getByText('Paquete B')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Promociones Beneficios vigentes/ }));
+  expect(screen.getByRole('heading', { name: 'Promo B' })).toBeInTheDocument();
+  expect(screen.getByRole('combobox')).toHaveValue('B');
+});
+
+test('error de Promociones antiguo no notifica ni cambia loading vigente', async () => {
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('Reservable');
+  const old = deferred();
+  api.getPublicCatalog.mockResolvedValue(catalog('B'));
+  api.listPublicCatalogPromotions.mockReturnValueOnce(old.promise).mockResolvedValue(promotions('B'));
+  chooseBranch('');
+  chooseBranch('B');
+  await screen.findByText('Servicio B');
+  await act(async () => old.reject(new Error('Error viejo')));
+  expect(notify).not.toHaveBeenCalled();
+  expect(screen.getByText('Servicio B')).toBeInTheDocument();
+});
+
+test('A → B → A conserva la ultima generacion de A', async () => {
+  const firstA = deferred();
+  const oldB = deferred();
+  api.getPublicCatalog.mockReturnValueOnce(firstA.promise).mockReturnValueOnce(oldB.promise).mockResolvedValueOnce(catalog('A vigente'));
+  render(<ClienteCatalogoPage />);
+  await screen.findByRole('option', { name: 'Norte' });
+  chooseBranch('B');
+  chooseBranch('A');
+  await screen.findByText('Servicio A vigente');
+  await act(async () => {
+    firstA.resolve(catalog('A vieja'));
+    oldB.resolve({ services: [], packages: [], errors: { services: true, packages: true } });
+  });
+  expect(screen.getByText('Servicio A vigente')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('consulta inicial pendiente no sobrescribe seleccion B posterior', async () => {
+  const old = deferred();
+  api.getPublicCatalog.mockReturnValueOnce(old.promise).mockResolvedValueOnce(catalog('B'));
+  render(<ClienteCatalogoPage />);
+  await screen.findByRole('option', { name: 'Norte' });
+  chooseBranch('B');
+  await screen.findByText('Servicio B');
+  await act(async () => old.resolve(catalog('A inicial')));
+  expect(screen.getByText('Servicio B')).toBeInTheDocument();
+  expect(screen.getByRole('combobox')).toHaveValue('B');
+});
+
+test('busqueda vieja no reemplaza texto ni resultado nuevo', async () => {
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('Reservable');
+  const old = deferred();
+  api.searchPublicCatalog.mockReturnValueOnce(old.promise).mockResolvedValueOnce(catalog('nuevo'));
+  const input = screen.getByPlaceholderText('Buscar servicios o paquetes...');
+  fireEvent.change(input, { target: { value: 'viejo' } });
+  await waitFor(() => expect(api.searchPublicCatalog).toHaveBeenCalledWith({ q: 'viejo', id_sucursal: 'A' }));
+  fireEvent.change(input, { target: { value: 'nuevo' } });
+  await screen.findByText('Servicio nuevo');
+  await act(async () => old.resolve(catalog('viejo')));
+  expect(screen.getByText('Servicio nuevo')).toBeInTheDocument();
+  expect(input).toHaveValue('nuevo');
+});
+
+test('busqueda vieja no aplica durante debounce del termino nuevo', async () => {
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('Reservable');
+  const old = deferred();
+  const current = deferred();
+  api.searchPublicCatalog.mockReturnValueOnce(old.promise).mockReturnValue(current.promise);
+  const input = screen.getByPlaceholderText('Buscar servicios o paquetes...');
+  fireEvent.change(input, { target: { value: 'viejo' } });
+  await waitFor(() => expect(api.searchPublicCatalog).toHaveBeenCalledTimes(1));
+  fireEvent.change(input, { target: { value: 'nuevo' } });
+  await act(async () => old.resolve(catalog('viejo')));
+  expect(screen.queryByText('Servicio viejo')).not.toBeInTheDocument();
+  await act(async () => current.resolve(catalog('nuevo')));
+  await screen.findByText('Servicio nuevo');
+});
+
+test('busqueda antigua en A no sustituye B ni genera consultas redundantes', async () => {
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('Reservable');
+  const old = deferred();
+  api.searchPublicCatalog.mockImplementation(({ id_sucursal }) => id_sucursal === 'A' ? old.promise : Promise.resolve(catalog('B buscado')));
+  fireEvent.change(screen.getByPlaceholderText('Buscar servicios o paquetes...'), { target: { value: 'corte' } });
+  await waitFor(() => expect(api.searchPublicCatalog).toHaveBeenCalledTimes(1));
+  chooseBranch('B');
+  await screen.findByText('Servicio B buscado');
+  await act(async () => old.resolve(catalog('A buscado')));
+  expect(screen.getByText('Servicio B buscado')).toBeInTheDocument();
+  expect(api.searchPublicCatalog).toHaveBeenCalledTimes(2);
+});
+
+test('limpiar busqueda invalida respuesta pendiente y vuelve al catalogo compartido', async () => {
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('Reservable');
+  const old = deferred();
+  api.searchPublicCatalog.mockReturnValue(old.promise);
+  api.getPublicCatalog.mockResolvedValue(catalog('sin filtro'));
+  const input = screen.getByPlaceholderText('Buscar servicios o paquetes...');
+  fireEvent.change(input, { target: { value: 'viejo' } });
+  await waitFor(() => expect(api.searchPublicCatalog).toHaveBeenCalledTimes(1));
+  fireEvent.change(input, { target: { value: '' } });
+  await act(async () => old.resolve(catalog('viejo')));
+  await screen.findByText('Servicio sin filtro');
+  expect(screen.queryByText('Servicio viejo')).not.toBeInTheDocument();
+});
+
+test('StrictMode no duplica inicial y rechazo tras desmontaje no notifica', async () => {
+  const old = deferred();
+  api.listPublicCatalogPromotions.mockReturnValue(old.promise);
+  const view = render(<StrictMode><ClienteCatalogoPage /></StrictMode>);
+  await screen.findByRole('option', { name: 'Norte' });
+  expect(api.getPublicCatalog).toHaveBeenCalledTimes(1);
+  view.unmount();
+  await act(async () => old.reject(new Error('Error despues de desmontar')));
+  expect(notify).not.toHaveBeenCalled();
+});
+
+test('reintento mas reciente conserva recuperacion y descarta error parcial anterior', async () => {
+  api.getPublicCatalog.mockResolvedValueOnce({ services: [], packages: [], errors: { services: true, packages: false } });
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('No se pudieron cargar los servicios.');
+  const old = deferred();
+  api.getPublicCatalog.mockReturnValueOnce(old.promise).mockResolvedValueOnce(catalog('recuperado'));
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+  await screen.findByText('Servicio recuperado');
+  await act(async () => old.resolve({ services: [], packages: [], errors: { services: true, packages: true } }));
+  expect(screen.getByText('Servicio recuperado')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(api.getPublicCatalog).toHaveBeenCalledTimes(3);
+});
+
+test('respuesta vieja no libera loading de la sucursal nueva pendiente', async () => {
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('Reservable');
+  const old = deferred();
+  const current = deferred();
+  api.getPublicCatalog.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
+  chooseBranch('B');
+  chooseBranch('A');
+  await act(async () => old.resolve(catalog('B viejo')));
+  expect(screen.queryByText('Servicio B viejo')).not.toBeInTheDocument();
+  expect(screen.queryByText('Reservable')).not.toBeInTheDocument();
+  await act(async () => current.resolve(catalog('A vigente')));
+  await screen.findByText('Servicio A vigente');
+});
+
+test('error vigente de reintento mantiene su mensaje seguro anterior', async () => {
+  api.getPublicCatalog.mockResolvedValue({ services: [], packages: [], errors: { services: true, packages: false } });
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('No se pudieron cargar los servicios.');
+  api.listPublicCatalogPromotions.mockRejectedValueOnce(new Error('Detalle tecnico privado'));
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+  await waitFor(() => expect(notify).toHaveBeenCalledWith('No se pudo recuperar el catálogo. Intenta nuevamente.'));
 });

@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { StrictMode } from 'react';
 import AdminServiciosCatalogoPublicoPage from '../AdminServiciosCatalogoPublicoPage.jsx';
 
 const api = vi.hoisted(() => ({ getPublicCatalog: vi.fn(), listPublicCatalogBranches: vi.fn(), listPublicCatalogPlans: vi.fn() }));
@@ -116,4 +117,128 @@ test('catalogos vacios exitosos conservan empty state sin alertas', async () => 
   render(<AdminServiciosCatalogoPublicoPage />);
   expect(await screen.findByText('Sin elementos publicados')).toBeInTheDocument();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
+const catalog = (name) => ({ services: [service(`Servicio ${name}`, true)], packages: [{ id_paquete: name, nombre_paquete: `Paquete ${name}`, precio_hnl: 300 }] });
+const vip = (name) => ({ plans: [{ id_plan: name, nombre_plan: `VIP ${name}`, precio_hnl: 500 }] });
+const chooseBranch = (value) => fireEvent.change(screen.getByRole('combobox'), { target: { value } });
+
+test('A/B respuesta antigua no sustituye Servicios, Paquetes ni VIP vigentes', async () => {
+  render(<AdminServiciosCatalogoPublicoPage />);
+  await screen.findByText('Reservable');
+  const oldCatalog = deferred();
+  const oldVip = deferred();
+  api.getPublicCatalog.mockImplementation(({ id_sucursal }) => id_sucursal === 'A' ? oldCatalog.promise : Promise.resolve(catalog('B')));
+  api.listPublicCatalogPlans.mockImplementation(({ id_sucursal }) => id_sucursal === 'A' ? oldVip.promise : Promise.resolve(vip('B')));
+  chooseBranch('A');
+  chooseBranch('B');
+  await screen.findByText('Servicio B');
+  await act(async () => { oldCatalog.resolve(catalog('A')); oldVip.resolve(vip('A')); });
+  expect(screen.getByText('Servicio B')).toBeInTheDocument();
+  expect(screen.getByText('Paquete B')).toBeInTheDocument();
+  expect(screen.getByText('VIP B')).toBeInTheDocument();
+  expect(screen.queryByText('Servicio A')).not.toBeInTheDocument();
+  expect(screen.getByRole('combobox')).toHaveValue('B');
+});
+
+test('error antiguo A no oculta resultado exitoso B', async () => {
+  render(<AdminServiciosCatalogoPublicoPage />);
+  await screen.findByText('Reservable');
+  const old = deferred();
+  api.listPublicCatalogPlans.mockImplementation(({ id_sucursal }) => id_sucursal === 'A' ? old.promise : Promise.resolve(vip('B')));
+  api.getPublicCatalog.mockImplementation(() => Promise.resolve(catalog('B')));
+  chooseBranch('A');
+  chooseBranch('B');
+  await screen.findByText('VIP B');
+  await act(async () => old.reject(new Error('Fallo antiguo A')));
+  expect(screen.getByText('VIP B')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('Todas → A → B → A descarta generaciones anteriores incluso de A', async () => {
+  render(<AdminServiciosCatalogoPublicoPage />);
+  await screen.findByText('Reservable');
+  const first = deferred();
+  const second = deferred();
+  api.getPublicCatalog.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise).mockResolvedValueOnce(catalog('A vigente'));
+  api.listPublicCatalogPlans.mockResolvedValue(vip('A vigente'));
+  chooseBranch('A');
+  chooseBranch('B');
+  chooseBranch('A');
+  await screen.findByText('Servicio A vigente');
+  await act(async () => { second.resolve(catalog('B vieja')); first.resolve(catalog('A vieja')); });
+  expect(screen.getByText('Servicio A vigente')).toBeInTheDocument();
+  expect(screen.queryByText('Servicio A vieja')).not.toBeInTheDocument();
+  expect(screen.getByRole('combobox')).toHaveValue('A');
+});
+
+test('catalogSync sustituye consulta pendiente y deja loading coherente', async () => {
+  render(<AdminServiciosCatalogoPublicoPage />);
+  await screen.findByText('Reservable');
+  const old = deferred();
+  api.getPublicCatalog.mockReturnValueOnce(old.promise).mockResolvedValueOnce(catalog('sync'));
+  chooseBranch('A');
+  await act(async () => sync.callback());
+  await screen.findByText('Servicio sync');
+  await act(async () => old.resolve({ services: [], packages: [], errors: { services: true, packages: true } }));
+  expect(screen.getByText('Servicio sync')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('reintento recupera fallo parcial sin aceptar respuesta vieja de catalogSync', async () => {
+  render(<AdminServiciosCatalogoPublicoPage />);
+  await screen.findByText('Reservable');
+  const old = deferred();
+  api.getPublicCatalog.mockReturnValueOnce(old.promise)
+    .mockResolvedValueOnce({ services: [], packages: [], errors: { services: true, packages: false } })
+    .mockResolvedValueOnce(catalog('recuperado'));
+  await act(async () => sync.callback());
+  await act(async () => sync.callback());
+  await screen.findByText('No se pudieron cargar los servicios.');
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+  await screen.findByText('Servicio recuperado');
+  await act(async () => old.resolve(catalog('viejo')));
+  expect(screen.getByText('Servicio recuperado')).toBeInTheDocument();
+});
+
+test('volver a Todas mantiene su scope ante respuesta tardia A', async () => {
+  render(<AdminServiciosCatalogoPublicoPage />);
+  await screen.findByText('Reservable');
+  const old = deferred();
+  api.getPublicCatalog.mockReturnValueOnce(old.promise).mockResolvedValueOnce(catalog('Todas'));
+  chooseBranch('A');
+  chooseBranch('');
+  await screen.findByText('Servicio Todas');
+  await act(async () => old.resolve(catalog('A')));
+  expect(screen.getByText('Servicio Todas')).toBeInTheDocument();
+  expect(api.getPublicCatalog).toHaveBeenLastCalledWith({ id_sucursal: undefined });
+});
+
+test('StrictMode carga inicialmente una sola vez y desmontaje descarta respuesta', async () => {
+  const pending = deferred();
+  api.getPublicCatalog.mockReturnValue(pending.promise);
+  const view = render(<StrictMode><AdminServiciosCatalogoPublicoPage /></StrictMode>);
+  await screen.findByRole('option', { name: 'Centro' });
+  expect(api.listPublicCatalogBranches).toHaveBeenCalledTimes(1);
+  expect(api.getPublicCatalog).toHaveBeenCalledTimes(1);
+  view.unmount();
+  await act(async () => pending.resolve(catalog('tardio')));
+  expect(screen.queryByText('Servicio tardio')).not.toBeInTheDocument();
+});
+
+test('catalogSync antes de recibir sucursales no invalida inicializacion ni duplica consultas', async () => {
+  const branches = deferred();
+  api.listPublicCatalogBranches.mockReturnValue(branches.promise);
+  render(<AdminServiciosCatalogoPublicoPage />);
+  await act(async () => sync.callback());
+  await act(async () => branches.resolve({ branches: [{ id_sucursal: 'A', nombre_sucursal: 'Centro' }] }));
+  await screen.findByText('Reservable');
+  expect(screen.getByRole('option', { name: 'Centro' })).toBeInTheDocument();
+  expect(api.getPublicCatalog).toHaveBeenCalledExactlyOnceWith({ id_sucursal: 'A' });
 });
