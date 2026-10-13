@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import AdminServicesCatalogPage from '../AdminServicesCatalogPage.jsx';
 
@@ -86,6 +87,178 @@ beforeEach(() => {
 });
 
 afterEach(() => cleanup());
+
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
+
+describe('alcance y concurrencia de servicios administrativos', () => {
+  test('A tardía no sustituye los servicios de B', async () => {
+    await renderLoaded();
+    const a = deferred();
+    catalogApiMock.listAdminServiciosAgrupados.mockReturnValueOnce(a.promise)
+      .mockResolvedValueOnce({ data: { servicios: [service({ nombre_servicio: 'Servicio B' })] } });
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_A } });
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_B } });
+    await screen.findByText('Servicio B');
+    await act(async () => a.resolve({ data: { servicios: [service({ nombre_servicio: 'Servicio A viejo' })] } }));
+    expect(screen.getByText('Servicio B')).toBeInTheDocument();
+    expect(screen.queryByText('Servicio A viejo')).not.toBeInTheDocument();
+  });
+
+  test.each([500, 401, 403])('error tardío A (%s) no reemplaza B ni navega', async (status) => {
+    await renderLoaded();
+    const a = deferred();
+    catalogApiMock.listAdminServiciosAgrupados.mockReturnValueOnce(a.promise)
+      .mockResolvedValueOnce({ data: { servicios: [service({ nombre_servicio: 'Servicio B' })] } });
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_A } });
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_B } });
+    await screen.findByText('Servicio B');
+    await act(async () => a.reject({ status }));
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(screen.getByText('Servicio B')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  test('A antigua no libera loading mientras B está pendiente', async () => {
+    await renderLoaded();
+    const a = deferred();
+    const b = deferred();
+    catalogApiMock.listAdminServiciosAgrupados.mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise);
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_A } });
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_B } });
+    await act(async () => a.resolve({ data: { servicios: [] } }));
+    expect(screen.getAllByText('Cargando...').length).toBeGreaterThan(0);
+    await act(async () => b.resolve({ data: { servicios: [service({ nombre_servicio: 'Servicio B' })] } }));
+    expect(screen.getByText('Servicio B')).toBeInTheDocument();
+  });
+
+  test('desmontaje descarta error tardío sin navegación', async () => {
+    const pending = deferred();
+    catalogApiMock.listAdminServiciosAgrupados.mockReturnValueOnce(pending.promise);
+    const view = render(<AdminServicesCatalogPage />);
+    view.unmount();
+    await act(async () => pending.reject({ status: 401 }));
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  test('admin múltiple requiere sucursal, no ofrece Todas ni acciones globales', async () => {
+    authState.roles = ['admin'];
+    authState.branchIds = [BRANCH_A, BRANCH_B];
+    render(<AdminServicesCatalogPage />);
+    await screen.findByRole('option', { name: 'MasterFade Centro' });
+    expect(screen.queryByRole('option', { name: 'Todas las sucursales' })).not.toBeInTheDocument();
+    expect(screen.getByText('Selecciona una sucursal', { selector: 'p' })).toBeInTheDocument();
+    expect(catalogApiMock.listAdminServiciosAgrupados).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Nuevo', exact: true })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_A } });
+    await screen.findByText('Corte clásico');
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: '' } });
+    expect(screen.queryByText('Corte clásico')).not.toBeInTheDocument();
+    expect(screen.queryByText('Desactivar globalmente')).not.toBeInTheDocument();
+    expect(catalogApiMock.listAdminServiciosAgrupados).toHaveBeenCalledTimes(1);
+  });
+
+  test('superadmin conserva Todas y consulta global', async () => {
+    await renderLoaded();
+    expect(screen.getByRole('option', { name: 'Todas las sucursales' })).toBeInTheDocument();
+    expect(catalogApiMock.listAdminServiciosAgrupados).toHaveBeenCalledExactlyOnceWith({});
+  });
+
+  test('admin sin selección descarta resultado pendiente de la sucursal anterior', async () => {
+    authState.roles = ['admin'];
+    authState.branchIds = [BRANCH_A, BRANCH_B];
+    const pending = deferred();
+    catalogApiMock.listAdminServiciosAgrupados.mockReturnValueOnce(pending.promise);
+    render(<AdminServicesCatalogPage />);
+    await screen.findByRole('option', { name: 'MasterFade Centro' });
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_A } });
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: '' } });
+    await act(async () => pending.resolve({ data: { servicios: [service()] } }));
+    expect(screen.queryByText('Corte clásico')).not.toBeInTheDocument();
+    expect(screen.getByText('Selecciona una sucursal', { selector: 'p' })).toBeInTheDocument();
+    expect(catalogApiMock.listAdminServiciosAgrupados).toHaveBeenCalledExactlyOnceWith({ id_sucursal: BRANCH_A });
+  });
+
+  test('StrictMode conserva listado vigente y descarta solicitud del montaje anterior', async () => {
+    const stale = deferred();
+    catalogApiMock.listAdminServiciosAgrupados.mockReturnValueOnce(stale.promise)
+      .mockResolvedValue({ data: { servicios: [service({ nombre_servicio: 'Vigente' })] } });
+    render(<StrictMode><AdminServicesCatalogPage /></StrictMode>);
+    await screen.findByText('Vigente');
+    await act(async () => stale.resolve({ data: { servicios: [service({ nombre_servicio: 'Antiguo' })] } }));
+    expect(screen.getByText('Vigente')).toBeInTheDocument();
+    expect(screen.queryByText('Antiguo')).not.toBeInTheDocument();
+  });
+
+  test('admin sin sucursales autorizadas no recibe opciones ajenas ni consulta global', async () => {
+    authState.roles = ['admin'];
+    render(<AdminServicesCatalogPage />);
+    await screen.findByRole('combobox', { name: 'Sucursal' });
+    await waitFor(() => expect(branchesApiMock.listAdminSucursales).toHaveBeenCalled());
+    expect(screen.queryByRole('option', { name: 'MasterFade Centro' })).not.toBeInTheDocument();
+    expect(catalogApiMock.listAdminServiciosAgrupados).not.toHaveBeenCalled();
+  });
+
+  test('crear servicio conserva payload por sucursal y refresca catálogo', async () => {
+    catalogApiMock.createAdminServicio.mockResolvedValue({ data: {} });
+    await renderLoaded();
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_A } });
+    await waitFor(() => expect(catalogApiMock.listAdminServiciosAgrupados).toHaveBeenLastCalledWith({ id_sucursal: BRANCH_A }));
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo', exact: true }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Nombre del servicio *'), { target: { value: 'Nuevo corte' } });
+    fireEvent.change(within(dialog).getByPlaceholderText('Precio HNL'), { target: { value: '275' } });
+    fireEvent.change(within(dialog).getByPlaceholderText('Duración min'), { target: { value: '35' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Crear servicio' }));
+    await waitFor(() => expect(catalogApiMock.createAdminServicio).toHaveBeenCalledExactlyOnceWith({
+      nombre_servicio: 'Nuevo corte', descripcion: null, orden_visual: 100,
+      visible_publico: true, agendable: true, activo: true,
+      sucursales: [{ id_sucursal: BRANCH_A, precio_hnl: 275, duracion_min: 35, buffer_min: 5, activo: true, servicio_informativo: false }],
+    }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(catalogApiMock.listAdminServiciosAgrupados).toHaveBeenCalledTimes(3);
+  });
+
+  test('editar maestro conserva alcance y no actualiza tarifas', async () => {
+    catalogApiMock.updateAdminServicio.mockResolvedValue({ data: {} });
+    await renderLoaded();
+    const menu = screen.getByLabelText('Acciones de Corte clásico').closest('details');
+    fireEvent.click(within(menu).getByLabelText('Acciones de Corte clásico'));
+    fireEvent.click(within(menu).getByRole('button', { name: 'Editar servicio global' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Descripción'), { target: { value: 'Descripción revisada' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(catalogApiMock.updateAdminServicio).toHaveBeenCalledExactlyOnceWith(
+      service().id_servicio, { nombre_servicio: 'Corte clásico', descripcion: 'Descripción revisada',
+        orden_visual: 10, visible_publico: true, agendable: true, id_sucursal: BRANCH_A },
+    ));
+    expect(catalogApiMock.updateAdminServicioTarifa).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  test('admin mantiene edición local de tarifa sin modificar maestro', async () => {
+    authState.roles = ['admin'];
+    authState.branchIds = [BRANCH_A];
+    catalogApiMock.updateAdminServicioTarifa.mockResolvedValue({ data: {} });
+    await renderLoaded();
+    const menu = screen.getByLabelText('Acciones de Corte clásico').closest('details');
+    fireEvent.click(within(menu).getByLabelText('Acciones de Corte clásico'));
+    fireEvent.click(within(menu).getByRole('button', { name: 'Editar tarifa' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Precio HNL *'), { target: { value: '290' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar tarifa' }));
+    await waitFor(() => expect(catalogApiMock.updateAdminServicioTarifa).toHaveBeenCalledExactlyOnceWith(
+      service().id_servicio, BRANCH_A,
+      { precio_hnl: 290, duracion_min: 30, buffer_min: 5, activo: true, servicio_informativo: false },
+    ));
+    expect(catalogApiMock.updateAdminServicio).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+});
 
 describe('presentación responsive del catálogo de servicios', () => {
   test('muestra lista por defecto y conserva los mismos registros al alternar tarjetas y lista', async () => {

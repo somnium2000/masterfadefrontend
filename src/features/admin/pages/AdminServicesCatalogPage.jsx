@@ -2,7 +2,7 @@
 // A3 - Pantalla CRUD de catalogo de servicios (Admin).
 // Logica de branchIds: 1 => auto, 2+ => selector por nombre, 0 => dropdown de todas.
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Plus, Pencil, Building2, Scissors, ToggleLeft, ToggleRight, Search, SlidersHorizontal, RotateCcw, X, List, LayoutGrid, MoreHorizontal, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext.jsx';
@@ -61,11 +61,11 @@ function extractMessage(err) {
  * selected   = UUID actualmente seleccionado
  * onChange   = cb(uuid)
  */
-function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingBranches }) {
+function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingBranches, allowAll }) {
     // AM: Replica el selector premium del submodulo Paquetes para consistencia visual total.
     const availableBranches = branchIds.length > 0
         ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-        : allBranches;
+        : allowAll ? allBranches : [];
     const validBranchIds = new Set(availableBranches.map((branch) => branch.id_sucursal));
     const selectedBranch = availableBranches.find((branch) => branch.id_sucursal === selected);
 
@@ -103,7 +103,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingB
                     onChange(validBranchIds.has(nextValue) ? nextValue : '');
                 }}
             >
-                <option value="">Todas las sucursales</option>
+                <option value="">{allowAll ? 'Todas las sucursales' : 'Selecciona una sucursal'}</option>
                 {availableBranches.map((branch) => (
                     <option key={branch.id_sucursal} value={branch.id_sucursal}>
                         {branch.nombre_sucursal}
@@ -435,6 +435,11 @@ export default function AdminServicesCatalogPage() {
     const [servicios, setServicios] = useState([]);
     const [loading, setLoading] = useState(false);
     const [listError, setListError] = useState('');
+    const requestGenerationRef = useRef(0);
+    const mountedRef = useRef(false);
+    const canQueryScope = isSuperAdmin || Boolean(sucursal && branchIds.includes(sucursal));
+    const requestScope = `${isSuperAdmin}:${sucursal}:${canQueryScope}`;
+    const currentScopeRef = useRef(requestScope);
     const [search, setSearch] = useState('');
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [filters, setFilters] = useState(() => ({ ...SERVICES_FILTER_DEFAULTS }));
@@ -471,9 +476,9 @@ export default function AdminServicesCatalogPage() {
     const availableBranches = useMemo(() => {
         const scopedBranches = branchIds.length > 0
             ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-            : allBranches;
+            : isSuperAdmin ? allBranches : [];
         return scopedBranches.filter((branch) => branch?.id_sucursal);
-    }, [allBranches, branchIds]);
+    }, [allBranches, branchIds, isSuperAdmin]);
 
     // AM: Filtro compuesto de servicios para busqueda local sin recargar backend.
     const filteredServicios = useMemo(() => {
@@ -621,18 +626,37 @@ export default function AdminServicesCatalogPage() {
     }, [sucursal]);
 
     // â”€â”€ Carga datos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // AM: Invalida solicitudes y datos del alcance anterior antes de mostrar otra sucursal.
+    useLayoutEffect(() => {
+        mountedRef.current = true;
+        currentScopeRef.current = requestScope;
+        requestGenerationRef.current += 1;
+        setServicios([]);
+        setListError('');
+        setLoading(false);
+        return () => {
+            mountedRef.current = false;
+            requestGenerationRef.current += 1;
+        };
+    }, [requestScope]);
+
     const fetchServicios = useCallback(async ({ silent = false } = {}) => {
-        if (!isSuperAdmin && !sucursal) return; // No llamar API sin sucursal excepto admin
+        if (!mountedRef.current || currentScopeRef.current !== requestScope || !canQueryScope) return;
+        const generation = ++requestGenerationRef.current;
+        const isCurrent = () => mountedRef.current && currentScopeRef.current === requestScope
+            && requestGenerationRef.current === generation;
         if (!silent) {
             setLoading(true);
             setListError('');
         }
         try {
             const data = await listAdminServiciosAgrupados(sucursal ? { id_sucursal: sucursal } : {});
+            if (!isCurrent()) return;
             const payloadData = data?.data ?? data;
             const lista = payloadData?.servicios ?? [];
             setServicios(Array.isArray(lista) ? lista : []);
         } catch (err) {
+            if (!isCurrent()) return;
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
             // AM: Evita mantener datos viejos cuando falla el filtro por sucursal.
@@ -641,11 +665,11 @@ export default function AdminServicesCatalogPage() {
                 setListError(extractMessage(err));
             }
         } finally {
-            if (!silent) {
+            if (isCurrent() && !silent) {
                 setLoading(false);
             }
         }
-    }, [sucursal, navigate, isSuperAdmin]);
+    }, [sucursal, navigate, canQueryScope, requestScope]);
 
     useEffect(() => {
         void fetchServicios();
@@ -1077,7 +1101,7 @@ export default function AdminServicesCatalogPage() {
     // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const sinSucursal = !sucursal;
     // AM: El listado agrupado permite revisar/editar maestro en todas las sucursales; crear sigue requiriendo sucursal.
-    const actionsLockedByBranch = false;
+    const actionsLockedByBranch = !canQueryScope;
     const titleSubtitle = !sucursal && availableBranches.length > 1
         ? 'Gestiona servicios maestro y tarifas por sucursal.'
         : 'Gestiona servicios maestro y tarifas por sucursal.';
@@ -1134,7 +1158,7 @@ export default function AdminServicesCatalogPage() {
     }
 
     function ServiceActions({ servicio, selectedTariff }) {
-        const globalMode = !sucursal;
+        const globalMode = isSuperAdmin && !sucursal;
         return (
             <details className="group relative ml-auto w-fit">
                 <summary
@@ -1268,6 +1292,7 @@ export default function AdminServicesCatalogPage() {
                             selected={sucursal}
                             onChange={setSucursal}
                             loadingBranches={loadingBranches}
+                            allowAll={isSuperAdmin}
                         />
                         {branchLoadError && <ErrorBanner message={branchLoadError} />}
                     </div>
@@ -1362,22 +1387,25 @@ export default function AdminServicesCatalogPage() {
             ) : null}
 
             {/* Estados */}
+            {!canQueryScope && (
+                <EmptyState icon={Building2} title="Selecciona una sucursal" description="Selecciona una sucursal autorizada para consultar y gestionar sus servicios." />
+            )}
             {listError && <ErrorBanner message={listError} onRetry={fetchServicios} />}
             {loading && !listError && <LoadingSpinner />}
 
-            {!loading && !listError && servicios.length === 0 && (!sinSucursal || isSuperAdmin) && (
+            {canQueryScope && !loading && !listError && servicios.length === 0 && (!sinSucursal || isSuperAdmin) && (
                 <EmptyState
                     icon={Scissors}
                     title="Sin servicios"
                     description={sinSucursal ? 'No hay servicios registrados aun.' : 'No hay servicios registrados para esta sucursal.'}
                 />
             )}
-            {!loading && !listError && servicios.length > 0 && visibleServicios.length === 0 && (
+            {canQueryScope && !loading && !listError && servicios.length > 0 && visibleServicios.length === 0 && (
                 <EmptyState icon={Search} title="Sin resultados" description="No hay coincidencias con la busqueda o filtros actuales." />
             )}
 
             {/* Datos */}
-            {!loading && !listError && visibleServicios.length > 0 && (
+            {canQueryScope && !loading && !listError && visibleServicios.length > 0 && (
                 <div className="space-y-3">
                     {viewMode === 'list' ? <ServicioList /> : <ServicioCards />}
                     <PaginationControls />
@@ -1661,7 +1689,7 @@ export default function AdminServicesCatalogPage() {
                                 <option value="no">No</option>
                             </select>
                         </div>
-                        {!sucursal ? (
+                        {isSuperAdmin && !sucursal ? (
                             <div className="sm:col-span-2">
                                 <Label className="mf-label">Sucursal</Label>
                                 <select
@@ -1679,7 +1707,7 @@ export default function AdminServicesCatalogPage() {
                             </div>
                         ) : (
                             <p className="sm:col-span-2 text-xs text-[var(--mf-text-2)]">
-                                La sucursal ya esta fijada en el selector superior.
+                                {sucursal ? 'La sucursal ya esta fijada en el selector superior.' : 'Selecciona una sucursal en el selector superior.'}
                             </p>
                         )}
                     </div>
