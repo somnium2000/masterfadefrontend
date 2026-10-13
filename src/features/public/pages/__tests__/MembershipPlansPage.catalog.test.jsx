@@ -48,6 +48,17 @@ vi.mock('../../../plans/components/PlanPurchaseFlowDialog.jsx', () => ({
 
 const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const USER = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const CLIENT = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const KEY1 = 'eeeeeeee-eeee-4eee-8eee-000000000001';
+const KEY2 = 'eeeeeeee-eeee-4eee-8eee-000000000002';
+const STORAGE_KEY = 'mf_vip_purchase_attempt_v1';
+const storedAttempt = () => JSON.parse(sessionStorage.getItem(STORAGE_KEY));
+function authenticateCliente(userId = USER) {
+  Object.assign(auth, { isAuthenticated: true, roles: ['cliente'],
+    user: { id_usuario: userId, cliente_id: CLIENT }, clienteId: CLIENT,
+    isHydrated: true, isHydrating: false });
+}
 const branches = [
   { id_sucursal: A, nombre_sucursal: 'Centro', estado: true },
   { id_sucursal: B, nombre_sucursal: 'Norte', estado: true },
@@ -72,6 +83,11 @@ beforeEach(() => {
   navigate.mockReset();
   auth.isAuthenticated = false;
   auth.roles = [];
+  Object.assign(auth, { user: null, clienteId: null, isHydrated: true, isHydrating: false });
+  sessionStorage.clear();
+  let sequence = 0;
+  vi.spyOn(globalThis.crypto, 'randomUUID').mockImplementation(() =>
+    `eeeeeeee-eeee-4eee-8eee-${String(++sequence).padStart(12, '0')}`);
   flags.enabled = true;
   Object.values(notifications).forEach((mock) => mock.mockReset());
   dialog.props = null;
@@ -98,8 +114,7 @@ const orderSummary = () => ({
   totales: { subtotal_hnl: 975, descuento_hnl: 0, total_hnl: 975, moneda_codigo: 'HNL' },
 });
 async function renderPurchase({ strict = false } = {}) {
-  auth.isAuthenticated = true;
-  auth.roles = ['cliente'];
+  authenticateCliente();
   api.listPublicPlansByBranch.mockImplementation((id) => Promise.resolve({ plans: id === A
     ? [plan('Plan A', 100), plan('Plan alternativo', 200)] : [plan('Plan B', 300)] }));
   const view = render(strict ? <StrictMode><MembershipPlansPage /></StrictMode> : <MembershipPlansPage />);
@@ -119,7 +134,7 @@ describe('exclusion de seleccion durante creacion de orden VIP', () => {
     await act(async () => pending.resolve({ data: summary }));
     expect(screen.getByRole('heading', { name: 'Planes en Centro' })).toBeInTheDocument();
     expect(api.listPublicPlansByBranch).not.toHaveBeenCalledWith(B);
-    expect(payment.createMembershipOrder).toHaveBeenCalledExactlyOnceWith('Plan A-offer');
+    expect(payment.createMembershipOrder).toHaveBeenCalledExactlyOnceWith('Plan A-offer', { idempotencyKey: KEY1 });
     expect(dialog.props.open).toBe(true);
     expect(dialog.props.orderSummary).toBe(summary);
     expect(dialog.props.orderSummary.plan.precio_hnl).toBe(975);
@@ -163,7 +178,7 @@ describe('exclusion de seleccion durante creacion de orden VIP', () => {
     const choices = screen.getAllByRole('button', { name: 'Quiero este plan' }).map(clickCallback);
     act(() => { choices[0](); choices[1](); });
     await act(async () => pending.resolve(orderSummary()));
-    expect(payment.createMembershipOrder).toHaveBeenCalledExactlyOnceWith('Plan A-offer');
+    expect(payment.createMembershipOrder).toHaveBeenCalledExactlyOnceWith('Plan A-offer', { idempotencyKey: KEY1 });
   });
 
   test('D rechazo mantiene el error backend y libera sucursal y ofertas para recuperar', async () => {
@@ -183,7 +198,7 @@ describe('exclusion de seleccion durante creacion de orden VIP', () => {
     await screen.findByText('Plan B');
     fireEvent.click(screen.getByRole('button', { name: 'Quiero este plan' }));
     await screen.findByText('orden-backend-B');
-    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan B-offer');
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan B-offer', { idempotencyKey: KEY2 });
     expect(payment.createMembershipPaymentIntent).not.toHaveBeenCalled();
   });
 
@@ -194,6 +209,7 @@ describe('exclusion de seleccion durante creacion de orden VIP', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Quiero este plan' })[0]);
     view.unmount();
     await act(async () => outcome === 'resolve' ? pending.resolve(orderSummary()) : pending.reject(new Error('Solicitud fallida')));
+    expect(storedAttempt()).toMatchObject({ key: KEY1, status: 'pending' });
     expect(notifications.error).not.toHaveBeenCalled();
     expect(payment.createMembershipOrder).toHaveBeenCalledTimes(1);
     expect(payment.createMembershipPaymentIntent).not.toHaveBeenCalled();
@@ -228,6 +244,7 @@ describe('exclusion de seleccion durante creacion de orden VIP', () => {
   test.each([false, true])('sesion autenticada=%s conserva navegacion y autorizacion previa', async (authenticated) => {
     auth.isAuthenticated = authenticated;
     auth.roles = authenticated ? ['admin'] : [];
+    auth.user = authenticated ? { id_usuario: USER } : null;
     api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan('Plan A')] });
     render(<MembershipPlansPage />);
     await select('Centro');
@@ -243,7 +260,223 @@ describe('exclusion de seleccion durante creacion de orden VIP', () => {
     }
   });
 });
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+describe('persistencia aislada de intentos VIP', () => {
+  const buy = () => fireEvent.click(screen.getAllByRole('button', { name: 'Quiero este plan' })[0]);
+  const failFirst = async (error) => {
+    payment.createMembershipOrder.mockRejectedValueOnce(error);
+    const view = await renderPurchase();
+    await act(async () => buy());
+    return view;
+  };
+
+  test('primera compra genera UUID una vez y almacena solo contexto mínimo antes de la respuesta', async () => {
+    const pending = deferred();
+    payment.createMembershipOrder.mockReturnValue(pending.promise);
+    await renderPurchase();
+    buy();
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+    expect(storedAttempt()).toEqual({ version: 1, identity: `${USER}:${CLIENT}`,
+      offerId: 'Plan A-offer', branchId: A, key: KEY1, status: 'pending' });
+    expect(payment.createMembershipOrder).toHaveBeenCalledExactlyOnceWith('Plan A-offer', { idempotencyKey: KEY1 });
+    const summary = orderSummary();
+    await act(async () => pending.resolve({ data: summary }));
+    expect(dialog.props.orderSummary).toBe(summary);
+    expect(storedAttempt().status).toBe('resolved');
+    expect(payment.createMembershipPaymentIntent).not.toHaveBeenCalled();
+    expect(payment.confirmMembershipPayment).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    { name: 'TimeoutError', message: 'timeout interno' },
+    { status: 0, code: 'NETWORK_UNAVAILABLE', message: 'red interna' },
+  ])('timeout/red conserva clave y reintento manual de misma oferta la reutiliza: %j', async (error) => {
+    await failFirst(error);
+    expect(storedAttempt().status).toBe('pending');
+    expect(payment.createMembershipOrder).toHaveBeenCalledTimes(1);
+    expect(notifications.error).toHaveBeenCalledWith(expect.stringContaining('Reintenta la misma oferta'));
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan A-offer', { idempotencyKey: KEY1 });
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+    expect(storedAttempt().status).toBe('resolved');
+  });
+
+  test('reload recupera intento pendiente y respuesta de instancia desmontada no lo sobrescribe', async () => {
+    const old = deferred();
+    payment.createMembershipOrder.mockReturnValueOnce(old.promise).mockResolvedValueOnce(orderSummary());
+    const view = await renderPurchase();
+    buy();
+    view.unmount();
+    expect(storedAttempt().status).toBe('pending');
+    await renderPurchase();
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan A-offer', { idempotencyKey: KEY1 });
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+    await act(async () => old.resolve(orderSummary()));
+    expect(storedAttempt().status).toBe('resolved');
+    expect(notifications.error).not.toHaveBeenCalled();
+  });
+
+  test('reload público sin hidratación automática ignora intento hasta login y recupera la misma clave', async () => {
+    const previous = await failFirst({ status: 0 });
+    previous.unmount();
+    Object.assign(auth, { isAuthenticated: false, roles: [], user: null, clienteId: null,
+      isHydrated: true, isHydrating: false });
+    const view = render(<MembershipPlansPage />);
+    await select('Centro');
+    await screen.findByText('Plan A');
+    expect(storedAttempt()).toMatchObject({ key: KEY1, status: 'pending' });
+    buy();
+    expect(navigate).toHaveBeenCalledWith(expect.stringContaining('/login?'));
+    expect(payment.createMembershipOrder).toHaveBeenCalledTimes(1);
+    authenticateCliente();
+    view.rerender(<MembershipPlansPage />);
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan A-offer', { idempotencyKey: KEY1 });
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  test('nueva compra explícita después de procesar resumen obtiene otra clave', async () => {
+    await renderPurchase();
+    await act(async () => buy());
+    act(() => dialog.props.onCancel());
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan A-offer', { idempotencyKey: KEY2 });
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(2);
+  });
+
+  test('otra oferta crea otro intento y volver a oferta abandonada no reactiva su clave', async () => {
+    payment.createMembershipOrder.mockRejectedValue({ status: 0 });
+    await renderPurchase();
+    await act(async () => buy());
+    await act(async () => fireEvent.click(screen.getAllByRole('button', { name: 'Quiero este plan' })[1]));
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan alternativo-offer', { idempotencyKey: KEY2 });
+    await act(async () => buy());
+    expect(payment.createMembershipOrder.mock.calls[2][1].idempotencyKey).not.toBe(KEY1);
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(3);
+  });
+
+  test.each(['otra identidad', 'logout'])('%s descarta intento anterior', async (mode) => {
+    const view = await failFirst({ status: 0 });
+    if (mode === 'logout') {
+      Object.assign(auth, { isAuthenticated: false, roles: [], user: null, clienteId: null });
+      view.rerender(<MembershipPlansPage />);
+      expect(storedAttempt()).toBeNull();
+    }
+    authenticateCliente(mode === 'otra identidad' ? B : USER);
+    view.rerender(<MembershipPlansPage />);
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan A-offer', { idempotencyKey: KEY2 });
+    expect(storedAttempt().identity).toBe(`${mode === 'otra identidad' ? B : USER}:${CLIENT}`);
+  });
+
+  test('respuesta pendiente de otra identidad no entrega resumen ni notificación', async () => {
+    const pending = deferred();
+    payment.createMembershipOrder.mockReturnValue(pending.promise);
+    const view = await renderPurchase();
+    buy();
+    authenticateCliente(B);
+    view.rerender(<MembershipPlansPage />);
+    await act(async () => pending.resolve(orderSummary()));
+    expect(dialog.props.open).toBe(false);
+    expect(storedAttempt()).toBeNull();
+    expect(notifications.error).not.toHaveBeenCalled();
+  });
+
+  test.each(['resolve', 'reject'])('logout y retorno a la misma cuenta descartan respuesta anterior: %s', async (outcome) => {
+    const pending = deferred();
+    payment.createMembershipOrder.mockReturnValue(pending.promise);
+    const view = await renderPurchase();
+    buy();
+    Object.assign(auth, { isAuthenticated: false, roles: [], user: null, clienteId: null });
+    view.rerender(<MembershipPlansPage />);
+    authenticateCliente();
+    view.rerender(<MembershipPlansPage />);
+    await act(async () => outcome === 'resolve' ? pending.resolve(orderSummary()) : pending.reject({ status: 0 }));
+    expect(dialog.props.open).toBe(false);
+    expect(storedAttempt()).toBeNull();
+    expect(notifications.error).not.toHaveBeenCalled();
+  });
+
+  test('hidratación de Auth no descarta registro recuperable y solo compra con identidad real', async () => {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, identity: `${USER}:${CLIENT}`,
+      offerId: 'Plan A-offer', branchId: A, key: KEY1, status: 'pending' }));
+    Object.assign(auth, { isHydrating: true, isHydrated: false });
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan('Plan A')] });
+    const view = render(<MembershipPlansPage />);
+    await select('Centro');
+    await screen.findByText('Plan A');
+    expect(storedAttempt().key).toBe(KEY1);
+    authenticateCliente();
+    view.rerender(<MembershipPlansPage />);
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).toHaveBeenCalledExactlyOnceWith('Plan A-offer', { idempotencyKey: KEY1 });
+    expect(crypto.randomUUID).not.toHaveBeenCalled();
+  });
+
+  test('cliente sin identidad válida no puede comprar', async () => {
+    const view = await renderPurchase();
+    Object.assign(auth, { user: null, clienteId: null });
+    view.rerender(<MembershipPlansPage />);
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).not.toHaveBeenCalled();
+    expect(notifications.error).toHaveBeenCalledWith(expect.stringContaining('identificar tu perfil'));
+  });
+
+  test('sessionStorage inaccesible conserva clave en memoria sin fallback legacy', async () => {
+    ['getItem', 'setItem', 'removeItem'].forEach((method) =>
+      vi.spyOn(Storage.prototype, method).mockImplementation(() => { throw new Error('SecurityError'); }));
+    await failFirst({ status: 0 });
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan A-offer', { idempotencyKey: KEY1 });
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([undefined, () => 'invalid'])('crypto.randomUUID inexistente/inválido impide solicitud', async (randomUUID) => {
+    vi.stubGlobal('crypto', { randomUUID });
+    await renderPurchase();
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).not.toHaveBeenCalled();
+    expect(notifications.error).toHaveBeenCalledWith(expect.stringContaining('proteger esta compra'));
+    expect(storedAttempt()).toBeNull();
+  });
+
+  test.each(['CONFLICT', 'ORDER_UNAVAILABLE'])('409 %s no reintenta y requiere nueva compra explícita', async (suffix) => {
+    await failFirst({ status: 409, data: { error: { code: `MEMBERSHIP_PURCHASE_IDEMPOTENCY_${suffix}` } } });
+    expect(payment.createMembershipOrder).toHaveBeenCalledTimes(1);
+    expect(storedAttempt().status).toBe('terminal');
+    expect(notifications.error).toHaveBeenCalledWith(expect.stringContaining('Iniciar nueva compra'));
+    fireEvent.click(screen.getByRole('button', { name: 'Iniciar nueva compra' }));
+    await screen.findByText('orden-1');
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan A-offer', { idempotencyKey: KEY2 });
+  });
+
+  test('503 SCHEMA_NOT_READY advierte, conserva clave y nunca hace fallback legacy', async () => {
+    await failFirst({ status: 503, data: { error: { code: 'MEMBERSHIP_PURCHASE_IDEMPOTENCY_SCHEMA_NOT_READY' } } });
+    expect(notifications.warning).toHaveBeenCalledWith(expect.stringContaining('temporalmente'));
+    expect(payment.createMembershipOrder).toHaveBeenCalledTimes(1);
+    expect(storedAttempt()).toMatchObject({ key: KEY1, status: 'pending' });
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan A-offer', { idempotencyKey: KEY1 });
+  });
+
+  test('respuesta sin resumen confiable no resuelve intento y conserva clave', async () => {
+    payment.createMembershipOrder.mockResolvedValueOnce({});
+    await renderPurchase();
+    await act(async () => buy());
+    expect(dialog.props.open).toBe(false);
+    expect(storedAttempt().status).toBe('pending');
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan A-offer', { idempotencyKey: KEY1 });
+  });
+
+  test('errores desconocidos no exponen detalles técnicos ni cambian la clave pendiente', async () => {
+    await failFirst({ data: { error: { code: 'INTERNAL_ERROR', message: 'SQL y datos privados' } } });
+    expect(notifications.error).toHaveBeenCalledWith('No se pudo crear la orden de compra. Reintenta la misma oferta.');
+    expect(storedAttempt()).toMatchObject({ key: KEY1, status: 'pending' });
+  });
+});
 
 describe('catálogo público de membresías por sucursal', () => {
   test('descarta respuesta antigua de A después de mostrar B', async () => {
@@ -386,15 +619,14 @@ describe('catálogo público de membresías por sucursal', () => {
   });
 
   test('la carga de catálogo no borra orden ni intent de pago en proceso', async () => {
-    auth.isAuthenticated = true;
-    auth.roles = ['cliente'];
+    authenticateCliente();
     api.listPublicPlansByBranch.mockImplementation((id) => Promise.resolve({ plans: [plan(id === A ? 'Plan A' : 'Plan B')] }));
     render(<MembershipPlansPage />);
     await select('Centro');
     expect(await screen.findByText('Plan A')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Quiero este plan' }));
     expect(await screen.findByText('orden-1')).toBeInTheDocument();
-    expect(payment.createMembershipOrder).toHaveBeenCalledWith('Plan A-offer');
+    expect(payment.createMembershipOrder).toHaveBeenCalledWith('Plan A-offer', { idempotencyKey: KEY1 });
     fireEvent.click(screen.getByRole('button', { name: 'Continuar pago' }));
     expect(await screen.findByText('intent-1')).toBeInTheDocument();
     await select('Norte');

@@ -15,7 +15,7 @@ import {
   Gem,
   Trophy,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import MasterfadeLogo from "../../../components/branding/MasterfadeLogo.jsx";
 import PremiumBottomNav from "../../../components/navigation/PremiumBottomNav.jsx";
@@ -46,6 +46,32 @@ const CATEGORY_ICONS = {
 };
 
 const DEFAULT_MEMBERSHIP_SIMULATION_AMOUNT = 1.00;
+const PURCHASE_ATTEMPT_STORAGE_KEY = "mf_vip_purchase_attempt_v1";
+const PURCHASE_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function readStoredPurchaseAttempt() {
+  try {
+    const record = JSON.parse(window.sessionStorage.getItem(PURCHASE_ATTEMPT_STORAGE_KEY) || "null");
+    if (record?.version !== 1 || typeof record.identity !== "string"
+      || typeof record.offerId !== "string" || !record.offerId
+      || typeof record.branchId !== "string" || !PURCHASE_UUID_REGEX.test(record.branchId)
+      || typeof record.key !== "string" || !PURCHASE_UUID_REGEX.test(record.key)
+      || !["pending", "resolved", "terminal"].includes(record.status)) return null;
+    return { version: 1, identity: record.identity, offerId: record.offerId,
+      branchId: record.branchId, key: record.key, status: record.status };
+  } catch {
+    return null;
+  }
+}
+
+function storePurchaseAttempt(record) {
+  try {
+    if (record) window.sessionStorage.setItem(PURCHASE_ATTEMPT_STORAGE_KEY, JSON.stringify(record));
+    else window.sessionStorage.removeItem(PURCHASE_ATTEMPT_STORAGE_KEY);
+  } catch {
+    // AM: La referencia del componente conserva el intento si sessionStorage no esta disponible.
+  }
+}
 
 function readEnvFlag(value, fallback = false) {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -216,7 +242,7 @@ function PlanCard({
 
 export default function MembershipPlansPage() {
   const navigate = useNavigate();
-  const { isAuthenticated, roles = [] } = useAuth();
+  const { isAuthenticated, roles = [], user, clienteId, isHydrating, isHydrated } = useAuth();
   const notifications = useNotifications();
   const isMountedRef = useRef(true);
   const selectedBranchRef = useRef("");
@@ -224,7 +250,13 @@ export default function MembershipPlansPage() {
   const branchRequestRef = useRef(0);
   const planRequestRef = useRef(0);
   const orderCreationOfferRef = useRef("");
+  const purchaseAttemptRef = useRef(null);
   const isClienteSession = Boolean(isAuthenticated && Array.isArray(roles) && roles.includes("cliente"));
+  const userId = String(user?.id_usuario || "").trim();
+  const authenticatedClienteId = String(clienteId || user?.cliente_id || "").trim();
+  const purchaseIdentity = isClienteSession && PURCHASE_UUID_REGEX.test(userId) && PURCHASE_UUID_REGEX.test(authenticatedClienteId)
+    ? `${userId}:${authenticatedClienteId}` : "";
+  const purchaseIdentityRef = useRef(purchaseIdentity);
 
   const [status, setStatus] = useState("loading");
   const [branches, setBranches] = useState([]);
@@ -234,6 +266,7 @@ export default function MembershipPlansPage() {
   const [membershipState, setMembershipState] = useState(null);
   const [membershipLoading, setMembershipLoading] = useState(false);
   const [processingPlanOfferId, setProcessingPlanOfferId] = useState("");
+  const [terminalOrderOfferId, setTerminalOrderOfferId] = useState("");
 
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [purchaseStep, setPurchaseStep] = useState("summary");
@@ -245,6 +278,57 @@ export default function MembershipPlansPage() {
 
   const scrollRef = useRef(null);
   const showMembershipSimulator = shouldShowMembershipSimulator();
+
+  useLayoutEffect(() => {
+    const previousIdentity = purchaseAttemptRef.current?.identity || purchaseIdentityRef.current;
+    purchaseIdentityRef.current = purchaseIdentity;
+    if (isHydrating || isHydrated === false) return;
+    const stored = readStoredPurchaseAttempt();
+    const candidate = purchaseAttemptRef.current?.identity === purchaseIdentity ? purchaseAttemptRef.current : stored;
+    if (!purchaseIdentity) {
+      purchaseAttemptRef.current = null;
+      setTerminalOrderOfferId("");
+      // AM: Un reload publico no hidrata Auth; ignorar el registro hasta confirmar identidad.
+      if (previousIdentity || isAuthenticated) storePurchaseAttempt(null);
+      return;
+    }
+    if (candidate?.identity !== purchaseIdentity) {
+      purchaseAttemptRef.current = null;
+      setTerminalOrderOfferId("");
+      storePurchaseAttempt(null);
+      return;
+    }
+    purchaseAttemptRef.current = candidate;
+    setTerminalOrderOfferId(candidate.status === "terminal" ? candidate.offerId : "");
+  }, [purchaseIdentity, isAuthenticated, isHydrating, isHydrated]);
+
+  function getPurchaseAttempt(offerId) {
+    const current = purchaseAttemptRef.current;
+    if (current?.identity === purchaseIdentity && current.offerId === offerId
+      && current.branchId === selectedBranchRef.current && current.status === "pending") return current;
+    let key;
+    try {
+      key = globalThis.crypto.randomUUID();
+    } catch {
+      throw Object.assign(new Error(), { code: "PURCHASE_KEY_UNAVAILABLE" });
+    }
+    if (typeof key !== "string" || !PURCHASE_UUID_REGEX.test(key)) {
+      throw Object.assign(new Error(), { code: "PURCHASE_KEY_UNAVAILABLE" });
+    }
+    const attempt = { version: 1, identity: purchaseIdentity, offerId, branchId: selectedBranchRef.current, key, status: "pending" };
+    purchaseAttemptRef.current = attempt;
+    storePurchaseAttempt(attempt);
+    setTerminalOrderOfferId("");
+    return attempt;
+  }
+
+  function markPurchaseAttempt(attempt, status) {
+    if (!attempt || purchaseAttemptRef.current?.key !== attempt.key || purchaseIdentityRef.current !== attempt.identity) return;
+    const updated = { ...attempt, status };
+    purchaseAttemptRef.current = updated;
+    storePurchaseAttempt(updated);
+    setTerminalOrderOfferId(status === "terminal" ? attempt.offerId : "");
+  }
 
   const resetPurchaseFlow = useCallback(() => {
     setPurchaseStep("summary");
@@ -405,23 +489,55 @@ export default function MembershipPlansPage() {
       notifications.warning("Este plan no tiene oferta valida para esta sucursal.");
       return;
     }
+    if (!purchaseIdentity || purchaseIdentityRef.current !== purchaseIdentity || isHydrating || isHydrated === false) {
+      notifications.error("No se pudo identificar tu perfil de cliente. Inicia sesión nuevamente.");
+      return;
+    }
 
     // AM: Exclusion inmediata antes del render para conservar la oferta y sucursal de origen.
     orderCreationOfferRef.current = planBranchOfferId;
     setProcessingPlanOfferId(planBranchOfferId);
+    let attempt;
     try {
-      const orderResponse = await createMembershipOrder(planBranchOfferId);
-      if (!isMountedRef.current) return;
+      attempt = getPurchaseAttempt(planBranchOfferId);
+      const orderResponse = await createMembershipOrder(planBranchOfferId, { idempotencyKey: attempt.key });
+      if (!isMountedRef.current || purchaseIdentityRef.current !== attempt.identity
+        || purchaseAttemptRef.current?.key !== attempt.key) return;
       const summary = orderResponse?.data || orderResponse;
+      if (!summary || typeof summary.id_order !== "string" || !summary.id_order.trim()) {
+        throw Object.assign(new Error(), { code: "PURCHASE_SUMMARY_UNAVAILABLE" });
+      }
       setPurchaseOrderSummary(summary);
       setMembershipPaymentIntent(null);
       setPurchaseErrorMessage("");
       setPurchaseStep("summary");
       setPurchaseCompleted(false);
       setPurchaseModalOpen(true);
+      markPurchaseAttempt(attempt, "resolved");
     } catch (error) {
-      if (!isMountedRef.current) return;
-      notifications.error(error?.data?.error?.message || error?.message || "No se pudo crear la orden de compra.");
+      if (!isMountedRef.current || purchaseIdentityRef.current !== purchaseIdentity
+        || (attempt && purchaseAttemptRef.current?.key !== attempt.key)) return;
+      const code = error?.data?.error?.code || error?.code;
+      if (["MEMBERSHIP_PURCHASE_IDEMPOTENCY_CONFLICT", "MEMBERSHIP_PURCHASE_IDEMPOTENCY_ORDER_UNAVAILABLE"].includes(code)) {
+        markPurchaseAttempt(attempt, "terminal");
+        notifications.error("Esta operación no puede retomarse. Pulsa Iniciar nueva compra para comenzar otro intento.");
+        return;
+      }
+      if (code === "MEMBERSHIP_PURCHASE_IDEMPOTENCY_SCHEMA_NOT_READY") {
+        notifications.warning("Las compras VIP no están disponibles temporalmente. Intenta más tarde.");
+        return;
+      }
+      if (code === "PURCHASE_KEY_UNAVAILABLE") {
+        notifications.error("No se pudo proteger esta compra. Utiliza un navegador compatible e intenta nuevamente.");
+      } else if (code === "PURCHASE_SUMMARY_UNAVAILABLE" || error?.status === 0
+        || ["NETWORK_UNAVAILABLE", "ETIMEDOUT"].includes(code)
+        || ["AbortError", "TimeoutError"].includes(error?.name)) {
+        notifications.error("No se pudo confirmar la compra. Reintenta la misma oferta para recuperar la operación.");
+      } else if (code === "MEMBERSHIP_PURCHASE_BRANCH_INACTIVE") {
+        notifications.error("Sucursal no disponible.");
+      } else {
+        notifications.error("No se pudo crear la orden de compra. Reintenta la misma oferta.");
+      }
     } finally {
       orderCreationOfferRef.current = "";
       if (isMountedRef.current) setProcessingPlanOfferId("");
@@ -636,7 +752,7 @@ export default function MembershipPlansPage() {
                           plan={plan}
                           onSelect={handlePlanSelect}
                           isSpotlight={normalizePlanCategory(plan?.categoria_nivel, 1) === spotlightCategory}
-                          ctaLabel={membershipCtaLabel}
+                          ctaLabel={terminalOrderOfferId === planOfferId ? "Iniciar nueva compra" : membershipCtaLabel}
                           loading={Boolean(planOfferId) && processingPlanOfferId === planOfferId}
                           disabled={Boolean(processingPlanOfferId && planOfferId && processingPlanOfferId !== planOfferId)}
                           purchaseLocked={!VIP_MEMBERSHIPS_PURCHASE_ENABLED}

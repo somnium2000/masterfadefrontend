@@ -174,8 +174,15 @@ export async function acquireClientePlan(payload) {
   return normalizeResponsePayload(response);
 }
 
-export async function createMembershipOrder(id_plan_sucursal) {
-  const response = await http.post(`${BASE}/planes/orden`, { id_plan_sucursal });
+export async function createMembershipOrder(id_plan_sucursal, { idempotencyKey } = {}) {
+  if (idempotencyKey !== undefined && (typeof idempotencyKey !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idempotencyKey))) {
+    throw new Error('No se pudo proteger el intento de compra. La clave no es válida.');
+  }
+  const response = await http.post(`${BASE}/planes/orden`, {
+    id_plan_sucursal,
+    ...(idempotencyKey !== undefined ? { idempotency_key: idempotencyKey } : {}),
+  });
   return normalizeResponsePayload(response);
 }
 
