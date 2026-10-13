@@ -223,6 +223,7 @@ export default function MembershipPlansPage() {
   const validBranchIdsRef = useRef(new Set());
   const branchRequestRef = useRef(0);
   const planRequestRef = useRef(0);
+  const orderCreationOfferRef = useRef("");
   const isClienteSession = Boolean(isAuthenticated && Array.isArray(roles) && roles.includes("cliente"));
 
   const [status, setStatus] = useState("loading");
@@ -349,6 +350,7 @@ export default function MembershipPlansPage() {
   }, [loadMembershipState]);
 
   function handleBranchChange(nextBranchId) {
+    if (orderCreationOfferRef.current) return;
     const safeId = String(nextBranchId || "").trim();
     if (!validBranchIdsRef.current.has(safeId) || safeId === selectedBranchRef.current) return;
     planRequestRef.current += 1;
@@ -374,6 +376,7 @@ export default function MembershipPlansPage() {
   }
 
   async function handlePlanSelect(plan) {
+    if (!isMountedRef.current || orderCreationOfferRef.current) return;
     if (!VIP_MEMBERSHIPS_PURCHASE_ENABLED) return;
 
     if (!selectedBranchId) {
@@ -403,9 +406,12 @@ export default function MembershipPlansPage() {
       return;
     }
 
+    // AM: Exclusion inmediata antes del render para conservar la oferta y sucursal de origen.
+    orderCreationOfferRef.current = planBranchOfferId;
     setProcessingPlanOfferId(planBranchOfferId);
     try {
       const orderResponse = await createMembershipOrder(planBranchOfferId);
+      if (!isMountedRef.current) return;
       const summary = orderResponse?.data || orderResponse;
       setPurchaseOrderSummary(summary);
       setMembershipPaymentIntent(null);
@@ -414,9 +420,11 @@ export default function MembershipPlansPage() {
       setPurchaseCompleted(false);
       setPurchaseModalOpen(true);
     } catch (error) {
+      if (!isMountedRef.current) return;
       notifications.error(error?.data?.error?.message || error?.message || "No se pudo crear la orden de compra.");
     } finally {
-      setProcessingPlanOfferId("");
+      orderCreationOfferRef.current = "";
+      if (isMountedRef.current) setProcessingPlanOfferId("");
     }
   }
 
@@ -538,6 +546,7 @@ export default function MembershipPlansPage() {
                     key={branch.id_sucursal}
                     type="button"
                     onClick={() => handleBranchChange(branch.id_sucursal)}
+                    disabled={Boolean(processingPlanOfferId)}
                     className={[
                       "inline-flex min-h-10 w-full items-center justify-between gap-2 rounded-full border px-4 py-2 text-sm transition-all duration-200 sm:justify-start lg:w-auto",
                       isActive

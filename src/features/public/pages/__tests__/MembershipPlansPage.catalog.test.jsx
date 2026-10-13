@@ -10,6 +10,9 @@ const api = vi.hoisted(() => ({ listPublicCatalogBranches: vi.fn(), listPublicPl
 const sync = vi.hoisted(() => ({ callback: null, unsubscribe: vi.fn() }));
 const navigate = vi.hoisted(() => vi.fn());
 const auth = vi.hoisted(() => ({ isAuthenticated: false, roles: [] }));
+const flags = vi.hoisted(() => ({ enabled: true }));
+const notifications = vi.hoisted(() => ({ warning: vi.fn(), error: vi.fn(), success: vi.fn() }));
+const dialog = vi.hoisted(() => ({ props: null }));
 const payment = vi.hoisted(() => ({
   getClientePlanEstado: vi.fn(), createMembershipOrder: vi.fn(),
   createMembershipPaymentIntent: vi.fn(), confirmMembershipPayment: vi.fn(),
@@ -21,22 +24,26 @@ vi.mock('../../../../lib/catalogSync.js', () => ({
 }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => navigate }));
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => auth }));
-vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => ({}) }));
+vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => notifications }));
 vi.mock('../../../cliente/lib/clienteApi.js', () => payment);
 vi.mock('../../lib/vipMembershipFeatureFlags.js', () => ({
-  VIP_MEMBERSHIPS_PURCHASE_ENABLED: true,
+  get VIP_MEMBERSHIPS_PURCHASE_ENABLED() { return flags.enabled; },
   VIP_MEMBERSHIPS_PURCHASE_LOCK_MESSAGE: 'Próximamente...',
 }));
 vi.mock('../../../../components/branding/MasterfadeLogo.jsx', () => ({ default: () => null }));
 vi.mock('../../../../components/theme/ThemeSwitcher.jsx', () => ({ default: () => null }));
 vi.mock('../../../../components/navigation/PremiumBottomNav.jsx', () => ({ default: () => null }));
 vi.mock('../../../plans/components/PlanPurchaseFlowDialog.jsx', () => ({
-  default: ({ open, step, orderSummary, paymentIntent, onContinueToPayment }) => open ? (
+  default: (props) => {
+    dialog.props = props;
+    const { open, step, orderSummary, paymentIntent, onContinueToPayment } = props;
+    return open ? (
     <div data-testid="purchase-flow">
       <span>{step}</span><span>{orderSummary?.id_order}</span><span>{paymentIntent?.id_payment_intent}</span>
       <button type="button" onClick={onContinueToPayment}>Continuar pago</button>
     </div>
-  ) : null,
+    ) : null;
+  },
 }));
 
 const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -65,6 +72,9 @@ beforeEach(() => {
   navigate.mockReset();
   auth.isAuthenticated = false;
   auth.roles = [];
+  flags.enabled = true;
+  Object.values(notifications).forEach((mock) => mock.mockReset());
+  dialog.props = null;
   Object.values(payment).forEach((mock) => mock.mockReset());
   payment.getClientePlanEstado.mockResolvedValue({});
   payment.createMembershipOrder.mockResolvedValue({ data: { id_order: 'orden-1' } });
@@ -73,6 +83,165 @@ beforeEach(() => {
   sync.unsubscribe.mockReset();
   api.listPublicCatalogBranches.mockResolvedValue({ branches });
   api.listPublicPlansByBranch.mockResolvedValue({ plans: [] });
+});
+
+// AM: Captura el callback real del boton para probar invocaciones antes del render
+// y el guard del handler independientemente del atributo disabled.
+function clickCallback(button) {
+  const key = Object.keys(button).find((name) => name.startsWith('__reactProps$'));
+  return button[key].onClick;
+}
+const orderSummary = () => ({
+  id_order: 'orden-backend-A', estado_orden_codigo: 'pendiente_pago',
+  plan: { id_plan: 'plan-backend', id_plan_sucursal: 'Plan A-offer', id_sucursal: A,
+    precio_hnl: 975, beneficios: [{ tipo: 'servicio', nombre: 'Corte backend', cantidad: 4 }] },
+  totales: { subtotal_hnl: 975, descuento_hnl: 0, total_hnl: 975, moneda_codigo: 'HNL' },
+});
+async function renderPurchase({ strict = false } = {}) {
+  auth.isAuthenticated = true;
+  auth.roles = ['cliente'];
+  api.listPublicPlansByBranch.mockImplementation((id) => Promise.resolve({ plans: id === A
+    ? [plan('Plan A', 100), plan('Plan alternativo', 200)] : [plan('Plan B', 300)] }));
+  const view = render(strict ? <StrictMode><MembershipPlansPage /></StrictMode> : <MembershipPlansPage />);
+  await select('Centro');
+  await screen.findByText('Plan A');
+  return view;
+}
+
+describe('exclusion de seleccion durante creacion de orden VIP', () => {
+  test('A no cambia a B mientras crea orden A y conserva exclusivamente el resumen backend', async () => {
+    const pending = deferred();
+    const summary = orderSummary();
+    payment.createMembershipOrder.mockReturnValue(pending.promise);
+    await renderPurchase();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Quiero este plan' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Norte' }));
+    await act(async () => pending.resolve({ data: summary }));
+    expect(screen.getByRole('heading', { name: 'Planes en Centro' })).toBeInTheDocument();
+    expect(api.listPublicPlansByBranch).not.toHaveBeenCalledWith(B);
+    expect(payment.createMembershipOrder).toHaveBeenCalledExactlyOnceWith('Plan A-offer');
+    expect(dialog.props.open).toBe(true);
+    expect(dialog.props.orderSummary).toBe(summary);
+    expect(dialog.props.orderSummary.plan.precio_hnl).toBe(975);
+    expect(dialog.props.orderSummary.plan.id_sucursal).toBe(A);
+    expect(dialog.props.orderSummary.totales.total_hnl).toBe(975);
+    expect(dialog.props.orderSummary.plan.beneficios[0].cantidad).toBe(4);
+    expect(payment.createMembershipPaymentIntent).not.toHaveBeenCalled();
+    expect(payment.confirmMembershipPayment).not.toHaveBeenCalled();
+  });
+
+  test('selector disabled y handler directo bloqueados hasta finalizar', async () => {
+    const pending = deferred();
+    payment.createMembershipOrder.mockReturnValue(pending.promise);
+    await renderPurchase();
+    const changeBranch = clickCallback(screen.getByRole('button', { name: 'Norte' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Quiero este plan' })[0]);
+    expect(screen.getByRole('button', { name: 'Norte' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Procesando...' })).toBeDisabled();
+    act(() => changeBranch());
+    expect(api.listPublicPlansByBranch).not.toHaveBeenCalledWith(B);
+    await act(async () => pending.resolve(orderSummary()));
+    expect(screen.getByRole('button', { name: 'Norte' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Procesando...' })).not.toBeInTheDocument();
+  });
+
+  test.each([false, true])('B doble clic previo al render produce una sola orden; StrictMode=%s', async (strict) => {
+    const pending = deferred();
+    payment.createMembershipOrder.mockReturnValue(pending.promise);
+    await renderPurchase({ strict });
+    const choose = clickCallback(screen.getAllByRole('button', { name: 'Quiero este plan' })[0]);
+    act(() => { choose(); choose(); });
+    await act(async () => pending.resolve(orderSummary()));
+    expect(payment.createMembershipOrder).toHaveBeenCalledTimes(1);
+    expect(dialog.props.orderSummary.id_order).toBe('orden-backend-A');
+  });
+
+  test('C otra oferta no inicia una segunda creacion antes del render', async () => {
+    const pending = deferred();
+    payment.createMembershipOrder.mockReturnValue(pending.promise);
+    await renderPurchase();
+    const choices = screen.getAllByRole('button', { name: 'Quiero este plan' }).map(clickCallback);
+    act(() => { choices[0](); choices[1](); });
+    await act(async () => pending.resolve(orderSummary()));
+    expect(payment.createMembershipOrder).toHaveBeenCalledExactlyOnceWith('Plan A-offer');
+  });
+
+  test('D rechazo mantiene el error backend y libera sucursal y ofertas para recuperar', async () => {
+    const pending = deferred();
+    const recovered = orderSummary();
+    recovered.id_order = 'orden-backend-B';
+    recovered.plan.id_sucursal = B;
+    recovered.plan.id_plan_sucursal = 'Plan B-offer';
+    payment.createMembershipOrder.mockReturnValueOnce(pending.promise).mockResolvedValueOnce({ data: recovered });
+    await renderPurchase();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Quiero este plan' })[0]);
+    await act(async () => pending.reject({ data: { error: { code: 'MEMBERSHIP_PURCHASE_BRANCH_INACTIVE', message: 'Sucursal no disponible.' } } }));
+    expect(notifications.error).toHaveBeenCalledWith('Sucursal no disponible.');
+    expect(dialog.props.open).toBe(false);
+    expect(screen.getByRole('button', { name: 'Norte' })).toBeEnabled();
+    await select('Norte');
+    await screen.findByText('Plan B');
+    fireEvent.click(screen.getByRole('button', { name: 'Quiero este plan' }));
+    await screen.findByText('orden-backend-B');
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan B-offer');
+    expect(payment.createMembershipPaymentIntent).not.toHaveBeenCalled();
+  });
+
+  test.each(['resolve', 'reject'])('F desmontaje durante creacion: %s no notifica ni solicita cancelacion', async (outcome) => {
+    const pending = deferred();
+    payment.createMembershipOrder.mockReturnValue(pending.promise);
+    const view = await renderPurchase();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Quiero este plan' })[0]);
+    view.unmount();
+    await act(async () => outcome === 'resolve' ? pending.resolve(orderSummary()) : pending.reject(new Error('Solicitud fallida')));
+    expect(notifications.error).not.toHaveBeenCalled();
+    expect(payment.createMembershipOrder).toHaveBeenCalledTimes(1);
+    expect(payment.createMembershipPaymentIntent).not.toHaveBeenCalled();
+    expect(payment.confirmMembershipPayment).not.toHaveBeenCalled();
+  });
+
+  test('feature flag deshabilitado mantiene CTA y no solicita orden incluso mediante callback', async () => {
+    flags.enabled = false;
+    await renderPurchase();
+    const button = screen.getAllByRole('button', { name: 'Próximamente...' })[0];
+    expect(button).toBeDisabled();
+    await act(async () => { await clickCallback(button)(); });
+    expect(payment.createMembershipOrder).not.toHaveBeenCalled();
+  });
+
+  test('catalogSync durante la orden conserva bloqueo y resumen backend original', async () => {
+    const pending = deferred();
+    const summary = orderSummary();
+    payment.createMembershipOrder.mockReturnValue(pending.promise);
+    await renderPurchase();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Quiero este plan' })[0]);
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan('Oferta recargada', 400)] });
+    await act(async () => sync.callback());
+    expect(await screen.findByText('Oferta recargada')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Norte' })).toBeDisabled();
+    await act(async () => { await clickCallback(screen.getByRole('button', { name: 'Quiero este plan' }))(); });
+    expect(payment.createMembershipOrder).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve({ data: summary }));
+    expect(dialog.props.orderSummary).toBe(summary);
+  });
+
+  test.each([false, true])('sesion autenticada=%s conserva navegacion y autorizacion previa', async (authenticated) => {
+    auth.isAuthenticated = authenticated;
+    auth.roles = authenticated ? ['admin'] : [];
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan('Plan A')] });
+    render(<MembershipPlansPage />);
+    await select('Centro');
+    await screen.findByText('Plan A');
+    fireEvent.click(screen.getByRole('button', { name: 'Quiero este plan' }));
+    expect(payment.createMembershipOrder).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Norte' })).toBeEnabled();
+    if (authenticated) {
+      expect(notifications.warning).toHaveBeenCalledWith('Esta compra solo esta disponible para perfiles cliente.');
+      expect(navigate).toHaveBeenCalledWith('/home');
+    } else {
+      expect(navigate).toHaveBeenCalledWith(expect.stringContaining(`/login?next=%2Fmembresias-vip&intent=seleccionar_plan&id_sucursal=${A}&id_plan=Plan+A`));
+    }
+  });
 });
 afterEach(() => cleanup());
 
