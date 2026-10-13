@@ -242,3 +242,72 @@ test('catalogSync antes de recibir sucursales no invalida inicializacion ni dupl
   expect(screen.getByRole('option', { name: 'Centro' })).toBeInTheDocument();
   expect(api.getPublicCatalog).toHaveBeenCalledExactlyOnceWith({ id_sucursal: 'A' });
 });
+
+test('06H A VIP falla pero conserva Servicios/Paquetes y recupera mediante reintento', async () => {
+  const pending = deferred();
+  api.listPublicCatalogPlans.mockReturnValueOnce(pending.promise);
+  render(<AdminServiciosCatalogoPublicoPage />);
+  await screen.findByRole('option', { name: 'Centro' });
+  await act(async () => pending.reject(new Error('Detalle privado VIP')));
+  expect(await screen.findByText('No se pudieron cargar los planes VIP.')).toBeInTheDocument();
+  expect(screen.getByText('Reservable')).toBeInTheDocument();
+  expect(screen.getByText('Combo')).toBeInTheDocument();
+  expect(screen.queryByText('Detalle privado VIP')).not.toBeInTheDocument();
+  const alert = screen.getByText('No se pudieron cargar los planes VIP.').closest('[role="alert"]');
+  fireEvent.click(within(alert).getByRole('button', { name: 'Reintentar' }));
+  expect(await screen.findByText('Plan VIP')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(api.getPublicCatalog).toHaveBeenCalledTimes(1);
+  expect(api.listPublicCatalogPlans).toHaveBeenCalledTimes(2);
+});
+
+test('06H E todas fallan: errores por seccion sin empty state falso', async () => {
+  api.getPublicCatalog.mockRejectedValue(new Error('Fallo privado catalogo'));
+  api.listPublicCatalogPlans.mockRejectedValue(new Error('Fallo privado VIP'));
+  render(<AdminServiciosCatalogoPublicoPage />);
+  await screen.findByText('No se pudieron cargar los planes VIP.');
+  expect(screen.getByText('No se pudieron cargar los servicios ni los paquetes.')).toBeInTheDocument();
+  expect(screen.queryByText('Sin elementos publicados')).not.toBeInTheDocument();
+  expect(screen.queryByText('Fallo privado VIP')).not.toBeInTheDocument();
+});
+
+test('06H F B conserva su catalogo aunque VIP falle, sin datos previos de A', async () => {
+  render(<AdminServiciosCatalogoPublicoPage />);
+  await screen.findByText('Plan VIP');
+  api.getPublicCatalog.mockResolvedValue(catalog('B'));
+  api.listPublicCatalogPlans.mockRejectedValue(new Error('Fallo VIP B'));
+  chooseBranch('B');
+  await screen.findByText('Servicio B');
+  await screen.findByText('No se pudieron cargar los planes VIP.');
+  expect(screen.getByText('Servicio B')).toBeInTheDocument();
+  expect(screen.getByText('Paquete B')).toBeInTheDocument();
+  expect(screen.queryByText('Reservable')).not.toBeInTheDocument();
+  expect(screen.queryByText('Plan VIP')).not.toBeInTheDocument();
+  expect(screen.getByRole('combobox')).toHaveValue('B');
+});
+
+test('06H reintento VIP fallido conserva alerta; respuesta obsoleta no revierte recuperacion', async () => {
+  const old = deferred();
+  api.listPublicCatalogPlans.mockReturnValueOnce(old.promise).mockRejectedValueOnce(new Error('Fallo VIP')).mockResolvedValueOnce(vip('recuperado'));
+  render(<AdminServiciosCatalogoPublicoPage />);
+  await screen.findByRole('option', { name: 'Norte' });
+  await act(async () => sync.callback());
+  await screen.findByText('No se pudieron cargar los planes VIP.');
+  fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Reintentar' }));
+  await screen.findByText('VIP recuperado');
+  await act(async () => old.reject(new Error('Fallo antiguo VIP')));
+  expect(screen.getByText('VIP recuperado')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('06H reintento exclusivo VIP fallido conserva catalogo y mensaje seguro', async () => {
+  api.listPublicCatalogPlans.mockRejectedValue(new Error('Detalle privado VIP'));
+  render(<AdminServiciosCatalogoPublicoPage />);
+  await screen.findByText('No se pudieron cargar los planes VIP.');
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })));
+  expect(screen.getByText('No se pudieron cargar los planes VIP.')).toBeInTheDocument();
+  expect(screen.getByText('Reservable')).toBeInTheDocument();
+  expect(screen.getByText('Combo')).toBeInTheDocument();
+  expect(api.getPublicCatalog).toHaveBeenCalledTimes(1);
+  expect(api.listPublicCatalogPlans).toHaveBeenCalledTimes(2);
+});

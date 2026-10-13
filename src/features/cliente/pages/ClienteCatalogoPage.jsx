@@ -372,6 +372,7 @@ export default function ClienteCatalogoPage() {
   const [packages, setPackages] = useState([]);
   const [catalogErrors, setCatalogErrors] = useState({ services: false, packages: false });
   const [promotions, setPromotions] = useState([]);
+  const [promotionsError, setPromotionsError] = useState(false);
   const [activeSection, setActiveSection] = useState('servicios');
   const [search, setSearch] = useState('');
 
@@ -386,20 +387,25 @@ export default function ClienteCatalogoPage() {
       && selectedBranchId === selectedBranchRef.current && normalizedSearch === searchRef.current;
     if (!options.silent) setLoading(true);
     try {
-      const [catalogPayload, promotionsPayload] = await Promise.all([
-        normalizedSearch
+      const [catalogResult, promotionsResult] = await Promise.allSettled([
+        options.promotionsOnly ? Promise.resolve(null) : normalizedSearch
           ? searchPublicCatalog({ q: normalizedSearch, id_sucursal: selectedBranchId || undefined })
-          : getPublicCatalog({ id_sucursal: selectedBranchId || undefined }).catch(() => ({
-            services: [], packages: [], errors: { services: true, packages: true },
-          })),
+          : getPublicCatalog({ id_sucursal: selectedBranchId || undefined }),
         listPublicCatalogPromotions({ id_sucursal: selectedBranchId || undefined }),
       ]);
 
       if (!isCurrent()) return;
-      setServices(Array.isArray(catalogPayload?.services) ? catalogPayload.services : []);
-      setPackages(Array.isArray(catalogPayload?.packages) ? catalogPayload.packages : []);
-      setCatalogErrors({ services: Boolean(catalogPayload?.errors?.services), packages: Boolean(catalogPayload?.errors?.packages) });
-      setPromotions(Array.isArray(promotionsPayload?.promotions) ? promotionsPayload.promotions : []);
+      if (!options.promotionsOnly) {
+        const catalogPayload = catalogResult.status === 'fulfilled' ? catalogResult.value : null;
+        setServices(Array.isArray(catalogPayload?.services) ? catalogPayload.services : []);
+        setPackages(Array.isArray(catalogPayload?.packages) ? catalogPayload.packages : []);
+        setCatalogErrors({
+          services: catalogResult.status === 'rejected' || Boolean(catalogPayload?.errors?.services),
+          packages: catalogResult.status === 'rejected' || Boolean(catalogPayload?.errors?.packages),
+        });
+      }
+      setPromotionsError(promotionsResult.status === 'rejected');
+      setPromotions(Array.isArray(promotionsResult.value?.promotions) ? promotionsResult.value.promotions : []);
     } catch (error) {
       if (isCurrent()) notifyError(options.silent
         ? options.errorMessage
@@ -470,9 +476,9 @@ export default function ClienteCatalogoPage() {
     await fetchCatalogData(nextBranchId, searchRef.current, { errorMessage: 'No se pudo actualizar el catálogo para la sucursal.' });
   }
 
-  async function handleCatalogRetry() {
+  async function handleCatalogRetry({ promotionsOnly = false } = {}) {
     await fetchCatalogData(selectedBranchRef.current, searchRef.current, {
-      silent: true, errorMessage: 'No se pudo recuperar el catálogo. Intenta nuevamente.',
+      silent: true, promotionsOnly, errorMessage: 'No se pudo recuperar el catálogo. Intenta nuevamente.',
     });
   }
 
@@ -572,6 +578,9 @@ export default function ClienteCatalogoPage() {
         </div>
       ) : (
         <>
+          {promotionsError ? (
+            <ErrorBanner message="No se pudieron cargar las promociones." onRetry={() => void handleCatalogRetry({ promotionsOnly: true })} />
+          ) : null}
           {catalogErrors.services || catalogErrors.packages ? (
             <ErrorBanner
               message={catalogErrors.services && catalogErrors.packages
@@ -688,11 +697,11 @@ export default function ClienteCatalogoPage() {
                   </div>
                 ) : null}
 
-                {!sortedPromotions.length ? (
+                {!sortedPromotions.length ? (promotionsError ? null : (
                   <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
                     Aún no hay promociones visibles para esta sucursal.
                   </p>
-                ) : (
+                )) : (
                   <div className="relative">
                     {showPromotionCarouselControls ? (
                       <>

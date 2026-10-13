@@ -59,6 +59,7 @@ export default function AdminServiciosCatalogoPublicoPage() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [catalogErrors, setCatalogErrors] = useState({ services: false, packages: false });
+  const [plansError, setPlansError] = useState(false);
 
   const [publicServices, setPublicServices] = useState([]);
   const [publicPackages, setPublicPackages] = useState([]);
@@ -76,18 +77,23 @@ export default function AdminServiciosCatalogoPublicoPage() {
     setErrorMessage('');
 
     try {
-      const [catalogResult, plansResult] = await Promise.all([
-        getPublicCatalog({ id_sucursal: selectedBranchId || undefined }).catch(() => ({
-          services: [], packages: [], errors: { services: true, packages: true },
-        })),
+      const [catalogResult, plansResult] = await Promise.allSettled([
+        options.plansOnly ? Promise.resolve(null) : getPublicCatalog({ id_sucursal: selectedBranchId || undefined }),
         listPublicCatalogPlans({ id_sucursal: selectedBranchId || undefined }),
       ]);
 
       if (!isCurrent()) return;
-      setPublicServices(sortByVisualOrder(catalogResult?.services || [], 'nombre_servicio'));
-      setPublicPackages(sortByVisualOrder(catalogResult?.packages || [], 'nombre_paquete'));
-      setCatalogErrors({ services: Boolean(catalogResult?.errors?.services), packages: Boolean(catalogResult?.errors?.packages) });
-      setPublicPlans(sortByVisualOrder(plansResult?.plans || [], 'nombre_plan'));
+      if (!options.plansOnly) {
+        const catalogPayload = catalogResult.status === 'fulfilled' ? catalogResult.value : null;
+        setPublicServices(sortByVisualOrder(catalogPayload?.services || [], 'nombre_servicio'));
+        setPublicPackages(sortByVisualOrder(catalogPayload?.packages || [], 'nombre_paquete'));
+        setCatalogErrors({
+          services: catalogResult.status === 'rejected' || Boolean(catalogPayload?.errors?.services),
+          packages: catalogResult.status === 'rejected' || Boolean(catalogPayload?.errors?.packages),
+        });
+      }
+      setPlansError(plansResult.status === 'rejected');
+      setPublicPlans(sortByVisualOrder(plansResult.value?.plans || [], 'nombre_plan'));
     } catch (error) {
       if (!isCurrent()) return;
       setErrorMessage(extractMessage(error));
@@ -218,6 +224,9 @@ export default function AdminServiciosCatalogoPublicoPage() {
 
       {errorMessage ? <ErrorBanner message={errorMessage} onRetry={() => void loadData(branchId)} /> : null}
       {loading ? <LoadingSpinner /> : null}
+      {!loading && !errorMessage && plansError ? (
+        <ErrorBanner message="No se pudieron cargar los planes VIP." onRetry={() => void loadData(branchId, { silent: true, plansOnly: true })} />
+      ) : null}
 
       {!loading && !errorMessage && (catalogErrors.services || catalogErrors.packages) ? (
         <ErrorBanner
@@ -228,7 +237,7 @@ export default function AdminServiciosCatalogoPublicoPage() {
         />
       ) : null}
 
-      {!loading && !errorMessage && !catalogErrors.services && !catalogErrors.packages && filteredAgendableServices.length === 0 && filteredInformativeServices.length === 0 && filteredNonBookableServices.length === 0 && filteredPackages.length === 0 && filteredPlans.length === 0 ? (
+      {!loading && !errorMessage && !plansError && !catalogErrors.services && !catalogErrors.packages && filteredAgendableServices.length === 0 && filteredInformativeServices.length === 0 && filteredNonBookableServices.length === 0 && filteredPackages.length === 0 && filteredPlans.length === 0 ? (
         <EmptyState
           icon={Building2}
           title="Sin elementos publicados"

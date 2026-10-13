@@ -302,11 +302,93 @@ test('respuesta vieja no libera loading de la sucursal nueva pendiente', async (
   await screen.findByText('Servicio A vigente');
 });
 
-test('error vigente de reintento mantiene su mensaje seguro anterior', async () => {
+test('error vigente de reintento identifica Promociones con alerta segura', async () => {
   api.getPublicCatalog.mockResolvedValue({ services: [], packages: [], errors: { services: true, packages: false } });
   render(<ClienteCatalogoPage />);
   await screen.findByText('No se pudieron cargar los servicios.');
   api.listPublicCatalogPromotions.mockRejectedValueOnce(new Error('Detalle tecnico privado'));
   fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
-  await waitFor(() => expect(notify).toHaveBeenCalledWith('No se pudo recuperar el catálogo. Intenta nuevamente.'));
+  expect(await screen.findByText('No se pudieron cargar las promociones.')).toBeInTheDocument();
+  expect(notify).not.toHaveBeenCalled();
+});
+
+test('06H G fallo Promociones conserva catalogo, cantidades y reintento recupera', async () => {
+  const pending = deferred();
+  api.listPublicCatalogPromotions.mockReturnValueOnce(pending.promise);
+  api.getPublicCatalog.mockResolvedValue({ services: [service('Reservable', true)], packages: [{ id_paquete: 'P', nombre_paquete: 'Combo', precio_hnl: 300, items: [{ id_servicio: 'S', nombre_servicio: 'Corte', cantidad: 2 }] }] });
+  render(<ClienteCatalogoPage />);
+  await screen.findByRole('option', { name: 'Centro' });
+  await act(async () => pending.reject(new Error('Detalle privado Promociones')));
+  await screen.findByText('No se pudieron cargar las promociones.');
+  expect(screen.getByText('Reservable')).toBeInTheDocument();
+  expect(screen.queryByText('Detalle privado Promociones')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Paquetes Combos disponibles/ }));
+  expect(screen.getByText('- Corte x2')).toBeInTheDocument();
+  expect(screen.getByText('L 300.00')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Promociones Beneficios vigentes/ }));
+  expect(screen.queryByText('Aún no hay promociones visibles para esta sucursal.')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+  await screen.findByRole('heading', { name: 'Promocion vigente' });
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(api.getPublicCatalog).toHaveBeenCalledTimes(1);
+  expect(api.listPublicCatalogPromotions).toHaveBeenCalledTimes(2);
+});
+
+test('06H K B con Promociones fallidas no muestra catalogo ni promociones previas de A', async () => {
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('Reservable');
+  api.getPublicCatalog.mockResolvedValue(catalog('B'));
+  api.listPublicCatalogPromotions.mockRejectedValue(new Error('Fallo Promociones B'));
+  chooseBranch('B');
+  await screen.findByText('Servicio B');
+  await screen.findByText('No se pudieron cargar las promociones.');
+  expect(screen.getByText('Servicio B')).toBeInTheDocument();
+  expect(screen.queryByText('Reservable')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Promociones Beneficios vigentes/ }));
+  expect(screen.queryByRole('heading', { name: 'Promocion vigente' })).not.toBeInTheDocument();
+  expect(screen.getByRole('combobox')).toHaveValue('B');
+});
+
+test('06H L busqueda fallida conserva Promociones y descarta productos anteriores', async () => {
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('Reservable');
+  api.searchPublicCatalog.mockRejectedValue(new Error('Detalle privado busqueda'));
+  fireEvent.change(screen.getByPlaceholderText('Buscar servicios o paquetes...'), { target: { value: 'corte' } });
+  await screen.findByText('No se pudieron cargar los servicios ni los paquetes.');
+  expect(screen.queryByText('Reservable')).not.toBeInTheDocument();
+  expect(screen.queryByText('No hay servicios publicados para esta sucursal.')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Promociones Beneficios vigentes/ }));
+  expect(screen.getByRole('heading', { name: 'Promocion vigente' })).toBeInTheDocument();
+  expect(screen.queryByText('Detalle privado busqueda')).not.toBeInTheDocument();
+  api.searchPublicCatalog.mockResolvedValue(catalog('recuperado'));
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+  await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: /Servicios Selecciona tu experiencia/ }));
+  expect(screen.getByText('Servicio recuperado')).toBeInTheDocument();
+  expect(api.searchPublicCatalog).toHaveBeenCalledTimes(2);
+  expect(api.searchPublicCatalog).toHaveBeenLastCalledWith({ q: 'corte', id_sucursal: 'A' });
+});
+
+test('06H todas fallan sin datos viejos; muestra errores de catalogo y Promociones', async () => {
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('Reservable');
+  api.getPublicCatalog.mockRejectedValue(new Error('Fallo privado catalogo'));
+  api.listPublicCatalogPromotions.mockRejectedValue(new Error('Fallo privado Promociones'));
+  chooseBranch('B');
+  await screen.findByText('No se pudieron cargar las promociones.');
+  expect(screen.getByText('No se pudieron cargar los servicios ni los paquetes.')).toBeInTheDocument();
+  expect(screen.queryByText('Reservable')).not.toBeInTheDocument();
+  expect(screen.queryByText('No hay servicios publicados para esta sucursal.')).not.toBeInTheDocument();
+});
+
+test('06H reintento exclusivo Promociones fallido conserva catalogo y error seguro', async () => {
+  api.listPublicCatalogPromotions.mockRejectedValue(new Error('Detalle privado Promociones'));
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('No se pudieron cargar las promociones.');
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })));
+  expect(screen.getByText('Reservable')).toBeInTheDocument();
+  expect(screen.getByText('No se pudieron cargar las promociones.')).toBeInTheDocument();
+  expect(api.getPublicCatalog).toHaveBeenCalledTimes(1);
+  expect(api.listPublicCatalogPromotions).toHaveBeenCalledTimes(2);
+  expect(notify).not.toHaveBeenCalled();
 });
