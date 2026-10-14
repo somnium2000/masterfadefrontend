@@ -107,11 +107,9 @@ function quickFilterButtonClass(isActive) {
         : 'rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_54%,transparent)] text-[var(--mf-text)] hover:border-[var(--mf-accent)]/60';
 }
 
-function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingBranches, allowAll }) {
+function SucursalSelector({ allBranches, selected, onChange, loadingBranches, allowAll }) {
     // AM: Selector reutilizado del patron de SERVICIOS para operar catalogo por sucursal sin bloqueos silenciosos.
-    const availableBranches = branchIds.length > 0
-        ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-        : allowAll ? allBranches : [];
+    const availableBranches = allBranches;
     const validBranchIds = new Set(availableBranches.map((branch) => branch.id_sucursal));
     const selectedBranch = availableBranches.find((branch) => branch.id_sucursal === selected);
 
@@ -658,13 +656,15 @@ function PaqueteForm({
 
 export default function AdminPackagesCatalogPage() {
     const navigate = useNavigate();
-    const { branchIds, roles = [] } = useAuth();
+    const { branchIds, roles = [], user } = useAuth();
     const notifications = useNotifications();
     const isSuperAdmin = roles.includes('super_admin');
 
     const [allBranches, setAllBranches] = useState([]);
+    const [branchesContext, setBranchesContext] = useState('');
+    const permissionsKey = JSON.stringify([user?.id_usuario ?? null, roles, [...branchIds].sort()]);
     const [loadingBranches, setLoadingBranches] = useState(false);
-    const [sucursal, setSucursal] = useState(branchIds.length === 1 ? branchIds[0] : '');
+    const [sucursal, setSucursal] = useState('');
 
     const [paquetes, setPaquetes] = useState([]);
     const [serviciosList, setServiciosList] = useState([]);
@@ -696,8 +696,10 @@ export default function AdminPackagesCatalogPage() {
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [stateTarget, setStateTarget] = useState(null);
     const [stateLoading, setStateLoading] = useState(false);
-    const actionsLockedByBranch = !isSuperAdmin && (!roles.includes('admin') || !sucursal || !branchIds.includes(sucursal));
-    const scopeContext = JSON.stringify([isSuperAdmin, roles.includes('admin'), [...branchIds].sort(), sucursal]);
+    const actionsLockedByBranch = branchesContext !== permissionsKey || allBranches.length === 0
+        || (!isSuperAdmin && (!roles.includes('admin') || !sucursal
+            || !allBranches.some((branch) => branch.id_sucursal === sucursal)));
+    const scopeContext = JSON.stringify([permissionsKey, sucursal, actionsLockedByBranch]);
     const scopeRef = useRef(scopeContext);
     const scopeEpochRef = useRef(0);
     const mountedRef = useRef(false);
@@ -754,11 +756,9 @@ export default function AdminPackagesCatalogPage() {
     );
 
     const availableBranches = useMemo(() => {
-        const scopedBranches = branchIds.length > 0
-            ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-            : isSuperAdmin ? allBranches : [];
+        const scopedBranches = branchesContext === permissionsKey && (isSuperAdmin || roles.includes('admin')) ? allBranches : [];
         return scopedBranches.filter((branch) => branch?.id_sucursal);
-    }, [allBranches, branchIds, isSuperAdmin]);
+    }, [allBranches, branchesContext, permissionsKey, isSuperAdmin, roles]);
     const titleSubtitle = !sucursal && availableBranches.length > 1
         ? 'Vista de paquetes maestros globales y sus ofertas por sucursal.'
         : 'Gestiona paquetes maestros y la oferta operativa de la sucursal seleccionada.';
@@ -860,6 +860,8 @@ export default function AdminPackagesCatalogPage() {
     const fetchBranches = useCallback(async () => {
         const generation = ++branchesGenerationRef.current;
         const isCurrent = () => mountedRef.current && branchesGenerationRef.current === generation;
+        setAllBranches([]);
+        setBranchesContext('');
         setLoadingBranches(true);
         try {
             const data = await listAdminSucursales({ soloActivas: true });
@@ -869,6 +871,7 @@ export default function AdminPackagesCatalogPage() {
                 ? payloadData.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
                 : [];
             setAllBranches(nextBranches);
+            setBranchesContext(permissionsKey);
         } catch {
             if (!isCurrent()) return;
             setAllBranches([]);
@@ -878,23 +881,17 @@ export default function AdminPackagesCatalogPage() {
         } finally {
             if (isCurrent()) setLoadingBranches(false);
         }
-    }, [notifications]);
+    }, [notifications, permissionsKey]);
 
     useEffect(() => {
         void fetchBranches();
     }, [fetchBranches]);
 
-    useEffect(() => {
-        if (sucursal) return;
-        if (branchIds.length === 1) {
-            setSucursal(branchIds[0]);
-            return;
-        }
-        if (isSuperAdmin && availableBranches.length === 1) {
-            // AM: Super admin con una sola sucursal activa queda operativo sin pasos extra.
-            setSucursal(availableBranches[0].id_sucursal);
-        }
-    }, [sucursal, branchIds, isSuperAdmin, availableBranches]);
+    useLayoutEffect(() => {
+        // AM: El catalogo administrativo vigente es la fuente de seleccion, no branchIds.
+        if (sucursal && availableBranches.some((branch) => branch.id_sucursal === sucursal)) return;
+        setSucursal(availableBranches.length === 1 ? availableBranches[0].id_sucursal : '');
+    }, [sucursal, availableBranches]);
 
     useEffect(() => {
         if (!sucursal) return;
@@ -1446,8 +1443,7 @@ export default function AdminPackagesCatalogPage() {
                             <p className="text-sm text-[var(--mf-text-2)]">{titleSubtitle}</p>
                         </div>
                         <SucursalSelector
-                            branchIds={branchIds}
-                            allBranches={allBranches}
+                            allBranches={availableBranches}
                             selected={sucursal}
                             onChange={setSucursal}
                             loadingBranches={loadingBranches}

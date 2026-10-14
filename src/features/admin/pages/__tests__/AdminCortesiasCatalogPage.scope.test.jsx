@@ -39,15 +39,16 @@ async function openEdit() {
 }
 
 beforeEach(() => {
+  auth.user = null;
   auth.branchIds = [];
   auth.roles = ["super_admin"];
   Object.values(api).forEach((mock) => mock.mockReset());
   Object.values(notifications).forEach((mock) => mock.mockReset());
   branchesApi.listAdminSucursales.mockReset();
-  branchesApi.listAdminSucursales.mockResolvedValue({ data: { sucursales: [
+  branchesApi.listAdminSucursales.mockImplementation(async () => ({ data: { sucursales: [
     { id_sucursal: A, nombre_sucursal: "Centro", estado: true },
     { id_sucursal: B, nombre_sucursal: "Norte", estado: true },
-  ] } });
+  ].filter((branch) => auth.roles.includes('super_admin') || auth.branchIds.includes(branch.id_sucursal)) } }));
   api.listAdminCortesias.mockResolvedValue({ data: { cortesias: [courtesy] } });
   api.updateAdminCortesia.mockResolvedValue({ data: courtesy });
   api.createAdminCortesia.mockResolvedValue({ data: courtesy });
@@ -94,6 +95,7 @@ describe("concurrencia y selección por alcance", () => {
     const pending = deferred();
     api.listAdminCortesias.mockReturnValueOnce(pending.promise);
     const view = render(<AdminCortesiasCatalogPage />);
+    await waitFor(() => expect(api.listAdminCortesias).toHaveBeenCalled());
     view.unmount();
     await act(async () => outcome === "resolve" ? pending.resolve(result("Anterior")) : pending.reject(new Error("interno")));
     expect(screen.queryByText("Anterior")).not.toBeInTheDocument();
@@ -133,6 +135,7 @@ describe("concurrencia y selección por alcance", () => {
     const pending = deferred();
     api.listAdminCortesias.mockReturnValueOnce(pending.promise);
     const view = render(<AdminCortesiasCatalogPage />);
+    await waitFor(() => expect(api.listAdminCortesias).toHaveBeenCalled());
     auth.roles = ["admin"]; auth.branchIds = [];
     view.rerender(<AdminCortesiasCatalogPage />);
     await act(async () => pending.resolve(result("Global anterior")));
@@ -159,10 +162,13 @@ describe("concurrencia y selección por alcance", () => {
 
   test("StrictMode conserva global y descarta respuesta del montaje anterior", async () => {
     const old = deferred();
-    api.listAdminCortesias.mockReturnValueOnce(old.promise).mockResolvedValue(result("Vigente"));
+    branchesApi.listAdminSucursales.mockReturnValueOnce(old.promise).mockResolvedValue({ data: { sucursales: [
+      { id_sucursal: A, nombre_sucursal: 'Centro', estado: true }, { id_sucursal: B, nombre_sucursal: 'Norte', estado: true },
+    ] } });
+    api.listAdminCortesias.mockResolvedValue(result("Vigente"));
     render(<StrictMode><AdminCortesiasCatalogPage /></StrictMode>);
     await screen.findByText("Vigente");
-    await act(async () => old.resolve(result("Vieja")));
+    await act(async () => old.resolve({ data: { sucursales: [] } }));
     expect(screen.queryByText("Vieja")).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Todas las sucursales" })).toBeInTheDocument();
   });
@@ -346,5 +352,88 @@ describe("edición segura de cortesías", () => {
     const confirm = screen.getByRole("dialog", { name: "Inactivar cortesía en sucursal" });
     fireEvent.click(within(confirm).getByRole("button", { name: "Inactivar" }));
     await waitFor(() => expect(api.setAdminCortesiaEstado).toHaveBeenCalledWith(ID, { id_sucursal: A, activa: false }));
+  });
+});
+
+describe('sucursales administrativas de la API', () => {
+  const apiBranches = [{ id_sucursal: A, nombre_sucursal: 'Centro', estado: true }, { id_sucursal: B, nombre_sucursal: 'Norte', estado: true }];
+  test('admin A + barbero B autoselecciona A solo despues de la API', async () => {
+    auth.roles = ['admin', 'barbero']; auth.branchIds = [A, B];
+    const pending = deferred(); branchesApi.listAdminSucursales.mockReturnValueOnce(pending.promise);
+    render(<AdminCortesiasCatalogPage />);
+    expect(api.listAdminCortesias).not.toHaveBeenCalled();
+    await act(async () => pending.resolve({ data: { sucursales: [apiBranches[0]] } }));
+    await screen.findByText('Corte gratis');
+    expect(api.listAdminCortesias).toHaveBeenCalledExactlyOnceWith({ id_sucursal: A, buscar: undefined });
+    expect(screen.queryByRole('option', { name: 'Norte' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Nueva maestra' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByLabelText('Centro')).toBeChecked();
+    expect(within(dialog).queryByLabelText('Norte')).not.toBeInTheDocument();
+  });
+
+  test('API A+B exige seleccion aunque branchIds tenga solo A', async () => {
+    auth.roles = ['admin']; auth.branchIds = [A];
+    branchesApi.listAdminSucursales.mockResolvedValue({ data: { sucursales: apiBranches } });
+    render(<AdminCortesiasCatalogPage />);
+    await screen.findByRole('option', { name: 'Norte' });
+    expect(api.listAdminCortesias).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Nueva maestra' })).toBeDisabled();
+    selectBranch(B); await screen.findByText('Corte gratis');
+    expect(api.listAdminCortesias).toHaveBeenLastCalledWith({ id_sucursal: B, buscar: undefined });
+  });
+
+  test('super_admin + admin A conserva todas las opciones y asociaciones del formulario', async () => {
+    auth.roles = ['super_admin', 'admin']; auth.branchIds = [A];
+    await renderReady();
+    expect(screen.getByRole('option', { name: 'Todas las sucursales' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Norte' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Nueva maestra' }));
+    expect(within(screen.getByRole('dialog')).getByLabelText('Norte')).toBeInTheDocument();
+  });
+
+  test.each(['admin', 'super_admin'])('API vacia bloquea acciones pese a branchIds: %s', async (role) => {
+    auth.roles = [role]; auth.branchIds = [A, B];
+    branchesApi.listAdminSucursales.mockResolvedValue({ data: { sucursales: [] } });
+    render(<AdminCortesiasCatalogPage />);
+    await screen.findByRole('combobox', { name: 'Sucursal' });
+    expect(screen.getByRole('button', { name: 'Nueva maestra' })).toBeDisabled();
+    expect(api.listAdminCortesias).not.toHaveBeenCalled();
+    expect(screen.queryByRole('option', { name: 'Centro' })).not.toBeInTheDocument();
+  });
+
+  test.each(['resolve', 'reject'])('cambio de permisos descarta sucursales antiguas: %s', async (outcome) => {
+    auth.roles = ['admin', 'barbero']; auth.branchIds = [A, B];
+    const old = deferred();
+    branchesApi.listAdminSucursales.mockReturnValueOnce(old.promise).mockResolvedValue({ data: { sucursales: [apiBranches[1]] } });
+    const view = render(<AdminCortesiasCatalogPage />);
+    auth.branchIds = [B]; view.rerender(<AdminCortesiasCatalogPage />);
+    await screen.findByText('Corte gratis');
+    await act(async () => outcome === 'resolve' ? old.resolve({ data: { sucursales: [apiBranches[0]] } }) : old.reject(new Error('anterior')));
+    expect(api.listAdminCortesias).toHaveBeenLastCalledWith({ id_sucursal: B, buscar: undefined });
+    expect(screen.getByRole('button', { name: 'Nueva maestra' })).toBeEnabled();
+    expect(screen.queryByText('anterior')).not.toBeInTheDocument();
+  });
+
+  test('revocar alcance elimina seleccion y datos anteriores', async () => {
+    auth.roles = ['admin']; auth.branchIds = [A];
+    const view = render(<AdminCortesiasCatalogPage />); await screen.findByText('Corte gratis');
+    branchesApi.listAdminSucursales.mockResolvedValue({ data: { sucursales: [] } });
+    auth.branchIds = [A, B]; view.rerender(<AdminCortesiasCatalogPage />);
+    await screen.findByRole('combobox', { name: 'Sucursal' });
+    expect(screen.queryByText('Corte gratis')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nueva maestra' })).toBeDisabled();
+    expect(screen.getByLabelText('Sucursal')).toHaveValue('');
+  });
+
+  test('cambio de cuenta con los mismos claims recarga el alcance administrativo', async () => {
+    auth.roles = ['admin', 'barbero']; auth.branchIds = [A, B];
+    auth.user = { id_usuario: 'administrador-A' };
+    branchesApi.listAdminSucursales.mockResolvedValue({ data: { sucursales: [apiBranches[0]] } });
+    const view = render(<AdminCortesiasCatalogPage />); await screen.findByText('Corte gratis');
+    branchesApi.listAdminSucursales.mockResolvedValue({ data: { sucursales: [apiBranches[1]] } });
+    auth.user = { id_usuario: 'administrador-B' }; view.rerender(<AdminCortesiasCatalogPage />);
+    await waitFor(() => expect(api.listAdminCortesias).toHaveBeenLastCalledWith({ id_sucursal: B, buscar: undefined }));
+    expect(branchesApi.listAdminSucursales).toHaveBeenCalledTimes(2);
   });
 });

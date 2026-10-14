@@ -1,6 +1,6 @@
 ﻿// src/features/admin/pages/AdminServicesCatalogPage.jsx
 // A3 - Pantalla CRUD de catalogo de servicios (Admin).
-// Logica de branchIds: 1 => auto, 2+ => selector por nombre, 0 => dropdown de todas.
+// AM: La API administrativa determina las sucursales disponibles y su seleccion.
 
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -56,16 +56,13 @@ function extractMessage(err) {
 }
 
 /**
- * branchIds  = UUIDs del usuario autenticado (de AuthContext)
- * allBranches = [{id_sucursal, nombre_sucursal}] de la API
+ * allBranches = sucursales autorizadas devueltas por la API administrativa
  * selected   = UUID actualmente seleccionado
  * onChange   = cb(uuid)
  */
-function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingBranches, allowAll }) {
+function SucursalSelector({ allBranches, selected, onChange, loadingBranches, allowAll }) {
     // AM: Replica el selector premium del submodulo Paquetes para consistencia visual total.
-    const availableBranches = branchIds.length > 0
-        ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-        : allowAll ? allBranches : [];
+    const availableBranches = allBranches;
     const validBranchIds = new Set(availableBranches.map((branch) => branch.id_sucursal));
     const selectedBranch = availableBranches.find((branch) => branch.id_sucursal === selected);
 
@@ -422,14 +419,16 @@ function formatActiveBranchesCount(servicio) {
 
 export default function AdminServicesCatalogPage() {
     const navigate = useNavigate();
-    const { branchIds, roles } = useAuth();
+    const { branchIds, roles, user } = useAuth();
     const isSuperAdmin = Array.isArray(roles) && roles.includes('super_admin');
     const canManageServiceBarberAssignments = isSuperAdmin && SERVICE_BARBER_ASSIGNMENTS_ENABLED;
     const notifications = useNotifications();
 
     // Sucursal activa según reglas
-    const [sucursal, setSucursal] = useState(branchIds.length === 1 ? branchIds[0] : '');
+    const [sucursal, setSucursal] = useState('');
     const [allBranches, setAllBranches] = useState([]);
+    const [branchesContext, setBranchesContext] = useState('');
+    const permissionsKey = JSON.stringify([user?.id_usuario ?? null, roles ?? [], [...branchIds].sort()]);
     const [loadingBranches, setLoadingBranches] = useState(false);
     const [branchLoadError, setBranchLoadError] = useState('');
     const [servicios, setServicios] = useState([]);
@@ -437,8 +436,10 @@ export default function AdminServicesCatalogPage() {
     const [listError, setListError] = useState('');
     const requestGenerationRef = useRef(0);
     const mountedRef = useRef(false);
-    const canQueryScope = isSuperAdmin || Boolean(sucursal && branchIds.includes(sucursal));
-    const requestScope = `${isSuperAdmin}:${sucursal}:${canQueryScope}`;
+    const canQueryScope = branchesContext === permissionsKey && allBranches.length > 0
+        && (isSuperAdmin || Boolean(roles?.includes('admin') && sucursal
+            && allBranches.some((branch) => branch.id_sucursal === sucursal)));
+    const requestScope = JSON.stringify([permissionsKey, sucursal, canQueryScope]);
     const currentScopeRef = useRef(requestScope);
     const [search, setSearch] = useState('');
     const [filtersOpen, setFiltersOpen] = useState(false);
@@ -474,11 +475,9 @@ export default function AdminServicesCatalogPage() {
     );
 
     const availableBranches = useMemo(() => {
-        const scopedBranches = branchIds.length > 0
-            ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-            : isSuperAdmin ? allBranches : [];
+        const scopedBranches = branchesContext === permissionsKey && (isSuperAdmin || roles?.includes('admin')) ? allBranches : [];
         return scopedBranches.filter((branch) => branch?.id_sucursal);
-    }, [allBranches, branchIds, isSuperAdmin]);
+    }, [allBranches, branchesContext, permissionsKey, isSuperAdmin, roles]);
 
     // AM: Filtro compuesto de servicios para busqueda local sin recargar backend.
     const filteredServicios = useMemo(() => {
@@ -582,6 +581,8 @@ export default function AdminServicesCatalogPage() {
     // â”€â”€ Carga sucursales (para nombres en selector) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     useEffect(() => {
         let cancelled = false;
+        setAllBranches([]);
+        setBranchesContext('');
         setLoadingBranches(true);
         setBranchLoadError('');
         listAdminSucursales({ soloActivas: true })
@@ -592,9 +593,11 @@ export default function AdminServicesCatalogPage() {
                     ? payload.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
                     : [];
                 setAllBranches(nextBranches);
+                setBranchesContext(permissionsKey);
             })
             .catch((err) => {
                 if (cancelled) return;
+                setAllBranches([]);
                 // AM: Evita bloqueo silencioso cuando no se pueden cargar sucursales para operar servicios.
                 const message = extractMessage(err) || 'No se pudieron cargar las sucursales.';
                 setBranchLoadError(message);
@@ -602,22 +605,13 @@ export default function AdminServicesCatalogPage() {
             })
             .finally(() => { if (!cancelled) setLoadingBranches(false); });
         return () => { cancelled = true; };
-    }, [notifications]);
+    }, [notifications, permissionsKey]);
 
-    useEffect(() => {
-        // AM: Si el usuario solo puede operar una sucursal, se autoselecciona para evitar botones bloqueados.
-        if (sucursal) return;
-
-        if (branchIds.length === 1) {
-            setSucursal(branchIds[0]);
-            return;
-        }
-
-        // AM: Super admin con una sola sucursal activa queda operativo sin pasos extra.
-        if (isSuperAdmin && allBranches.length === 1) {
-            setSucursal(allBranches[0].id_sucursal);
-        }
-    }, [sucursal, branchIds, isSuperAdmin, allBranches]);
+    useLayoutEffect(() => {
+        // AM: Solo la respuesta administrativa vigente determina opciones y seleccion automatica.
+        if (sucursal && availableBranches.some((branch) => branch.id_sucursal === sucursal)) return;
+        setSucursal(availableBranches.length === 1 ? availableBranches[0].id_sucursal : '');
+    }, [sucursal, availableBranches]);
 
     useEffect(() => {
         if (!sucursal) return;
@@ -634,11 +628,17 @@ export default function AdminServicesCatalogPage() {
         setServicios([]);
         setListError('');
         setLoading(false);
+        if (!canQueryScope) {
+            setDialogOpen(false);
+            setTariffDialogOpen(false);
+            setRemoveBranchTarget(null);
+            setGlobalDeactivateTarget(null);
+        }
         return () => {
             mountedRef.current = false;
             requestGenerationRef.current += 1;
         };
-    }, [requestScope]);
+    }, [requestScope, canQueryScope]);
 
     const fetchServicios = useCallback(async ({ silent = false } = {}) => {
         if (!mountedRef.current || currentScopeRef.current !== requestScope || !canQueryScope) return;
@@ -1287,8 +1287,7 @@ export default function AdminServicesCatalogPage() {
                             <p className="text-sm text-[var(--mf-text-2)]">{titleSubtitle}</p>
                         </div>
                         <SucursalSelector
-                            branchIds={branchIds}
-                            allBranches={allBranches}
+                            allBranches={availableBranches}
                             selected={sucursal}
                             onChange={setSucursal}
                             loadingBranches={loadingBranches}

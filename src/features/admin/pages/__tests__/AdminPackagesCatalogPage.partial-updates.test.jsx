@@ -52,6 +52,7 @@ async function openMasterEditor() {
 }
 
 beforeEach(() => {
+  authState.user = null;
   authState.branchIds = [BRANCH];
   authState.roles = ['admin'];
   navigateMock.mockReset();
@@ -61,10 +62,10 @@ beforeEach(() => {
   branchesApi.listAdminSucursales.mockReset();
   packagesApi.listAdminPaquetes.mockResolvedValue({ data: { paquetes: [originalPackage] } });
   packagesApi.updateAdminPaquete.mockResolvedValue({ data: originalPackage });
-  branchesApi.listAdminSucursales.mockResolvedValue({ data: { sucursales: [
+  branchesApi.listAdminSucursales.mockImplementation(async () => ({ data: { sucursales: [
     { id_sucursal: BRANCH, nombre_sucursal: 'Centro', estado: true },
     { id_sucursal: BRANCH_B, nombre_sucursal: 'Norte', estado: true },
-  ] } });
+  ].filter((branch) => authState.roles.includes('super_admin') || authState.branchIds.includes(branch.id_sucursal)) } }));
   catalogApi.listAdminServicios.mockResolvedValue({ data: { servicios: [
     { id_servicio: SERVICE_A, id_sucursal: BRANCH, nombre_servicio: 'Servicio A', activo: true, agendable: true, tarifa_activa: true, servicio_informativo: false, precio_hnl: 200 },
     { id_servicio: SERVICE_B, id_sucursal: BRANCH, nombre_servicio: 'Servicio B', activo: true, agendable: true, tarifa_activa: true, servicio_informativo: false, precio_hnl: 300 },
@@ -122,6 +123,7 @@ describe('alcance, concurrencia y disponibilidad de paquetes', () => {
     const pending = deferred();
     packagesApi.listAdminPaquetes.mockReturnValueOnce(pending.promise);
     const view = render(<AdminPackagesCatalogPage />);
+    await waitFor(() => expect(packagesApi.listAdminPaquetes).toHaveBeenCalled());
     view.unmount();
     await act(async () => pending.reject({ status: 401 }));
     expect(navigateMock).not.toHaveBeenCalled();
@@ -195,13 +197,18 @@ describe('alcance, concurrencia y disponibilidad de paquetes', () => {
   });
 
   test('StrictMode descarta resultados del montaje anterior', async () => {
+    authState.roles = ['super_admin']; authState.branchIds = [];
     const old = deferred();
-    packagesApi.listAdminPaquetes.mockReturnValueOnce(old.promise).mockResolvedValue(packageResult('Vigente', BRANCH));
+    branchesApi.listAdminSucursales.mockReturnValueOnce(old.promise).mockResolvedValue({ data: { sucursales: [
+      { id_sucursal: BRANCH, nombre_sucursal: 'Centro', estado: true }, { id_sucursal: BRANCH_B, nombre_sucursal: 'Norte', estado: true },
+    ] } });
+    packagesApi.listAdminPaquetes.mockResolvedValue(packageResult('Vigente', BRANCH));
     render(<StrictMode><AdminPackagesCatalogPage /></StrictMode>);
     await screen.findByText('Vigente');
-    await act(async () => old.resolve(packageResult('Viejo')));
+    await act(async () => old.resolve({ data: { sucursales: [] } }));
     expect(screen.queryByText('Viejo')).not.toBeInTheDocument();
     expect(screen.getByText('Vigente')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Norte' })).toBeInTheDocument();
   });
 
   test('retirar una oferta durante su carga no permite que reaparezca', async () => {
@@ -458,5 +465,86 @@ describe('catálogo responsive de paquetes', () => {
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('La composición no está disponible en todas las sucursales.');
     expect(nameInput).toHaveValue('Nombre conservado');
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+});
+
+describe('sucursales administrativas de la API', () => {
+  const apiBranches = [{ id_sucursal: BRANCH, nombre_sucursal: 'Centro', estado: true }, { id_sucursal: BRANCH_B, nombre_sucursal: 'Norte', estado: true }];
+  test('admin A + barbero B autoselecciona A solo despues de la API', async () => {
+    authState.roles = ['admin', 'barbero']; authState.branchIds = [BRANCH, BRANCH_B];
+    const pending = deferred(); branchesApi.listAdminSucursales.mockReturnValueOnce(pending.promise);
+    render(<AdminPackagesCatalogPage />);
+    expect(packagesApi.listAdminPaquetes).not.toHaveBeenCalled();
+    await act(async () => pending.resolve({ data: { sucursales: [apiBranches[0]] } }));
+    await screen.findByText('Paquete base');
+    expect(screen.getByText('Sucursal activa:')).toBeInTheDocument();
+    expect(packagesApi.listAdminPaquetes.mock.calls.every(([args]) => args.id_sucursal === BRANCH)).toBe(true);
+    expect(screen.queryByRole('option', { name: 'Norte' })).not.toBeInTheDocument();
+  });
+
+  test('API A+B requiere seleccion aunque branchIds tenga solo A', async () => {
+    branchesApi.listAdminSucursales.mockResolvedValue({ data: { sucursales: apiBranches } });
+    render(<AdminPackagesCatalogPage />);
+    await screen.findByRole('option', { name: 'Norte' });
+    expect(packagesApi.listAdminPaquetes).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Nuevo maestro' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_B } });
+    await screen.findByText('Paquete base');
+    expect(packagesApi.listAdminPaquetes).toHaveBeenLastCalledWith({ id_sucursal: BRANCH_B });
+  });
+
+  test('super_admin + admin A conserva todas las opciones', async () => {
+    authState.roles = ['super_admin', 'admin']; authState.branchIds = [BRANCH];
+    render(<AdminPackagesCatalogPage />);
+    await screen.findByRole('option', { name: 'Norte' });
+    expect(screen.getByRole('option', { name: 'Todas las sucursales' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_B } });
+    await waitFor(() => expect(packagesApi.listAdminPaquetes).toHaveBeenLastCalledWith({ id_sucursal: BRANCH_B }));
+  });
+
+  test.each(['admin', 'super_admin'])('API vacia bloquea acciones pese a branchIds: %s', async (role) => {
+    authState.roles = [role];
+    authState.branchIds = [BRANCH, BRANCH_B];
+    branchesApi.listAdminSucursales.mockResolvedValue({ data: { sucursales: [] } });
+    render(<AdminPackagesCatalogPage />);
+    await screen.findByRole('combobox', { name: 'Sucursal' });
+    expect(screen.getByRole('button', { name: 'Nuevo maestro' })).toBeDisabled();
+    expect(packagesApi.listAdminPaquetes).not.toHaveBeenCalled();
+    expect(catalogApi.listAdminServicios).not.toHaveBeenCalled();
+    expect(screen.queryByRole('option', { name: 'Centro' })).not.toBeInTheDocument();
+  });
+
+  test.each(['resolve', 'reject'])('cambio de permisos descarta sucursales antiguas: %s', async (outcome) => {
+    authState.roles = ['admin', 'barbero']; authState.branchIds = [BRANCH, BRANCH_B];
+    const old = deferred();
+    branchesApi.listAdminSucursales.mockReturnValueOnce(old.promise).mockResolvedValue({ data: { sucursales: [apiBranches[1]] } });
+    const view = render(<AdminPackagesCatalogPage />);
+    authState.branchIds = [BRANCH_B]; view.rerender(<AdminPackagesCatalogPage />);
+    await screen.findByText('Paquete base');
+    await act(async () => outcome === 'resolve' ? old.resolve({ data: { sucursales: [apiBranches[0]] } }) : old.reject(new Error('anterior')));
+    expect(packagesApi.listAdminPaquetes).toHaveBeenLastCalledWith({ id_sucursal: BRANCH_B });
+    expect(screen.getByRole('button', { name: 'Nuevo maestro' })).toBeEnabled();
+    expect(notifications.error).not.toHaveBeenCalled();
+  });
+
+  test('revocar alcance elimina seleccion y datos anteriores', async () => {
+    const view = render(<AdminPackagesCatalogPage />); await screen.findByText('Paquete base');
+    branchesApi.listAdminSucursales.mockResolvedValue({ data: { sucursales: [] } });
+    authState.branchIds = [BRANCH, BRANCH_B]; view.rerender(<AdminPackagesCatalogPage />);
+    await screen.findByRole('combobox', { name: 'Sucursal' });
+    expect(screen.queryByText('Paquete base')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nuevo maestro' })).toBeDisabled();
+    expect(screen.getByLabelText('Sucursal')).toHaveValue('');
+  });
+
+  test('cambio de cuenta con los mismos claims recarga el alcance administrativo', async () => {
+    authState.roles = ['admin', 'barbero']; authState.branchIds = [BRANCH, BRANCH_B];
+    authState.user = { id_usuario: 'administrador-A' };
+    branchesApi.listAdminSucursales.mockResolvedValue({ data: { sucursales: [apiBranches[0]] } });
+    const view = render(<AdminPackagesCatalogPage />); await screen.findByText('Paquete base');
+    branchesApi.listAdminSucursales.mockResolvedValue({ data: { sucursales: [apiBranches[1]] } });
+    authState.user = { id_usuario: 'administrador-B' }; view.rerender(<AdminPackagesCatalogPage />);
+    await waitFor(() => expect(packagesApi.listAdminPaquetes).toHaveBeenLastCalledWith({ id_sucursal: BRANCH_B }));
+    expect(branchesApi.listAdminSucursales).toHaveBeenCalledTimes(2);
   });
 });

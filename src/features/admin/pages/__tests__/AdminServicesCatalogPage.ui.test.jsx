@@ -73,13 +73,15 @@ async function renderLoaded() {
 }
 
 beforeEach(() => {
+  authState.user = null;
   authState.branchIds = [];
   authState.roles = ['super_admin'];
   navigateMock.mockReset();
   Object.values(notificationMock).forEach((mock) => mock.mockReset());
   Object.values(catalogApiMock).filter((value) => typeof value?.mockReset === 'function').forEach((mock) => mock.mockReset());
   branchesApiMock.listAdminSucursales.mockReset();
-  branchesApiMock.listAdminSucursales.mockResolvedValue({ data: { sucursales: branches } });
+  branchesApiMock.listAdminSucursales.mockImplementation(async () => ({ data: { sucursales: branches.filter((branch) =>
+    authState.roles.includes('super_admin') || authState.branchIds.includes(branch.id_sucursal)) } }));
   setServices([
     service(),
     service({ id_servicio: '12222222-2222-4222-8222-222222222222', nombre_servicio: 'Barba ejecutiva', descripcion: 'Perfilado y acabado', activo: false, visible_publico: false, agendable: false }),
@@ -140,6 +142,7 @@ describe('alcance y concurrencia de servicios administrativos', () => {
     const pending = deferred();
     catalogApiMock.listAdminServiciosAgrupados.mockReturnValueOnce(pending.promise);
     const view = render(<AdminServicesCatalogPage />);
+    await waitFor(() => expect(catalogApiMock.listAdminServiciosAgrupados).toHaveBeenCalled());
     view.unmount();
     await act(async () => pending.reject({ status: 401 }));
     expect(navigateMock).not.toHaveBeenCalled();
@@ -185,13 +188,14 @@ describe('alcance y concurrencia de servicios administrativos', () => {
 
   test('StrictMode conserva listado vigente y descarta solicitud del montaje anterior', async () => {
     const stale = deferred();
-    catalogApiMock.listAdminServiciosAgrupados.mockReturnValueOnce(stale.promise)
-      .mockResolvedValue({ data: { servicios: [service({ nombre_servicio: 'Vigente' })] } });
+    branchesApiMock.listAdminSucursales.mockReturnValueOnce(stale.promise).mockResolvedValue({ data: { sucursales: branches } });
+    catalogApiMock.listAdminServiciosAgrupados.mockResolvedValue({ data: { servicios: [service({ nombre_servicio: 'Vigente' })] } });
     render(<StrictMode><AdminServicesCatalogPage /></StrictMode>);
     await screen.findByText('Vigente');
-    await act(async () => stale.resolve({ data: { servicios: [service({ nombre_servicio: 'Antiguo' })] } }));
+    await act(async () => stale.resolve({ data: { sucursales: [branches[0]] } }));
     expect(screen.getByText('Vigente')).toBeInTheDocument();
     expect(screen.queryByText('Antiguo')).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'MasterFade Norte' })).toBeInTheDocument();
   });
 
   test('admin sin sucursales autorizadas no recibe opciones ajenas ni consulta global', async () => {
@@ -370,5 +374,93 @@ describe('presentación responsive del catálogo de servicios', () => {
     expect(screen.queryByLabelText('Sucursal')).not.toBeInTheDocument();
     expect(screen.getByText('Sucursal activa:')).toBeInTheDocument();
     expect(catalogApiMock.listAdminServiciosAgrupados).toHaveBeenCalledWith({ id_sucursal: BRANCH_A });
+  });
+});
+
+describe('sucursales administrativas de la API', () => {
+  test('admin A + barbero B espera la API y autoselecciona solamente A', async () => {
+    authState.roles = ['admin', 'barbero']; authState.branchIds = [BRANCH_A, BRANCH_B];
+    const pending = deferred();
+    branchesApiMock.listAdminSucursales.mockReturnValueOnce(pending.promise);
+    render(<AdminServicesCatalogPage />);
+    expect(catalogApiMock.listAdminServiciosAgrupados).not.toHaveBeenCalled();
+    await act(async () => pending.resolve({ data: { sucursales: [branches[0]] } }));
+    await screen.findByText('Corte clásico');
+    expect(screen.getByText('Sucursal activa:')).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'MasterFade Norte' })).not.toBeInTheDocument();
+    expect(catalogApiMock.listAdminServiciosAgrupados.mock.calls.every(([args]) => args.id_sucursal === BRANCH_A)).toBe(true);
+  });
+
+  test('API A+B exige seleccion explicita aunque branchIds tenga solo A', async () => {
+    authState.roles = ['admin']; authState.branchIds = [BRANCH_A];
+    branchesApiMock.listAdminSucursales.mockResolvedValue({ data: { sucursales: branches } });
+    render(<AdminServicesCatalogPage />);
+    await screen.findByRole('option', { name: 'MasterFade Norte' });
+    expect(catalogApiMock.listAdminServiciosAgrupados).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Nuevo', exact: true })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_B } });
+    await screen.findByText('Corte clásico');
+    expect(catalogApiMock.listAdminServiciosAgrupados).toHaveBeenLastCalledWith({ id_sucursal: BRANCH_B });
+  });
+
+  test('super_admin + admin A conserva todas las opciones de la API', async () => {
+    authState.roles = ['super_admin', 'admin']; authState.branchIds = [BRANCH_A];
+    await renderLoaded();
+    expect(screen.getByRole('option', { name: 'Todas las sucursales' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'MasterFade Norte' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_B } });
+    await waitFor(() => expect(catalogApiMock.listAdminServiciosAgrupados).toHaveBeenLastCalledWith({ id_sucursal: BRANCH_B }));
+  });
+
+  test.each(['admin', 'super_admin'])('API vacia bloquea acciones aunque existan branchIds: %s', async (role) => {
+    authState.roles = [role]; authState.branchIds = [BRANCH_A, BRANCH_B];
+    branchesApiMock.listAdminSucursales.mockResolvedValue({ data: { sucursales: [] } });
+    render(<AdminServicesCatalogPage />);
+    await screen.findByRole('combobox', { name: 'Sucursal' });
+    expect(screen.getByRole('button', { name: 'Nuevo', exact: true })).toBeDisabled();
+    expect(screen.queryByRole('option', { name: 'MasterFade Centro' })).not.toBeInTheDocument();
+    expect(catalogApiMock.listAdminServiciosAgrupados).not.toHaveBeenCalled();
+  });
+
+  test.each(['resolve', 'reject'])('cambio de permisos descarta sucursales antiguas: %s', async (outcome) => {
+    authState.roles = ['admin', 'barbero']; authState.branchIds = [BRANCH_A, BRANCH_B];
+    const old = deferred();
+    branchesApiMock.listAdminSucursales.mockReturnValueOnce(old.promise).mockResolvedValue({ data: { sucursales: [branches[1]] } });
+    const view = render(<AdminServicesCatalogPage />);
+    authState.branchIds = [BRANCH_B];
+    view.rerender(<AdminServicesCatalogPage />);
+    await screen.findByText('Corte clásico');
+    await act(async () => outcome === 'resolve' ? old.resolve({ data: { sucursales: [branches[0]] } }) : old.reject(new Error('anterior')));
+    expect(catalogApiMock.listAdminServiciosAgrupados).toHaveBeenLastCalledWith({ id_sucursal: BRANCH_B });
+    expect(screen.getByRole('button', { name: 'Nuevo', exact: true })).toBeEnabled();
+    expect(notificationMock.error).not.toHaveBeenCalled();
+  });
+
+  test('revocar el alcance elimina seleccion y formularios anteriores', async () => {
+    authState.roles = ['admin']; authState.branchIds = [BRANCH_A];
+    const view = render(<AdminServicesCatalogPage />);
+    await screen.findByText('Corte clásico');
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo', exact: true }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    branchesApiMock.listAdminSucursales.mockResolvedValue({ data: { sucursales: [] } });
+    authState.branchIds = [BRANCH_A, BRANCH_B];
+    view.rerender(<AdminServicesCatalogPage />);
+    await screen.findByRole('combobox', { name: 'Sucursal' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByText('Corte clásico')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nuevo', exact: true })).toBeDisabled();
+    expect(screen.getByLabelText('Sucursal')).toHaveValue('');
+  });
+
+  test('cambio de cuenta con los mismos claims recarga el alcance administrativo', async () => {
+    authState.roles = ['admin', 'barbero']; authState.branchIds = [BRANCH_A, BRANCH_B];
+    authState.user = { id_usuario: 'cliente-administrativo-A' };
+    branchesApiMock.listAdminSucursales.mockResolvedValue({ data: { sucursales: [branches[0]] } });
+    const view = render(<AdminServicesCatalogPage />); await screen.findByText('Corte clásico');
+    branchesApiMock.listAdminSucursales.mockResolvedValue({ data: { sucursales: [branches[1]] } });
+    authState.user = { id_usuario: 'cliente-administrativo-B' };
+    view.rerender(<AdminServicesCatalogPage />);
+    await waitFor(() => expect(catalogApiMock.listAdminServiciosAgrupados).toHaveBeenLastCalledWith({ id_sucursal: BRANCH_B }));
+    expect(branchesApiMock.listAdminSucursales).toHaveBeenCalledTimes(2);
   });
 });

@@ -93,10 +93,8 @@ function CompactActionButton({
   );
 }
 
-function SucursalSelector({ branchIds, allBranches, selected, onChange, loading, allowAll }) {
-  const available = branchIds.length > 0
-    ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-    : allowAll ? allBranches : [];
+function SucursalSelector({ allBranches, selected, onChange, loading, allowAll }) {
+  const available = allBranches;
   const selectedBranch = available.find((branch) => branch.id_sucursal === selected);
 
   if (available.length === 1 && selectedBranch) {
@@ -139,10 +137,8 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loading,
   );
 }
 
-function CortesiaForm({ values, onChange, branches, branchIds, lockBranchSelection }) {
-  const scopedBranches = branchIds.length > 0
-    ? branches.filter((branch) => branchIds.includes(branch.id_sucursal))
-    : branches;
+function CortesiaForm({ values, onChange, branches, lockBranchSelection }) {
+  const scopedBranches = branches;
 
   const selectedById = useMemo(() => new Map(values.sucursales.map((item) => [item.id_sucursal, item])), [values.sucursales]);
 
@@ -245,14 +241,17 @@ function validateForm(values, { requireBranch = true } = {}) {
 }
 
 export default function AdminCortesiasCatalogPage() {
-  const { branchIds, roles = [] } = useAuth();
+  const { branchIds, roles = [], user } = useAuth();
   const notifications = useNotifications();
   const isSuperAdmin = roles.includes("super_admin");
 
   const [allBranches, setAllBranches] = useState([]);
+  const [branchesContext, setBranchesContext] = useState('');
+  const permissionsKey = JSON.stringify([user?.id_usuario ?? null, roles, [...branchIds].sort()]);
+  const branchesGenerationRef = useRef(0);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [branchLoadError, setBranchLoadError] = useState("");
-  const [sucursal, setSucursal] = useState(branchIds.length === 1 ? branchIds[0] : "");
+  const [sucursal, setSucursal] = useState("");
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -280,11 +279,9 @@ export default function AdminCortesiasCatalogPage() {
   const [stateLoading, setStateLoading] = useState(false);
 
   const availableBranches = useMemo(() => {
-    const scoped = branchIds.length > 0
-      ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-      : isSuperAdmin ? allBranches : [];
+    const scoped = branchesContext === permissionsKey && (isSuperAdmin || roles.includes('admin')) ? allBranches : [];
     return scoped.filter((branch) => branch?.id_sucursal);
-  }, [allBranches, branchIds, isSuperAdmin]);
+  }, [allBranches, branchesContext, permissionsKey, isSuperAdmin, roles]);
 
   const branchNameById = useMemo(
     () => allBranches.reduce((acc, branch) => ({ ...acc, [branch.id_sucursal]: branch.nombre_sucursal }), {}),
@@ -324,9 +321,11 @@ export default function AdminCortesiasCatalogPage() {
     [page, visibleCortesias]
   );
 
-  const actionsLockedByBranch = !isSuperAdmin && (!roles.includes("admin") || !sucursal || !branchIds.includes(sucursal));
+  const actionsLockedByBranch = branchesContext !== permissionsKey || availableBranches.length === 0
+    || (!isSuperAdmin && (!roles.includes("admin") || !sucursal
+      || !availableBranches.some((branch) => branch.id_sucursal === sucursal)));
   const isGlobalView = isSuperAdmin && !sucursal;
-  const scopeContext = JSON.stringify([isSuperAdmin, roles.includes("admin"), [...branchIds].sort(), sucursal]);
+  const scopeContext = JSON.stringify([permissionsKey, sucursal, actionsLockedByBranch]);
   const requestContext = JSON.stringify([scopeContext, searchInput.trim()]);
   const scopeRef = useRef(scopeContext);
   const contextRef = useRef(requestContext);
@@ -360,22 +359,30 @@ export default function AdminCortesiasCatalogPage() {
   }, [searchInput]);
 
   const fetchBranches = useCallback(async () => {
+    const generation = ++branchesGenerationRef.current;
+    const isCurrent = () => mountedRef.current && branchesGenerationRef.current === generation;
+    setAllBranches([]);
+    setBranchesContext('');
     setLoadingBranches(true);
     setBranchLoadError("");
 
     try {
       const response = await listAdminSucursales({ soloActivas: true });
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       const next = Array.isArray(payload?.sucursales)
         ? payload.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
         : [];
       setAllBranches(next);
+      setBranchesContext(permissionsKey);
     } catch (error) {
+      if (!isCurrent()) return;
+      setAllBranches([]);
       setBranchLoadError(extractMessage(error));
     } finally {
-      setLoadingBranches(false);
+      if (isCurrent()) setLoadingBranches(false);
     }
-  }, []);
+  }, [permissionsKey]);
 
   const fetchCortesias = useCallback(async () => {
     if (!mountedRef.current || contextRef.current !== requestContext
@@ -407,17 +414,18 @@ export default function AdminCortesiasCatalogPage() {
 
   useEffect(() => {
     void fetchBranches();
+    return () => { branchesGenerationRef.current += 1; };
   }, [fetchBranches]);
 
   useEffect(() => {
     void fetchCortesias();
   }, [fetchCortesias]);
 
-  useEffect(() => {
-    if (!sucursal && branchIds.length === 1) {
-      setSucursal(branchIds[0]);
-    }
-  }, [branchIds, sucursal]);
+  useLayoutEffect(() => {
+    // AM: Autoseleccion y revocacion dependen de la respuesta administrativa vigente.
+    if (sucursal && availableBranches.some((branch) => branch.id_sucursal === sucursal)) return;
+    setSucursal(availableBranches.length === 1 ? availableBranches[0].id_sucursal : '');
+  }, [sucursal, availableBranches]);
 
   useEffect(() => {
     setPage(1);
@@ -440,8 +448,8 @@ export default function AdminCortesiasCatalogPage() {
     if (actionsLockedByBranch) return;
     const defaults = sucursal
       ? [{ id_sucursal: sucursal, activa: true }]
-      : branchIds.length === 1
-      ? [{ id_sucursal: branchIds[0], activa: true }]
+      : availableBranches.length === 1
+      ? [{ id_sucursal: availableBranches[0].id_sucursal, activa: true }]
       : [];
     setEditTarget(null);
     setFormValues({ ...FORM_DEFAULTS, sucursales: defaults });
@@ -630,8 +638,7 @@ export default function AdminCortesiasCatalogPage() {
               <p className="text-sm text-[var(--mf-text-2)]">Gestiona cortesías maestras y su disponibilidad por sucursal.</p>
             </div>
             <SucursalSelector
-              branchIds={branchIds}
-              allBranches={allBranches}
+              allBranches={availableBranches}
               selected={sucursal}
               onChange={setSucursal}
               loading={loadingBranches}
@@ -797,8 +804,7 @@ export default function AdminCortesiasCatalogPage() {
             values={formValues}
             onChange={handleFormChange}
             branches={availableBranches}
-            branchIds={branchIds}
-            lockBranchSelection={branchIds.length === 1}
+            lockBranchSelection={availableBranches.length === 1}
           />
 
           {formError ? <ErrorBanner message={formError} /> : null}
