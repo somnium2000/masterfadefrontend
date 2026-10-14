@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Building2,
   Gift,
@@ -93,10 +93,10 @@ function CompactActionButton({
   );
 }
 
-function SucursalSelector({ branchIds, allBranches, selected, onChange, loading }) {
+function SucursalSelector({ branchIds, allBranches, selected, onChange, loading, allowAll }) {
   const available = branchIds.length > 0
     ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-    : allBranches;
+    : allowAll ? allBranches : [];
   const selectedBranch = available.find((branch) => branch.id_sucursal === selected);
 
   if (available.length === 1 && selectedBranch) {
@@ -125,9 +125,12 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loading 
         id="cortesias-branch"
         className="mf-select h-10 w-full sm:h-9 sm:min-w-[220px] sm:w-auto"
         value={selected}
-        onChange={(event) => onChange(String(event.target.value || "").trim())}
+        onChange={(event) => {
+          const next = String(event.target.value || "").trim();
+          onChange(available.some((branch) => branch.id_sucursal === next) ? next : "");
+        }}
       >
-        <option value="">Todas las sucursales</option>
+        <option value="">{allowAll ? "Todas las sucursales" : "Selecciona una sucursal"}</option>
         {available.map((branch) => (
           <option key={branch.id_sucursal} value={branch.id_sucursal}>{branch.nombre_sucursal}</option>
         ))}
@@ -279,9 +282,9 @@ export default function AdminCortesiasCatalogPage() {
   const availableBranches = useMemo(() => {
     const scoped = branchIds.length > 0
       ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-      : allBranches;
+      : isSuperAdmin ? allBranches : [];
     return scoped.filter((branch) => branch?.id_sucursal);
-  }, [allBranches, branchIds]);
+  }, [allBranches, branchIds, isSuperAdmin]);
 
   const branchNameById = useMemo(
     () => allBranches.reduce((acc, branch) => ({ ...acc, [branch.id_sucursal]: branch.nombre_sucursal }), {}),
@@ -321,9 +324,35 @@ export default function AdminCortesiasCatalogPage() {
     [page, visibleCortesias]
   );
 
-  const mustSelectBranchForList = !isSuperAdmin && branchIds.length !== 1;
-  const actionsLockedByBranch = !sucursal && mustSelectBranchForList;
-  const isGlobalView = !sucursal;
+  const actionsLockedByBranch = !isSuperAdmin && (!roles.includes("admin") || !sucursal || !branchIds.includes(sucursal));
+  const isGlobalView = isSuperAdmin && !sucursal;
+  const scopeContext = JSON.stringify([isSuperAdmin, roles.includes("admin"), [...branchIds].sort(), sucursal]);
+  const requestContext = JSON.stringify([scopeContext, searchInput.trim()]);
+  const scopeRef = useRef(scopeContext);
+  const contextRef = useRef(requestContext);
+  const generationRef = useRef(0);
+  const mountedRef = useRef(false);
+
+  // AM: Invalida antes del debounce datos de otro alcance o busqueda.
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    contextRef.current = requestContext;
+    generationRef.current += 1;
+    setCortesias([]);
+    setListError("");
+    setLoading(false);
+    if (scopeRef.current !== scopeContext) {
+      scopeRef.current = scopeContext;
+      setDialogOpen(false);
+      setEditTarget(null);
+      setGlobalEditConfirmOpen(false);
+      setDetailOpen(false);
+      setDetailTarget(null);
+      setConfirmOpen(false);
+      setStateTarget(null);
+    }
+    return () => { mountedRef.current = false; generationRef.current += 1; };
+  }, [requestContext, scopeContext]);
 
   useEffect(() => {
     const timeout = setTimeout(() => setSearch(searchInput.trim()), 250);
@@ -349,11 +378,11 @@ export default function AdminCortesiasCatalogPage() {
   }, []);
 
   const fetchCortesias = useCallback(async () => {
-    if (actionsLockedByBranch) {
-      setCortesias([]);
-      setListError("Debes seleccionar una sucursal para consultar cortesías.");
-      return;
-    }
+    if (!mountedRef.current || contextRef.current !== requestContext
+      || actionsLockedByBranch || search !== searchInput.trim()) return;
+    const generation = ++generationRef.current;
+    const isCurrent = () => mountedRef.current && contextRef.current === requestContext
+      && generationRef.current === generation;
 
     setLoading(true);
     setListError("");
@@ -363,16 +392,18 @@ export default function AdminCortesiasCatalogPage() {
         id_sucursal: sucursal || undefined,
         buscar: search || undefined,
       });
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       const next = Array.isArray(payload?.cortesias) ? payload.cortesias : [];
       setCortesias(next);
     } catch (error) {
+      if (!isCurrent()) return;
       setListError(extractMessage(error));
       setCortesias([]);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [actionsLockedByBranch, search, sucursal]);
+  }, [actionsLockedByBranch, search, searchInput, sucursal, requestContext]);
 
   useEffect(() => {
     void fetchBranches();
@@ -406,6 +437,7 @@ export default function AdminCortesiasCatalogPage() {
   }
 
   function openNuevo() {
+    if (actionsLockedByBranch) return;
     const defaults = sucursal
       ? [{ id_sucursal: sucursal, activa: true }]
       : branchIds.length === 1
@@ -418,6 +450,7 @@ export default function AdminCortesiasCatalogPage() {
   }
 
   function openEditar(row) {
+    if (actionsLockedByBranch) return;
     const cortesia = cortesiasById.get(row.id);
     if (!cortesia) return;
 
@@ -463,6 +496,7 @@ export default function AdminCortesiasCatalogPage() {
   }
 
   async function saveForm() {
+    if (actionsLockedByBranch) return;
     const validationError = validateForm(formValues, { requireBranch: !editTarget });
     if (validationError) {
       setFormError(validationError);
@@ -534,7 +568,7 @@ export default function AdminCortesiasCatalogPage() {
   }
 
   async function handleConfirmState() {
-    if (!stateTarget) return;
+    if (!stateTarget || actionsLockedByBranch) return;
 
     setStateLoading(true);
     try {
@@ -601,6 +635,7 @@ export default function AdminCortesiasCatalogPage() {
               selected={sucursal}
               onChange={setSucursal}
               loading={loadingBranches}
+              allowAll={isSuperAdmin}
             />
             {branchLoadError ? <ErrorBanner message={branchLoadError} /> : null}
           </div>
@@ -647,18 +682,19 @@ export default function AdminCortesiasCatalogPage() {
         </div>
       </header>
 
+      {actionsLockedByBranch ? <EmptyState icon={Building2} title="Selecciona una sucursal autorizada" description="Selecciona una sucursal de tu alcance para consultar y gestionar cortesías." /> : null}
       {listError ? <ErrorBanner message={listError} onRetry={fetchCortesias} /> : null}
       {loading ? <LoadingSpinner label="Cargando cortesías..." /> : null}
 
-      {!loading && !listError && cortesias.length === 0 ? (
+      {!actionsLockedByBranch && !loading && !listError && cortesias.length === 0 ? (
         <EmptyState icon={Gift} title="Sin cortesías" description="No hay cortesías maestras registradas para el alcance actual." actionLabel="Crear cortesía maestra" onAction={openNuevo} />
       ) : null}
 
-      {!loading && !listError && cortesias.length > 0 && visibleCortesias.length === 0 ? (
+      {!actionsLockedByBranch && !loading && !listError && cortesias.length > 0 && visibleCortesias.length === 0 ? (
         <EmptyState icon={Search} title="Sin resultados" description="No hay coincidencias con la búsqueda o filtros." />
       ) : null}
 
-      {!loading && !listError && paginatedCortesias.length > 0 && view === "list" ? (
+      {!actionsLockedByBranch && !loading && !listError && paginatedCortesias.length > 0 && view === "list" ? (
         <section aria-label="Lista de cortesías" className="@container overflow-visible rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)]">
           <div role="row" className="hidden grid-cols-[minmax(180px,1fr)_minmax(220px,1.35fr)_minmax(210px,1fr)_auto] gap-4 border-b border-[var(--mf-nav-border)] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)] @[58rem]:grid">
             <span>Nombre</span><span>Descripción</span><span>{isGlobalView ? "Cobertura" : "Estado en sucursal"}</span><span className="text-right">Acciones</span>
@@ -705,7 +741,7 @@ export default function AdminCortesiasCatalogPage() {
         </section>
       ) : null}
 
-      {!loading && !listError && paginatedCortesias.length > 0 && view === "cards" ? (
+      {!actionsLockedByBranch && !loading && !listError && paginatedCortesias.length > 0 && view === "cards" ? (
         <section aria-label="Tarjetas de cortesías" className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
           {paginatedCortesias.map((item) => {
             const scopes = Array.isArray(item.sucursales) ? item.sucursales : [];
@@ -740,7 +776,7 @@ export default function AdminCortesiasCatalogPage() {
         </section>
       ) : null}
 
-      {!loading && !listError && visibleCortesias.length > PAGE_SIZE ? (
+      {!actionsLockedByBranch && !loading && !listError && visibleCortesias.length > PAGE_SIZE ? (
         <nav aria-label="Paginación de cortesías" className="flex flex-col items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] px-3 py-2 sm:flex-row">
           <p className="text-xs text-[var(--mf-text-2)]">Página {page} de {pageCount} · {visibleCortesias.length} resultados</p>
           <div className="flex items-center gap-2">
@@ -851,7 +887,7 @@ export default function AdminCortesiasCatalogPage() {
               </select>
             </div>
 
-            {!sucursal ? (
+            {isSuperAdmin && !sucursal ? (
               <div>
                 <Label className="mf-label">Sucursal</Label>
                 <select className="mf-select mt-1" value={filters.idSucursal} onChange={(event) => setFilters((prev) => ({ ...prev, idSucursal: event.target.value }))}>
@@ -862,7 +898,7 @@ export default function AdminCortesiasCatalogPage() {
                 </select>
               </div>
             ) : (
-              <p className="sm:col-span-2 text-xs text-[var(--mf-text-2)]">La vista operativa ya está fijada por la sucursal superior.</p>
+              <p className="sm:col-span-2 text-xs text-[var(--mf-text-2)]">{sucursal ? "La vista operativa ya está fijada por la sucursal superior." : "Selecciona una sucursal autorizada en el selector superior."}</p>
             )}
           </div>
 

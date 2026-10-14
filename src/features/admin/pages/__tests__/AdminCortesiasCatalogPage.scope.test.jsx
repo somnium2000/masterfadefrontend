@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import AdminCortesiasCatalogPage from "../AdminCortesiasCatalogPage.jsx";
@@ -53,7 +54,172 @@ beforeEach(() => {
   api.setAdminCortesiaEstado.mockResolvedValue({ data: courtesy });
 });
 
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.useRealTimers(); });
+
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
+const result = (nombre) => ({ data: { cortesias: [{ ...courtesy, nombre }] } });
+const selectBranch = (value) => fireEvent.change(screen.getByLabelText("Sucursal"), { target: { value } });
+
+describe("concurrencia y selección por alcance", () => {
+  test.each(["resolve", "reject"])('A → B descarta respuesta/error tardío A: %s', async (outcome) => {
+    await renderReady();
+    const a = deferred();
+    api.listAdminCortesias.mockReturnValueOnce(a.promise).mockResolvedValueOnce(result("Cortesía B"));
+    selectBranch(A);
+    selectBranch(B);
+    await screen.findByText("Cortesía B");
+    await act(async () => outcome === "resolve" ? a.resolve(result("Cortesía A vieja")) : a.reject({ status: 500 }));
+    expect(screen.getByText("Cortesía B")).toBeInTheDocument();
+    expect(screen.queryByText("Cortesía A vieja")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  test("respuesta A no libera loading de B", async () => {
+    await renderReady();
+    const a = deferred(); const b = deferred();
+    api.listAdminCortesias.mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise);
+    selectBranch(A); selectBranch(B);
+    await act(async () => a.resolve(result("Anterior")));
+    expect(screen.getByText("Cargando cortesías...")).toBeInTheDocument();
+    await act(async () => b.resolve(result("Vigente")));
+    expect(screen.getByText("Vigente")).toBeInTheDocument();
+  });
+
+  test.each(["resolve", "reject"])('desmontaje descarta respuesta tardía: %s', async (outcome) => {
+    const pending = deferred();
+    api.listAdminCortesias.mockReturnValueOnce(pending.promise);
+    const view = render(<AdminCortesiasCatalogPage />);
+    view.unmount();
+    await act(async () => outcome === "resolve" ? pending.resolve(result("Anterior")) : pending.reject(new Error("interno")));
+    expect(screen.queryByText("Anterior")).not.toBeInTheDocument();
+    expect(notifications.error).not.toHaveBeenCalled();
+  });
+
+  test("admin múltiple no ofrece Todas y requiere una sucursal", async () => {
+    auth.roles = ["admin"]; auth.branchIds = [A, B];
+    render(<AdminCortesiasCatalogPage />);
+    await screen.findByRole("option", { name: "Centro" });
+    expect(screen.queryByRole("option", { name: "Todas las sucursales" })).not.toBeInTheDocument();
+    expect(api.listAdminCortesias).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Nueva maestra" })).toBeDisabled();
+    selectBranch(A);
+    await screen.findByText("Corte gratis");
+    expect(api.listAdminCortesias).toHaveBeenCalledExactlyOnceWith({ id_sucursal: A, buscar: undefined });
+  });
+
+  test("admin sin sucursales no ve opciones ajenas ni puede crear", async () => {
+    auth.roles = ["admin"];
+    render(<AdminCortesiasCatalogPage />);
+    await screen.findByRole("combobox", { name: "Sucursal" });
+    expect(screen.queryByRole("option", { name: "Centro" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Norte" })).not.toBeInTheDocument();
+    expect(api.listAdminCortesias).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Nueva maestra" })).toBeDisabled();
+  });
+
+  test("admin de una sucursal conserva selección automática", async () => {
+    auth.roles = ["admin"]; auth.branchIds = [A];
+    await renderReady();
+    expect(api.listAdminCortesias).toHaveBeenCalledExactlyOnceWith({ id_sucursal: A, buscar: undefined });
+    expect(screen.getByText("Sucursal activa:")).toBeInTheDocument();
+  });
+
+  test("cambio de permisos invalida datos y respuesta pendiente del alcance anterior", async () => {
+    const pending = deferred();
+    api.listAdminCortesias.mockReturnValueOnce(pending.promise);
+    const view = render(<AdminCortesiasCatalogPage />);
+    auth.roles = ["admin"]; auth.branchIds = [];
+    view.rerender(<AdminCortesiasCatalogPage />);
+    await act(async () => pending.resolve(result("Global anterior")));
+    expect(screen.queryByText("Global anterior")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Nueva maestra" })).toBeDisabled();
+  });
+
+  test("búsqueda invalida inmediatamente y debounce agrupa entradas rápidas", async () => {
+    await renderReady();
+    vi.useFakeTimers();
+    const old = deferred();
+    api.listAdminCortesias.mockReturnValueOnce(old.promise).mockResolvedValueOnce(result("Resultado abc"));
+    const input = screen.getByPlaceholderText("Buscar por nombre o descripción");
+    fireEvent.change(input, { target: { value: "a" } });
+    await act(async () => { vi.advanceTimersByTime(250); });
+    fireEvent.change(input, { target: { value: "ab" } });
+    fireEvent.change(input, { target: { value: "abc" } });
+    await act(async () => old.resolve(result("Resultado a viejo")));
+    expect(screen.queryByText("Resultado a viejo")).not.toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(250); });
+    expect(screen.getByText("Resultado abc")).toBeInTheDocument();
+    expect(api.listAdminCortesias.mock.calls.map(([args]) => args.buscar)).toEqual([undefined, "a", "abc"]);
+  });
+
+  test("StrictMode conserva global y descarta respuesta del montaje anterior", async () => {
+    const old = deferred();
+    api.listAdminCortesias.mockReturnValueOnce(old.promise).mockResolvedValue(result("Vigente"));
+    render(<StrictMode><AdminCortesiasCatalogPage /></StrictMode>);
+    await screen.findByText("Vigente");
+    await act(async () => old.resolve(result("Vieja")));
+    expect(screen.queryByText("Vieja")).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Todas las sucursales" })).toBeInTheDocument();
+  });
+
+  test("reintentos concurrentes de la misma consulta conservan solo el último resultado", async () => {
+    api.listAdminCortesias.mockRejectedValueOnce({ status: 500 });
+    render(<AdminCortesiasCatalogPage />);
+    const retry = await screen.findByRole("button", { name: /Reintentar/ });
+    const old = deferred();
+    api.listAdminCortesias.mockReturnValueOnce(old.promise).mockResolvedValueOnce(result("Recuperada"));
+    act(() => { fireEvent.click(retry); fireEvent.click(retry); });
+    await screen.findByText("Recuperada");
+    await act(async () => old.resolve(result("Reintento viejo")));
+    expect(screen.queryByText("Reintento viejo")).not.toBeInTheDocument();
+    expect(api.listAdminCortesias).toHaveBeenCalledTimes(3);
+  });
+
+  test("reducción de claims en la misma sucursal invalida la consulta anterior", async () => {
+    auth.roles = ["admin"]; auth.branchIds = [A, B];
+    const old = deferred();
+    api.listAdminCortesias.mockReturnValueOnce(old.promise).mockResolvedValueOnce(result("Solo A"));
+    const view = render(<AdminCortesiasCatalogPage />);
+    await screen.findByRole("option", { name: "Centro" });
+    selectBranch(A);
+    auth.branchIds = [A];
+    view.rerender(<AdminCortesiasCatalogPage />);
+    await screen.findByText("Solo A");
+    await act(async () => old.resolve(result("Alcance anterior")));
+    expect(screen.queryByText("Alcance anterior")).not.toBeInTheDocument();
+    expect(screen.getByText("Solo A")).toBeInTheDocument();
+  });
+
+  test("pérdida del rol admin limpia datos y cierra edición aunque conserve branch_ids", async () => {
+    auth.roles = ["admin"]; auth.branchIds = [A];
+    const view = render(<AdminCortesiasCatalogPage />);
+    await screen.findByText("Corte gratis");
+    fireEvent.click(screen.getByTitle("Editar cortesía maestra"));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    auth.roles = ["cliente"];
+    view.rerender(<AdminCortesiasCatalogPage />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByText("Corte gratis")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Nueva maestra" })).toBeDisabled();
+    expect(api.listAdminCortesias).toHaveBeenCalledTimes(1);
+    expect(api.updateAdminCortesia).not.toHaveBeenCalled();
+  });
+
+  test("duplicado conserva mensaje funcional y formulario", async () => {
+    api.updateAdminCortesia.mockRejectedValueOnce({ status: 409, data: { error: { code: "CORTESIA_NAME_DUPLICATE" } } });
+    const dialog = await openEdit();
+    fireEvent.change(within(dialog).getByLabelText(/Nombre/), { target: { value: "Duplicada" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar cambios" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Modificar información global" })).getByRole("button", { name: "Confirmar cambios" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ya existe una cortesía con ese nombre");
+    expect(screen.getByRole("dialog", { name: "Editar cortesía maestra" })).toBeInTheDocument();
+  });
+});
 
 describe("edición segura de cortesías", () => {
   test("inicia en lista y alterna a tarjetas con el mismo registro", async () => {
