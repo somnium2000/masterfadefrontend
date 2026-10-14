@@ -1,7 +1,7 @@
 // src/features/admin/pages/AdminPackagesCatalogPage.jsx
 // AM: Catalogo administrativo de paquetes alineado al patron operativo de SERVICIOS.
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Loader2,
@@ -107,11 +107,11 @@ function quickFilterButtonClass(isActive) {
         : 'rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_54%,transparent)] text-[var(--mf-text)] hover:border-[var(--mf-accent)]/60';
 }
 
-function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingBranches }) {
+function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingBranches, allowAll }) {
     // AM: Selector reutilizado del patron de SERVICIOS para operar catalogo por sucursal sin bloqueos silenciosos.
     const availableBranches = branchIds.length > 0
         ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-        : allBranches;
+        : allowAll ? allBranches : [];
     const validBranchIds = new Set(availableBranches.map((branch) => branch.id_sucursal));
     const selectedBranch = availableBranches.find((branch) => branch.id_sucursal === selected);
 
@@ -149,7 +149,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingB
                     onChange(validBranchIds.has(nextValue) ? nextValue : '');
                 }}
             >
-                <option value="">Todas las sucursales</option>
+                <option value="">{allowAll ? 'Todas las sucursales' : 'Selecciona una sucursal'}</option>
                 {availableBranches.map((branch) => (
                     <option key={branch.id_sucursal} value={branch.id_sucursal}>
                         {branch.nombre_sucursal}
@@ -668,7 +668,8 @@ export default function AdminPackagesCatalogPage() {
 
     const [paquetes, setPaquetes] = useState([]);
     const [serviciosList, setServiciosList] = useState([]);
-    const [serviciosByBranch, setServiciosByBranch] = useState({});
+    const serviciosByBranchRef = useRef({});
+    const createOffersRef = useRef([]);
     const [loading, setLoading] = useState(false);
     const [listError, setListError] = useState('');
 
@@ -695,6 +696,57 @@ export default function AdminPackagesCatalogPage() {
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [stateTarget, setStateTarget] = useState(null);
     const [stateLoading, setStateLoading] = useState(false);
+    const actionsLockedByBranch = !isSuperAdmin && (!roles.includes('admin') || !sucursal || !branchIds.includes(sucursal));
+    const scopeContext = JSON.stringify([isSuperAdmin, roles.includes('admin'), [...branchIds].sort(), sucursal]);
+    const scopeRef = useRef(scopeContext);
+    const scopeEpochRef = useRef(0);
+    const mountedRef = useRef(false);
+    const packagesGenerationRef = useRef(0);
+    const servicesGenerationRef = useRef(0);
+    const branchesGenerationRef = useRef(0);
+    const dialogGenerationRef = useRef(0);
+
+    // AM: Descarta datos y formularios del alcance anterior antes de mostrarlos.
+    useLayoutEffect(() => {
+        mountedRef.current = true;
+        scopeRef.current = scopeContext;
+        scopeEpochRef.current += 1;
+        packagesGenerationRef.current += 1;
+        servicesGenerationRef.current += 1;
+        dialogGenerationRef.current += 1;
+        serviciosByBranchRef.current = {};
+        createOffersRef.current = [];
+        setPaquetes([]);
+        setServiciosList([]);
+        setListError('');
+        setLoading(false);
+        setDialogOpen(false);
+        setEditTarget(null);
+        setFormLoading(false);
+        setStateLoading(false);
+        setDetailOpen(false);
+        setDetailTarget(null);
+        setOffersOpen(false);
+        setOffersTarget(null);
+        setConfirmOpen(false);
+        setStateTarget(null);
+        return () => {
+            mountedRef.current = false;
+            packagesGenerationRef.current += 1;
+            servicesGenerationRef.current += 1;
+            scopeEpochRef.current += 1;
+        };
+    }, [scopeContext]);
+
+    useLayoutEffect(() => {
+        if (dialogOpen) return;
+        dialogGenerationRef.current += 1;
+        servicesGenerationRef.current += 1;
+        serviciosByBranchRef.current = {};
+        createOffersRef.current = [];
+        setServiciosList([]);
+        setFormLoading(false);
+    }, [dialogOpen]);
 
     const branchNameById = useMemo(
         () => allBranches.reduce((acc, branch) => ({ ...acc, [branch.id_sucursal]: branch.nombre_sucursal }), {}),
@@ -704,9 +756,9 @@ export default function AdminPackagesCatalogPage() {
     const availableBranches = useMemo(() => {
         const scopedBranches = branchIds.length > 0
             ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-            : allBranches;
+            : isSuperAdmin ? allBranches : [];
         return scopedBranches.filter((branch) => branch?.id_sucursal);
-    }, [allBranches, branchIds]);
+    }, [allBranches, branchIds, isSuperAdmin]);
     const titleSubtitle = !sucursal && availableBranches.length > 1
         ? 'Vista de paquetes maestros globales y sus ofertas por sucursal.'
         : 'Gestiona paquetes maestros y la oferta operativa de la sucursal seleccionada.';
@@ -806,21 +858,25 @@ export default function AdminPackagesCatalogPage() {
     }
 
     const fetchBranches = useCallback(async () => {
+        const generation = ++branchesGenerationRef.current;
+        const isCurrent = () => mountedRef.current && branchesGenerationRef.current === generation;
         setLoadingBranches(true);
         try {
             const data = await listAdminSucursales({ soloActivas: true });
+            if (!isCurrent()) return;
             const payloadData = data?.data ?? data;
             const nextBranches = Array.isArray(payloadData?.sucursales)
                 ? payloadData.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
                 : [];
             setAllBranches(nextBranches);
         } catch {
+            if (!isCurrent()) return;
             setAllBranches([]);
             notifications.error('No se pudieron cargar las sucursales para operar paquetes.', {
                 dedupeKey: 'paquetes-branches-error',
             });
         } finally {
-            setLoadingBranches(false);
+            if (isCurrent()) setLoadingBranches(false);
         }
     }, [notifications]);
 
@@ -846,6 +902,10 @@ export default function AdminPackagesCatalogPage() {
     }, [sucursal]);
 
     const fetchPaquetes = useCallback(async ({ silent = false } = {}) => {
+        if (!mountedRef.current || scopeRef.current !== scopeContext || actionsLockedByBranch) return;
+        const generation = ++packagesGenerationRef.current;
+        const isCurrent = () => mountedRef.current && scopeRef.current === scopeContext
+            && packagesGenerationRef.current === generation;
         if (!silent) {
             setLoading(true);
             setListError('');
@@ -853,10 +913,12 @@ export default function AdminPackagesCatalogPage() {
 
         try {
             const data = await listAdminPaquetes(sucursal ? { id_sucursal: sucursal } : {});
+            if (!isCurrent()) return;
             const payloadData = data?.data ?? data;
             const list = Array.isArray(payloadData?.paquetes) ? payloadData.paquetes : [];
             setPaquetes(sortPaquetes(list));
         } catch (err) {
+            if (!isCurrent()) return;
             if (err.status === 401) {
                 navigate('/login');
                 return;
@@ -870,9 +932,9 @@ export default function AdminPackagesCatalogPage() {
             setPaquetes([]);
             if (!silent) setListError(extractMessage(err));
         } finally {
-            if (!silent) setLoading(false);
+            if (isCurrent()) setLoading(false);
         }
-    }, [navigate, sucursal]);
+    }, [navigate, sucursal, scopeContext, actionsLockedByBranch]);
 
     const loadServiciosForBranch = useCallback(async (branchId) => {
         if (!branchId) return [];
@@ -882,26 +944,37 @@ export default function AdminPackagesCatalogPage() {
         // AM: Solo permite servicios realmente operativos en la sucursal seleccionada para evitar 409 al crear paquetes.
         return list
             .filter((servicio) => (
-                Boolean(servicio?.activo)
+                servicio?.activo === true
+                && servicio?.agendable === true
+                && servicio?.tarifa_activa === true
+                && servicio?.servicio_informativo !== true
                 && String(servicio?.id_sucursal || '') === String(branchId)
+                && (typeof servicio?.precio_hnl === 'number' || (typeof servicio?.precio_hnl === 'string' && servicio.precio_hnl.trim() !== ''))
                 && Number.isFinite(Number(servicio?.precio_hnl))
+                && Number(servicio.precio_hnl) >= 0
             ))
             .sort((left, right) => String(left?.nombre_servicio || '').localeCompare(String(right?.nombre_servicio || ''), 'es'));
     }, []);
 
     const fetchServicios = useCallback(async (branchId = sucursal) => {
+        if (!mountedRef.current || scopeRef.current !== scopeContext || actionsLockedByBranch) return;
+        const generation = ++servicesGenerationRef.current;
+        const epoch = scopeEpochRef.current;
+        const isCurrent = () => mountedRef.current && scopeEpochRef.current === epoch
+            && servicesGenerationRef.current === generation;
         if (!branchId) {
             setServiciosList([]);
             return;
         }
 
         try {
-            setServiciosList(await loadServiciosForBranch(branchId));
+            const loaded = await loadServiciosForBranch(branchId);
+            if (isCurrent()) setServiciosList(loaded);
         } catch {
             // AM: Evita bloquear la vista completa si falla solo el catalogo auxiliar de servicios.
-            setServiciosList([]);
+            if (isCurrent()) setServiciosList([]);
         }
-    }, [loadServiciosForBranch, sucursal]);
+    }, [loadServiciosForBranch, sucursal, scopeContext, actionsLockedByBranch]);
 
     const refreshCommonServicios = useCallback((branchIdsToUse, cache) => {
         if (!Array.isArray(branchIdsToUse) || branchIdsToUse.length === 0) {
@@ -921,12 +994,11 @@ export default function AdminPackagesCatalogPage() {
         }, new Set(lists[0].map((servicio) => servicio.id_servicio)));
 
         setServiciosList(lists[0].filter((servicio) => commonIds.has(servicio.id_servicio)));
-    }, [sucursal]);
+    }, []);
 
     useEffect(() => {
-        if (!isSuperAdmin && !sucursal) return;
         void fetchPaquetes();
-    }, [fetchPaquetes, isSuperAdmin, sucursal]);
+    }, [fetchPaquetes]);
 
     useEffect(() => {
         void fetchServicios();
@@ -942,10 +1014,33 @@ export default function AdminPackagesCatalogPage() {
         void fetchServicios(value);
     }
 
-    async function handleCreateOfferToggle(branchId, checked) {
+    async function refreshCreateServicios(nextOffers) {
+        const generation = ++servicesGenerationRef.current;
+        const epoch = scopeEpochRef.current;
+        const dialog = dialogGenerationRef.current;
+        const nextBranchIds = nextOffers.map((offer) => offer.id_sucursal);
+        setServiciosList([]);
+        const lists = await Promise.all(nextBranchIds.map(async (branchId) => {
+            try { return serviciosByBranchRef.current[branchId] || await loadServiciosForBranch(branchId); }
+            catch { return []; }
+        }));
+        if (!mountedRef.current || scopeEpochRef.current !== epoch || dialogGenerationRef.current !== dialog
+            || servicesGenerationRef.current !== generation) return;
+        const nextCache = { ...serviciosByBranchRef.current };
+        nextBranchIds.forEach((branchId, index) => { nextCache[branchId] = lists[index]; });
+        serviciosByBranchRef.current = nextCache;
+        refreshCommonServicios(nextBranchIds, nextCache);
+        const commonIds = new Set((lists[0] || []).filter((service) =>
+            lists.every((list) => list.some((entry) => entry.id_servicio === service.id_servicio))
+        ).map((service) => service.id_servicio));
+        setFormValues((prev) => ({ ...prev, items: prev.items.filter((item) => commonIds.has(item.id_servicio)) }));
+    }
+
+    function handleCreateOfferToggle(branchId, checked) {
+        if (actionsLockedByBranch || !availableBranches.some((branch) => branch.id_sucursal === branchId)) return;
         const nextOffers = checked
             ? [
-                ...formValues.ofertas,
+                ...createOffersRef.current.filter((offer) => offer.id_sucursal !== branchId),
                 {
                     id_sucursal: branchId,
                     precio_hnl: '',
@@ -953,42 +1048,15 @@ export default function AdminPackagesCatalogPage() {
                     orden_visual: '100',
                 },
             ]
-            : formValues.ofertas.filter((offer) => offer.id_sucursal !== branchId);
-        const nextBranchIds = nextOffers.map((offer) => offer.id_sucursal);
-        let nextCache = serviciosByBranch;
-
-        if (checked && !serviciosByBranch[branchId]) {
-            try {
-                const loaded = await loadServiciosForBranch(branchId);
-                nextCache = { ...serviciosByBranch, [branchId]: loaded };
-                setServiciosByBranch(nextCache);
-            } catch {
-                nextCache = { ...serviciosByBranch, [branchId]: [] };
-                setServiciosByBranch(nextCache);
-            }
-        }
-
-        refreshCommonServicios(nextBranchIds, nextCache);
-        const commonIds = new Set(
-            nextBranchIds.length > 0
-                ? nextBranchIds
-                    .map((id) => nextCache[id] || [])
-                    .reduce((acc, list, index) => {
-                        const ids = new Set(list.map((servicio) => servicio.id_servicio));
-                        if (index === 0) return ids;
-                        return new Set([...acc].filter((id) => ids.has(id)));
-                    }, new Set())
-                : []
-        );
-
-        setFormValues((prev) => ({
-            ...prev,
-            ofertas: nextOffers,
-            items: prev.items.filter((item) => commonIds.has(item.id_servicio)),
-        }));
+            : createOffersRef.current.filter((offer) => offer.id_sucursal !== branchId);
+        // AM: La seleccion cambia antes de esperar servicios; ninguna respuesta puede restaurar ofertas antiguas.
+        createOffersRef.current = nextOffers;
+        setFormValues((prev) => ({ ...prev, ofertas: nextOffers }));
+        void refreshCreateServicios(nextOffers);
     }
 
     function handleCreateOfferChange(branchId, field, value) {
+        createOffersRef.current = createOffersRef.current.map((offer) => offer.id_sucursal === branchId ? { ...offer, [field]: value } : offer);
         setFormValues((prev) => ({
             ...prev,
             ofertas: prev.ofertas.map((offer) => (
@@ -1002,38 +1070,26 @@ export default function AdminPackagesCatalogPage() {
     }
 
     function openCrear() {
+        if (actionsLockedByBranch) return;
+        dialogGenerationRef.current += 1;
+        serviciosByBranchRef.current = {};
+        const offers = sucursal ? [{ id_sucursal: sucursal, precio_hnl: '', visible_publico: true, orden_visual: '100' }] : [];
+        createOffersRef.current = offers;
         setDialogMode('create');
         setInitialOfferBranchId(sucursal || '');
         setEditTarget(null);
         setFormValues({
             ...FORM_DEFAULTS,
-            ofertas: sucursal
-                ? [{
-                    id_sucursal: sucursal,
-                    precio_hnl: '',
-                    visible_publico: true,
-                    orden_visual: '100',
-                }]
-                : [],
+            ofertas: offers,
         });
         setFormError('');
         setDialogOpen(true);
-        if (sucursal) {
-            void loadServiciosForBranch(sucursal)
-                .then((loaded) => {
-                    const nextCache = { ...serviciosByBranch, [sucursal]: loaded };
-                    setServiciosByBranch(nextCache);
-                    refreshCommonServicios([sucursal], nextCache);
-                })
-                .catch(() => {
-                    setServiciosList([]);
-                });
-        } else {
-            setServiciosList([]);
-        }
+        void refreshCreateServicios(offers);
     }
 
     function openEditarMaestro(paquete) {
+        if (actionsLockedByBranch) return;
+        dialogGenerationRef.current += 1;
         const mutationBranchId = resolveMutationBranchId(paquete);
         if (!mutationBranchId) {
             notifications.error('No se pudo determinar la sucursal del paquete para editarlo.', {
@@ -1066,6 +1122,9 @@ export default function AdminPackagesCatalogPage() {
     }
 
     function openEditarOferta(paquete, offer = null) {
+        if (actionsLockedByBranch) return;
+        dialogGenerationRef.current += 1;
+        servicesGenerationRef.current += 1;
         const offerData = offer || paquete;
         const mutationBranchId = String(offerData?.id_sucursal || sucursal || '').trim();
         if (!mutationBranchId) {
@@ -1091,6 +1150,9 @@ export default function AdminPackagesCatalogPage() {
     }
 
     function openAgregarOferta(paquete) {
+        if (actionsLockedByBranch) return;
+        dialogGenerationRef.current += 1;
+        servicesGenerationRef.current += 1;
         const nextBranches = getUnassociatedBranches(paquete, availableBranches);
         if (nextBranches.length === 0) {
             notifications.warning('Todas las sucursales disponibles ya tienen oferta para este paquete.', {
@@ -1114,6 +1176,10 @@ export default function AdminPackagesCatalogPage() {
     }
 
     async function handleGuardar() {
+        if (actionsLockedByBranch) return;
+        const epoch = scopeEpochRef.current;
+        const dialog = dialogGenerationRef.current;
+        const isCurrent = () => mountedRef.current && scopeEpochRef.current === epoch && dialogGenerationRef.current === dialog;
         const validationError = validateForm(formValues, dialogMode);
         if (validationError) {
             setFormError(validationError);
@@ -1133,12 +1199,6 @@ export default function AdminPackagesCatalogPage() {
         if (dialogMode === 'create' && !serviciosList.length) {
             setFormLoading(false);
             setFormError('No hay servicios activos comunes en las sucursales seleccionadas para construir este paquete.');
-            return;
-        }
-
-        if (dialogMode !== 'create' && dialogMode !== 'editOffer' && dialogMode !== 'addOffer' && !serviciosList.length) {
-            setFormLoading(false);
-            setFormError('No hay servicios activos disponibles en esta sucursal para construir paquetes.');
             return;
         }
 
@@ -1163,6 +1223,12 @@ export default function AdminPackagesCatalogPage() {
                     })),
                 };
 
+        if (dialogMode === 'editMaster' && payload?.items && !serviciosList.length) {
+            setFormLoading(false);
+            setFormError('No hay servicios activos disponibles en esta sucursal para construir paquetes.');
+            return;
+        }
+
         if (dialogMode === 'editMaster' && !payload) {
             setFormLoading(false);
             setDialogOpen(false);
@@ -1173,6 +1239,7 @@ export default function AdminPackagesCatalogPage() {
             const response = editTarget
                 ? await updateAdminPaquete(editTarget.id_paquete, payload)
                 : await createAdminPaquete(payload);
+            if (!isCurrent()) return;
             const result = response?.data ?? response;
 
             setPaquetes((prev) => upsertScopedPaquete(prev, result));
@@ -1193,6 +1260,7 @@ export default function AdminPackagesCatalogPage() {
             emitCatalogSync(editTarget ? 'paquete-updated' : 'paquete-created');
             setDialogOpen(false);
         } catch (err) {
+            if (!isCurrent()) return;
             if (err.status === 401) {
                 navigate('/login');
                 return;
@@ -1206,7 +1274,7 @@ export default function AdminPackagesCatalogPage() {
             setFormError(message);
             notifications.error(message, { dedupeKey: 'paquetes-save-error' });
         } finally {
-            setFormLoading(false);
+            if (isCurrent()) setFormLoading(false);
         }
     }
 
@@ -1230,7 +1298,9 @@ export default function AdminPackagesCatalogPage() {
     }
 
     async function handleConfirmState() {
-        if (!stateTarget) return;
+        if (!stateTarget || actionsLockedByBranch) return;
+        const epoch = scopeEpochRef.current;
+        const isCurrent = () => mountedRef.current && scopeEpochRef.current === epoch;
 
         setStateLoading(true);
         try {
@@ -1247,6 +1317,7 @@ export default function AdminPackagesCatalogPage() {
                 id_sucursal: mutationBranchId,
                 confirmar_citas_pendientes: stateTarget._confirmPendingAppointments === true,
             });
+            if (!isCurrent()) return;
             const result = response?.data ?? response;
 
             setPaquetes((prev) => upsertScopedPaquete(prev, result));
@@ -1258,6 +1329,7 @@ export default function AdminPackagesCatalogPage() {
             setConfirmOpen(false);
             setStateTarget(null);
         } catch (err) {
+            if (!isCurrent()) return;
             if (err.status === 401) {
                 navigate('/login');
                 return;
@@ -1285,7 +1357,7 @@ export default function AdminPackagesCatalogPage() {
 
             notifications.error(extractMessage(err), { dedupeKey: 'paquetes-state-error' });
         } finally {
-            setStateLoading(false);
+            if (isCurrent()) setStateLoading(false);
         }
     }
 
@@ -1379,6 +1451,7 @@ export default function AdminPackagesCatalogPage() {
                             selected={sucursal}
                             onChange={setSucursal}
                             loadingBranches={loadingBranches}
+                            allowAll={isSuperAdmin}
                         />
                     </div>
 
@@ -1434,7 +1507,7 @@ export default function AdminPackagesCatalogPage() {
                                 </Button>
                             ) : null}
 
-                            <Button onClick={openCrear} className="gap-2">
+                            <Button onClick={openCrear} className="gap-2" disabled={actionsLockedByBranch}>
                                 <Plus size={15} /> Nuevo maestro
                             </Button>
                         </div>
@@ -1459,10 +1532,11 @@ export default function AdminPackagesCatalogPage() {
                 </div>
             ) : null}
 
+            {actionsLockedByBranch && <EmptyState icon={Building2} title="Selecciona una sucursal autorizada" description="Selecciona una sucursal de tu alcance para consultar y gestionar paquetes." />}
             {listError && <ErrorBanner message={listError} onRetry={fetchPaquetes} />}
             {loading && !listError && <LoadingSpinner />}
 
-            {!loading && !listError && paquetes.length === 0 ? (
+            {!actionsLockedByBranch && !loading && !listError && paquetes.length === 0 ? (
                 <EmptyState
                     icon={Package}
                     title="Sin paquetes"
@@ -1471,7 +1545,7 @@ export default function AdminPackagesCatalogPage() {
                 />
             ) : null}
 
-            {!loading && !listError && displayPaquetes.length > 0 && filteredPaquetes.length === 0 ? (
+            {!actionsLockedByBranch && !loading && !listError && displayPaquetes.length > 0 && filteredPaquetes.length === 0 ? (
                 <EmptyState
                     icon={Search}
                     title="Sin resultados"
@@ -1479,7 +1553,7 @@ export default function AdminPackagesCatalogPage() {
                 />
             ) : null}
 
-            {!loading && !listError && paginatedPaquetes.length > 0 && view === 'list' ? (
+            {!actionsLockedByBranch && !loading && !listError && paginatedPaquetes.length > 0 && view === 'list' ? (
                 <section aria-label="Lista de paquetes" className="@container overflow-visible rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)]">
                     <div role="row" className="hidden grid-cols-[minmax(230px,1.35fr)_minmax(240px,1.35fr)_minmax(190px,.85fr)_auto] gap-4 border-b border-[var(--mf-nav-border)] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)] @[62rem]:grid">
                         <span>Paquete maestro</span><span>Composición</span><span>{sucursal ? 'Oferta local' : 'Resumen comercial'}</span><span className="text-right">Acciones</span>
@@ -1504,7 +1578,7 @@ export default function AdminPackagesCatalogPage() {
                 </section>
             ) : null}
 
-            {!loading && !listError && paginatedPaquetes.length > 0 && view === 'cards' ? (
+            {!actionsLockedByBranch && !loading && !listError && paginatedPaquetes.length > 0 && view === 'cards' ? (
                 <section aria-label="Tarjetas de paquetes" className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                     {paginatedPaquetes.map((paquete) => (
                         <article key={`${paquete.id_paquete || 'pkg'}:${sucursal ? paquete.id_sucursal || 'all' : 'master'}`} className="flex min-w-0 flex-col rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)] p-4 shadow-[var(--mf-shadow-soft)]">
@@ -1772,7 +1846,7 @@ export default function AdminPackagesCatalogPage() {
                             </select>
                         </div>
 
-                        {!sucursal ? (
+                        {isSuperAdmin && !sucursal ? (
                             <div className="sm:col-span-2">
                                 <Label className="mf-label">Sucursal</Label>
                                 <select
@@ -1790,7 +1864,7 @@ export default function AdminPackagesCatalogPage() {
                             </div>
                         ) : (
                             <p className="sm:col-span-2 text-xs text-[var(--mf-text-2)]">
-                                La sucursal ya esta fijada en el selector superior.
+                                {sucursal ? 'La sucursal ya esta fijada en el selector superior.' : 'Selecciona una sucursal autorizada en el selector superior.'}
                             </p>
                         )}
                     </div>

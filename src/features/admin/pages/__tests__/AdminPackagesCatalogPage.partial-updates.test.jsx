@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import AdminPackagesCatalogPage from '../AdminPackagesCatalogPage.jsx';
@@ -65,12 +66,287 @@ beforeEach(() => {
     { id_sucursal: BRANCH_B, nombre_sucursal: 'Norte', estado: true },
   ] } });
   catalogApi.listAdminServicios.mockResolvedValue({ data: { servicios: [
-    { id_servicio: SERVICE_A, id_sucursal: BRANCH, nombre_servicio: 'Servicio A', activo: true, precio_hnl: 200 },
-    { id_servicio: SERVICE_B, id_sucursal: BRANCH, nombre_servicio: 'Servicio B', activo: true, precio_hnl: 300 },
+    { id_servicio: SERVICE_A, id_sucursal: BRANCH, nombre_servicio: 'Servicio A', activo: true, agendable: true, tarifa_activa: true, servicio_informativo: false, precio_hnl: 200 },
+    { id_servicio: SERVICE_B, id_sucursal: BRANCH, nombre_servicio: 'Servicio B', activo: true, agendable: true, tarifa_activa: true, servicio_informativo: false, precio_hnl: 300 },
   ] } });
 });
 
 afterEach(() => cleanup());
+
+const deferred = () => {
+  let resolve; let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
+const packageResult = (nombre_paquete, id_sucursal = BRANCH_B) => ({ data: { paquetes: [{ ...originalPackage, nombre_paquete, id_sucursal }] } });
+const service = (id_servicio = SERVICE_A, id_sucursal = BRANCH, extra = {}) => ({
+  id_servicio, id_sucursal, nombre_servicio: id_servicio === SERVICE_A ? 'Servicio A' : 'Servicio B',
+  activo: true, agendable: true, tarifa_activa: true, servicio_informativo: false, precio_hnl: 200, ...extra,
+});
+const serviceResult = (items) => ({ data: { servicios: items } });
+async function renderGlobal() {
+  authState.roles = ['super_admin']; authState.branchIds = [];
+  const view = render(<AdminPackagesCatalogPage />);
+  await screen.findByText('Paquete base');
+  await screen.findByRole('option', { name: 'Centro' });
+  return view;
+}
+const changeBranch = (value) => fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value } });
+
+describe('alcance, concurrencia y disponibilidad de paquetes', () => {
+  test.each(['resolve', 'reject', '401', '403'])('A tardía no afecta datos ni navegación de B: %s', async (outcome) => {
+    await renderGlobal();
+    const a = deferred();
+    packagesApi.listAdminPaquetes.mockReturnValueOnce(a.promise).mockResolvedValueOnce(packageResult('Paquete B'));
+    changeBranch(BRANCH); changeBranch(BRANCH_B);
+    await screen.findByText('Paquete B');
+    await act(async () => outcome === 'resolve' ? a.resolve(packageResult('Paquete A viejo', BRANCH)) : a.reject({ status: outcome === 'reject' ? 500 : Number(outcome) }));
+    expect(screen.getByText('Paquete B')).toBeInTheDocument();
+    expect(screen.queryByText('Paquete A viejo')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  test('respuesta A no libera loading de B', async () => {
+    await renderGlobal();
+    const a = deferred(); const b = deferred();
+    packagesApi.listAdminPaquetes.mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise);
+    changeBranch(BRANCH); changeBranch(BRANCH_B);
+    await act(async () => a.resolve(packageResult('Viejo')));
+    expect(screen.getAllByText('Cargando...').length).toBeGreaterThan(0);
+    await act(async () => b.resolve(packageResult('Vigente')));
+    expect(screen.getByText('Vigente')).toBeInTheDocument();
+  });
+
+  test('desmontaje descarta errores tardíos sin navegar', async () => {
+    const pending = deferred();
+    packagesApi.listAdminPaquetes.mockReturnValueOnce(pending.promise);
+    const view = render(<AdminPackagesCatalogPage />);
+    view.unmount();
+    await act(async () => pending.reject({ status: 401 }));
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  test.each([{ ids: [] }, { ids: [BRANCH, BRANCH_B] }])('admin requiere sucursal autorizada, claims=%j', async ({ ids }) => {
+    authState.branchIds = ids;
+    render(<AdminPackagesCatalogPage />);
+    await screen.findByRole('combobox', { name: 'Sucursal' });
+    expect(screen.queryByRole('option', { name: 'Todas las sucursales' })).not.toBeInTheDocument();
+    if (!ids.length) expect(screen.queryByRole('option', { name: 'Centro' })).not.toBeInTheDocument();
+    expect(packagesApi.listAdminPaquetes).not.toHaveBeenCalled();
+    expect(catalogApi.listAdminServicios).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Nuevo maestro' })).toBeDisabled();
+    expect(screen.getByText('Selecciona una sucursal autorizada')).toBeInTheDocument();
+  });
+
+  test('cambio de permisos elimina datos y formularios anteriores', async () => {
+    const view = render(<AdminPackagesCatalogPage />);
+    await screen.findByText('Paquete base');
+    fireEvent.click(screen.getByRole('button', { name: 'Editar maestro' }));
+    await screen.findByRole('dialog');
+    authState.branchIds = [];
+    view.rerender(<AdminPackagesCatalogPage />);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByText('Paquete base')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nuevo maestro' })).toBeDisabled();
+  });
+
+  test.each([
+    { activo: false }, { agendable: false }, { tarifa_activa: false }, { servicio_informativo: true },
+    { id_sucursal: BRANCH_B }, { precio_hnl: null }, { precio_hnl: '' }, { precio_hnl: -1 },
+  ])('excluye servicio no operativo: %j', async (invalid) => {
+    catalogApi.listAdminServicios.mockResolvedValue(serviceResult([
+      service(), service(SERVICE_B, BRANCH, { ...invalid, nombre_servicio: 'No seleccionable' }),
+    ]));
+    const dialog = await openMasterEditor();
+    await waitFor(() => expect(within(dialog).getAllByRole('option', { name: 'Servicio A' }).length).toBeGreaterThan(0));
+    expect(within(dialog).queryByRole('option', { name: 'No seleccionable' })).not.toBeInTheDocument();
+  });
+
+  test.each(['resolve', 'reject'])('servicios A tardíos no reemplazan catálogo auxiliar de B: %s', async (outcome) => {
+    await renderGlobal();
+    const a = deferred();
+    catalogApi.listAdminServicios.mockImplementation(({ id_sucursal }) => id_sucursal === BRANCH ? a.promise : Promise.resolve(serviceResult([service(SERVICE_A, BRANCH_B, { nombre_servicio: 'Solo B' })])));
+    changeBranch(BRANCH); changeBranch(BRANCH_B);
+    await screen.findByText('Paquete base');
+    fireEvent.click(screen.getByRole('button', { name: 'Editar maestro' }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findAllByRole('option', { name: 'Solo B' });
+    await act(async () => outcome === 'resolve' ? a.resolve(serviceResult([service(SERVICE_A, BRANCH, { nombre_servicio: 'Viejo A' })])) : a.reject({ status: 500 }));
+    expect(within(dialog).queryByRole('option', { name: 'Viejo A' })).not.toBeInTheDocument();
+    expect(within(dialog).getAllByRole('option', { name: 'Solo B' }).length).toBeGreaterThan(0);
+  });
+
+  test('selección rápida A+B conserva ambas ofertas y servicios comunes', async () => {
+    await renderGlobal();
+    const a = deferred(); const b = deferred();
+    catalogApi.listAdminServicios.mockImplementation(({ id_sucursal }) => id_sucursal === BRANCH ? a.promise : b.promise);
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo maestro' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByLabelText('Centro'));
+    fireEvent.click(within(dialog).getByLabelText('Norte'));
+    await act(async () => b.resolve(serviceResult([service(SERVICE_A, BRANCH_B), service(SERVICE_B, BRANCH_B)])));
+    await act(async () => a.resolve(serviceResult([service(), service(SERVICE_B)])));
+    expect(within(dialog).getByLabelText('Centro')).toBeChecked();
+    expect(within(dialog).getByLabelText('Norte')).toBeChecked();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Agregar', exact: true }));
+    expect(within(dialog).getByRole('option', { name: 'Servicio A' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('option', { name: 'Servicio B' })).toBeInTheDocument();
+  });
+
+  test('StrictMode descarta resultados del montaje anterior', async () => {
+    const old = deferred();
+    packagesApi.listAdminPaquetes.mockReturnValueOnce(old.promise).mockResolvedValue(packageResult('Vigente', BRANCH));
+    render(<StrictMode><AdminPackagesCatalogPage /></StrictMode>);
+    await screen.findByText('Vigente');
+    await act(async () => old.resolve(packageResult('Viejo')));
+    expect(screen.queryByText('Viejo')).not.toBeInTheDocument();
+    expect(screen.getByText('Vigente')).toBeInTheDocument();
+  });
+
+  test('retirar una oferta durante su carga no permite que reaparezca', async () => {
+    await renderGlobal();
+    const pending = deferred();
+    catalogApi.listAdminServicios.mockReturnValue(pending.promise);
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo maestro' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByLabelText('Centro'));
+    expect(within(dialog).getByLabelText('Centro')).toBeChecked();
+    fireEvent.click(within(dialog).getByLabelText('Centro'));
+    await act(async () => pending.resolve(serviceResult([service()])));
+    expect(within(dialog).getByLabelText('Centro')).not.toBeChecked();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Agregar', exact: true }));
+    expect(within(dialog).queryByRole('option', { name: 'Servicio A' })).not.toBeInTheDocument();
+  });
+
+  test('cerrar y abrir creación descarta la carga de la sesión de formulario anterior', async () => {
+    await renderGlobal();
+    const old = deferred();
+    catalogApi.listAdminServicios.mockReturnValueOnce(old.promise).mockResolvedValue(serviceResult([service(SERVICE_B, BRANCH_B, { nombre_servicio: 'Nuevo Norte' })]));
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo maestro' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByLabelText('Centro'));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancelar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo maestro' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByLabelText('Norte'));
+    await act(async () => {});
+    await act(async () => old.resolve(serviceResult([service()])));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Agregar', exact: true }));
+    expect(within(dialog).getByLabelText('Centro')).not.toBeChecked();
+    expect(within(dialog).getByLabelText('Norte')).toBeChecked();
+    expect(within(dialog).getByRole('option', { name: 'Nuevo Norte' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('option', { name: 'Servicio A' })).not.toBeInTheDocument();
+  });
+
+  test('creación conserva servicios comunes, cantidades y precios por sucursal', async () => {
+    await renderGlobal();
+    catalogApi.listAdminServicios.mockImplementation(({ id_sucursal }) => Promise.resolve(serviceResult([
+      service(SERVICE_A, id_sucursal), service(SERVICE_B, id_sucursal),
+      service('44444444-4444-4444-8444-444444444444', id_sucursal, { nombre_servicio: 'Exclusivo', activo: id_sucursal === BRANCH }),
+    ])));
+    packagesApi.createAdminPaquete.mockResolvedValue({ data: originalPackage });
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo maestro' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByLabelText('Centro'));
+    fireEvent.click(within(dialog).getByLabelText('Norte'));
+    fireEvent.change(within(dialog).getByLabelText('Nombre del paquete maestro *'), { target: { value: 'Combo común' } });
+    const offerPrices = within(dialog).getAllByPlaceholderText('800.00');
+    fireEvent.change(offerPrices[0], { target: { value: '450' } });
+    fireEvent.change(offerPrices[1], { target: { value: '475' } });
+    await act(async () => {});
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Agregar', exact: true }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Agregar', exact: true }));
+    const selects = within(dialog).getAllByRole('combobox');
+    expect(within(dialog).queryByRole('option', { name: 'Exclusivo' })).not.toBeInTheDocument();
+    fireEvent.change(selects[0], { target: { value: SERVICE_A } });
+    fireEvent.change(selects[1], { target: { value: SERVICE_B } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Crear paquete maestro' }));
+    await waitFor(() => expect(packagesApi.createAdminPaquete).toHaveBeenCalledExactlyOnceWith({
+      nombre_paquete: 'Combo común', descripcion: undefined,
+      items: [{ id_servicio: SERVICE_A, cantidad: 1 }, { id_servicio: SERVICE_B, cantidad: 1 }],
+      ofertas: [
+        { id_sucursal: BRANCH, precio_hnl: 450, visible_publico: true, orden_visual: 100 },
+        { id_sucursal: BRANCH_B, precio_hnl: 475, visible_publico: true, orden_visual: 100 },
+      ],
+    }));
+  });
+
+  test('editar oferta conserva precio y alcance sin reenviar composición', async () => {
+    render(<AdminPackagesCatalogPage />);
+    await screen.findByText('Paquete base');
+    fireEvent.click(screen.getByRole('button', { name: 'Editar oferta', exact: true }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Precio HNL de la oferta *'), { target: { value: '550' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(packagesApi.updateAdminPaquete).toHaveBeenCalledExactlyOnceWith(PACKAGE, {
+      id_sucursal: BRANCH, precio_hnl: 550, visible_publico: true, orden_visual: 10,
+    }));
+  });
+
+  test.each([true, false])('estado de oferta activo=%s conserva endpoint y alcance', async (activo) => {
+    packagesApi.listAdminPaquetes.mockResolvedValue(packageResult('Paquete base', BRANCH));
+    if (!activo) packagesApi.listAdminPaquetes.mockResolvedValue({ data: { paquetes: [{ ...originalPackage, activo: false }] } });
+    packagesApi.setAdminPaqueteEstado.mockResolvedValue({ data: { ...originalPackage, activo: !activo } });
+    render(<AdminPackagesCatalogPage />);
+    await screen.findByText('Paquete base');
+    fireEvent.click(screen.getByRole('button', { name: activo ? 'Inactivar oferta' : 'Activar oferta' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: activo ? 'Inactivar oferta' : 'Activar oferta' }));
+    await waitFor(() => expect(packagesApi.setAdminPaqueteEstado).toHaveBeenCalledExactlyOnceWith(PACKAGE, {
+      activo: !activo, id_sucursal: BRANCH, confirmar_citas_pendientes: false,
+    }));
+  });
+
+  test('edición solo de nombre sigue permitida sin servicios operativos seleccionables', async () => {
+    catalogApi.listAdminServicios.mockResolvedValue(serviceResult([service(SERVICE_A, BRANCH, { agendable: false })]));
+    const dialog = await openMasterEditor();
+    fireEvent.change(within(dialog).getByLabelText('Nombre del paquete maestro *'), { target: { value: 'Maestro renombrado' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(packagesApi.updateAdminPaquete).toHaveBeenCalledExactlyOnceWith(PACKAGE, {
+      nombre_paquete: 'Maestro renombrado', id_sucursal: BRANCH,
+    }));
+  });
+
+  test('admin múltiple opera únicamente después de seleccionar su sucursal', async () => {
+    authState.branchIds = [BRANCH, BRANCH_B];
+    packagesApi.listAdminPaquetes.mockResolvedValue(packageResult('Paquete Norte'));
+    render(<AdminPackagesCatalogPage />);
+    await screen.findByRole('option', { name: 'Norte' });
+    changeBranch(BRANCH_B);
+    await screen.findByText('Paquete Norte');
+    expect(packagesApi.listAdminPaquetes).toHaveBeenCalledExactlyOnceWith({ id_sucursal: BRANCH_B });
+    expect(catalogApi.listAdminServicios).toHaveBeenCalledExactlyOnceWith({ id_sucursal: BRANCH_B });
+    expect(screen.getByRole('button', { name: 'Nuevo maestro' })).toBeEnabled();
+    expect(screen.queryByRole('option', { name: 'Todas las sucursales' })).not.toBeInTheDocument();
+  });
+
+  test('cambio de composición sigue bloqueado si no hay servicios operativos', async () => {
+    catalogApi.listAdminServicios.mockResolvedValue(serviceResult([]));
+    const dialog = await openMasterEditor();
+    fireEvent.change(within(dialog).getAllByRole('spinbutton')[0], { target: { value: '2' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('No hay servicios activos disponibles');
+    expect(packagesApi.updateAdminPaquete).not.toHaveBeenCalled();
+  });
+
+  test('respuesta de edición pendiente no reinserta datos ni abre formularios al perder alcance', async () => {
+    const pending = deferred();
+    packagesApi.updateAdminPaquete.mockReturnValueOnce(pending.promise);
+    const view = render(<AdminPackagesCatalogPage />);
+    await screen.findByText('Paquete base');
+    fireEvent.click(screen.getByRole('button', { name: 'Editar maestro' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Nombre del paquete maestro *'), { target: { value: 'Edición anterior' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(packagesApi.updateAdminPaquete).toHaveBeenCalledTimes(1));
+    authState.branchIds = [];
+    view.rerender(<AdminPackagesCatalogPage />);
+    await act(async () => pending.resolve({ data: { ...originalPackage, nombre_paquete: 'Edición anterior' } }));
+    expect(screen.queryByText('Edición anterior')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(notifications.success).not.toHaveBeenCalled();
+  });
+});
 
 describe('actualizaciones parciales del paquete maestro', () => {
   test('envia solo nombre e id_sucursal cuando solo cambia el nombre', async () => {
