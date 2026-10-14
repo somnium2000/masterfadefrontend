@@ -63,6 +63,26 @@ beforeEach(() => {
 });
 
 describe('useBookingAvailability invalidacion SSE', () => {
+  test('preserves backend recommended, alternatives and overflow ranking in hook state', async () => {
+    const slot = hora => ({ hora, disponible: true });
+    apiMock.listPublicAgendaHorarios.mockResolvedValue({ ok: true, data: {
+      horarios: ['08:00', '08:05', '08:30', '09:00'].map(slot),
+      horarios_curados: { manana: {
+        recommended: slot('08:30'),
+        alternatives: ['10:00', '09:00', '09:30'].map(slot),
+        overflow: ['11:00', '10:30'].map(slot),
+        total: 6, has_more: true,
+      } },
+      duracion_total_min: 15,
+    } });
+    const { result } = renderAvailabilityHook({ selectedTime: '' });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    const period = result.current.slotsCurated.manana;
+    expect(period.recommended.hora).toBe('08:30');
+    expect(period.alternatives.map(s => s.hora)).toEqual(['10:00', '09:00', '09:30']);
+    expect(period.overflow.map(s => s.hora)).toEqual(['11:00', '10:30']);
+  });
+
   test('refresca solo la fecha afectada y horarios del selectedDate', async () => {
     const { result } = renderAvailabilityHook();
 

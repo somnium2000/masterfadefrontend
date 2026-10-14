@@ -20,6 +20,7 @@ import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import { DayButton, ServiceCard, SlotButton } from './PublicBookingBlocks.jsx';
 import { usePublicBookingFlow } from './BookingFlowContext.jsx';
+import { buildPeriodSlotModels } from './utils/bookingSlotModels.js';
 import {
   WEEK_DAYS,
   buildFullName,
@@ -37,19 +38,6 @@ const SLOT_TIME_PERIODS = [
   { key: 'tarde', label: 'Tarde' },
   { key: 'noche', label: 'Noche' },
 ];
-
-function getSlotPeriodKey(timeKey) {
-  const normalized = String(timeKey || '').trim();
-  const match = normalized.match(/^(\d{2}):(\d{2})/);
-  if (!match) return 'noche';
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return 'noche';
-  const totalMinutes = (hour * 60) + minute;
-  if (totalMinutes >= 6 * 60 && totalMinutes < 12 * 60) return 'manana';
-  if (totalMinutes >= 12 * 60 && totalMinutes < 18 * 60) return 'tarde';
-  return 'noche';
-}
 
 function toMinutes(timeKey) {
   const match = String(timeKey || '').trim().match(/^(\d{2}):(\d{2})/);
@@ -132,34 +120,6 @@ function resolvePromotionTargetLabel(promotion) {
     return String(promotion?.paquete_objetivo_nombre || 'paquete objetivo').trim();
   }
   return String(promotion?.servicio_objetivo_nombre || 'servicio objetivo').trim();
-}
-
-function sortSlotsByTime(slots = []) {
-  return [...slots].sort((left, right) => {
-    const leftMin = toMinutes(left?.hora);
-    const rightMin = toMinutes(right?.hora);
-    if (leftMin == null && rightMin == null) return 0;
-    if (leftMin == null) return 1;
-    if (rightMin == null) return -1;
-    return leftMin - rightMin;
-  });
-}
-
-function isRenderableSlot(slot, selectedDate, isPastSlotForToday) {
-  if (!slot?.disponible) return false;
-  if (selectedDate && isPastSlotForToday(selectedDate, slot?.hora)) return false;
-  return Boolean(slot?.hora);
-}
-
-function pushUniqueSlots(target, candidates, seen, selectedDate, isPastSlotForToday) {
-  const list = Array.isArray(candidates) ? candidates : [candidates];
-  list.forEach((slot) => {
-    if (!isRenderableSlot(slot, selectedDate, isPastSlotForToday)) return;
-    const key = String(slot?.hora || '').trim();
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    target.push(slot);
-  });
 }
 
 const BookingBlocksSummary = memo(function BookingBlocksSummary({
@@ -564,78 +524,10 @@ export default function PublicBookingAgendaStep() {
   const visibleEstimatedDiscount = Math.max(activeBlockEstimatedDiscount, safeEstimatedDiscountGlobal);
 
   const [preferredSlotPeriod, setPreferredSlotPeriod] = useState('manana');
-  const periodSlotModels = useMemo(() => {
-    const baseByPeriod = {
-      manana: [],
-      tarde: [],
-      noche: [],
-    };
-
-    (Array.isArray(slots) ? slots : []).forEach((slot) => {
-      if (!slot?.disponible) return;
-      if (selectedDate && isPastSlotForToday(selectedDate, slot?.hora)) return;
-      const key = getSlotPeriodKey(slot?.hora);
-      baseByPeriod[key].push(slot);
-    });
-
-    Object.keys(baseByPeriod).forEach((periodKey) => {
-      baseByPeriod[periodKey] = sortSlotsByTime(baseByPeriod[periodKey]);
-    });
-
-    const models = {};
-    SLOT_TIME_PERIODS.forEach((period) => {
-      const periodKey = period.key;
-      const fallbackSlots = baseByPeriod[periodKey] || [];
-      const curatedPeriod = slotsCurated?.[periodKey] || null;
-      const seen = new Set();
-
-      const curatedRecommended = [];
-      pushUniqueSlots(curatedRecommended, curatedPeriod?.recommended, seen, selectedDate, isPastSlotForToday);
-
-      const curatedAlternatives = [];
-      pushUniqueSlots(
-        curatedAlternatives,
-        Array.isArray(curatedPeriod?.alternatives) ? curatedPeriod.alternatives : [],
-        seen,
-        selectedDate,
-        isPastSlotForToday
-      );
-
-      const fallbackUnique = [];
-      pushUniqueSlots(fallbackUnique, fallbackSlots, seen, selectedDate, isPastSlotForToday);
-      fallbackUnique.sort((left, right) => {
-        const leftMin = toMinutes(left?.hora);
-        const rightMin = toMinutes(right?.hora);
-        if (leftMin == null && rightMin == null) return 0;
-        if (leftMin == null) return 1;
-        if (rightMin == null) return -1;
-        return leftMin - rightMin;
-      });
-
-      const recommendedPool = sortSlotsByTime([...curatedRecommended, ...fallbackUnique]);
-      const recommended = recommendedPool[0] || null;
-      const alternativesRaw = sortSlotsByTime([
-        ...curatedAlternatives,
-        ...(recommended ? fallbackUnique.filter((slot) => slot.hora !== recommended.hora) : fallbackUnique),
-      ]);
-      const alternatives = alternativesRaw
-        .filter((slot) => slot && slot.hora !== recommended?.hora)
-        .slice(0, 3);
-      const visibleSlots = [recommended, ...alternatives]
-        .filter(Boolean)
-        .filter((slot, index, list) => list.findIndex((candidate) => candidate?.hora === slot?.hora) === index);
-      const total = visibleSlots.length;
-
-      models[periodKey] = {
-        recommended,
-        alternatives,
-        total,
-        visibleSlots,
-      };
-    });
-
-    return models;
-  }, [isPastSlotForToday, selectedDate, slots, slotsCurated]);
+  const periodSlotModels = useMemo(
+    () => buildPeriodSlotModels({ slots, slotsCurated, selectedDate, isPastSlotForToday }),
+    [isPastSlotForToday, selectedDate, slots, slotsCurated]
+  );
 
   const totalAvailableSlots = useMemo(
     () => SLOT_TIME_PERIODS.reduce((total, period) => total + Number(periodSlotModels?.[period.key]?.total || 0), 0),
