@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import AdminPlansCatalogPage from "../AdminPlansCatalogPage.jsx";
@@ -68,6 +69,241 @@ beforeEach(() => {
 });
 
 afterEach(() => cleanup());
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+test("servicios no agendables o sin precio positivo no son seleccionables", async () => {
+  auth.roles = ["admin"];
+  auth.branchIds = [BRANCH_A];
+  catalogApi.listAdminServicios.mockResolvedValue({ data: { servicios: [
+    { id_servicio: "invalid", nombre_servicio: "No agendable", id_sucursal: BRANCH_A, activo: true, tarifa_activa: true, agendable: false, precio_hnl: 100 },
+    { id_servicio: "missing", nombre_servicio: "Sin precio", id_sucursal: BRANCH_A, activo: true, tarifa_activa: true, agendable: true },
+  ] } });
+  await renderCatalog([makePlan(1)]);
+  fireEvent.click(screen.getByRole("button", { name: "Editar maestro" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).queryByRole("option", { name: "No agendable" })).not.toBeInTheDocument();
+  expect(within(dialog).queryByRole("option", { name: "Sin precio" })).not.toBeInTheDocument();
+});
+
+test("seleccion rapida de ofertas conserva ambas sucursales", async () => {
+  await renderCatalog([makePlan(1)]);
+  fireEvent.click(screen.getByRole("button", { name: "Nuevo plan maestro" }));
+  const dialog = await screen.findByRole("dialog");
+  const a = deferred(), b = deferred();
+  catalogApi.listAdminServicios.mockImplementation(({ id_sucursal }) => id_sucursal === BRANCH_A ? a.promise : b.promise);
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "Centro" }));
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "Norte" }));
+  await act(async () => { b.resolve({ data: { servicios: [] } }); });
+  await act(async () => { a.resolve({ data: { servicios: [] } }); });
+  expect(within(dialog).getByRole("checkbox", { name: "Centro" })).toBeChecked();
+  expect(within(dialog).getByRole("checkbox", { name: "Norte" })).toBeChecked();
+});
+
+test.each([0, 2])("admin con %i sucursales requiere seleccion sin consulta global", async (count) => {
+  auth.roles = ["admin"];
+  auth.branchIds = [BRANCH_A, BRANCH_B].slice(0, count);
+  plansApi.listAdminPlanes.mockResolvedValue({ data: { planes: [] } });
+  render(<AdminPlansCatalogPage />);
+  await waitFor(() => expect(screen.getByLabelText("Sucursal")).toBeInTheDocument());
+  expect(screen.queryByRole("option", { name: "Todas las sucursales" })).not.toBeInTheDocument();
+  expect(plansApi.listAdminPlanes).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Nuevo plan maestro" })).toBeDisabled();
+});
+
+test.each(["success", "error"])("respuesta tardia A (%s) no sustituye B", async (outcome) => {
+  const pending = deferred();
+  plansApi.listAdminPlanes.mockImplementation(({ id_sucursal }) => id_sucursal === BRANCH_A ? pending.promise : Promise.resolve({ data: { planes: id_sucursal === BRANCH_B ? [makePlan(2, BRANCH_B)] : [] } }));
+  render(<AdminPlansCatalogPage />);
+  const selector = await screen.findByLabelText("Sucursal");
+  await screen.findByRole("option", { name: "Norte" });
+  fireEvent.change(selector, { target: { value: BRANCH_A } });
+  await waitFor(() => expect(plansApi.listAdminPlanes).toHaveBeenCalledWith({ id_sucursal: BRANCH_A }));
+  fireEvent.change(selector, { target: { value: BRANCH_B } });
+  expect(await screen.findByText("Plan VIP 2")).toBeInTheDocument();
+  await act(async () => outcome === "success" ? pending.resolve({ data: { planes: [makePlan(1)] } }) : pending.reject({ data: { error: { message: "Error anterior" } } }));
+  expect(screen.getByText("Plan VIP 2")).toBeInTheDocument();
+  expect(screen.queryByText("Plan VIP 1")).not.toBeInTheDocument();
+  expect(screen.queryByText("Error anterior")).not.toBeInTheDocument();
+});
+
+test("loading pertenece a B aunque A termine antes", async () => {
+  const a = deferred(), b = deferred();
+  plansApi.listAdminPlanes.mockImplementation(({ id_sucursal }) => id_sucursal === BRANCH_A ? a.promise : id_sucursal === BRANCH_B ? b.promise : Promise.resolve({ data: { planes: [] } }));
+  render(<AdminPlansCatalogPage />);
+  await screen.findByRole("option", { name: "Norte" });
+  fireEvent.change(screen.getByLabelText("Sucursal"), { target: { value: BRANCH_A } });
+  fireEvent.change(screen.getByLabelText("Sucursal"), { target: { value: BRANCH_B } });
+  await act(async () => a.resolve({ data: { planes: [makePlan(1)] } }));
+  expect(screen.getByText("Cargando planes...")).toBeInTheDocument();
+  await act(async () => b.resolve({ data: { planes: [makePlan(2, BRANCH_B)] } }));
+  expect(screen.getByText("Plan VIP 2")).toBeInTheDocument();
+});
+
+test("perdida de alcance cierra formulario y descarta respuestas pendientes", async () => {
+  auth.roles = ["admin"];
+  auth.branchIds = [BRANCH_A];
+  plansApi.listAdminPlanes.mockResolvedValue({ data: { planes: [makePlan(1)] } });
+  const view = render(<AdminPlansCatalogPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Editar oferta" }));
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  auth.branchIds = [];
+  view.rerender(<AdminPlansCatalogPage />);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByText("Plan VIP 1")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Nuevo plan maestro" })).toBeDisabled();
+  expect(screen.queryByRole("option", { name: "Centro" })).not.toBeInTheDocument();
+});
+
+test("StrictMode y desmontaje descartan errores tardios sin notificar", async () => {
+  const pending = deferred();
+  plansApi.listAdminPlanes.mockImplementation(() => pending.promise);
+  const view = render(<StrictMode><AdminPlansCatalogPage /></StrictMode>);
+  await screen.findByText("Cargando planes...");
+  view.unmount();
+  await act(async () => pending.reject({ data: { error: { message: "Error anterior" } } }));
+  expect(notifications.error).not.toHaveBeenCalled();
+  expect(navigateMock).not.toHaveBeenCalled();
+});
+
+test.each([
+  { activo: false }, { agendable: false }, { tarifa_activa: false }, { servicio_informativo: true },
+  { precio_hnl: null }, { precio_hnl: "" }, { precio_hnl: 0 }, { precio_hnl: -1 }, { precio_hnl: "abc" }, { id_sucursal: BRANCH_B },
+])("no ofrece servicio no operativo %j y conserva historicos", async (invalid) => {
+  auth.roles = ["admin"];
+  auth.branchIds = [BRANCH_A];
+  catalogApi.listAdminServicios.mockResolvedValue({ data: { servicios: [
+    { id_servicio: "valid", nombre_servicio: "Operativo", id_sucursal: BRANCH_A, activo: true, tarifa_activa: true, agendable: true, precio_hnl: "100.00" },
+    { id_servicio: "invalid", nombre_servicio: "No disponible nuevo", id_sucursal: BRANCH_A, activo: true, tarifa_activa: true, agendable: true, precio_hnl: 100, ...invalid },
+  ] } });
+  await renderCatalog([makePlan(1)]);
+  fireEvent.click(screen.getByRole("button", { name: "Editar maestro" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByRole("option", { name: "Operativo" })).toBeInTheDocument();
+  expect(within(dialog).queryByRole("option", { name: "No disponible nuevo" })).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("option", { name: "Corte premium (No disponible)" })).toBeInTheDocument();
+});
+
+test("catalogos tardios de editor cancelado no reemplazan nueva seleccion", async () => {
+  await renderCatalog([makePlan(1)]);
+  fireEvent.click(screen.getByRole("button", { name: "Nuevo plan maestro" }));
+  let dialog = await screen.findByRole("dialog");
+  const pending = deferred();
+  catalogApi.listAdminServicios.mockImplementation(() => pending.promise);
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "Centro" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+  fireEvent.click(screen.getByRole("button", { name: "Nuevo plan maestro" }));
+  dialog = await screen.findByRole("dialog");
+  await act(async () => pending.resolve({ data: { servicios: [{ id_servicio: "old", nombre_servicio: "Antiguo", id_sucursal: BRANCH_A, activo: true, tarifa_activa: true, agendable: true, precio_hnl: 100 }] } }));
+  expect(within(dialog).getByRole("checkbox", { name: "Centro" })).not.toBeChecked();
+  expect(within(dialog).queryByRole("option", { name: "Antiguo" })).not.toBeInTheDocument();
+});
+
+test("creacion multioferta conserva precios y beneficios comunes al resolver fuera de orden", async () => {
+  const service = "21111111-1111-4111-8111-111111111111";
+  const courtesy = "31111111-1111-4111-8111-111111111111";
+  await renderCatalog([makePlan(1)]);
+  fireEvent.click(screen.getByRole("button", { name: "Nuevo plan maestro" }));
+  const dialog = await screen.findByRole("dialog");
+  const a = deferred(), b = deferred();
+  catalogApi.listAdminServicios.mockImplementation(({ id_sucursal }) => id_sucursal === BRANCH_A ? a.promise : b.promise);
+  courtesiesApi.listAdminCortesias.mockImplementation(({ id_sucursal }) => Promise.resolve({ data: { cortesias: [{ id: courtesy, nombre: "Bebida comun", sucursales: [{ id_sucursal, activa: true }] }] } }));
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "Centro" }));
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "Norte" }));
+  const prices = within(dialog).getAllByPlaceholderText("1800.00");
+  fireEvent.change(prices[0], { target: { value: "1000" } });
+  fireEvent.change(prices[1], { target: { value: "2000" } });
+  const response = (id_sucursal) => ({ data: { servicios: [
+    { id_servicio: service, nombre_servicio: "Servicio comun", id_sucursal, activo: true, agendable: true, tarifa_activa: true, precio_hnl: 100 },
+    { id_servicio: id_sucursal, nombre_servicio: `Exclusivo ${id_sucursal}`, id_sucursal, activo: true, agendable: true, tarifa_activa: true, precio_hnl: 100 },
+  ] } });
+  await act(async () => b.resolve(response(BRANCH_B)));
+  await act(async () => a.resolve(response(BRANCH_A)));
+  fireEvent.change(within(dialog).getByLabelText("Nombre del plan *"), { target: { value: "Plan nuevo" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Agregar servicio" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Agregar cortesia" }));
+  expect(within(dialog).getByRole("option", { name: "Servicio comun" })).toBeInTheDocument();
+  expect(within(dialog).queryByRole("option", { name: /^Exclusivo/ })).not.toBeInTheDocument();
+  const serviceSelect = within(dialog).getByRole("option", { name: "Servicio comun" }).parentElement;
+  const courtesySelect = within(dialog).getByRole("option", { name: "Bebida comun" }).parentElement;
+  fireEvent.change(serviceSelect, { target: { value: service } });
+  fireEvent.change(courtesySelect, { target: { value: courtesy } });
+  plansApi.createAdminPlan.mockResolvedValue({ data: makePlan(3) });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Crear plan maestro" }));
+  await waitFor(() => expect(plansApi.createAdminPlan).toHaveBeenCalledTimes(1));
+  const payload = plansApi.createAdminPlan.mock.calls[0][0];
+  expect(payload.ofertas).toEqual([
+    { id_sucursal: BRANCH_A, precio_hnl: 1000, visible_publico: true, orden_visual: 100 },
+    { id_sucursal: BRANCH_B, precio_hnl: 2000, visible_publico: true, orden_visual: 100 },
+  ]);
+  expect(payload.beneficios.items).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id_servicio: service, cantidad: 1 }),
+    expect.objectContaining({ id_cortesia: courtesy, cantidad: 1 }),
+  ]));
+});
+
+test("edicion de oferta mantiene precio, visibilidad y orden por sucursal", async () => {
+  auth.roles = ["admin"];
+  auth.branchIds = [BRANCH_A];
+  await renderCatalog([makePlan(1)]);
+  fireEvent.click(screen.getByRole("button", { name: "Editar oferta" }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.change(within(dialog).getByLabelText("Precio HNL *"), { target: { value: "1500" } });
+  plansApi.updateAdminPlan.mockResolvedValue({ data: makePlan(1, BRANCH_A, { precio_hnl: 1500 }) });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Guardar cambios" }));
+  await waitFor(() => expect(plansApi.updateAdminPlan).toHaveBeenCalledWith(makePlan(1).id_plan, {
+    id_sucursal: BRANCH_A, precio_hnl: 1500, visible_publico: true, orden_visual: 1,
+  }));
+});
+
+test.each([true, false])("estado local %s utiliza exclusivamente la oferta seleccionada", async (activo) => {
+  auth.roles = ["admin"];
+  auth.branchIds = [BRANCH_A];
+  await renderCatalog([makePlan(1, BRANCH_A, { activo })]);
+  const action = activo ? "Inactivar oferta" : "Activar oferta";
+  fireEvent.click(screen.getByRole("button", { name: action }));
+  const dialog = await screen.findByRole("dialog");
+  plansApi.setAdminPlanEstado.mockResolvedValue({ data: makePlan(1, BRANCH_A, { activo: !activo }) });
+  fireEvent.click(within(dialog).getByRole("button", { name: action }));
+  await waitFor(() => expect(plansApi.setAdminPlanEstado).toHaveBeenCalledWith(makePlan(1).id_plan, { id_sucursal: BRANCH_A, activo: !activo }));
+});
+
+test.each(["success", "error"])("servicios y cortesias tardios A (%s) no afectan editor B", async (outcome) => {
+  const aServices = deferred(), aCourtesies = deferred();
+  plansApi.listAdminPlanes.mockImplementation(({ id_sucursal }) => Promise.resolve({ data: { planes: id_sucursal ? [makePlan(1, id_sucursal)] : [] } }));
+  catalogApi.listAdminServicios.mockImplementation(({ id_sucursal }) => id_sucursal === BRANCH_A ? aServices.promise : Promise.resolve({ data: { servicios: [{ id_servicio: "b", nombre_servicio: "Servicio B", id_sucursal: BRANCH_B, activo: true, agendable: true, tarifa_activa: true, precio_hnl: 100 }] } }));
+  courtesiesApi.listAdminCortesias.mockImplementation(({ id_sucursal }) => id_sucursal === BRANCH_A ? aCourtesies.promise : Promise.resolve({ data: { cortesias: [{ id: "b", nombre: "Cortesia B", sucursales: [{ id_sucursal: BRANCH_B, activa: true }] }] } }));
+  render(<AdminPlansCatalogPage />);
+  await screen.findByRole("option", { name: "Norte" });
+  fireEvent.change(screen.getByLabelText("Sucursal"), { target: { value: BRANCH_A } });
+  fireEvent.change(screen.getByLabelText("Sucursal"), { target: { value: BRANCH_B } });
+  fireEvent.click(await screen.findByRole("button", { name: "Editar maestro" }));
+  const dialog = await screen.findByRole("dialog");
+  await act(async () => {
+    if (outcome === "error") {
+      aServices.reject({ data: { error: { message: "Fallo auxiliar antiguo" } } });
+      aCourtesies.reject({ data: { error: { message: "Fallo auxiliar antiguo" } } });
+    } else {
+      aServices.resolve({ data: { servicios: [] } });
+      aCourtesies.resolve({ data: { cortesias: [] } });
+    }
+  });
+  expect(within(dialog).getByRole("option", { name: "Servicio B" })).toBeInTheDocument();
+  expect(within(dialog).getByRole("option", { name: "Cortesia B" })).toBeInTheDocument();
+  expect(notifications.warning).not.toHaveBeenCalled();
+  expect(within(dialog).getByRole("button", { name: "Guardar cambios" })).not.toBeDisabled();
+});
+
+test("StrictMode conserva la carga vigente y permite editar", async () => {
+  plansApi.listAdminPlanes.mockResolvedValue({ data: { planes: [makePlan(1)] } });
+  render(<StrictMode><AdminPlansCatalogPage /></StrictMode>);
+  fireEvent.click(await screen.findByRole("button", { name: "Editar maestro" }));
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+});
 
 describe("catálogo responsive de planes VIP", () => {
   test("inicia en lista y alterna a tarjetas sin consultar de nuevo", async () => {

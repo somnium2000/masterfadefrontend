@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Loader2,
@@ -386,8 +386,8 @@ function PlanCategoryBadge({ level }) {
   );
 }
 
-function SucursalSelector({ branchIds, allBranches, selected, onChange, loading }) {
-  const available = branchIds.length > 0 ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal)) : allBranches;
+function SucursalSelector({ branchIds, allBranches, selected, onChange, loading, isSuperAdmin }) {
+  const available = isSuperAdmin ? allBranches : allBranches.filter((branch) => branchIds.includes(branch.id_sucursal));
   const validIds = new Set(available.map((branch) => branch.id_sucursal));
   const selectedBranch = available.find((branch) => branch.id_sucursal === selected);
 
@@ -423,7 +423,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loading 
           onChange(validIds.has(nextValue) ? nextValue : "");
         }}
       >
-        <option value="">Todas las sucursales</option>
+        <option value="">{isSuperAdmin ? "Todas las sucursales" : "Selecciona una sucursal"}</option>
         {available.map((branch) => <option key={branch.id_sucursal} value={branch.id_sucursal}>{branch.nombre_sucursal}</option>)}
       </select>
     </div>
@@ -797,6 +797,8 @@ export default function AdminPlansCatalogPage() {
   const { branchIds, roles = [] } = useAuth();
   const notifications = useNotifications();
   const canManagePlans = roles.includes("super_admin") || roles.includes("admin");
+  const isSuperAdmin = roles.includes("super_admin");
+  const branchKey = JSON.stringify([...branchIds].sort());
 
   const [allBranches, setAllBranches] = useState([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
@@ -839,6 +841,50 @@ export default function AdminPlansCatalogPage() {
   const [stateTarget, setStateTarget] = useState(null);
   const [stateLoading, setStateLoading] = useState(false);
   const lastErrorToastRef = useRef({ planes: "", sucursales: "" });
+  const mountedRef = useRef(false);
+  const scopeGeneration = useRef(0);
+  const plansRequest = useRef(0);
+  const branchesRequest = useRef(0);
+  const catalogRequest = useRef(0);
+  const formRequest = useRef(0);
+  const offersRef = useRef([]);
+  const validScope = canManagePlans && (isSuperAdmin || (Boolean(sucursal) && branchIds.includes(sucursal)));
+  const scopeKey = JSON.stringify([isSuperAdmin, canManagePlans, branchKey, sucursal]);
+
+  // AM: Invalida solicitudes y formularios del alcance anterior antes de pintar.
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    scopeGeneration.current += 1;
+    plansRequest.current += 1;
+    catalogRequest.current += 1;
+    formRequest.current += 1;
+    setPlanes([]);
+    setServices([]);
+    setCourtesies([]);
+    setServicesByBranch({});
+    setCourtesiesByBranch({});
+    setListError("");
+    setLoading(false);
+    setLoadingServices(false);
+    setDialogOpen(false);
+    setDetailOpen(false);
+    setOffersOpen(false);
+    setConfirmOpen(false);
+    setFormLoading(false);
+    setStateLoading(false);
+    return () => {
+      mountedRef.current = false;
+      scopeGeneration.current += 1;
+      formRequest.current += 1;
+    };
+  }, [scopeKey]);
+
+  function closeForm() {
+    formRequest.current += 1;
+    catalogRequest.current += 1;
+    setLoadingServices(false);
+    setDialogOpen(false);
+  }
 
   const notifyErrorOnce = useCallback((scope, message) => {
     const normalized = String(message || "").trim();
@@ -851,9 +897,9 @@ export default function AdminPlansCatalogPage() {
   const branchNameById = useMemo(() => allBranches.reduce((acc, branch) => ({ ...acc, [branch.id_sucursal]: branch.nombre_sucursal }), {}), [allBranches]);
 
   const availableBranches = useMemo(() => {
-    const scoped = branchIds.length > 0 ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal)) : allBranches;
+    const scoped = isSuperAdmin ? allBranches : allBranches.filter((branch) => branchIds.includes(branch.id_sucursal));
     return scoped.filter((branch) => branch?.id_sucursal);
-  }, [allBranches, branchIds]);
+  }, [allBranches, branchIds, isSuperAdmin]);
   const displayPlanes = useMemo(() => (sucursal ? planes : groupPlanesByMaster(planes)), [planes, sucursal]);
 
   const filteredPlanes = useMemo(() => {
@@ -923,92 +969,90 @@ export default function AdminPlansCatalogPage() {
   }
 
   const fetchBranches = useCallback(async () => {
+    const request = ++branchesRequest.current;
+    const current = () => mountedRef.current && request === branchesRequest.current;
     setLoadingBranches(true);
     setBranchLoadError("");
 
     try {
       const response = await listAdminSucursales({ soloActivas: true });
+      if (!current()) return;
       const nextBranches = Array.isArray(response?.data?.sucursales)
         ? response.data.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
         : [];
-      const scopedBranches = branchIds.length > 0
-        ? nextBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-        : nextBranches;
+      const scopedBranches = isSuperAdmin ? nextBranches : nextBranches.filter((branch) => JSON.parse(branchKey).includes(branch.id_sucursal));
       setAllBranches(scopedBranches);
       lastErrorToastRef.current.sucursales = "";
 
       if (scopedBranches.length === 1) {
         setSucursal(scopedBranches[0].id_sucursal);
-      } else if (sucursal && !scopedBranches.some((branch) => branch.id_sucursal === sucursal)) {
-        setSucursal("");
+      } else {
+        setSucursal((previous) => scopedBranches.some((branch) => branch.id_sucursal === previous) ? previous : "");
       }
     } catch (error) {
+      if (!current()) return;
       const message = extractMessage(error);
       setBranchLoadError(message);
       notifyErrorOnce("sucursales", message);
     } finally {
-      setLoadingBranches(false);
+      if (current()) setLoadingBranches(false);
     }
-  }, [branchIds, notifyErrorOnce, sucursal]);
+  }, [branchKey, isSuperAdmin, notifyErrorOnce]);
 
   const fetchPlanes = useCallback(async ({ silent = false } = {}) => {
+    if (!validScope) return;
+    const request = ++plansRequest.current;
+    const scope = scopeGeneration.current;
+    const current = () => mountedRef.current && scope === scopeGeneration.current && request === plansRequest.current;
     if (!silent) setLoading(true);
     setListError("");
 
     try {
       const response = await listAdminPlanes({ id_sucursal: sucursal || undefined });
+      if (!current()) return;
       const list = Array.isArray(response?.data?.planes) ? response.data.planes : [];
       setPlanes(sortPlanes(list));
       lastErrorToastRef.current.planes = "";
     } catch (error) {
+      if (!current()) return;
       const message = extractMessage(error);
       setListError(message);
       if (!silent) notifyErrorOnce("planes", message);
     } finally {
-      if (!silent) setLoading(false);
+      if (current()) setLoading(false);
     }
-  }, [notifyErrorOnce, sucursal]);
+  }, [notifyErrorOnce, sucursal, validScope]);
 
   const fetchServicesForBranch = useCallback(async (branchId) => {
     if (!branchId) {
-      setServices([]);
       return [];
     }
 
-    setLoadingServices(true);
-    try {
       const response = await listAdminServicios({ id_sucursal: branchId });
       const list = Array.isArray(response?.data?.servicios) ? response.data.servicios : [];
       const scoped = list
         // AM: Solo servicios operativos por sucursal para beneficios de planes.
         .filter((service) =>
-          Boolean(service?.activo)
-          && Boolean(service?.tarifa_activa)
+          service?.activo === true
+          && service?.agendable === true
+          && service?.tarifa_activa === true
           && service?.servicio_informativo !== true
           && String(service?.id_sucursal || "") === String(branchId)
+          && (typeof service?.precio_hnl === "number" || typeof service?.precio_hnl === "string")
+          && String(service.precio_hnl).trim() !== ""
+          && Number.isFinite(Number(service.precio_hnl)) && Number(service.precio_hnl) > 0
         )
         .map((service) => ({ id_servicio: service.id_servicio, nombre_servicio: service.nombre_servicio }))
         .sort((a, b) => String(a.nombre_servicio || "").localeCompare(String(b.nombre_servicio || ""), "es"));
 
-      setServices(scoped);
-      setServicesByBranch((previous) => ({ ...previous, [branchId]: scoped }));
       return scoped;
-    } catch (error) {
-      notifications.warning(extractMessage(error));
-      setServices([]);
-      return [];
-    } finally {
-      setLoadingServices(false);
-    }
-  }, [notifications]);
+  }, []);
 
   const fetchCourtesiesForBranch = useCallback(async (branchId) => {
     if (!branchId) {
-      setCourtesies([]);
       return [];
     }
 
-    try {
       const response = await listAdminCortesias({ id_sucursal: branchId });
       const list = Array.isArray(response?.data?.cortesias) ? response.data.cortesias : [];
       const scoped = list
@@ -1025,23 +1069,26 @@ export default function AdminPlansCatalogPage() {
         })
         .filter(Boolean)
         .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es"));
-      setCourtesies(scoped);
-      setCourtesiesByBranch((previous) => ({ ...previous, [branchId]: scoped }));
       return scoped;
-    } catch (error) {
-      notifications.warning(extractMessage(error));
-      setCourtesies([]);
-      return [];
-    }
-  }, [notifications]);
+  }, []);
 
   const fetchCatalogOptionsForBranch = useCallback(async (branchId) => {
-    const [scopedServices, scopedCourtesies] = await Promise.all([
-      fetchServicesForBranch(branchId),
-      fetchCourtesiesForBranch(branchId),
-    ]);
+    const request = ++catalogRequest.current;
+    const scope = scopeGeneration.current;
+    const current = () => mountedRef.current && scope === scopeGeneration.current && request === catalogRequest.current;
+    setLoadingServices(Boolean(branchId));
+    const results = await Promise.allSettled([fetchServicesForBranch(branchId), fetchCourtesiesForBranch(branchId)]);
+    if (!current()) return null;
+    const scopedServices = results[0].status === "fulfilled" ? results[0].value : [];
+    const scopedCourtesies = results[1].status === "fulfilled" ? results[1].value : [];
+    results.filter((result) => result.status === "rejected").forEach((result) => notifications.warning(extractMessage(result.reason)));
+    setServices(scopedServices);
+    setCourtesies(scopedCourtesies);
+    setServicesByBranch((previous) => ({ ...previous, [branchId]: scopedServices }));
+    setCourtesiesByBranch((previous) => ({ ...previous, [branchId]: scopedCourtesies }));
+    setLoadingServices(false);
     return { scopedServices, scopedCourtesies };
-  }, [fetchCourtesiesForBranch, fetchServicesForBranch]);
+  }, [fetchCourtesiesForBranch, fetchServicesForBranch, notifications]);
 
   function refreshCommonBenefitOptions(branchIdsToUse, servicesCache, courtesiesCache) {
     if (!Array.isArray(branchIdsToUse) || branchIdsToUse.length === 0) {
@@ -1088,13 +1135,14 @@ export default function AdminPlansCatalogPage() {
   useEffect(() => {
     if (!canManagePlans) return;
     void fetchBranches();
+    return () => { branchesRequest.current += 1; };
   }, [canManagePlans, fetchBranches]);
 
   useEffect(() => {
-    if (!canManagePlans) return;
+    if (!validScope) return;
     void fetchPlanes();
     void fetchCatalogOptionsForBranch(sucursal);
-  }, [canManagePlans, fetchCatalogOptionsForBranch, fetchPlanes, sucursal]);
+  }, [validScope, fetchCatalogOptionsForBranch, fetchPlanes, sucursal, scopeKey]);
 
   useEffect(() => {
     if (!dialogOpen || dialogMode === "editMaster") return;
@@ -1118,15 +1166,18 @@ export default function AdminPlansCatalogPage() {
     if (branchId) {
       await fetchCatalogOptionsForBranch(branchId);
     } else {
+      catalogRequest.current += 1;
+      setLoadingServices(false);
       setServices([]);
       setCourtesies([]);
     }
   }
 
   async function handleCreateOfferToggle(branchId, checked) {
+    if (!validScope || !availableBranches.some((branch) => branch.id_sucursal === branchId)) return;
     const nextOffers = checked
       ? [
-        ...formValues.ofertas,
+        ...offersRef.current.filter((offer) => offer.id_sucursal !== branchId),
         {
           id_sucursal: branchId,
           precio_hnl: "",
@@ -1134,30 +1185,37 @@ export default function AdminPlansCatalogPage() {
           orden_visual: "100",
         },
       ]
-      : formValues.ofertas.filter((offer) => offer.id_sucursal !== branchId);
+      : offersRef.current.filter((offer) => offer.id_sucursal !== branchId);
+    offersRef.current = nextOffers;
+    setFormValues((previous) => ({ ...previous, ofertas: nextOffers }));
     const nextBranchIds = nextOffers.map((offer) => offer.id_sucursal);
-    let nextServicesCache = servicesByBranch;
-    let nextCourtesiesCache = courtesiesByBranch;
-
-    if (checked && (!servicesByBranch[branchId] || !courtesiesByBranch[branchId])) {
-      const { scopedServices, scopedCourtesies } = await fetchCatalogOptionsForBranch(branchId);
-      nextServicesCache = { ...servicesByBranch, [branchId]: scopedServices };
-      nextCourtesiesCache = { ...courtesiesByBranch, [branchId]: scopedCourtesies };
+    const request = ++catalogRequest.current;
+    const scope = scopeGeneration.current;
+    setLoadingServices(true);
+    try {
+      const results = await Promise.all(nextBranchIds.map(async (id) => {
+        const [branchServices, branchCourtesies] = await Promise.all([fetchServicesForBranch(id), fetchCourtesiesForBranch(id)]);
+        return { id, services: branchServices, courtesies: branchCourtesies };
+      }));
+      if (!mountedRef.current || scope !== scopeGeneration.current || request !== catalogRequest.current) return;
+      const nextServicesCache = Object.fromEntries(results.map((result) => [result.id, result.services]));
+      const nextCourtesiesCache = Object.fromEntries(results.map((result) => [result.id, result.courtesies]));
       setServicesByBranch(nextServicesCache);
       setCourtesiesByBranch(nextCourtesiesCache);
+      const { commonServices, commonCourtesies } = refreshCommonBenefitOptions(nextBranchIds, nextServicesCache, nextCourtesiesCache);
+      setFormValues((previous) => ({ ...previous, beneficios: sanitizeBenefitsByScope(previous.beneficios, commonServices, commonCourtesies, []) }));
+    } catch (error) {
+      if (!mountedRef.current || scope !== scopeGeneration.current || request !== catalogRequest.current) return;
+      setServices([]);
+      setCourtesies([]);
+      notifications.warning(extractMessage(error));
+    } finally {
+      if (mountedRef.current && scope === scopeGeneration.current && request === catalogRequest.current) setLoadingServices(false);
     }
-
-    const { commonServices, commonCourtesies } = refreshCommonBenefitOptions(nextBranchIds, nextServicesCache, nextCourtesiesCache);
-    const nextBenefits = sanitizeBenefitsByScope(formValues.beneficios, commonServices, commonCourtesies, []);
-
-    setFormValues((previous) => ({
-      ...previous,
-      ofertas: nextOffers,
-      beneficios: nextBenefits,
-    }));
   }
 
   function handleCreateOfferChange(branchId, field, value) {
+    offersRef.current = offersRef.current.map((offer) => offer.id_sucursal === branchId ? { ...offer, [field]: value } : offer);
     setFormValues((previous) => ({
       ...previous,
       ofertas: previous.ofertas.map((offer) => (
@@ -1167,9 +1225,16 @@ export default function AdminPlansCatalogPage() {
   }
 
   async function openNuevo() {
+    if (!validScope) return;
+    const request = ++formRequest.current;
+    const scope = scopeGeneration.current;
+    catalogRequest.current += 1;
+    setLoadingServices(false);
     const branchId = sucursal || "";
     if (branchId) {
-      const { scopedServices, scopedCourtesies } = await fetchCatalogOptionsForBranch(branchId);
+      const result = await fetchCatalogOptionsForBranch(branchId);
+      if (!result || request !== formRequest.current || scope !== scopeGeneration.current || !mountedRef.current) return;
+      const { scopedServices, scopedCourtesies } = result;
       refreshCommonBenefitOptions([branchId], { ...servicesByBranch, [branchId]: scopedServices }, { ...courtesiesByBranch, [branchId]: scopedCourtesies });
     }
     else {
@@ -1193,17 +1258,22 @@ export default function AdminPlansCatalogPage() {
         : [],
     });
     setFormError("");
+    offersRef.current = branchId ? [{ id_sucursal: branchId, precio_hnl: "", visible_publico: true, orden_visual: "100" }] : [];
     setDialogOpen(true);
   }
 
   async function openEditarMaestro(plan) {
+    if (!validScope) return;
+    const request = ++formRequest.current;
+    const scope = scopeGeneration.current;
     const branchId = resolveMutationBranchId(plan);
     if (!branchId) {
       notifications.warning("Debes seleccionar una sucursal valida para editar el plan.");
       return;
     }
 
-    await fetchCatalogOptionsForBranch(branchId);
+    const result = await fetchCatalogOptionsForBranch(branchId);
+    if (!result || request !== formRequest.current || scope !== scopeGeneration.current || !mountedRef.current) return;
     setDialogMode("editMaster");
     setFormBranchId(branchId);
     setEditTarget(plan);
@@ -1232,6 +1302,10 @@ export default function AdminPlansCatalogPage() {
   }
 
   function openEditarOferta(plan, offer = null) {
+    if (!validScope) return;
+    formRequest.current += 1;
+    catalogRequest.current += 1;
+    setLoadingServices(false);
     const offerData = offer || plan;
     const branchId = String(offerData?.id_sucursal || sucursal || "").trim();
     if (!branchId) {
@@ -1255,6 +1329,10 @@ export default function AdminPlansCatalogPage() {
   }
 
   function openAgregarOferta(plan) {
+    if (!validScope) return;
+    formRequest.current += 1;
+    catalogRequest.current += 1;
+    setLoadingServices(false);
     const nextBranches = getUnassociatedBranches(plan, availableBranches);
     if (nextBranches.length === 0) {
       notifications.warning("Este plan ya tiene oferta en todas las sucursales disponibles.");
@@ -1299,6 +1377,10 @@ export default function AdminPlansCatalogPage() {
   }
 
   async function handleGuardar() {
+    if (!validScope || loadingServices) return;
+    const scope = scopeGeneration.current;
+    const form = formRequest.current;
+    const current = () => mountedRef.current && scope === scopeGeneration.current && form === formRequest.current;
     const validationError = validateForm(formValues, dialogMode);
     if (validationError) {
       setFormError(validationError);
@@ -1464,10 +1546,12 @@ export default function AdminPlansCatalogPage() {
       }
       if (editTarget?.id_plan) {
         const response = await updateAdminPlan(editTarget.id_plan, payload);
+        if (!current()) return;
         setPlanes((current) => upsertScopedPlan(current, response?.data));
         notifications.success(dialogMode === "addOffer" ? "Oferta agregada correctamente." : "Plan actualizado correctamente.");
       } else {
         const response = await createAdminPlan(payload);
+        if (!current()) return;
         setPlanes((current) => upsertScopedPlan(current, response?.data));
         notifications.success("Plan creado correctamente.");
       }
@@ -1481,15 +1565,18 @@ export default function AdminPlansCatalogPage() {
       setFormOriginalMaster(null);
       void fetchPlanes({ silent: true });
     } catch (error) {
+      if (!current()) return;
       setFormError(extractMessage(error));
       notifications.error(extractMessage(error));
     } finally {
-      setFormLoading(false);
+      if (current()) setFormLoading(false);
     }
   }
 
   async function handleConfirmState() {
-    if (!stateTarget?.id_plan) return;
+    if (!validScope || !stateTarget?.id_plan) return;
+    const scope = scopeGeneration.current;
+    const current = () => mountedRef.current && scope === scopeGeneration.current;
 
     setStateLoading(true);
     try {
@@ -1502,6 +1589,7 @@ export default function AdminPlansCatalogPage() {
       }
 
       const response = await setAdminPlanEstado(stateTarget.id_plan, payload);
+      if (!current()) return;
 
       setPlanes((current) => upsertScopedPlan(current, response?.data));
       notifications.success(stateTarget._nextActivo ? "Oferta activada." : "Oferta inactivada.");
@@ -1510,6 +1598,7 @@ export default function AdminPlansCatalogPage() {
       setStateTarget(null);
       void fetchPlanes({ silent: true });
     } catch (error) {
+      if (!current()) return;
       const backendCode = String(error?.data?.error?.code || error?.response?.data?.error?.code || "");
       if (backendCode === "CATALOG_PLAN_ACTIVE_SUBSCRIPTIONS_CONFIRM_REQUIRED") {
         const totalClientesActivos = extractActiveSubscribersCount(error);
@@ -1525,7 +1614,7 @@ export default function AdminPlansCatalogPage() {
       }
       notifications.error(extractMessage(error));
     } finally {
-      setStateLoading(false);
+      if (current()) setStateLoading(false);
     }
   }
 
@@ -1570,7 +1659,7 @@ export default function AdminPlansCatalogPage() {
               <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Planes VIP</h1>
               <p className="text-sm text-[var(--mf-text-2)]">{titleSubtitle}</p>
             </div>
-            <SucursalSelector branchIds={branchIds} allBranches={allBranches} selected={sucursal} onChange={setSucursal} loading={loadingBranches} />
+            <SucursalSelector branchIds={branchIds} allBranches={allBranches} selected={sucursal} onChange={setSucursal} loading={loadingBranches} isSuperAdmin={isSuperAdmin} />
             {branchLoadError ? <ErrorBanner message={branchLoadError} /> : null}
           </div>
 
@@ -1596,7 +1685,7 @@ export default function AdminPlansCatalogPage() {
                 <SlidersHorizontal size={15} /> Filtros
                 {activeFilterCount > 0 ? <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-xs text-[var(--mf-accent-text)]">{activeFilterCount}</span> : null}
               </Button>
-              <Button className="gap-2" onClick={() => void openNuevo()}>
+              <Button className="gap-2" onClick={() => void openNuevo()} disabled={!validScope}>
                 <Plus size={15} /> Nuevo plan maestro
               </Button>
             </div>
@@ -1614,7 +1703,8 @@ export default function AdminPlansCatalogPage() {
       {loading ? <LoadingSpinner label="Cargando planes..." /> : null}
       {!loading && listError ? <ErrorBanner message={listError} /> : null}
 
-      {!loading && !listError && planes.length === 0 ? (
+      {!validScope && canManagePlans ? <p role="status">{branchIds.length ? "Selecciona una sucursal autorizada para operar." : "No tienes sucursales autorizadas para operar."}</p> : null}
+      {validScope && !loading && !listError && planes.length === 0 ? (
         <EmptyState icon={Crown} title="Sin planes registrados" description="Crea el primer plan VIP para empezar a vender membresias por sucursal." actionLabel="Crear plan" onAction={() => void openNuevo()} />
       ) : null}
 
@@ -1703,7 +1793,7 @@ export default function AdminPlansCatalogPage() {
         </nav>
       ) : null}
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading) setDialogOpen(open); }}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading && !open) closeForm(); }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
@@ -1743,8 +1833,8 @@ export default function AdminPlansCatalogPage() {
           {loadingServices ? <p className="text-xs text-[var(--mf-text-2)] flex items-center gap-2"><Loader2 size={13} className="animate-spin" />Cargando opciones de servicios y cortesias...</p> : null}
           {formError ? <ErrorBanner message={formError} /> : null}
           <DialogFooter className="mt-2">
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>Cancelar</Button>
-            <Button onClick={handleGuardar} disabled={formLoading} className="gap-2 min-w-[120px]">{formLoading ? <Loader2 size={15} className="animate-spin" /> : null}{editTarget ? "Guardar cambios" : "Crear plan maestro"}</Button>
+            <Button variant="outline" onClick={closeForm} disabled={formLoading}>Cancelar</Button>
+            <Button onClick={handleGuardar} disabled={formLoading || loadingServices || !validScope} className="gap-2 min-w-[120px]">{formLoading ? <Loader2 size={15} className="animate-spin" /> : null}{editTarget ? "Guardar cambios" : "Crear plan maestro"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

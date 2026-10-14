@@ -69,6 +69,12 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("edicion segura de beneficios globales", () => {
+  test("editar nombre conserva beneficios historicos mediante PATCH parcial", async () => {
+    const dialog = await openMasterEditor();
+    fireEvent.change(within(dialog).getByLabelText("Nombre del plan *"), { target: { value: "Plan renombrado" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar cambios" }));
+    await waitFor(() => expect(plansApi.updateAdminPlan).toHaveBeenCalledWith(PLAN, { nombre_plan: "Plan renombrado", id_sucursal: BRANCH }));
+  });
   test("conserva y representa beneficios existentes no disponibles", async () => {
     const dialog = await openMasterEditor();
     expect(await within(dialog).findByRole("option", { name: "Servicio heredado (No disponible)" })).toBeInTheDocument();
@@ -116,7 +122,7 @@ describe("edicion segura de beneficios globales", () => {
   test("cambio real de cantidad incluye beneficios", async () => {
     catalogApi.listAdminServicios.mockResolvedValue({ data: { servicios: [{
       id_servicio: SERVICE, id_sucursal: BRANCH, nombre_servicio: "Servicio heredado", activo: true,
-      tarifa_activa: true, servicio_informativo: false,
+      tarifa_activa: true, agendable: true, precio_hnl: 100, servicio_informativo: false,
     }] } });
     courtesiesApi.listAdminCortesias.mockResolvedValue({ data: { cortesias: [{
       id: COURTESY, nombre: "Cortesia heredada", sucursales: [{ id_sucursal: BRANCH, activa: true }],
@@ -147,7 +153,7 @@ describe("edicion segura de beneficios globales", () => {
   test("no permite aumentar una cortesia existente mientras permanece inactiva", async () => {
     catalogApi.listAdminServicios.mockResolvedValue({ data: { servicios: [{
       id_servicio: SERVICE, id_sucursal: BRANCH, nombre_servicio: "Servicio heredado", activo: true,
-      tarifa_activa: true, servicio_informativo: false,
+      tarifa_activa: true, agendable: true, precio_hnl: 100, servicio_informativo: false,
     }] } });
     courtesiesApi.listAdminCortesias.mockResolvedValue({ data: { cortesias: [{
       id: COURTESY, nombre: "Cortesia heredada", sucursales: [{ id_sucursal: BRANCH, activa: false }],
@@ -175,7 +181,7 @@ describe("edicion segura de beneficios globales", () => {
     } } });
     catalogApi.listAdminServicios.mockResolvedValue({ data: { servicios: [{
       id_servicio: SERVICE, id_sucursal: BRANCH, nombre_servicio: "Servicio heredado", activo: true,
-      tarifa_activa: true, servicio_informativo: false,
+      tarifa_activa: true, agendable: true, precio_hnl: 100, servicio_informativo: false,
     }] } });
     courtesiesApi.listAdminCortesias.mockResolvedValue({ data: { cortesias: [{
       id: COURTESY, nombre: "Cortesia heredada", sucursales: [{ id_sucursal: BRANCH, activa: true }],
