@@ -15,6 +15,7 @@ import {
 } from '../bookingPayloadBuilders.js';
 import {
   BOOKING_PAYMENT_CONTEXT_STORAGE_KEY,
+  PENDING_PAYMENT_CONTEXT_STORAGE_KEY,
   readBookingPaymentContext,
 } from '../paymentResumeContext.js';
 
@@ -104,7 +105,31 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
   }, []);
 
   useEffect(() => {
-    currentGroupIdRef.current = safeText(currentGroupId) || safeText(paymentIntentRef.current?.id_grupo_cita);
+    const groupId = safeText(currentGroupId);
+    const previousGroupId = safeText(currentGroupIdRef.current);
+    const groupChanged = Boolean(groupId && previousGroupId && groupId !== previousGroupId);
+    currentGroupIdRef.current = groupId || safeText(paymentIntentRef.current?.id_grupo_cita);
+    if (!groupId) return;
+    const incompatible = (value) => value && safeText(value.id_grupo_cita) !== groupId;
+    if (incompatible(paymentIntentRef.current)) {
+      paymentIntentRef.current = null;
+      paymentStateSeqRef.current += 1;
+      setPaymentIntentState(null);
+    }
+    const staleResult = (value) => value && (incompatible(value)
+      && (groupChanged || safeText(value.id_grupo_cita)));
+    setPaymentResultState((current) => staleResult(current) ? null : current);
+    setBookingSuccessResultState((current) => staleResult(current) ? null : current);
+    if (typeof window !== 'undefined') {
+      for (const key of [BOOKING_PAYMENT_CONTEXT_STORAGE_KEY, PENDING_PAYMENT_CONTEXT_STORAGE_KEY]) {
+        try {
+          const stored = JSON.parse(window.sessionStorage.getItem(key));
+          if (incompatible(stored)) window.sessionStorage.removeItem(key);
+        } catch {
+          // AM: Un contexto ilegible nunca se utiliza para resolver un pago.
+        }
+      }
+    }
   }, [currentGroupId]);
 
   const isCurrentPaymentGroup = useCallback((groupId) => {
@@ -168,7 +193,8 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
           paymentIntent: null,
         }
       : null;
-    const expectedGroupId = fallback?.id_grupo_cita || safeText(groupId);
+    const expectedGroupId = safeText(groupId) || fallback?.id_grupo_cita;
+    if (fallback && expectedGroupId && fallback.id_grupo_cita !== expectedGroupId) return null;
     const expectedIntentId = fallback?.id_intent || '';
     const stored = readBookingPaymentContext({
       groupId: expectedGroupId,

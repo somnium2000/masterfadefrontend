@@ -153,8 +153,8 @@ export function resolvePaymentExecutionContext({
     || ''
   ).trim();
   const intentId = String(
-    paymentIntent?.id_intent
-    || pendingResumeContext?.id_intent
+    (String(paymentIntent?.id_grupo_cita || '').trim() === groupId ? paymentIntent?.id_intent : '')
+    || (String(pendingResumeContext?.id_grupo_cita || '').trim() === groupId ? pendingResumeContext?.id_intent : '')
     || ''
   ).trim();
   const resumeMatches = Boolean(
@@ -425,10 +425,6 @@ const agendaAutoLoadKeyRef = useRef('');
     selectedTime,
     titularSelectedDate,
   } = activeBookingBlockState;
-  const pendingResumeContext = useMemo(() => {
-    return resolvePaymentResumeContext({ search: location.search });
-  }, [location.search]);
-  const isPendingPaymentResumeRoute = location.pathname.startsWith(BOOKING_ROUTES.payment) && Boolean(pendingResumeContext?.id_grupo_cita && pendingResumeContext?.id_intent);
   const {
     contextLoading,
     contextError,
@@ -875,6 +871,13 @@ const agendaAutoLoadKeyRef = useRef('');
     bookingAdapter,
     selectionFingerprint: bookingHoldFingerprint,
   });
+
+  const pendingResumeContext = useMemo(() => {
+    const context = resolvePaymentResumeContext({ search: location.search });
+    const groupId = String(holdResult?.id_grupo_cita || '').trim();
+    return groupId && context?.id_grupo_cita !== groupId ? null : context;
+  }, [holdResult?.id_grupo_cita, location.search]);
+  const isPendingPaymentResumeRoute = location.pathname.startsWith(BOOKING_ROUTES.payment) && Boolean(pendingResumeContext?.id_grupo_cita && pendingResumeContext?.id_intent);
 
   const {
     paymentIntent,
@@ -3496,32 +3499,19 @@ const agendaAutoLoadKeyRef = useRef('');
     const searchParams = new URLSearchParams(location.search || '');
     const groupIdFromUrl = String(searchParams.get('id_grupo_cita') || '').trim();
     const storedContext = restorePaymentContext(
-      pendingResumeContext?.id_grupo_cita
+      holdResult?.id_grupo_cita
+      || pendingResumeContext?.id_grupo_cita
       || groupIdFromUrl
-      || holdResult?.id_grupo_cita
       || '',
       pendingResumeContext
     );
-    const groupId = String(
-      holdResult?.id_grupo_cita
-      || storedContext?.id_grupo_cita
-      || pendingResumeContext?.id_grupo_cita
-      || groupIdFromUrl
-      || ''
-    ).trim();
-    const intentId = String(
-      paymentIntent?.id_intent
-      || storedContext?.id_intent
-      || pendingResumeContext?.id_intent
-      || ''
-    ).trim();
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
-    const titularEmail = String(
-      titularContact.email
-      || storedContext?.titular_email
-      || pendingResumeContext?.titular_email
-      || ''
-    ).trim().toLowerCase();
+    const { groupId, intentId, titularEmail } = resolvePaymentExecutionContext({
+      holdResult: holdResult || { id_grupo_cita: groupIdFromUrl },
+      paymentIntent,
+      pendingResumeContext: storedContext || pendingResumeContext,
+      currentEmail: titularContact.email,
+    });
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
 
     try {
@@ -3676,9 +3666,7 @@ const agendaAutoLoadKeyRef = useRef('');
     bookingBlocks,
     confirmHoldWithoutPaymentRequest,
     fetchPaymentStatusOnce,
-    holdResult?.id_grupo_cita,
-    holdResult?.total_hnl,
-    holdResult?.total_pagar_hnl,
+    holdResult,
     isCurrentPaymentGroup,
     location.pathname,
     location.search,
@@ -3699,8 +3687,7 @@ const agendaAutoLoadKeyRef = useRef('');
   ]);
 
   const completeMockPayment = useCallback(async () => {
-    const groupId = String(holdResult?.id_grupo_cita || '').trim();
-    const intentId = String(paymentIntent?.id_intent || '').trim();
+    const { groupId, intentId } = resolvePaymentExecutionContext({ holdResult, paymentIntent });
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
     const titularEmail = String(titularContact.email || '').trim().toLowerCase();
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return false;
@@ -3712,11 +3699,10 @@ const agendaAutoLoadKeyRef = useRef('');
       notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-complete-error' });
       return false;
     }
-  }, [bookingBlocks, completeMockPaymentOnce, holdResult?.id_grupo_cita, notifications, paymentIntent?.id_intent, refreshPaymentStatus, resolveBlockContactState]);
+  }, [bookingBlocks, completeMockPaymentOnce, holdResult, notifications, paymentIntent, refreshPaymentStatus, resolveBlockContactState]);
 
   const completeSimulatorPayment = useCallback(async () => {
-    const groupId = String(holdResult?.id_grupo_cita || '').trim();
-    const intentId = String(paymentIntent?.id_intent || '').trim();
+    const { groupId, intentId } = resolvePaymentExecutionContext({ holdResult, paymentIntent });
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
     const titularEmail = String(titularContact.email || '').trim().toLowerCase();
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return false;
@@ -3728,7 +3714,7 @@ const agendaAutoLoadKeyRef = useRef('');
       notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-simulator-error' });
       return false;
     }
-  }, [bookingBlocks, completeSimulatorPaymentOnce, holdResult?.id_grupo_cita, notifications, paymentIntent?.id_intent, refreshPaymentStatus, resolveBlockContactState]);
+  }, [bookingBlocks, completeSimulatorPaymentOnce, holdResult, notifications, paymentIntent, refreshPaymentStatus, resolveBlockContactState]);
 
   const completePaymentSimulation = useCallback(async ({ provider } = {}) => {
     const normalizedProvider = String(provider || '').trim().toLowerCase();
@@ -3943,25 +3929,17 @@ const agendaAutoLoadKeyRef = useRef('');
     const searchParams = new URLSearchParams(location.search || '');
     const groupIdFromUrl = String(searchParams.get('id_grupo_cita') || '').trim();
     const restoredContext = restorePaymentContext(
-      pendingResumeContext?.id_grupo_cita
+      holdResult?.id_grupo_cita
+      || pendingResumeContext?.id_grupo_cita
       || groupIdFromUrl
-      || holdResult?.id_grupo_cita
       || '',
       pendingResumeContext
     );
-    const groupId = String(
-      holdResult?.id_grupo_cita
-      || restoredContext?.id_grupo_cita
-      || pendingResumeContext?.id_grupo_cita
-      || groupIdFromUrl
-      || ''
-    ).trim();
-    const intentId = String(
-      paymentIntent?.id_intent
-      || restoredContext?.id_intent
-      || pendingResumeContext?.id_intent
-      || ''
-    ).trim();
+    const { groupId, intentId } = resolvePaymentExecutionContext({
+      holdResult: holdResult || { id_grupo_cita: groupIdFromUrl },
+      paymentIntent,
+      pendingResumeContext: restoredContext || pendingResumeContext,
+    });
     if (!groupId || !intentId) return;
 
     const checkKey = `${location.pathname}|${location.search}|${groupId}|${intentId}`;
@@ -3977,10 +3955,10 @@ const agendaAutoLoadKeyRef = useRef('');
       retryDelayMs: 1500,
     });
   }, [
-    holdResult?.id_grupo_cita,
+    holdResult,
     location.pathname,
     location.search,
-    paymentIntent?.id_intent,
+    paymentIntent,
     paymentResult?.booking_confirmed,
     pendingResumeContext,
     refreshPaymentStatus,
