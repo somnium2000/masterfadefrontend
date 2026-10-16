@@ -33,6 +33,9 @@ vi.mock('../../../../context/NotificationsContext.jsx', () => ({
 }));
 
 beforeEach(() => {
+  // AM: Fecha fija anterior a la cita; conserva timers reales y validaciones del calendario.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-07-14T18:00:00.000Z'));
   apiMock.getPublicBookingContext.mockReset();
   apiMock.listPublicAgendaBarberos.mockReset();
   apiMock.listPublicAgendaDisponibilidad.mockReset();
@@ -112,10 +115,13 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 async function renderReadyPreview() {
   render(<AdminCitasPreviewPage />);
+  await screen.findByRole('option', { name: 'Sucursal Centro' });
+  fireEvent.change(screen.getByLabelText(/Sucursal/i), { target: { value: BRANCH_A } });
   expect(await screen.findByRole('button', { name: /Seleccionar a Ada/i })).toBeInTheDocument();
 }
 
