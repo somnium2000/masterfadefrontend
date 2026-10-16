@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Package, Scissors, Search, Sparkles, Tag } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import {
   getPublicCatalog,
   listPublicCatalogBranches,
@@ -78,6 +79,7 @@ function CatalogRailSection({
   subtitle,
   items = [],
   emptyMessage,
+  loadError = false,
   renderItem,
   forceRail = false,
   expanded = false,
@@ -119,7 +121,7 @@ function CatalogRailSection({
 
       {expanded ? (
         <>
-          {useRail ? (
+          {useRail && !loadError ? (
             <div className="flex justify-end">
               <div className="hidden items-center gap-2 sm:flex">
                 <button
@@ -142,11 +144,11 @@ function CatalogRailSection({
             </div>
           ) : null}
 
-          {!items.length ? (
+          {!items.length ? (loadError ? null : (
             <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
               {emptyMessage}
             </p>
-          ) : useRail ? (
+          )) : useRail ? (
             <>
               <div
                 ref={trackRef}
@@ -183,6 +185,7 @@ function CatalogServicesTwoRowsSection({
   subtitle,
   items = [],
   emptyMessage,
+  loadError = false,
   renderItem,
   expanded = false,
   onActivate = () => {},
@@ -231,11 +234,11 @@ function CatalogServicesTwoRowsSection({
             </div>
           ) : null}
 
-          {!items.length ? (
+          {!items.length ? (loadError ? null : (
             <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
               {emptyMessage}
             </p>
-          ) : (
+          )) : (
             <div
               ref={trackRef}
               className="grid grid-flow-col grid-rows-2 auto-cols-[minmax(260px,1fr)] gap-3 overflow-x-auto pb-2 scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -354,56 +357,102 @@ function PromotionPublicCard({ promotion }) {
 export default function ClienteCatalogoPage() {
     const location = useLocation();
   const { error: notifyError } = useNotifications();
+  const isMountedRef = useRef(false);
+  const requestRef = useRef(0);
+  const initialRequestRef = useRef(0);
+  const selectedBranchRef = useRef('');
+  const searchRef = useRef('');
+  const branchesReadyRef = useRef(false);
+  const searchTimerRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState('');
   const [services, setServices] = useState([]);
   const [packages, setPackages] = useState([]);
+  const [catalogErrors, setCatalogErrors] = useState({ services: false, packages: false });
   const [promotions, setPromotions] = useState([]);
+  const [promotionsError, setPromotionsError] = useState(false);
   const [activeSection, setActiveSection] = useState('servicios');
   const [search, setSearch] = useState('');
 
   const promotionsRef = useRef(null);
   const promotionsCarouselRef = useRef(null);
 
-  const fetchCatalogData = useCallback(async (selectedBranchId, searchTerm = '') => {
+  const fetchCatalogData = useCallback(async (selectedBranchId, searchTerm = '', options = {}) => {
     const normalizedSearch = String(searchTerm || '').trim();
-    const [catalogPayload, promotionsPayload] = await Promise.all([
-      normalizedSearch
-        ? searchPublicCatalog({ q: normalizedSearch, id_sucursal: selectedBranchId || undefined })
-        : getPublicCatalog({ id_sucursal: selectedBranchId || undefined }),
-      listPublicCatalogPromotions({ id_sucursal: selectedBranchId || undefined }),
-    ]);
+    if (!isMountedRef.current || selectedBranchId !== selectedBranchRef.current || normalizedSearch !== searchRef.current) return;
+    const requestId = ++requestRef.current;
+    const isCurrent = () => isMountedRef.current && requestId === requestRef.current
+      && selectedBranchId === selectedBranchRef.current && normalizedSearch === searchRef.current;
+    if (!options.silent) setLoading(true);
+    try {
+      const [catalogResult, promotionsResult] = await Promise.allSettled([
+        options.promotionsOnly ? Promise.resolve(null) : normalizedSearch
+          ? searchPublicCatalog({ q: normalizedSearch, id_sucursal: selectedBranchId || undefined })
+          : getPublicCatalog({ id_sucursal: selectedBranchId || undefined }),
+        listPublicCatalogPromotions({ id_sucursal: selectedBranchId || undefined }),
+      ]);
 
-    setServices(Array.isArray(catalogPayload?.services) ? catalogPayload.services : []);
-    setPackages(Array.isArray(catalogPayload?.packages) ? catalogPayload.packages : []);
-    setPromotions(Array.isArray(promotionsPayload?.promotions) ? promotionsPayload.promotions : []);
-  }, []);
+      if (!isCurrent()) return;
+      if (!options.promotionsOnly) {
+        const catalogPayload = catalogResult.status === 'fulfilled' ? catalogResult.value : null;
+        setServices(Array.isArray(catalogPayload?.services) ? catalogPayload.services : []);
+        setPackages(Array.isArray(catalogPayload?.packages) ? catalogPayload.packages : []);
+        setCatalogErrors({
+          services: catalogResult.status === 'rejected' || Boolean(catalogPayload?.errors?.services),
+          packages: catalogResult.status === 'rejected' || Boolean(catalogPayload?.errors?.packages),
+        });
+      }
+      setPromotionsError(promotionsResult.status === 'rejected');
+      setPromotions(Array.isArray(promotionsResult.value?.promotions) ? promotionsResult.value.promotions : []);
+    } catch (error) {
+      if (isCurrent()) notifyError(options.silent
+        ? options.errorMessage
+        : error?.data?.error?.message || error?.message || options.errorMessage || 'No se pudo cargar el catálogo de cliente.');
+    } finally {
+      if (isCurrent()) setLoading(false);
+    }
+  }, [notifyError]);
 
   const loadInitial = useCallback(async () => {
+    const initialRequestId = ++initialRequestRef.current;
     setLoading(true);
     try {
       const branchPayload = await listPublicCatalogBranches();
+      if (!isMountedRef.current || initialRequestId !== initialRequestRef.current) return;
       const nextBranches = Array.isArray(branchPayload?.branches) ? branchPayload.branches : [];
       setBranches(nextBranches);
 
       const preferredBranchId = getStoredClienteCatalogBranchId();
       const resolvedBranchId = resolveValidClienteBranchId(preferredBranchId, nextBranches);
+      selectedBranchRef.current = resolvedBranchId;
+      branchesReadyRef.current = true;
       setBranchId(resolvedBranchId);
       setStoredClienteCatalogBranchId(resolvedBranchId);
 
-      await fetchCatalogData(resolvedBranchId, '');
+      window.clearTimeout(searchTimerRef.current);
+      await fetchCatalogData(resolvedBranchId, searchRef.current);
     } catch (error) {
+      if (!isMountedRef.current || initialRequestId !== initialRequestRef.current) return;
       notifyError(error?.data?.error?.message || error?.message || 'No se pudo cargar el catálogo de cliente.');
-    } finally {
       setLoading(false);
     }
   }, [fetchCatalogData, notifyError]);
 
 
   useEffect(() => {
-    void loadInitial();
+    isMountedRef.current = true;
+    let active = true;
+    queueMicrotask(() => { if (active) void loadInitial(); });
+    return () => {
+      active = false;
+      isMountedRef.current = false;
+      branchesReadyRef.current = false;
+      requestRef.current += 1;
+      initialRequestRef.current += 1;
+      window.clearTimeout(searchTimerRef.current);
+    };
   }, [loadInitial]);
 
   useEffect(() => {
@@ -417,44 +466,36 @@ export default function ClienteCatalogoPage() {
 
   async function handleBranchChange(event) {
     const nextBranchId = String(event.target.value || '').trim();
+    if (nextBranchId === selectedBranchRef.current) return;
+    requestRef.current += 1;
+    selectedBranchRef.current = nextBranchId;
+    window.clearTimeout(searchTimerRef.current);
     setBranchId(nextBranchId);
     setStoredClienteCatalogBranchId(nextBranchId);
 
-    setLoading(true);
-    try {
-      await fetchCatalogData(nextBranchId, search);
-    } catch (error) {
-      notifyError(error?.data?.error?.message || error?.message || 'No se pudo actualizar el catálogo para la sucursal.');
-    } finally {
-      setLoading(false);
-    }
+    await fetchCatalogData(nextBranchId, searchRef.current, { errorMessage: 'No se pudo actualizar el catálogo para la sucursal.' });
   }
 
+  async function handleCatalogRetry({ promotionsOnly = false } = {}) {
+    await fetchCatalogData(selectedBranchRef.current, searchRef.current, {
+      silent: true, promotionsOnly, errorMessage: 'No se pudo recuperar el catálogo. Intenta nuevamente.',
+    });
+  }
+
+  const normalizedSearchTerm = String(search || '').trim();
   useEffect(() => {
-    const normalizedSearch = String(search || '').trim();
-    if (!normalizedSearch) return;
-    const controller = new AbortController();
     const timerId = window.setTimeout(() => {
-      void (async () => {
-        setLoading(true);
-        try {
-          await fetchCatalogData(branchId, normalizedSearch);
-        } catch (error) {
-          if (!controller.signal.aborted) {
-            notifyError(error?.data?.error?.message || error?.message || 'No se pudo buscar en el catálogo.');
-          }
-        } finally {
-          if (!controller.signal.aborted) setLoading(false);
-        }
-      })();
-    }, 280);
+      if (!branchesReadyRef.current) return;
+      void fetchCatalogData(selectedBranchRef.current, normalizedSearchTerm, { errorMessage: 'No se pudo buscar en el catálogo.' });
+    }, normalizedSearchTerm ? 280 : 0);
+    searchTimerRef.current = timerId;
     return () => {
-      controller.abort();
       window.clearTimeout(timerId);
     };
-  }, [branchId, fetchCatalogData, notifyError, search]);
+  }, [fetchCatalogData, normalizedSearchTerm]);
 
-  const agendables = useMemo(() => services.filter((item) => !item?.servicio_informativo), [services]);
+  const agendables = useMemo(() => services.filter((item) => item?.agendable === true && item?.servicio_informativo !== true), [services]);
+  const nonBookableServices = useMemo(() => services.filter((item) => item?.agendable !== true && item?.servicio_informativo !== true), [services]);
   const sortedPromotions = useMemo(() => {
     return [...promotions].sort((a, b) => {
       const featuredDiff = Number(Boolean(b?.destacada)) - Number(Boolean(a?.destacada));
@@ -511,7 +552,17 @@ export default function ClienteCatalogoPage() {
             <input
               type="text"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                const nextSearch = event.target.value;
+                const normalized = String(nextSearch || '').trim();
+                if (normalized !== searchRef.current) {
+                  requestRef.current += 1;
+                  searchRef.current = normalized;
+                  window.clearTimeout(searchTimerRef.current);
+                  if (branchesReadyRef.current) setLoading(true);
+                }
+                setSearch(nextSearch);
+              }}
               placeholder="Buscar servicios o paquetes..."
               className="mf-input w-full pl-11"
             />
@@ -527,6 +578,17 @@ export default function ClienteCatalogoPage() {
         </div>
       ) : (
         <>
+          {promotionsError ? (
+            <ErrorBanner message="No se pudieron cargar las promociones." onRetry={() => void handleCatalogRetry({ promotionsOnly: true })} />
+          ) : null}
+          {catalogErrors.services || catalogErrors.packages ? (
+            <ErrorBanner
+              message={catalogErrors.services && catalogErrors.packages
+                ? 'No se pudieron cargar los servicios ni los paquetes.'
+                : catalogErrors.services ? 'No se pudieron cargar los servicios.' : 'No se pudieron cargar los paquetes.'}
+              onRetry={() => void handleCatalogRetry()}
+            />
+          ) : null}
           <CatalogServicesTwoRowsSection
             sectionId="servicios"
             titleIcon={Scissors}
@@ -534,6 +596,7 @@ export default function ClienteCatalogoPage() {
             subtitle="Selecciona tu experiencia agendable."
             items={agendables}
             emptyMessage="No hay servicios publicados para esta sucursal."
+            loadError={catalogErrors.services}
             expanded={activeSection === 'servicios'}
             onActivate={() => setActiveSection('servicios')}
             renderItem={(item) => (
@@ -549,6 +612,24 @@ export default function ClienteCatalogoPage() {
             )}
           />
 
+          {nonBookableServices.length > 0 ? (
+            <section className="space-y-3">
+              <SectionTitle icon={Scissors} title="Servicios no disponibles para agendar" subtitle="Consulta los detalles de estos servicios." />
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {nonBookableServices.map((item) => (
+                  <CatalogItemCard
+                    key={item.id_servicio}
+                    title={item.nombre_servicio}
+                    subtitle="No disponible para agendar"
+                    description={item.descripcion || ''}
+                    price={Number(item?.precio_hnl) > 0 ? formatPrice(item.precio_hnl) : null}
+                    footer={<p className="mt-2 text-xs text-[var(--mf-text-2)]">Duración: {item.duracion_min} min</p>}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           <CatalogRailSection
             sectionId="paquetes"
             titleIcon={Package}
@@ -556,6 +637,7 @@ export default function ClienteCatalogoPage() {
             subtitle="Combos disponibles para clientes autenticados."
             items={packages}
             emptyMessage="No hay paquetes activos para esta sucursal."
+            loadError={catalogErrors.packages}
             forceRail
             expanded={activeSection === 'paquetes'}
             onActivate={() => setActiveSection('paquetes')}
@@ -615,11 +697,11 @@ export default function ClienteCatalogoPage() {
                   </div>
                 ) : null}
 
-                {!sortedPromotions.length ? (
+                {!sortedPromotions.length ? (promotionsError ? null : (
                   <p className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
                     Aún no hay promociones visibles para esta sucursal.
                   </p>
-                ) : (
+                )) : (
                   <div className="relative">
                     {showPromotionCarouselControls ? (
                       <>

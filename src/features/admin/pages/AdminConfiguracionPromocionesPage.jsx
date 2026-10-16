@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Building2, CalendarDays, Eye, Gift, Loader2, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
@@ -706,8 +706,8 @@ function PromotionDateField({ label, value, onChange }) {
   );
 }
 
-function SucursalSelector({ branchIds, allBranches, selected, onChange, loading }) {
-  const available = branchIds.length > 0 ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal)) : allBranches;
+function SucursalSelector({ branchIds, allBranches, selected, onChange, loading, isSuperAdmin }) {
+  const available = isSuperAdmin ? allBranches : allBranches.filter((branch) => branchIds.includes(branch.id_sucursal));
   const validIds = new Set(available.map((branch) => branch.id_sucursal));
   const selectedBranch = available.find((branch) => branch.id_sucursal === selected);
 
@@ -730,7 +730,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loading 
         const nextValue = String(event.target.value || '').trim();
         onChange(validIds.has(nextValue) ? nextValue : '');
       }}>
-        <option value="">- Seleccionar sucursal -</option>
+        <option value="">{isSuperAdmin ? 'Todas las sucursales' : '- Seleccionar sucursal -'}</option>
         {available.map((branch) => <option key={branch.id_sucursal} value={branch.id_sucursal}>{branch.nombre_sucursal}</option>)}
       </select>
     </div>
@@ -786,6 +786,9 @@ function PromotionForm({ values, onChange, branchLabel, promotionId, serviceOpti
               disabled={loadingTargets}
             >
               <option value="">{loadingTargets ? 'Cargando catalogo...' : `Selecciona ${aplicaA}`}</option>
+              {objetivoValue && !objetivoOptions.some((item) => String(item.value) === String(objetivoValue)) ? (
+                <option value={objetivoValue}>Objetivo existente (No disponible)</option>
+              ) : null}
               {objetivoOptions.map((item) => (
                 <option key={item.value} value={item.value}>{item.label}</option>
               ))}
@@ -922,8 +925,12 @@ function PromotionForm({ values, onChange, branchLabel, promotionId, serviceOpti
 }
 
 export default function AdminConfiguracionPromocionesPage() {
-  const { branchIds } = useAuth();
+  const { branchIds, roles = [] } = useAuth();
   const notifications = useNotifications();
+  const isSuperAdmin = roles.includes('super_admin');
+  const canManage = isSuperAdmin || roles.includes('admin');
+  const branchKey = JSON.stringify([...branchIds].sort());
+  const permissionsKey = JSON.stringify([isSuperAdmin, canManage, branchKey]);
 
   const [allBranches, setAllBranches] = useState([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
@@ -957,9 +964,69 @@ export default function AdminConfiguracionPromocionesPage() {
   const [packageTargetOptions, setPackageTargetOptions] = useState([]);
   const [loadingTargetOptions, setLoadingTargetOptions] = useState(false);
 
+  const mountedRef = useRef(false);
+  const permissionsRef = useRef(permissionsKey);
+  const scopeGeneration = useRef(0);
+  const branchesRequest = useRef(0);
+  const listRequest = useRef(0);
+  const targetsRequest = useRef(0);
+  const editorRequest = useRef(0);
+  const detailRequest = useRef(0);
+  const canUseBranch = canManage && Boolean(sucursal) && (isSuperAdmin || branchIds.includes(sucursal));
+  const canRead = canManage && (isSuperAdmin || canUseBranch);
+  const scopeKey = JSON.stringify([permissionsKey, sucursal]);
+
+  // AM: Ninguna respuesta del alcance anterior puede recuperar datos o formularios.
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    if (permissionsRef.current !== permissionsKey) {
+      setAllBranches([]);
+      setBranchLoadError('');
+      setLoadingBranches(false);
+    }
+    permissionsRef.current = permissionsKey;
+    scopeGeneration.current += 1;
+    listRequest.current += 1;
+    targetsRequest.current += 1;
+    editorRequest.current += 1;
+    detailRequest.current += 1;
+    setPromociones([]);
+    setListError('');
+    setLoading(false);
+    setServiceTargetOptions([]);
+    setPackageTargetOptions([]);
+    setLoadingTargetOptions(false);
+    setDialogOpen(false);
+    setEditTarget(null);
+    setFormValues(FORM_DEFAULTS);
+    setFormError('');
+    setFormLoading(false);
+    setDetailOpen(false);
+    setDetailTarget(null);
+    setDetailLoading(false);
+    return () => {
+      mountedRef.current = false;
+      scopeGeneration.current += 1;
+      editorRequest.current += 1;
+      detailRequest.current += 1;
+    };
+  }, [scopeKey, permissionsKey]);
+
+  function closeEditor() {
+    editorRequest.current += 1;
+    setDialogOpen(false);
+    setFormLoading(false);
+  }
+
+  function closeDetail() {
+    detailRequest.current += 1;
+    setDetailOpen(false);
+    setDetailLoading(false);
+  }
+
   const branchNameById = useMemo(() => allBranches.reduce((acc, branch) => ({ ...acc, [branch.id_sucursal]: branch.nombre_sucursal }), {}), [allBranches]);
-  const availableBranches = useMemo(() => (branchIds.length > 0 ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal)) : allBranches).filter((branch) => branch?.id_sucursal), [allBranches, branchIds]);
-  const actionsLockedByBranch = !sucursal && availableBranches.length > 1;
+  const availableBranches = useMemo(() => (isSuperAdmin ? allBranches : allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))).filter((branch) => branch?.id_sucursal), [allBranches, branchIds, isSuperAdmin]);
+  const actionsLockedByBranch = !canUseBranch;
 
   const filteredPromociones = useMemo(() => {
     const searchValue = search.trim().toLowerCase();
@@ -999,39 +1066,57 @@ export default function AdminConfiguracionPromocionesPage() {
   }, [branchNameById, filters, search, sucursal]);
 
   const fetchBranches = useCallback(async () => {
+    if (!canManage) return;
+    const request = ++branchesRequest.current;
+    const current = () => mountedRef.current && request === branchesRequest.current && permissionsRef.current === permissionsKey;
+    setAllBranches([]);
     setLoadingBranches(true);
     setBranchLoadError('');
     try {
       const response = await listAdminSucursales({ soloActivas: true });
+      if (!current()) return;
       const payload = response?.data || response;
-      setAllBranches(Array.isArray(payload?.sucursales) ? payload.sucursales.filter((item) => item?.id_sucursal && item?.estado !== false) : []);
+      const allowedBranches = JSON.parse(branchKey);
+      setAllBranches(Array.isArray(payload?.sucursales) ? payload.sucursales.filter((item) => item?.id_sucursal && item?.estado !== false && (isSuperAdmin || allowedBranches.includes(item.id_sucursal))) : []);
     } catch (error) {
+      if (!current()) return;
       const message = extractMessage(error);
       setBranchLoadError(message);
       notifications.error(message, { dedupeKey: 'promos-branches-error' });
-    } finally { setLoadingBranches(false); }
-  }, [notifications]);
+    } finally { if (current()) setLoadingBranches(false); }
+  }, [notifications, canManage, permissionsKey, branchKey, isSuperAdmin]);
 
   const fetchPromociones = useCallback(async ({ silent = false } = {}) => {
+    if (!canRead) return;
+    const request = ++listRequest.current;
+    const scope = scopeGeneration.current;
+    const current = () => mountedRef.current && scope === scopeGeneration.current && request === listRequest.current;
     if (!silent) { setLoading(true); setListError(''); }
     try {
       const response = await listAdminConfigPromociones({ id_sucursal: sucursal || undefined });
+      if (!current()) return;
       const payload = response?.data || response;
       setPromociones(sortPromos(Array.isArray(payload?.promociones) ? payload.promociones : []));
     } catch (error) {
+      if (!current()) return;
       const message = extractMessage(error);
       setListError(message);
       if (silent) notifications.error(message, { dedupeKey: 'promos-list-error' });
-    } finally { if (!silent) setLoading(false); }
-  }, [notifications, sucursal]);
+    } finally { if (current()) setLoading(false); }
+  }, [notifications, sucursal, canRead]);
 
   const fetchPromotionTargetOptions = useCallback(async () => {
-    if (!sucursal) {
+    if (!canUseBranch) {
       setServiceTargetOptions([]);
       setPackageTargetOptions([]);
       return;
     }
 
+    const request = ++targetsRequest.current;
+    const scope = scopeGeneration.current;
+    const current = () => mountedRef.current && scope === scopeGeneration.current && request === targetsRequest.current;
+    setServiceTargetOptions([]);
+    setPackageTargetOptions([]);
     setLoadingTargetOptions(true);
     try {
       // JK: Carga paralela de catalogos para evitar bloqueos del modal al seleccionar objetivos.
@@ -1039,6 +1124,7 @@ export default function AdminConfiguracionPromocionesPage() {
         listAdminServicios({ id_sucursal: sucursal }),
         listAdminPaquetes({ id_sucursal: sucursal }),
       ]);
+      if (!current()) return;
 
       const servicesPayload = servicesResponse?.data || servicesResponse;
       const services = Array.isArray(servicesPayload?.servicios) ? servicesPayload.servicios : [];
@@ -1070,44 +1156,26 @@ export default function AdminConfiguracionPromocionesPage() {
         .sort((left, right) => String(left.label || '').localeCompare(String(right.label || ''), 'es'));
       setPackageTargetOptions(mappedPackages);
     } catch (error) {
+      if (!current()) return;
       setServiceTargetOptions([]);
       setPackageTargetOptions([]);
       notifications.warning(extractMessage(error), { dedupeKey: 'promos-target-options-error' });
     } finally {
-      setLoadingTargetOptions(false);
+      if (current()) setLoadingTargetOptions(false);
     }
-  }, [notifications, sucursal]);
+  }, [notifications, sucursal, canUseBranch]);
 
-  useEffect(() => { void fetchBranches(); }, [fetchBranches]);
   useEffect(() => {
-    if (sucursal) return;
-    if (branchIds.length === 1) setSucursal(branchIds[0]);
-    else if (availableBranches.length === 1) setSucursal(availableBranches[0].id_sucursal);
-  }, [availableBranches, branchIds, sucursal]);
-  useEffect(() => { void fetchPromociones(); }, [fetchPromociones]);
-  useEffect(() => { void fetchPromotionTargetOptions(); }, [fetchPromotionTargetOptions]);
+    void fetchBranches();
+    return () => { branchesRequest.current += 1; };
+  }, [fetchBranches]);
   useEffect(() => {
-    if (!dialogOpen) return;
-    setFormValues((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      if (
-        next.id_servicio_objetivo
-        && !serviceTargetOptions.some((item) => String(item.value) === String(next.id_servicio_objetivo))
-      ) {
-        next.id_servicio_objetivo = '';
-        changed = true;
-      }
-      if (
-        next.id_paquete_objetivo
-        && !packageTargetOptions.some((item) => String(item.value) === String(next.id_paquete_objetivo))
-      ) {
-        next.id_paquete_objetivo = '';
-        changed = true;
-      }
-      return changed ? next : prev;
-    });
-  }, [dialogOpen, packageTargetOptions, serviceTargetOptions]);
+    const allowed = JSON.parse(branchKey);
+    if (!isSuperAdmin && sucursal && !allowed.includes(sucursal)) setSucursal(allowed.length === 1 ? allowed[0] : '');
+    else if (!isSuperAdmin && !sucursal && allowed.length === 1) setSucursal(allowed[0]);
+  }, [branchKey, isSuperAdmin, sucursal]);
+  useEffect(() => { void fetchPromociones(); }, [fetchPromociones, scopeKey]);
+  useEffect(() => { void fetchPromotionTargetOptions(); }, [fetchPromotionTargetOptions, scopeKey]);
 
   function clearAllFilters() { setSearch(''); setFilters({ ...FILTER_DEFAULTS }); }
   function clearChip(key) {
@@ -1149,6 +1217,9 @@ export default function AdminConfiguracionPromocionesPage() {
       notifications.warning('Selecciona una sucursal para crear promociones.', { dedupeKey: 'promos-branch-required' });
       return;
     }
+    closeDetail();
+    editorRequest.current += 1;
+    setFormLoading(false);
     setEditTarget(null);
     setFormValues({ ...FORM_DEFAULTS, id_sucursal: sucursal || '' });
     setFormError('');
@@ -1156,39 +1227,55 @@ export default function AdminConfiguracionPromocionesPage() {
   }
 
   async function openEditar(promo) {
-    const branchId = promo?.id_sucursal || sucursal;
-    if (!branchId) return;
+    if (!canUseBranch || promo?.id_sucursal !== sucursal) return;
+    closeDetail();
+    const branchId = sucursal;
+    const request = ++editorRequest.current;
+    const scope = scopeGeneration.current;
+    const current = () => mountedRef.current && scope === scopeGeneration.current && request === editorRequest.current;
     setFormLoading(true);
     setEditTarget(promo);
     setFormError('');
     try {
       const response = await getAdminConfigPromocion(promo.id_promocion, { id_sucursal: branchId });
+      if (!current()) return;
       const payload = response?.data || response;
       setFormValues(mapToForm(payload?.promocion || promo, branchId));
       setDialogOpen(true);
     } catch (error) {
+      if (!current()) return;
       notifications.error(extractMessage(error), { dedupeKey: 'promos-edit-load-error' });
       setEditTarget(null);
-    } finally { setFormLoading(false); }
+    } finally { if (current()) setFormLoading(false); }
   }
 
   async function openDetail(promo) {
-    const branchId = promo?.id_sucursal || sucursal;
-    if (!branchId) return;
+    if (!canUseBranch || promo?.id_sucursal !== sucursal) return;
+    closeEditor();
+    const branchId = sucursal;
+    const request = ++detailRequest.current;
+    const scope = scopeGeneration.current;
+    const current = () => mountedRef.current && scope === scopeGeneration.current && request === detailRequest.current;
     setDetailOpen(true);
     setDetailLoading(true);
     setDetailTarget(null);
     try {
       const response = await getAdminConfigPromocion(promo.id_promocion, { id_sucursal: branchId });
+      if (!current()) return;
       const payload = response?.data || response;
       setDetailTarget(payload?.promocion || null);
     } catch (error) {
+      if (!current()) return;
       notifications.error(extractMessage(error), { dedupeKey: 'promos-detail-error' });
       setDetailOpen(false);
-    } finally { setDetailLoading(false); }
+    } finally { if (current()) setDetailLoading(false); }
   }
 
   async function handleGuardar() {
+    if (!canUseBranch || formValues.id_sucursal !== sucursal || formLoading) return;
+    const request = editorRequest.current;
+    const scope = scopeGeneration.current;
+    const current = () => mountedRef.current && scope === scopeGeneration.current && request === editorRequest.current;
     const errorText = validate(formValues);
     if (errorText) { setFormError(errorText); return; }
     setFormLoading(true);
@@ -1197,12 +1284,14 @@ export default function AdminConfiguracionPromocionesPage() {
       const payload = toPayload(formValues);
       if (editTarget?.id_promocion) {
         const response = await updateAdminConfigPromocion(editTarget.id_promocion, payload);
+        if (!current()) return;
         const data = response?.data || response;
         if (data?.promocion) setPromociones((current) => upsertPromo(current, data.promocion));
         emitCatalogSync('promocion-updated');
         notifications.success('Promocion actualizada correctamente.', { dedupeKey: 'promos-update-ok' });
       } else {
         const response = await createAdminConfigPromocion(payload);
+        if (!current()) return;
         const data = response?.data || response;
         if (data?.promocion) setPromociones((current) => upsertPromo(current, data.promocion));
         emitCatalogSync('promocion-created');
@@ -1213,10 +1302,11 @@ export default function AdminConfiguracionPromocionesPage() {
       setEditTarget(null);
       await fetchPromociones({ silent: true });
     } catch (error) {
+      if (!current()) return;
       const message = extractMessage(error);
       setFormError(message);
       notifications.error(message, { dedupeKey: 'promos-save-error' });
-    } finally { setFormLoading(false); }
+    } finally { if (current()) setFormLoading(false); }
   }
 
   function renderActions(promo) {
@@ -1240,7 +1330,7 @@ export default function AdminConfiguracionPromocionesPage() {
               <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Promociones</h1>
               <p className="text-sm text-[var(--mf-text-2)]">{subtitle}</p>
             </div>
-            <SucursalSelector branchIds={branchIds} allBranches={allBranches} selected={sucursal} onChange={setSucursal} loading={loadingBranches} />
+            <SucursalSelector branchIds={branchIds} allBranches={allBranches} selected={sucursal} onChange={setSucursal} loading={loadingBranches} isSuperAdmin={isSuperAdmin} />
             {branchLoadError ? <ErrorBanner message={branchLoadError} /> : null}
           </div>
 
@@ -1266,7 +1356,8 @@ export default function AdminConfiguracionPromocionesPage() {
 
       {loading ? <LoadingSpinner label="Cargando promociones..." /> : null}
       {!loading && listError ? <ErrorBanner message={listError} onRetry={() => void fetchPromociones()} /> : null}
-      {!loading && !listError && promociones.length === 0 ? <EmptyState icon={Gift} title="Sin promociones registradas" description="Crea la primera promocion por sucursal para preparar la landing publica." actionLabel="Crear promocion" onAction={openNuevo} /> : null}
+      {!canRead && canManage ? <p role="status">{branchIds.length ? 'Selecciona una sucursal autorizada para consultar promociones.' : 'No tienes sucursales autorizadas para operar.'}</p> : null}
+      {canRead && !loading && !listError && promociones.length === 0 ? <EmptyState icon={Gift} title="Sin promociones registradas" description="Crea la primera promocion por sucursal para preparar la landing publica." actionLabel="Crear promocion" onAction={openNuevo} /> : null}
       {!loading && !listError && promociones.length > 0 && filteredPromociones.length === 0 ? <EmptyState icon={Search} title="Sin resultados" description="No hay coincidencias con la busqueda o filtros actuales." /> : null}
 
       {!loading && !listError && filteredPromociones.length > 0 && view === 'cards' ? (
@@ -1323,7 +1414,7 @@ export default function AdminConfiguracionPromocionesPage() {
         </div>
       ) : null}
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading) setDialogOpen(open); }}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading && !open) closeEditor(); }}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editTarget ? 'Editar promocion' : 'Nueva promocion'}</DialogTitle><DialogDescription className="sr-only">Configura contenido, publicacion y vigencia de la promocion por sucursal.</DialogDescription></DialogHeader>
           <PromotionForm
@@ -1336,11 +1427,11 @@ export default function AdminConfiguracionPromocionesPage() {
             loadingTargets={loadingTargetOptions}
             errorMessage={formError}
           />
-          <DialogFooter className="mt-2"><Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>Cancelar</Button><Button onClick={() => void handleGuardar()} disabled={formLoading} className="gap-2 min-w-[140px]">{formLoading ? <Loader2 size={15} className="animate-spin" /> : null}{editTarget ? 'Guardar cambios' : 'Crear promocion'}</Button></DialogFooter>
+          <DialogFooter className="mt-2"><Button variant="outline" onClick={closeEditor} disabled={formLoading}>Cancelar</Button><Button onClick={() => void handleGuardar()} disabled={formLoading || actionsLockedByBranch} className="gap-2 min-w-[140px]">{formLoading ? <Loader2 size={15} className="animate-spin" /> : null}{editTarget ? 'Guardar cambios' : 'Crear promocion'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <Dialog open={detailOpen} onOpenChange={(open) => { if (!open) closeDetail(); }}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Detalle de promocion</DialogTitle><DialogDescription className="sr-only">Consulta campos basicos de la promocion y su estado de publicacion.</DialogDescription></DialogHeader>
           {detailLoading ? <LoadingSpinner label="Cargando detalle..." /> : null}

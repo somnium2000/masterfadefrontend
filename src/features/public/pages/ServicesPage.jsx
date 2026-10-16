@@ -32,7 +32,7 @@ function formatPriceHnl(value) {
   return `L ${amount.toFixed(2)}`;
 }
 
-function ServiceCard({ item, compact = false }) {
+function ServiceCard({ item, compact = false, nonBookable = false }) {
   const displayPrice = formatPriceHnl(item?.precio_hnl);
   return (
     <motion.article
@@ -40,12 +40,14 @@ function ServiceCard({ item, compact = false }) {
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="mf-glass-surface flex w-[85vw] shrink-0 snap-start flex-col justify-between rounded-[28px] p-5 sm:w-[68vw] lg:w-[calc((100%-2rem)/3)]"
+      className={nonBookable
+        ? 'mf-glass-surface flex min-w-0 flex-col justify-between rounded-[28px] p-5'
+        : 'mf-glass-surface flex w-[85vw] shrink-0 snap-start flex-col justify-between rounded-[28px] p-5 sm:w-[68vw] lg:w-[calc((100%-2rem)/3)]'}
     >
       <div className="flex items-start gap-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">
-            {compact ? 'Informativo' : 'Servicio'}
+            {nonBookable ? 'No disponible para agendar' : compact ? 'Informativo' : 'Servicio'}
           </p>
           <h3 className="mf-font-display mt-3 text-[28px] leading-[0.95] text-[var(--mf-text)]">
             {item.nombre_servicio}
@@ -213,105 +215,145 @@ function CatalogSection({ icon: Icon, title, eyebrow, items, emptyMessage, child
   );
 }
 
+function CatalogLoadError({ message, onRetry }) {
+  return (
+    <div className="mf-glass-surface mt-8 rounded-[28px] p-6 text-center" role="alert">
+      <p className="text-sm leading-6 text-[var(--mf-text-2)]">{message}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mf-accent-gradient mt-6 inline-flex h-11 items-center justify-center rounded-2xl px-5 text-sm font-semibold shadow-[var(--mf-shadow-accent)]"
+      >
+        Reintentar
+      </button>
+    </div>
+  );
+}
+
 export default function ServicesPage() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const isMountedRef = useRef(true);
   const selectedBranchRef = useRef('');
+  const validBranchIdsRef = useRef(new Set());
+  const catalogRequestRef = useRef(0);
+  const branchRequestRef = useRef(0);
   const [status, setStatus] = useState('loading');
   const [branches, setBranches] = useState([]);
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [services, setServices] = useState([]);
   const [packages, setPackages] = useState([]);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [servicesError, setServicesError] = useState(false);
+  const [packagesError, setPackagesError] = useState(false);
+
+  const invalidatePendingRequests = useCallback(() => {
+    ++catalogRequestRef.current;
+    ++branchRequestRef.current;
+  }, []);
 
   const loadCatalog = useCallback(async ({ silent = false, branchId = selectedBranchRef.current } = {}) => {
+    if (!branchId || !validBranchIdsRef.current.has(branchId) || branchId !== selectedBranchRef.current) return;
+    const requestId = ++catalogRequestRef.current;
+    const isCurrent = () => isMountedRef.current
+      && requestId === catalogRequestRef.current
+      && branchId === selectedBranchRef.current;
     if (!silent) {
       setStatus('loading');
     }
-    setErrorMessage('');
+    const [servicesResult, packagesResult] = await Promise.allSettled([
+      listPublicCatalogServices({ id_sucursal: branchId }),
+      listPublicCatalogPackages({ id_sucursal: branchId }),
+    ]);
+    if (!isCurrent()) return;
 
-    try {
-      const [servicesResult, packagesResult] = await Promise.allSettled([
-        listPublicCatalogServices({ id_sucursal: branchId || undefined }),
-        listPublicCatalogPackages({ id_sucursal: branchId || undefined }),
-      ]);
-
-      if (servicesResult.status !== 'fulfilled') {
-        throw servicesResult.reason;
-      }
-
-      if (!isMountedRef.current) return;
-      setServices(Array.isArray(servicesResult.value?.services) ? servicesResult.value.services : []);
-      setPackages(
-        packagesResult.status === 'fulfilled' && Array.isArray(packagesResult.value?.packages)
-          ? packagesResult.value.packages
-          : []
-      );
-      setStatus('success');
-    } catch (error) {
-      if (!isMountedRef.current) return;
-      setErrorMessage(error?.data?.error?.message || error?.message || 'No se pudo cargar el catalogo.');
-      setStatus('error');
-    }
+    const failedServices = servicesResult.status === 'rejected';
+    const failedPackages = packagesResult.status === 'rejected';
+    setServices(failedServices ? [] : (Array.isArray(servicesResult.value?.services) ? servicesResult.value.services : []));
+    setPackages(failedPackages ? [] : (Array.isArray(packagesResult.value?.packages) ? packagesResult.value.packages : []));
+    setServicesError(failedServices);
+    setPackagesError(failedPackages);
+    setStatus(failedServices && failedPackages ? 'error' : 'success');
   }, []);
+
+  const loadBranches = useCallback(async () => {
+    const requestId = ++branchRequestRef.current;
+    ++catalogRequestRef.current;
+    setStatus('loading');
+    setServicesError(false);
+    setPackagesError(false);
+    try {
+      const branchResult = await listPublicCatalogBranches();
+      if (!isMountedRef.current || requestId !== branchRequestRef.current) return;
+      const nextBranches = Array.isArray(branchResult?.branches)
+        ? branchResult.branches.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
+        : [];
+      setBranches(nextBranches);
+      validBranchIdsRef.current = new Set(nextBranches.map((branch) => branch.id_sucursal));
+      const initialBranchId = nextBranches[0]?.id_sucursal || '';
+      selectedBranchRef.current = initialBranchId;
+      setSelectedBranchId(initialBranchId);
+      setServices([]);
+      setPackages([]);
+      if (initialBranchId) {
+        void loadCatalog({ branchId: initialBranchId });
+      } else {
+        setStatus('noBranches');
+      }
+    } catch {
+      if (!isMountedRef.current || requestId !== branchRequestRef.current) return;
+      setBranches([]);
+      validBranchIdsRef.current = new Set();
+      selectedBranchRef.current = '';
+      setSelectedBranchId('');
+      setServices([]);
+      setPackages([]);
+      setStatus('branchesError');
+    }
+  }, [loadCatalog]);
 
   useEffect(() => {
     isMountedRef.current = true;
-
-    // AM: Carga sucursales activas y luego levanta el catalogo en el scope de sucursal seleccionado.
+    let active = true;
     queueMicrotask(() => {
-      if (!isMountedRef.current) return;
-      void (async () => {
-        try {
-          const branchResult = await listPublicCatalogBranches();
-          if (!isMountedRef.current) return;
-
-          const nextBranches = Array.isArray(branchResult?.branches)
-            ? branchResult.branches.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
-            : [];
-          setBranches(nextBranches);
-
-          const initialBranchId = nextBranches[0]?.id_sucursal || '';
-          selectedBranchRef.current = initialBranchId;
-          setSelectedBranchId(initialBranchId);
-
-          await loadCatalog({ branchId: initialBranchId });
-        } catch (error) {
-          if (!isMountedRef.current) return;
-          setErrorMessage(error?.data?.error?.message || error?.message || 'No se pudo cargar el catalogo.');
-          setStatus('error');
-        }
-      })();
+      if (active) void loadBranches();
     });
 
     const unsubscribe = subscribeCatalogSync(() => {
-      if (!isMountedRef.current) return;
+      if (!active || !isMountedRef.current) return;
       // AM: Refresco silencioso para reflejar cambios admin sin recargar toda la vista publica.
       void loadCatalog({ silent: true, branchId: selectedBranchRef.current });
     });
 
     return () => {
+      active = false;
       isMountedRef.current = false;
+      invalidatePendingRequests();
       unsubscribe();
     };
-  }, [loadCatalog]);
+  }, [invalidatePendingRequests, loadBranches, loadCatalog]);
 
   function handleBranchChange(nextBranchId) {
     // AM: Evita refrescos redundantes al pulsar la misma sucursal activa.
-    if (!nextBranchId || nextBranchId === selectedBranchRef.current) return;
+    if (!validBranchIdsRef.current.has(nextBranchId) || nextBranchId === selectedBranchRef.current) return;
     // AM: Mantiene seleccion de sucursal y refresca catalogo sin recargar la pantalla completa.
+    ++catalogRequestRef.current;
     selectedBranchRef.current = nextBranchId;
     setSelectedBranchId(nextBranchId);
-    void loadCatalog({ branchId: nextBranchId, silent: true });
+    setServices([]);
+    setPackages([]);
+    setServicesError(false);
+    setPackagesError(false);
+    setStatus('loading');
+    void loadCatalog({ branchId: nextBranchId });
   }
 
   function handleAgendar() {
     navigate('/agendar/barberos');
   }
 
-  const agendableServices = services.filter((item) => item?.servicio_informativo !== true);
+  const agendableServices = services.filter((item) => item?.agendable === true && item?.servicio_informativo !== true);
   const informativeServices = services.filter((item) => item?.servicio_informativo === true);
+  const nonBookableServices = services.filter((item) => item?.agendable !== true && item?.servicio_informativo !== true);
 
   const navItems = [
     { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate('/') },
@@ -423,59 +465,78 @@ export default function ServicesPage() {
             </div>
           ) : null}
 
-          {status === 'error' ? (
-            <div className="mf-glass-surface mt-8 rounded-[28px] p-6 text-center">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">
-                Error de catalogo
-              </p>
-              <p className="mt-4 text-sm leading-6 text-[var(--mf-text-2)]">{errorMessage}</p>
-              <button
-                type="button"
-                onClick={() => void loadCatalog()}
-                className="mf-accent-gradient mt-6 inline-flex h-11 items-center justify-center rounded-2xl px-5 text-sm font-semibold shadow-[var(--mf-shadow-accent)]"
-              >
-                Reintentar
-              </button>
+          {status === 'branchesError' ? (
+            <CatalogLoadError message="No se pudieron cargar las sucursales." onRetry={() => void loadBranches()} />
+          ) : null}
+
+          {status === 'noBranches' ? (
+            <div className="mf-glass-surface mt-8 rounded-[28px] p-6 text-center" role="status">
+              No hay sucursales disponibles en este momento.
             </div>
+          ) : null}
+
+          {status === 'error' ? (
+            <CatalogLoadError message="No se pudieron cargar los servicios ni los paquetes." onRetry={() => void loadCatalog()} />
           ) : null}
 
           {status === 'success' ? (
             <>
-              <CatalogSection
-                icon={Scissors}
-                eyebrow="Servicios"
-                title="Servicios agendables"
-                items={agendableServices}
-                emptyMessage="Aun no hay servicios agendables visibles."
-              >
-                {agendableServices.map((item) => (
-                  <ServiceCard key={item.id_servicio} item={item} />
-                ))}
-              </CatalogSection>
+              {servicesError ? (
+                <CatalogLoadError message="No se pudieron cargar los servicios." onRetry={() => void loadCatalog()} />
+              ) : (
+                <>
+                  <CatalogSection
+                    icon={Scissors}
+                    eyebrow="Servicios"
+                    title="Servicios agendables"
+                    items={agendableServices}
+                    emptyMessage="Aun no hay servicios agendables visibles."
+                  >
+                    {agendableServices.map((item) => (
+                      <ServiceCard key={item.id_servicio} item={item} />
+                    ))}
+                  </CatalogSection>
 
-              <CatalogSection
-                icon={Sparkles}
-                eyebrow="Informativo"
-                title="Servicios informativos"
-                items={informativeServices}
-                emptyMessage="Aun no hay servicios informativos visibles."
-              >
-                {informativeServices.map((item) => (
-                  <ServiceCard key={item.id_servicio} item={item} compact />
-                ))}
-              </CatalogSection>
+                  <CatalogSection
+                    icon={Sparkles}
+                    eyebrow="Informativo"
+                    title="Servicios informativos"
+                    items={informativeServices}
+                    emptyMessage="Aun no hay servicios informativos visibles."
+                  >
+                    {informativeServices.map((item) => (
+                      <ServiceCard key={item.id_servicio} item={item} compact />
+                    ))}
+                  </CatalogSection>
 
-              <CatalogSection
-                icon={CalendarDays}
-                eyebrow="Experiencias"
-                title="Combos / Paquetes"
-                items={packages}
-                emptyMessage="Aun no hay paquetes visibles."
-              >
-                {packages.map((item) => (
-                  <PackageCard key={item.id_paquete} item={item} />
-                ))}
-              </CatalogSection>
+                  {nonBookableServices.length > 0 ? (
+                    <section className="mt-8">
+                      <h2 className="mf-font-display text-[26px] text-[var(--mf-text)]">Servicios no disponibles para agendar</h2>
+                      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {nonBookableServices.map((item) => (
+                          <ServiceCard key={item.id_servicio} item={item} nonBookable />
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+                </>
+              )}
+
+              {packagesError ? (
+                <CatalogLoadError message="No se pudieron cargar los paquetes." onRetry={() => void loadCatalog()} />
+              ) : (
+                <CatalogSection
+                  icon={CalendarDays}
+                  eyebrow="Experiencias"
+                  title="Combos / Paquetes"
+                  items={packages}
+                  emptyMessage="Aun no hay paquetes visibles."
+                >
+                  {packages.map((item) => (
+                    <PackageCard key={item.id_paquete} item={item} />
+                  ))}
+                </CatalogSection>
+              )}
 
             </>
           ) : null}

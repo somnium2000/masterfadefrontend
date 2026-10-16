@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "npm run test:vitest && npm run test:node",
+    "test:vitest": "vitest run --exclude test/accountDeletionClientFlow.test.js --exclude test/adminAccountDeletionFlow.test.js --exclude test/internalAccountDeletionFlow.test.js",
+    "test:node": "node --test test/accountDeletionClientFlow.test.js test/adminAccountDeletionFlow.test.js test/internalAccountDeletionFlow.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

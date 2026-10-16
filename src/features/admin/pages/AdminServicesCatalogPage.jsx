@@ -1,10 +1,10 @@
 ﻿// src/features/admin/pages/AdminServicesCatalogPage.jsx
 // A3 - Pantalla CRUD de catalogo de servicios (Admin).
-// Logica de branchIds: 1 => auto, 2+ => selector por nombre, 0 => dropdown de todas.
+// AM: La API administrativa determina las sucursales disponibles y su seleccion.
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Plus, Pencil, Building2, Scissors, ToggleLeft, ToggleRight, Search, SlidersHorizontal, RotateCcw, X } from 'lucide-react';
+import { Loader2, Plus, Pencil, Building2, Scissors, ToggleLeft, ToggleRight, Search, SlidersHorizontal, RotateCcw, X, List, LayoutGrid, MoreHorizontal, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import {
     listAdminServiciosAgrupados,
@@ -26,8 +26,6 @@ import {
 } from '../../../components/ui/dialog.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
-import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
-import HoverActionButton from '../../../components/data/HoverActionButton.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
@@ -58,16 +56,13 @@ function extractMessage(err) {
 }
 
 /**
- * branchIds  = UUIDs del usuario autenticado (de AuthContext)
- * allBranches = [{id_sucursal, nombre_sucursal}] de la API
+ * allBranches = sucursales autorizadas devueltas por la API administrativa
  * selected   = UUID actualmente seleccionado
  * onChange   = cb(uuid)
  */
-function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingBranches }) {
+function SucursalSelector({ allBranches, selected, onChange, loadingBranches, allowAll }) {
     // AM: Replica el selector premium del submodulo Paquetes para consistencia visual total.
-    const availableBranches = branchIds.length > 0
-        ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-        : allBranches;
+    const availableBranches = allBranches;
     const validBranchIds = new Set(availableBranches.map((branch) => branch.id_sucursal));
     const selectedBranch = availableBranches.find((branch) => branch.id_sucursal === selected);
 
@@ -105,7 +100,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingB
                     onChange(validBranchIds.has(nextValue) ? nextValue : '');
                 }}
             >
-                <option value="">Todas las sucursales</option>
+                <option value="">{allowAll ? 'Todas las sucursales' : 'Selecciona una sucursal'}</option>
                 {availableBranches.map((branch) => (
                     <option key={branch.id_sucursal} value={branch.id_sucursal}>
                         {branch.nombre_sucursal}
@@ -163,6 +158,8 @@ const SERVICE_AGENDABLE_FILTER_LABELS = {
     si: 'Agendable: Si',
     no: 'Agendable: No',
 };
+
+const SERVICES_PAGE_SIZE = 10;
 
 function quickFilterButtonClass(isActive) {
     // AM: Estilo consistente con PERSONAS para que filtros activos sean evidentes en escritorio y móvil.
@@ -373,17 +370,6 @@ function ServiceTypeBadge({ informativo }) {
     );
 }
 
-function GlobalStateRow({ label, value }) {
-    return (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_42%,transparent)] px-3 py-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--mf-text-2)]">{label}</span>
-            <span className={`text-sm font-semibold ${value ? 'text-[var(--mf-success)]' : 'text-[var(--mf-text-2)]'}`}>
-                {value ? 'Sí' : 'No'}
-            </span>
-        </div>
-    );
-}
-
 function BranchConfigField({ label, value }) {
     return (
         <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_72%,transparent)] px-3 py-2">
@@ -433,22 +419,33 @@ function formatActiveBranchesCount(servicio) {
 
 export default function AdminServicesCatalogPage() {
     const navigate = useNavigate();
-    const { branchIds, roles } = useAuth();
+    const { branchIds, roles, user } = useAuth();
     const isSuperAdmin = Array.isArray(roles) && roles.includes('super_admin');
     const canManageServiceBarberAssignments = isSuperAdmin && SERVICE_BARBER_ASSIGNMENTS_ENABLED;
     const notifications = useNotifications();
 
     // Sucursal activa según reglas
-    const [sucursal, setSucursal] = useState(branchIds.length === 1 ? branchIds[0] : '');
+    const [sucursal, setSucursal] = useState('');
     const [allBranches, setAllBranches] = useState([]);
+    const [branchesContext, setBranchesContext] = useState('');
+    const permissionsKey = JSON.stringify([user?.id_usuario ?? null, roles ?? [], [...branchIds].sort()]);
     const [loadingBranches, setLoadingBranches] = useState(false);
     const [branchLoadError, setBranchLoadError] = useState('');
     const [servicios, setServicios] = useState([]);
     const [loading, setLoading] = useState(false);
     const [listError, setListError] = useState('');
+    const requestGenerationRef = useRef(0);
+    const mountedRef = useRef(false);
+    const canQueryScope = branchesContext === permissionsKey && allBranches.length > 0
+        && (isSuperAdmin || Boolean(roles?.includes('admin') && sucursal
+            && allBranches.some((branch) => branch.id_sucursal === sucursal)));
+    const requestScope = JSON.stringify([permissionsKey, sucursal, canQueryScope]);
+    const currentScopeRef = useRef(requestScope);
     const [search, setSearch] = useState('');
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [filters, setFilters] = useState(() => ({ ...SERVICES_FILTER_DEFAULTS }));
+    const [viewMode, setViewMode] = useState('list');
+    const [currentPage, setCurrentPage] = useState(1);
 
     // Dialogo crear/editar
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -478,11 +475,9 @@ export default function AdminServicesCatalogPage() {
     );
 
     const availableBranches = useMemo(() => {
-        const scopedBranches = branchIds.length > 0
-            ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-            : allBranches;
+        const scopedBranches = branchesContext === permissionsKey && (isSuperAdmin || roles?.includes('admin')) ? allBranches : [];
         return scopedBranches.filter((branch) => branch?.id_sucursal);
-    }, [allBranches, branchIds]);
+    }, [allBranches, branchesContext, permissionsKey, isSuperAdmin, roles]);
 
     // AM: Filtro compuesto de servicios para busqueda local sin recargar backend.
     const filteredServicios = useMemo(() => {
@@ -533,6 +528,20 @@ export default function AdminServicesCatalogPage() {
         [filters]
     );
 
+    const totalPages = Math.max(1, Math.ceil(filteredServicios.length / SERVICES_PAGE_SIZE));
+    const paginatedServicios = useMemo(() => {
+        const start = (currentPage - 1) * SERVICES_PAGE_SIZE;
+        return filteredServicios.slice(start, start + SERVICES_PAGE_SIZE);
+    }, [currentPage, filteredServicios]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [filters, search, sucursal, viewMode]);
+
+    useEffect(() => {
+        setCurrentPage((page) => Math.min(page, totalPages));
+    }, [totalPages]);
+
     const activeFilterChips = useMemo(() => {
         const chips = [];
         const trimmedSearch = search.trim();
@@ -572,6 +581,8 @@ export default function AdminServicesCatalogPage() {
     // â”€â”€ Carga sucursales (para nombres en selector) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     useEffect(() => {
         let cancelled = false;
+        setAllBranches([]);
+        setBranchesContext('');
         setLoadingBranches(true);
         setBranchLoadError('');
         listAdminSucursales({ soloActivas: true })
@@ -582,9 +593,11 @@ export default function AdminServicesCatalogPage() {
                     ? payload.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
                     : [];
                 setAllBranches(nextBranches);
+                setBranchesContext(permissionsKey);
             })
             .catch((err) => {
                 if (cancelled) return;
+                setAllBranches([]);
                 // AM: Evita bloqueo silencioso cuando no se pueden cargar sucursales para operar servicios.
                 const message = extractMessage(err) || 'No se pudieron cargar las sucursales.';
                 setBranchLoadError(message);
@@ -592,22 +605,13 @@ export default function AdminServicesCatalogPage() {
             })
             .finally(() => { if (!cancelled) setLoadingBranches(false); });
         return () => { cancelled = true; };
-    }, [notifications]);
+    }, [notifications, permissionsKey]);
 
-    useEffect(() => {
-        // AM: Si el usuario solo puede operar una sucursal, se autoselecciona para evitar botones bloqueados.
-        if (sucursal) return;
-
-        if (branchIds.length === 1) {
-            setSucursal(branchIds[0]);
-            return;
-        }
-
-        // AM: Super admin con una sola sucursal activa queda operativo sin pasos extra.
-        if (isSuperAdmin && allBranches.length === 1) {
-            setSucursal(allBranches[0].id_sucursal);
-        }
-    }, [sucursal, branchIds, isSuperAdmin, allBranches]);
+    useLayoutEffect(() => {
+        // AM: Solo la respuesta administrativa vigente determina opciones y seleccion automatica.
+        if (sucursal && availableBranches.some((branch) => branch.id_sucursal === sucursal)) return;
+        setSucursal(availableBranches.length === 1 ? availableBranches[0].id_sucursal : '');
+    }, [sucursal, availableBranches]);
 
     useEffect(() => {
         if (!sucursal) return;
@@ -616,18 +620,43 @@ export default function AdminServicesCatalogPage() {
     }, [sucursal]);
 
     // â”€â”€ Carga datos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // AM: Invalida solicitudes y datos del alcance anterior antes de mostrar otra sucursal.
+    useLayoutEffect(() => {
+        mountedRef.current = true;
+        currentScopeRef.current = requestScope;
+        requestGenerationRef.current += 1;
+        setServicios([]);
+        setListError('');
+        setLoading(false);
+        if (!canQueryScope) {
+            setDialogOpen(false);
+            setTariffDialogOpen(false);
+            setRemoveBranchTarget(null);
+            setGlobalDeactivateTarget(null);
+        }
+        return () => {
+            mountedRef.current = false;
+            requestGenerationRef.current += 1;
+        };
+    }, [requestScope, canQueryScope]);
+
     const fetchServicios = useCallback(async ({ silent = false } = {}) => {
-        if (!isSuperAdmin && !sucursal) return; // No llamar API sin sucursal excepto admin
+        if (!mountedRef.current || currentScopeRef.current !== requestScope || !canQueryScope) return;
+        const generation = ++requestGenerationRef.current;
+        const isCurrent = () => mountedRef.current && currentScopeRef.current === requestScope
+            && requestGenerationRef.current === generation;
         if (!silent) {
             setLoading(true);
             setListError('');
         }
         try {
             const data = await listAdminServiciosAgrupados(sucursal ? { id_sucursal: sucursal } : {});
+            if (!isCurrent()) return;
             const payloadData = data?.data ?? data;
             const lista = payloadData?.servicios ?? [];
             setServicios(Array.isArray(lista) ? lista : []);
         } catch (err) {
+            if (!isCurrent()) return;
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
             // AM: Evita mantener datos viejos cuando falla el filtro por sucursal.
@@ -636,11 +665,11 @@ export default function AdminServicesCatalogPage() {
                 setListError(extractMessage(err));
             }
         } finally {
-            if (!silent) {
+            if (isCurrent() && !silent) {
                 setLoading(false);
             }
         }
-    }, [sucursal, navigate, isSuperAdmin]);
+    }, [sucursal, navigate, canQueryScope, requestScope]);
 
     useEffect(() => {
         void fetchServicios();
@@ -1072,7 +1101,7 @@ export default function AdminServicesCatalogPage() {
     // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const sinSucursal = !sucursal;
     // AM: El listado agrupado permite revisar/editar maestro en todas las sucursales; crear sigue requiriendo sucursal.
-    const actionsLockedByBranch = false;
+    const actionsLockedByBranch = !canQueryScope;
     const titleSubtitle = !sucursal && availableBranches.length > 1
         ? 'Gestiona servicios maestro y tarifas por sucursal.'
         : 'Gestiona servicios maestro y tarifas por sucursal.';
@@ -1080,112 +1109,170 @@ export default function AdminServicesCatalogPage() {
     const visibleServicios = useMemo(() => filteredServicios, [filteredServicios]);
     const modeLabel = 'servicios';
 
-    // â”€â”€ Vista Cards de servicios â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    function ServiceBadges({ servicio, selectedTariff }) {
+        const informative = sucursal
+            ? Boolean(selectedTariff?.servicio_informativo)
+            : !servicio.agendable;
+        return (
+            <div className="flex flex-wrap gap-1.5">
+                <ServiceStatusBadge activo={Boolean(servicio.activo)} />
+                <ServiceVisibilityBadge visiblePublico={Boolean(servicio.visible_publico)} />
+                <ServiceAgendableBadge agendable={Boolean(servicio.agendable)} />
+                {informative ? <ServiceTypeBadge informativo /> : null}
+            </div>
+        );
+    }
+
+    function BranchSummary({ servicio, selectedTariff }) {
+        const activeTariffs = getActiveTariffs(servicio);
+        if (sucursal) {
+            if (!selectedTariff?.tarifa_activa) {
+                return <span className="text-sm text-[var(--mf-text-2)]">Sin tarifa activa en esta sucursal</span>;
+            }
+            return (
+                <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-3">
+                    <BranchConfigField label="Precio" value={formatServicePrice(selectedTariff.precio_hnl)} />
+                    <BranchConfigField label="Duración" value={`${selectedTariff.duracion_min ?? '-'} min`} />
+                    <BranchConfigField label="Buffer" value={`${selectedTariff.buffer_min ?? '-'} min`} />
+                </div>
+            );
+        }
+
+        const visibleBranches = activeTariffs.slice(0, 3);
+        return (
+            <div className="space-y-1.5">
+                <p className="text-xs text-[var(--mf-text-2)]">{formatActiveBranchesCount(servicio)}</p>
+                <div className="flex min-w-0 flex-wrap gap-1.5">
+                    {visibleBranches.map((tarifa) => (
+                        <span key={getTarifaKey(tarifa)} className="max-w-full truncate rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-2 py-0.5 text-xs text-[var(--mf-text)]">
+                            {getBranchShortName(tarifa.nombre_sucursal)}
+                        </span>
+                    ))}
+                    {activeTariffs.length > visibleBranches.length ? (
+                        <span className="rounded-full border border-[var(--mf-nav-border)] px-2 py-0.5 text-xs text-[var(--mf-text-2)]">+{activeTariffs.length - visibleBranches.length}</span>
+                    ) : null}
+                    {activeTariffs.length === 0 ? <span className="text-xs text-[var(--mf-text-2)]">Sin sucursales activas</span> : null}
+                </div>
+            </div>
+        );
+    }
+
+    function ServiceActions({ servicio, selectedTariff }) {
+        const globalMode = isSuperAdmin && !sucursal;
+        return (
+            <details className="group relative ml-auto w-fit">
+                <summary
+                    className="inline-flex h-9 min-w-9 cursor-pointer list-none items-center justify-center gap-2 rounded-lg border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-2.5 text-sm font-medium text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mf-accent)] [&::-webkit-details-marker]:hidden"
+                    aria-label={`Acciones de ${servicio.nombre_servicio}`}
+                >
+                    <MoreHorizontal size={17} aria-hidden="true" />
+                    <span className="hidden sm:inline">Acciones</span>
+                </summary>
+                <div className="absolute right-0 z-20 mt-1 grid w-[230px] max-w-[calc(100vw-2rem)] gap-1 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-1.5 shadow-[var(--mf-shadow-soft)]">
+                    {globalMode ? (
+                        <>
+                            <Button type="button" variant="ghost" size="sm" className="justify-start gap-2" disabled={!resolveMutationBranchId(servicio)} onClick={() => openEditar(servicio)}>
+                                <Pencil size={15} /> Editar servicio global
+                            </Button>
+                            {servicio.activo ? (
+                                <Button type="button" variant="ghost" size="sm" className="justify-start gap-2" onClick={() => openGlobalDeactivate(servicio)}>
+                                    <ToggleLeft size={15} /> Desactivar globalmente
+                                </Button>
+                            ) : (
+                                <Button type="button" variant="ghost" size="sm" className="justify-start gap-2" onClick={() => handleReactivateService(servicio)}>
+                                    <ToggleRight size={15} /> Reactivar servicio
+                                </Button>
+                            )}
+                        </>
+                    ) : (
+                        <>
+                            {selectedTariff?.tarifa_activa ? (
+                                <Button type="button" variant="ghost" size="sm" className="justify-start gap-2" onClick={() => openTarifa(servicio, selectedTariff)}>
+                                    <Pencil size={15} /> Editar tarifa
+                                </Button>
+                            ) : (
+                                <Button type="button" variant="ghost" size="sm" className="justify-start gap-2" onClick={() => openAgregarSucursal(servicio)}>
+                                    <Plus size={15} /> Agregar a esta sucursal
+                                </Button>
+                            )}
+                            {selectedTariff?.tarifa_activa ? (
+                                <Button type="button" variant="ghost" size="sm" className="justify-start gap-2" onClick={() => openRemoveBranch(servicio, selectedTariff)}>
+                                    <ToggleLeft size={15} /> Desactivar en esta sucursal
+                                </Button>
+                            ) : null}
+                        </>
+                    )}
+                </div>
+            </details>
+        );
+    }
+
+    function ServicioList() {
+        return (
+            <section aria-label="Lista de servicios" className="@container overflow-visible rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)]">
+                <div role="row" className="hidden grid-cols-[minmax(220px,1.5fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_auto] gap-4 border-b border-[var(--mf-nav-border)] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)] @[54rem]:grid">
+                    <span>Servicio</span><span>Estado maestro</span><span>{sucursal ? 'Tarifa local' : 'Sucursales'}</span><span className="text-right">Acciones</span>
+                </div>
+                <div className="divide-y divide-[var(--mf-nav-border)]">
+                    {paginatedServicios.map((servicio) => {
+                        const selectedTariff = sucursal ? getSelectedBranchTariff(servicio, sucursal) : null;
+                        return (
+                            <article key={buildServicioScopeKey(servicio)} role="row" className="grid min-w-0 gap-3 px-3 py-3 transition-colors hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_40%,transparent)] sm:px-4 @[54rem]:grid-cols-[minmax(220px,1.5fr)_minmax(220px,1fr)_minmax(260px,1.25fr)_auto] @[54rem]:items-center @[54rem]:gap-4">
+                                <div className="flex min-w-0 items-start gap-3">
+                                    <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Scissors size={16} /></span>
+                                    <div className="min-w-0">
+                                        <h2 className="break-words text-sm font-semibold leading-5 text-[var(--mf-text)]">{servicio.nombre_servicio}</h2>
+                                        {servicio.descripcion ? <p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-[var(--mf-text-2)]">{servicio.descripcion}</p> : null}
+                                    </div>
+                                </div>
+                                <ServiceBadges servicio={servicio} selectedTariff={selectedTariff} />
+                                <BranchSummary servicio={servicio} selectedTariff={selectedTariff} />
+                                <ServiceActions servicio={servicio} selectedTariff={selectedTariff} />
+                            </article>
+                        );
+                    })}
+                </div>
+            </section>
+        );
+    }
+
     function ServicioCards() {
         return (
-            <CardsCarousel
-                items={visibleServicios}
-                getItemKey={(servicio) => buildServicioScopeKey(servicio)}
-                showHeaderTag={false}
-                renderItem={(s, i, pageIndex) => {
-                    const selectedTariff = sucursal ? getSelectedBranchTariff(s, sucursal) : null;
-                    const activeTariffs = getActiveTariffs(s);
-                    const globalMode = !sucursal;
+            <section aria-label="Tarjetas de servicios" className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {paginatedServicios.map((servicio) => {
+                    const selectedTariff = sucursal ? getSelectedBranchTariff(servicio, sucursal) : null;
                     return (
-                        <div
-                            key={buildServicioScopeKey(s)}
-                            className="rounded-[20px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-4 shadow-[var(--mf-shadow-soft)]"
-                            style={{ animationDelay: `${(pageIndex * 0.02) + (i * 0.05)}s` }}
-                        >
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                <div className="flex min-w-0 items-start gap-3">
-                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]">
-                                        <Scissors size={20} />
-                                    </div>
-                                    <div className="min-w-0">
-                                        <p className="text-sm font-semibold leading-tight text-[var(--mf-text)] break-words">{s.nombre_servicio}</p>
-                                        {s.descripcion ? <p className="mt-0.5 text-xs leading-snug text-[var(--mf-text-2)] break-words">{s.descripcion}</p> : null}
-                                        <div className="mt-2 flex flex-wrap gap-1.5">
-                                            <ServiceStatusBadge activo={Boolean(s.activo)} />
-                                            {activeTariffs.length === 0 ? <span className="mf-badge mf-badge-muted">Sin sucursales activas</span> : null}
-                                        </div>
-                                    </div>
+                        <article key={buildServicioScopeKey(servicio)} className="flex min-w-0 flex-col rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)] p-4 shadow-[var(--mf-shadow-soft)]">
+                            <div className="flex min-w-0 items-start gap-3">
+                                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Scissors size={18} /></span>
+                                <div className="min-w-0">
+                                    <h2 className="break-words text-sm font-semibold text-[var(--mf-text)]">{servicio.nombre_servicio}</h2>
+                                    {servicio.descripcion ? <p className="mt-1 line-clamp-2 break-words text-xs leading-5 text-[var(--mf-text-2)]">{servicio.descripcion}</p> : null}
                                 </div>
-                                {globalMode ? (
-                                    <div className="min-w-[220px] rounded-xl border border-[var(--mf-nav-border)] p-3">
-                                        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Estado global</p>
-                                        <div className="grid gap-2">
-                                            <GlobalStateRow label="Activo" value={Boolean(s.activo)} />
-                                            <GlobalStateRow label="Visible en catálogo" value={Boolean(s.visible_publico)} />
-                                            <GlobalStateRow label="Reservable" value={Boolean(s.agendable)} />
-                                        </div>
-                                    </div>
-                                ) : null}
                             </div>
-
-                            {globalMode ? (
-                                <div className="mt-4 border-t border-[var(--mf-nav-border)] pt-3">
-                                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Sucursales activas</p>
-                                    <p className="mt-1 text-sm text-[var(--mf-text-2)]">{formatActiveBranchesCount(s)}</p>
-                                    <div className="flex flex-wrap gap-2">
-                                        {activeTariffs.map((tarifa) => (
-                                            <span key={getTarifaKey(tarifa)} className="rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-2.5 py-1 text-xs text-[var(--mf-text)]">
-                                                {getBranchShortName(tarifa.nombre_sucursal)}
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="mt-4 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_42%,transparent)] p-3">
-                                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Configuración en esta sucursal</p>
-                                    <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">{selectedTariff?.nombre_sucursal || 'Sucursal seleccionada'}</p>
-                                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                                        <BranchConfigField label="Precio" value={formatServicePrice(selectedTariff?.precio_hnl)} />
-                                        <BranchConfigField label="Duración" value={`${selectedTariff?.duracion_min ?? '-'} min`} />
-                                        <BranchConfigField label="Buffer" value={`${selectedTariff?.buffer_min ?? '-'} min`} />
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--mf-nav-border)] pt-3">
-                                {globalMode ? (
-                                    <>
-                                        <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" disabled={!resolveMutationBranchId(s)} onClick={() => openEditar(s)}>
-                                            <Pencil size={15} /> Editar servicio global
-                                        </Button>
-                                        {s.activo ? (
-                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openGlobalDeactivate(s)}>
-                                                <ToggleLeft size={15} /> Desactivar globalmente
-                                            </Button>
-                                        ) : (
-                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => handleReactivateService(s)}>
-                                                <ToggleRight size={15} /> Reactivar servicio
-                                            </Button>
-                                        )}
-                                    </>
-                                ) : (
-                                    <>
-                                        {selectedTariff?.tarifa_activa ? (
-                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openTarifa(s, selectedTariff)}>
-                                                <Pencil size={15} /> Editar tarifa
-                                            </Button>
-                                        ) : (
-                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openAgregarSucursal(s)}>
-                                                <Plus size={15} /> Agregar a esta sucursal
-                                            </Button>
-                                        )}
-                                        {selectedTariff?.tarifa_activa ? (
-                                            <Button type="button" variant="outline" size="sm" className="gap-2 w-full sm:w-auto" onClick={() => openRemoveBranch(s, selectedTariff)}>
-                                                <ToggleLeft size={15} /> Desactivar en esta sucursal
-                                            </Button>
-                                        ) : null}
-                                    </>
-                                )}
-                            </div>
-                        </div>
+                            <div className="mt-3"><ServiceBadges servicio={servicio} selectedTariff={selectedTariff} /></div>
+                            <div className="mt-3 border-t border-[var(--mf-nav-border)] pt-3"><BranchSummary servicio={servicio} selectedTariff={selectedTariff} /></div>
+                            <div className="mt-auto pt-3"><ServiceActions servicio={servicio} selectedTariff={selectedTariff} /></div>
+                        </article>
                     );
-                }}
-            />
+                })}
+            </section>
+        );
+    }
+
+    function PaginationControls() {
+        if (totalPages <= 1) return null;
+        const firstVisible = ((currentPage - 1) * SERVICES_PAGE_SIZE) + 1;
+        const lastVisible = Math.min(currentPage * SERVICES_PAGE_SIZE, visibleServicios.length);
+        return (
+            <nav aria-label="Paginación de servicios" className="flex flex-col items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2 sm:flex-row">
+                <p className="text-xs text-[var(--mf-text-2)]">Mostrando {firstVisible}-{lastVisible} de {visibleServicios.length}</p>
+                <div className="flex items-center gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={currentPage === 1} aria-label="Página anterior"><ChevronLeft size={15} /></Button>
+                    <span className="min-w-[88px] text-center text-xs text-[var(--mf-text-2)]">Página {currentPage} de {totalPages}</span>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} disabled={currentPage === totalPages} aria-label="Página siguiente"><ChevronRight size={15} /></Button>
+                </div>
+            </nav>
         );
     }
 
@@ -1195,25 +1282,43 @@ export default function AdminServicesCatalogPage() {
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
                     <div className="space-y-3">
                         <div className="space-y-1">
-                            <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Catalogo - Servicios</p>
+                            <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Catálogo · Servicios</p>
                             <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Servicios</h1>
                             <p className="text-sm text-[var(--mf-text-2)]">{titleSubtitle}</p>
                         </div>
                         <SucursalSelector
-                            branchIds={branchIds}
-                            allBranches={allBranches}
+                            allBranches={availableBranches}
                             selected={sucursal}
                             onChange={setSucursal}
                             loadingBranches={loadingBranches}
+                            allowAll={isSuperAdmin}
                         />
                         {branchLoadError && <ErrorBanner message={branchLoadError} />}
                     </div>
 
                     <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[560px]">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                                <p className="text-sm text-[var(--mf-text-2)]">
-                                    {loading ? 'Cargando...' : `${visibleServicios.length} ${modeLabel}`}
-                                </p>
+                            <p className="text-sm text-[var(--mf-text-2)]">
+                                {loading ? 'Cargando...' : `${visibleServicios.length} ${modeLabel}`}
+                            </p>
+                            <div className="inline-flex rounded-lg border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] p-0.5" role="group" aria-label="Vista del catálogo">
+                                <button
+                                    type="button"
+                                    onClick={() => setViewMode('list')}
+                                    aria-pressed={viewMode === 'list'}
+                                    className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors ${viewMode === 'list' ? 'bg-[var(--mf-accent)] text-[var(--mf-accent-text)]' : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]'}`}
+                                >
+                                    <List size={14} /> Lista
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setViewMode('cards')}
+                                    aria-pressed={viewMode === 'cards'}
+                                    className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors ${viewMode === 'cards' ? 'bg-[var(--mf-accent)] text-[var(--mf-accent-text)]' : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]'}`}
+                                >
+                                    <LayoutGrid size={14} /> Tarjetas
+                                </button>
+                            </div>
                         </div>
 
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -1281,23 +1386,29 @@ export default function AdminServicesCatalogPage() {
             ) : null}
 
             {/* Estados */}
+            {!canQueryScope && (
+                <EmptyState icon={Building2} title="Selecciona una sucursal" description="Selecciona una sucursal autorizada para consultar y gestionar sus servicios." />
+            )}
             {listError && <ErrorBanner message={listError} onRetry={fetchServicios} />}
             {loading && !listError && <LoadingSpinner />}
 
-            {!loading && !listError && servicios.length === 0 && (!sinSucursal || isSuperAdmin) && (
+            {canQueryScope && !loading && !listError && servicios.length === 0 && (!sinSucursal || isSuperAdmin) && (
                 <EmptyState
                     icon={Scissors}
                     title="Sin servicios"
                     description={sinSucursal ? 'No hay servicios registrados aun.' : 'No hay servicios registrados para esta sucursal.'}
                 />
             )}
-            {!loading && !listError && servicios.length > 0 && visibleServicios.length === 0 && (
+            {canQueryScope && !loading && !listError && servicios.length > 0 && visibleServicios.length === 0 && (
                 <EmptyState icon={Search} title="Sin resultados" description="No hay coincidencias con la busqueda o filtros actuales." />
             )}
 
             {/* Datos */}
-            {!loading && !listError && visibleServicios.length > 0 && (
-                <ServicioCards />
+            {canQueryScope && !loading && !listError && visibleServicios.length > 0 && (
+                <div className="space-y-3">
+                    {viewMode === 'list' ? <ServicioList /> : <ServicioCards />}
+                    <PaginationControls />
+                </div>
             )}
 
             {/* Dialog Crear / Editar */}
@@ -1577,7 +1688,7 @@ export default function AdminServicesCatalogPage() {
                                 <option value="no">No</option>
                             </select>
                         </div>
-                        {!sucursal ? (
+                        {isSuperAdmin && !sucursal ? (
                             <div className="sm:col-span-2">
                                 <Label className="mf-label">Sucursal</Label>
                                 <select
@@ -1595,7 +1706,7 @@ export default function AdminServicesCatalogPage() {
                             </div>
                         ) : (
                             <p className="sm:col-span-2 text-xs text-[var(--mf-text-2)]">
-                                La sucursal ya esta fijada en el selector superior.
+                                {sucursal ? 'La sucursal ya esta fijada en el selector superior.' : 'Selecciona una sucursal en el selector superior.'}
                             </p>
                         )}
                     </div>
