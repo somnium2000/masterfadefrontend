@@ -257,6 +257,8 @@ export default function MembershipPlansPage() {
   const purchaseIdentity = isClienteSession && PURCHASE_UUID_REGEX.test(userId) && PURCHASE_UUID_REGEX.test(authenticatedClienteId)
     ? `${userId}:${authenticatedClienteId}` : "";
   const purchaseIdentityRef = useRef(purchaseIdentity);
+  const purchaseGenerationRef = useRef(0);
+  const membershipRequestRef = useRef(0);
 
   const [status, setStatus] = useState("loading");
   const [branches, setBranches] = useState([]);
@@ -281,6 +283,22 @@ export default function MembershipPlansPage() {
 
   useLayoutEffect(() => {
     const previousIdentity = purchaseAttemptRef.current?.identity || purchaseIdentityRef.current;
+    // AM: Una nueva sesion invalida tambien respuestas de la misma cuenta anterior al logout.
+    if (previousIdentity && previousIdentity !== purchaseIdentity) {
+      purchaseGenerationRef.current += 1;
+      membershipRequestRef.current += 1;
+      orderCreationOfferRef.current = "";
+      setProcessingPlanOfferId("");
+      setPurchaseModalOpen(false);
+      setPurchaseOrderSummary(null);
+      setMembershipPaymentIntent(null);
+      setPurchaseStep("summary");
+      setPurchaseLoading(false);
+      setPurchaseErrorMessage("");
+      setPurchaseCompleted(false);
+      setMembershipState(null);
+      setMembershipLoading(false);
+    }
     purchaseIdentityRef.current = purchaseIdentity;
     if (isHydrating || isHydrated === false) return;
     const stored = readStoredPurchaseAttempt();
@@ -391,22 +409,27 @@ export default function MembershipPlansPage() {
   }, []);
 
   const loadMembershipState = useCallback(async () => {
-    if (!isClienteSession) {
+    const requestId = ++membershipRequestRef.current;
+    const generation = purchaseGenerationRef.current;
+    const isCurrent = () => isMountedRef.current && requestId === membershipRequestRef.current
+      && generation === purchaseGenerationRef.current && purchaseIdentityRef.current === purchaseIdentity;
+    if (!purchaseIdentity || isHydrating || isHydrated === false) {
       setMembershipState(null);
+      setMembershipLoading(false);
       return;
     }
     setMembershipLoading(true);
     try {
       const payload = await getClientePlanEstado();
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       setMembershipState(payload);
     } catch {
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       setMembershipState(null);
     } finally {
-      if (isMountedRef.current) setMembershipLoading(false);
+      if (isCurrent()) setMembershipLoading(false);
     }
-  }, [isClienteSession]);
+  }, [purchaseIdentity, isHydrating, isHydrated]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -423,6 +446,8 @@ export default function MembershipPlansPage() {
     return () => {
       active = false;
       isMountedRef.current = false;
+      purchaseGenerationRef.current += 1;
+      membershipRequestRef.current += 1;
       branchRequestRef.current += 1;
       planRequestRef.current += 1;
       unsubscribe();
@@ -496,12 +521,13 @@ export default function MembershipPlansPage() {
 
     // AM: Exclusion inmediata antes del render para conservar la oferta y sucursal de origen.
     orderCreationOfferRef.current = planBranchOfferId;
+    const generation = purchaseGenerationRef.current;
     setProcessingPlanOfferId(planBranchOfferId);
     let attempt;
     try {
       attempt = getPurchaseAttempt(planBranchOfferId);
       const orderResponse = await createMembershipOrder(planBranchOfferId, { idempotencyKey: attempt.key });
-      if (!isMountedRef.current || purchaseIdentityRef.current !== attempt.identity
+      if (!isMountedRef.current || generation !== purchaseGenerationRef.current || purchaseIdentityRef.current !== attempt.identity
         || purchaseAttemptRef.current?.key !== attempt.key) return;
       const summary = orderResponse?.data || orderResponse;
       if (!summary || typeof summary.id_order !== "string" || !summary.id_order.trim()) {
@@ -515,7 +541,7 @@ export default function MembershipPlansPage() {
       setPurchaseModalOpen(true);
       markPurchaseAttempt(attempt, "resolved");
     } catch (error) {
-      if (!isMountedRef.current || purchaseIdentityRef.current !== purchaseIdentity
+      if (!isMountedRef.current || generation !== purchaseGenerationRef.current || purchaseIdentityRef.current !== purchaseIdentity
         || (attempt && purchaseAttemptRef.current?.key !== attempt.key)) return;
       const code = error?.data?.error?.code || error?.code;
       if (["MEMBERSHIP_PURCHASE_IDEMPOTENCY_CONFLICT", "MEMBERSHIP_PURCHASE_IDEMPOTENCY_ORDER_UNAVAILABLE"].includes(code)) {
@@ -539,26 +565,32 @@ export default function MembershipPlansPage() {
         notifications.error("No se pudo crear la orden de compra. Reintenta la misma oferta.");
       }
     } finally {
-      orderCreationOfferRef.current = "";
-      if (isMountedRef.current) setProcessingPlanOfferId("");
+      if (isMountedRef.current && generation === purchaseGenerationRef.current) {
+        orderCreationOfferRef.current = "";
+        setProcessingPlanOfferId("");
+      }
     }
   }
 
   async function handleContinueToPayment() {
     const orderId = String(purchaseOrderSummary?.id_order || "").trim();
     if (!orderId || purchaseLoading) return;
+    const generation = purchaseGenerationRef.current;
+    const isCurrent = () => isMountedRef.current && generation === purchaseGenerationRef.current;
 
     setPurchaseLoading(true);
     setPurchaseErrorMessage("");
     try {
       const intentResponse = await createMembershipPaymentIntent(orderId);
+      if (!isCurrent()) return;
       const intentData = intentResponse?.data || intentResponse;
       setMembershipPaymentIntent(intentData);
       setPurchaseStep("payment");
     } catch (error) {
+      if (!isCurrent()) return;
       setPurchaseErrorMessage(error?.data?.error?.message || "No se pudo iniciar el pago del plan.");
     } finally {
-      setPurchaseLoading(false);
+      if (isCurrent()) setPurchaseLoading(false);
     }
   }
 
@@ -569,6 +601,8 @@ export default function MembershipPlansPage() {
       setPurchaseErrorMessage("No hay intent de pago disponible para confirmar.");
       return;
     }
+    const generation = purchaseGenerationRef.current;
+    const isCurrent = () => isMountedRef.current && generation === purchaseGenerationRef.current;
 
     setPurchaseLoading(true);
     setPurchaseErrorMessage("");
@@ -576,14 +610,17 @@ export default function MembershipPlansPage() {
       await confirmMembershipPayment(paymentIntentId, {
         monto_prueba_hnl: showMembershipSimulator ? DEFAULT_MEMBERSHIP_SIMULATION_AMOUNT : undefined,
       });
+      if (!isCurrent()) return;
       setPurchaseCompleted(true);
       setPurchaseStep("success");
       await loadMembershipState();
+      if (!isCurrent()) return;
       notifications.success("Pago confirmado. Tu plan ya esta activo.");
     } catch (error) {
+      if (!isCurrent()) return;
       setPurchaseErrorMessage(error?.data?.error?.message || "No se pudo confirmar el pago del plan.");
     } finally {
-      setPurchaseLoading(false);
+      if (isCurrent()) setPurchaseLoading(false);
     }
   }
 
