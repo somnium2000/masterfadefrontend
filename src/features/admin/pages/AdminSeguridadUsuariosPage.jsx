@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Filter, RotateCcw, Search, ShieldAlert } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
@@ -119,7 +119,7 @@ function resolveActionMessage(error) {
 export default function AdminSeguridadUsuariosPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
-  const { roles } = useAuth();
+  const { roles, user } = useAuth();
 
   const canWrite = useMemo(
     () => roles.includes('super_admin') || roles.includes('security_admin') || roles.includes('root'),
@@ -158,7 +158,27 @@ export default function AdminSeguridadUsuariosPage() {
     return () => clearTimeout(handler);
   }, [searchInput]);
 
+  const listContext = JSON.stringify([filters, page, searchInput, searchTerm, roles, user?.id_usuario]);
+  const listContextRef = useRef(listContext);
+  const listGenerationRef = useRef(0);
+  const listMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    listMountedRef.current = true;
+    listContextRef.current = listContext;
+    listGenerationRef.current += 1;
+    setRows([]);
+    setPagination({ page: 1, limit: DEFAULT_FILTERS.limit, total: 0, total_pages: 1 });
+    setError('');
+    setLoading(false);
+    return () => { listMountedRef.current = false; listGenerationRef.current += 1; };
+  }, [listContext]);
+
   const fetchRows = useCallback(async () => {
+    if (!listMountedRef.current || listContextRef.current !== listContext) return;
+    const generation = ++listGenerationRef.current;
+    const isCurrent = () => listMountedRef.current && listGenerationRef.current === generation && listContextRef.current === listContext;
+    if (searchInput.normalize('NFC').trim() !== searchTerm) return;
+    if (!roles.some(role => ['super_admin', 'security_admin', 'security_auditor', 'root'].includes(role))) return;
     setLoading(true);
     setError('');
     try {
@@ -171,9 +191,11 @@ export default function AdminSeguridadUsuariosPage() {
         q: searchTerm,
       });
       const parsed = unwrapCollectionResponse(response);
+      if (!isCurrent()) return;
       setRows(parsed.items);
       setPagination(parsed.pagination);
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -186,9 +208,9 @@ export default function AdminSeguridadUsuariosPage() {
       setRows([]);
       setPagination({ page: 1, limit: filters.limit, total: 0, total_pages: 1 });
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [filters, navigate, page, searchTerm]);
+  }, [filters, navigate, page, searchTerm, listContext, roles, searchInput]);
 
   useEffect(() => {
     void fetchRows();

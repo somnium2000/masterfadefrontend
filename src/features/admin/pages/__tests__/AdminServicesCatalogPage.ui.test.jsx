@@ -264,6 +264,29 @@ describe('alcance y concurrencia de servicios administrativos', () => {
   });
 });
 
+for (const failure of [false, true]) test(`QA09 editor B conserva cambios tras respuesta antigua A, error=${failure}`, async () => {
+  let finish, reject;
+  const pending = new Promise((resolve, fail) => { finish = resolve; reject = fail; });
+  catalogApiMock.updateAdminServicio.mockReturnValue(pending);
+  setServices([service(), service({ id_servicio: '22222222-2222-4222-8222-222222222222', nombre_servicio: 'Servicio B', descripcion: 'Texto B' })]);
+  await renderLoaded();
+  const open = name => {
+    const menu = screen.getByLabelText(`Acciones de ${name}`).closest('details');
+    fireEvent.click(within(menu).getByLabelText(`Acciones de ${name}`));
+    fireEvent.click(within(menu).getByRole('button', { name: 'Editar servicio global' }));
+  };
+  open('Corte clásico');
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Guardar cambios' }));
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', code: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  open('Servicio B');
+  fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('Descripción'), { target: { value: 'B sin guardar' } });
+  await act(async () => { if (failure) reject({ status: 401 }); else finish({ data: {} }); });
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+  expect(within(screen.getByRole('dialog')).getByLabelText('Descripción')).toHaveValue('B sin guardar');
+  expect(notificationMock.success).not.toHaveBeenCalled(); expect(navigateMock).not.toHaveBeenCalled();
+});
+
 describe('presentación responsive del catálogo de servicios', () => {
   test('muestra lista por defecto y conserva los mismos registros al alternar tarjetas y lista', async () => {
     await renderLoaded();

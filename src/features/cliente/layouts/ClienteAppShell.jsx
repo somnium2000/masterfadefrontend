@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { CalendarDays, Crown, Home, LogOut, Plus, ShieldCheck, Sparkles, UserRound } from 'lucide-react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
@@ -49,33 +49,87 @@ export default function ClienteAppShell() {
   const { user, logout, isAuthenticated, isHydrated, isHydrating } = useAuth();
 
   const redirectedUnauthorizedRef = useRef(false);
+  const sessionRef = useRef({ mounted: false, identity: '', generation: 0 });
+  const profileControllersRef = useRef(new Set());
+  const logoutPendingRef = useRef(false);
+  const identity = JSON.stringify([user?.id_usuario || '', user?.cliente_id || '']);
 
   const activeTab = useMemo(() => resolveActiveTab(location.pathname), [location.pathname]);
   const sectionTitle = useMemo(() => resolveSectionTitle(location.pathname), [location.pathname]);
   const displayName = getUserDisplayName(user);
-  const canLoadClienteProfile = Boolean(isAuthenticated && isHydrated && !isHydrating  );
+  const canLoadClienteProfile = Boolean(user?.id_usuario && isAuthenticated && isHydrated && !isHydrating);
+
+  useLayoutEffect(() => {
+    const session = sessionRef.current;
+    const controllers = profileControllersRef.current;
+    session.mounted = true;
+    session.identity = identity;
+    session.authenticated = isAuthenticated;
+    session.userId = user?.id_usuario || '';
+    session.ready = canLoadClienteProfile;
+    session.generation += 1;
+    redirectedUnauthorizedRef.current = false;
+    return () => {
+      session.mounted = false;
+      session.generation += 1;
+      controllers.forEach(controller => controller.abort());
+      controllers.clear();
+    };
+  }, [identity, isAuthenticated, user?.id_usuario, canLoadClienteProfile]);
+
+  const closeCurrentSession = useCallback(async () => {
+    if (logoutPendingRef.current) return;
+    const generation = sessionRef.current.generation;
+    const owner = sessionRef.current.identity;
+    logoutPendingRef.current = true;
+    try {
+      const result = await logout();
+      const current = sessionRef.current;
+      const sameSession = current.identity === owner && current.generation === generation;
+      const closedSession = !current.authenticated && !current.userId;
+      if (result?.ok === true && result?.logged_out === true && current.mounted && (sameSession || closedSession)) {
+        navigate('/login', { replace: true });
+      }
+    } catch {
+      // AM: AuthContext conserva la sesión y presenta el cierre no confirmado.
+    } finally {
+      logoutPendingRef.current = false;
+    }
+  }, [logout, navigate]);
 
   const refreshClienteProfile = useCallback(async ({ silent = false } = {}) => {
-    if (!canLoadClienteProfile) return null;
+    const current = sessionRef.current;
+    if (!canLoadClienteProfile || !current.mounted || !current.ready || current.identity !== identity) return null;
+    const generation = current.generation;
+    const controller = new AbortController();
+    profileControllersRef.current.add(controller);
+    const isCurrent = () => sessionRef.current.mounted
+      && sessionRef.current.ready
+      && sessionRef.current.identity === identity
+      && sessionRef.current.generation === generation
+      && !controller.signal.aborted;
 
     try {
-      const payload = await getClienteMe();
-      return payload;
+      const payload = await getClienteMe({ cache: false, dedupe: false, skipAuthInvalidation: true, signal: controller.signal });
+      return isCurrent() ? payload : null;
     } catch (error) {
+      if (!isCurrent()) return null;
       if (Number(error?.status) === 401) {
         if (!redirectedUnauthorizedRef.current) {
           redirectedUnauthorizedRef.current = true;
-          logout();
-          navigate('/login', { replace: true });
+          await closeCurrentSession();
+          if (isCurrent()) redirectedUnauthorizedRef.current = false;
         }
         return null;
       }
       if (!silent) {
-        notifyError(error?.data?.error?.message || error?.message || 'No se pudo cargar tu estado de perfil.');
+        notifyError('No se pudo cargar tu estado de perfil. Intenta nuevamente.');
       }
       return null;
+    } finally {
+      profileControllersRef.current.delete(controller);
     }
-  }, [canLoadClienteProfile, logout, navigate, notifyError]);
+  }, [canLoadClienteProfile, identity, closeCurrentSession, notifyError]);
 
   useEffect(() => {
     if (!canLoadClienteProfile) return;
@@ -111,8 +165,11 @@ export default function ClienteAppShell() {
   }
 
   function handleLogout() {
-    logout();
-    navigate('/login', { replace: true });
+    if (logoutPendingRef.current) return;
+    sessionRef.current.generation += 1;
+    profileControllersRef.current.forEach(controller => controller.abort());
+    profileControllersRef.current.clear();
+    void closeCurrentSession();
   }
 
   const mobileSideItems = [

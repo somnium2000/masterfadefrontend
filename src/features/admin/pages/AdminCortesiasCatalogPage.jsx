@@ -331,6 +331,10 @@ export default function AdminCortesiasCatalogPage() {
   const contextRef = useRef(requestContext);
   const generationRef = useRef(0);
   const mountedRef = useRef(false);
+  const formGenerationRef = useRef(0);
+  const saveOperationRef = useRef(null);
+  const stateGenerationRef = useRef(0);
+  const stateOperationRef = useRef(null);
 
   // AM: Invalida antes del debounce datos de otro alcance o busqueda.
   useLayoutEffect(() => {
@@ -352,6 +356,22 @@ export default function AdminCortesiasCatalogPage() {
     }
     return () => { mountedRef.current = false; generationRef.current += 1; };
   }, [requestContext, scopeContext]);
+
+  useLayoutEffect(() => {
+    setFormLoading(false);
+    return () => {
+      formGenerationRef.current += 1;
+      saveOperationRef.current = null;
+    };
+  }, [scopeContext]);
+
+  useLayoutEffect(() => {
+    setStateLoading(false);
+    return () => {
+      stateGenerationRef.current += 1;
+      stateOperationRef.current = null;
+    };
+  }, [scopeContext]);
 
   useEffect(() => {
     const timeout = setTimeout(() => setSearch(searchInput.trim()), 250);
@@ -446,6 +466,8 @@ export default function AdminCortesiasCatalogPage() {
 
   function openNuevo() {
     if (actionsLockedByBranch) return;
+    formGenerationRef.current += 1;
+    saveOperationRef.current = null;
     const defaults = sucursal
       ? [{ id_sucursal: sucursal, activa: true }]
       : availableBranches.length === 1
@@ -461,6 +483,8 @@ export default function AdminCortesiasCatalogPage() {
     if (actionsLockedByBranch) return;
     const cortesia = cortesiasById.get(row.id);
     if (!cortesia) return;
+    formGenerationRef.current += 1;
+    saveOperationRef.current = null;
 
     const scoped = Array.isArray(cortesia.sucursales)
       ? cortesia.sucursales.map((item) => ({ id_sucursal: item.id_sucursal, activa: Boolean(item.activa) }))
@@ -483,6 +507,9 @@ export default function AdminCortesiasCatalogPage() {
   }
 
   function openConfirmState(row) {
+    stateGenerationRef.current += 1;
+    stateOperationRef.current = null;
+    setStateLoading(false);
     setStateTarget({ ...row, _nextActiva: !row.activa });
     setConfirmOpen(true);
   }
@@ -504,7 +531,7 @@ export default function AdminCortesiasCatalogPage() {
   }
 
   async function saveForm() {
-    if (actionsLockedByBranch) return;
+    if (actionsLockedByBranch || !mountedRef.current || saveOperationRef.current) return;
     const validationError = validateForm(formValues, { requireBranch: !editTarget });
     if (validationError) {
       setFormError(validationError);
@@ -535,25 +562,35 @@ export default function AdminCortesiasCatalogPage() {
       }));
     }
 
+    const operation = {};
+    const formGeneration = formGenerationRef.current;
+    saveOperationRef.current = operation;
+    const isCurrent = () => mountedRef.current && saveOperationRef.current === operation
+      && formGenerationRef.current === formGeneration && scopeRef.current === scopeContext;
     setFormLoading(true);
     setFormError("");
 
     try {
       if (editTarget) {
         await updateAdminCortesia(editTarget.id, payload);
-        notifications.success("Cortesía actualizada");
       } else {
         await createAdminCortesia(payload);
-        notifications.success("Cortesía creada");
       }
 
-      setDialogOpen(false);
+      // AM: Una mutación confirmada debe sincronizarse incluso si su formulario ya no está vigente.
       emitCatalogSync("admin-cortesias");
+      if (!isCurrent()) return;
+      notifications.success(editTarget ? "Cortesía actualizada" : "Cortesía creada");
+      setDialogOpen(false);
       await fetchCortesias();
     } catch (error) {
+      if (!isCurrent()) return;
       setFormError(extractMessage(error));
     } finally {
-      setFormLoading(false);
+      if (isCurrent()) {
+        saveOperationRef.current = null;
+        setFormLoading(false);
+      }
     }
   }
 
@@ -576,7 +613,13 @@ export default function AdminCortesiasCatalogPage() {
   }
 
   async function handleConfirmState() {
-    if (!stateTarget || actionsLockedByBranch) return;
+    if (!stateTarget || actionsLockedByBranch || !mountedRef.current || stateOperationRef.current) return;
+
+    const operation = {};
+    const generation = stateGenerationRef.current;
+    stateOperationRef.current = operation;
+    const isCurrent = () => mountedRef.current && stateOperationRef.current === operation
+      && stateGenerationRef.current === generation && scopeRef.current === scopeContext;
 
     setStateLoading(true);
     try {
@@ -585,15 +628,19 @@ export default function AdminCortesiasCatalogPage() {
         activa: stateTarget._nextActiva,
       });
 
+      emitCatalogSync("admin-cortesias");
+      if (!isCurrent()) return;
       notifications.success(stateTarget._nextActiva ? "Cortesía activada" : "Cortesía inactivada");
       setConfirmOpen(false);
       setStateTarget(null);
-      emitCatalogSync("admin-cortesias");
       await fetchCortesias();
     } catch (error) {
-      notifications.error(extractMessage(error));
+      if (isCurrent()) notifications.error(extractMessage(error));
     } finally {
-      setStateLoading(false);
+      if (isCurrent()) {
+        stateOperationRef.current = null;
+        setStateLoading(false);
+      }
     }
   }
 

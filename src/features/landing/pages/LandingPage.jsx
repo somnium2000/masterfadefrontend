@@ -99,6 +99,8 @@ export default function LandingPage() {
 
   return (
     <div className="relative min-h-[100dvh] overflow-hidden bg-[var(--mf-bg)] font-[var(--font-body)]">
+      <main aria-labelledby="landing-title">
+      <h1 id="landing-title" className="sr-only">MASTERFADE — Barbería premium en Honduras</h1>
       <div className="absolute inset-0">
         <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url('${BG_URL}')`, opacity: 0.15 }} />
         <div className="absolute inset-0 bg-[var(--mf-noise)] opacity-[0.03]" />
@@ -217,6 +219,7 @@ export default function LandingPage() {
         </div>
       </div>
 
+      </main>
       <PremiumBottomNav
         activeId="inicio"
         sideItems={navItems}

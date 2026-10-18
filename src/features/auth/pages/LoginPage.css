@@ -252,6 +252,10 @@
   border: 1px solid rgba(251, 113, 133, 0.22);
 }
 
+:root[data-theme="light"] .mf-login-page .mf-error {
+  color: #721c1c;
+}
+
 .mf-help {
   margin-top: 10px;
   font-size: 12px;

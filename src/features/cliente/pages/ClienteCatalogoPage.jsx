@@ -367,6 +367,7 @@ export default function ClienteCatalogoPage() {
 
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState([]);
+  const [branchesError, setBranchesError] = useState(false);
   const [branchId, setBranchId] = useState('');
   const [services, setServices] = useState([]);
   const [packages, setPackages] = useState([]);
@@ -418,6 +419,7 @@ export default function ClienteCatalogoPage() {
   const loadInitial = useCallback(async () => {
     const initialRequestId = ++initialRequestRef.current;
     setLoading(true);
+    setBranchesError(false);
     try {
       const branchPayload = await listPublicCatalogBranches();
       if (!isMountedRef.current || initialRequestId !== initialRequestRef.current) return;
@@ -433,9 +435,10 @@ export default function ClienteCatalogoPage() {
 
       window.clearTimeout(searchTimerRef.current);
       await fetchCatalogData(resolvedBranchId, searchRef.current);
-    } catch (error) {
+    } catch {
       if (!isMountedRef.current || initialRequestId !== initialRequestRef.current) return;
-      notifyError(error?.data?.error?.message || error?.message || 'No se pudo cargar el catálogo de cliente.');
+      setBranchesError(true);
+      notifyError('No se pudieron cargar las sucursales. Intenta nuevamente.');
       setLoading(false);
     }
   }, [fetchCatalogData, notifyError]);
@@ -536,7 +539,7 @@ export default function ClienteCatalogoPage() {
           <label className="mf-label">Sucursal</label>
           <div className="relative">
             <Building2 className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" size={14} />
-            <select className="mf-select !pl-11 pr-10" value={branchId} onChange={(event) => void handleBranchChange(event)}>
+            <select className="mf-select !pl-11 pr-10" value={branchId} disabled={!branchesReadyRef.current} onChange={(event) => void handleBranchChange(event)}>
               <option value="">Todas las sucursales</option>
               {branches.map((branch) => (
                 <option key={branch.id_sucursal} value={branch.id_sucursal}>{branch.nombre_sucursal}</option>
@@ -551,6 +554,7 @@ export default function ClienteCatalogoPage() {
             <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" size={14} />
             <input
               type="text"
+              disabled={!branchesReadyRef.current}
               value={search}
               onChange={(event) => {
                 const nextSearch = event.target.value;
@@ -576,6 +580,8 @@ export default function ClienteCatalogoPage() {
           <div className="mf-skeleton h-28 rounded-2xl" />
           <div className="mf-skeleton h-28 rounded-2xl" />
         </div>
+      ) : branchesError ? (
+        <ErrorBanner message="No se pudieron cargar las sucursales." onRetry={() => void loadInitial()} />
       ) : (
         <>
           {promotionsError ? (

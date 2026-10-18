@@ -20,6 +20,20 @@ const SESSION_LAST_BACKEND_TOUCH_KEY = 'mf_session_last_backend_touch_at';
 const SESSION_IDLE_EXPIRED_KEY = 'mf_session_idle_expired_at';
 const SESSION_MANUAL_LOGOUT_KEY = 'mf_session_manual_logout_at';
 const SESSION_ACTIVITY_EVENTS = ['click', 'keydown', 'touchstart', 'scroll'];
+const REWARD_BOOKING_CONTEXT_STORAGE_KEY = 'mf_reward_redeem_context_v1';
+
+function restrictRewardContextToUser(user = null) {
+  try {
+    const raw = window.sessionStorage.getItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY);
+    if (!raw) return;
+    const context = JSON.parse(raw);
+    if (user?.id_usuario && user?.cliente_id
+      && context?.owner_id_usuario === user.id_usuario && context?.owner_id_cliente === user.cliente_id) return;
+    window.sessionStorage.removeItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY);
+  } catch {
+    try { window.sessionStorage.removeItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY); } catch { /* AM: Storage puede estar bloqueado. */ }
+  }
+}
 
 function normalizeRoles(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
@@ -109,10 +123,10 @@ function shouldTrackIdleSession(pathname) {
   return true;
 }
 
-function persistIdleSessionMessage() {
+function persistIdleSessionMessage(message = IDLE_SESSION_MESSAGE) {
   if (typeof window === 'undefined') return;
   try {
-    window.sessionStorage.setItem(IDLE_SESSION_MESSAGE_KEY, IDLE_SESSION_MESSAGE);
+    window.sessionStorage.setItem(IDLE_SESSION_MESSAGE_KEY, message);
   } catch {
     // no-op
   }
@@ -171,12 +185,16 @@ export function AuthProvider({ children }) {
   const [clienteId, setClienteId] = useState(null);
   const [isHydrating, setIsHydrating] = useState(shouldHydrateOnBoot);
   const [isHydrated, setIsHydrated] = useState(!shouldHydrateOnBoot);
+  const [logoutError, setLogoutError] = useState('');
+  const logoutRequestRef = useRef(null);
+  const sessionGenerationRef = useRef(0);
   const idleTimerRef = useRef(null);
   const lastMouseMoveAtRef = useRef(0);
   const idleExpirationHandledRef = useRef(false);
   const backendTouchInFlightRef = useRef(false);
 
   const applyUserState = useCallback((nextUser) => {
+    if (nextUser?.id_usuario) restrictRewardContextToUser(nextUser);
     setAdminReportesSessionScope({
       userId: nextUser?.id_usuario,
       roles: normalizeRoles(nextUser?.roles),
@@ -205,7 +223,9 @@ export function AuthProvider({ children }) {
   }, [applyUserState]);
 
   const invalidateSession = useCallback((reason = 'session_invalidated') => {
+    sessionGenerationRef.current += 1;
     abortInFlightRequests(reason);
+    restrictRewardContextToUser();
     clearSessionState();
     if (supabase) {
       void supabase.auth.signOut({ scope: 'local' }).catch(() => {});
@@ -213,6 +233,8 @@ export function AuthProvider({ children }) {
   }, [clearSessionState]);
 
   const hydrateSession = useCallback(async () => {
+    const generation = ++sessionGenerationRef.current;
+    resetSessionInvalidation();
     setIsHydrating(true);
     setIsHydrated(false);
 
@@ -222,6 +244,7 @@ export function AuthProvider({ children }) {
         skipAuthInvalidation: isPublicBookingPath(currentPathname),
       });
       const payload = response?.data || response;
+      if (generation !== sessionGenerationRef.current) return { ok: false, message: '' };
 
       if (!response?.ok || !payload?.user) {
         clearSessionState();
@@ -230,13 +253,14 @@ export function AuthProvider({ children }) {
 
       const enrichedUser = buildEnrichedUser(payload);
       applyUserState(enrichedUser);
-      resetSessionInvalidation();
       setIsHydrating(false);
       setIsHydrated(true);
       return { ok: true };
     } catch (err) {
+      if (generation !== sessionGenerationRef.current) return { ok: false, message: '' };
       clearSessionState();
       if (Number(err?.status) === 401) {
+        restrictRewardContextToUser();
         return {
           ok: false,
           expectedUnauthenticated: true,
@@ -263,6 +287,7 @@ export function AuthProvider({ children }) {
       return { ok: false, message: 'Ingresa un correo valido para iniciar sesion.' };
     }
 
+    const generation = ++sessionGenerationRef.current;
     try {
       const response = await http.post('/v1/auth/login', {
         identifier: normalizedIdentifier,
@@ -274,6 +299,7 @@ export function AuthProvider({ children }) {
         skipCsrf: true,
       });
 
+      if (generation !== sessionGenerationRef.current) return { ok: false, message: '' };
       if (!response?.ok) {
         return {
           ok: false,
@@ -289,6 +315,7 @@ export function AuthProvider({ children }) {
 
       return { ok: true, message: 'Login exitoso' };
     } catch (err) {
+      if (generation !== sessionGenerationRef.current) return { ok: false, message: '' };
       clearSessionState();
       return {
         ok: false,
@@ -306,15 +333,28 @@ export function AuthProvider({ children }) {
     return { ok: true };
   }, [hydrateSession]);
 
-  const logout = useCallback(async () => {
-    writeSharedTimestamp(SESSION_MANUAL_LOGOUT_KEY);
-    removeSharedTimestamp(SESSION_IDLE_EXPIRED_KEY);
-    invalidateSession('logout');
-    try {
-      await http.post('/v1/auth/logout', {}, { skipAuthInvalidation: true });
-    } catch {
-      // noop: de todas formas limpiamos estado local.
-    }
+  const logout = useCallback(() => {
+    if (logoutRequestRef.current) return logoutRequestRef.current;
+    const request = (async () => {
+      try {
+        const response = await http.post('/v1/auth/logout', {}, { skipAuthInvalidation: true });
+        const payload = response?.data || response;
+        if (response?.ok !== true || payload?.logged_out !== true) throw new Error('LOGOUT_UNCONFIRMED');
+        setLogoutError('');
+        writeSharedTimestamp(SESSION_MANUAL_LOGOUT_KEY);
+        removeSharedTimestamp(SESSION_IDLE_EXPIRED_KEY);
+        invalidateSession('logout');
+        return { ok: true, logged_out: true };
+      } catch {
+        const message = 'No se confirmó el cierre de sesión en el servidor. Intenta nuevamente.';
+        setLogoutError(message);
+        return { ok: false, logged_out: false, message };
+      } finally {
+        logoutRequestRef.current = null;
+      }
+    })();
+    logoutRequestRef.current = request;
+    return request;
   }, [invalidateSession]);
 
   const expireIdleSession = useCallback(async ({ broadcast = true } = {}) => {
@@ -328,17 +368,23 @@ export function AuthProvider({ children }) {
       writeSharedTimestamp(SESSION_IDLE_EXPIRED_KEY);
     }
     persistIdleSessionMessage();
+    sessionGenerationRef.current += 1;
     abortInFlightRequests('AUTH_SESSION_IDLE_EXPIRED');
+    restrictRewardContextToUser();
     clearSessionState();
     if (supabase) {
       void supabase.auth.signOut({ scope: 'local' }).catch(() => {});
     }
     try {
-      await http.post('/v1/auth/logout', {}, {
+      const response = await http.post('/v1/auth/logout', {}, {
         skipAuthInvalidation: true,
       });
+      if (response?.ok !== true || (response?.data || response)?.logged_out !== true) throw new Error('LOGOUT_UNCONFIRMED');
+      setLogoutError('');
     } catch {
-      // no-op: la sesion local ya quedo cerrada para UX.
+      const message = 'Se ocultó la sesión local por inactividad, pero no se confirmó su cierre en el servidor.';
+      setLogoutError(message);
+      persistIdleSessionMessage(message);
     }
     navigate('/login', { replace: true });
   }, [clearSessionState, navigate]);
@@ -513,6 +559,7 @@ export function AuthProvider({ children }) {
       completeExchangeLogin,
       hydrateSession,
       logout,
+      logoutError,
       invalidateSession,
     }),
     [
@@ -529,11 +576,18 @@ export function AuthProvider({ children }) {
       completeExchangeLogin,
       hydrateSession,
       logout,
+      logoutError,
       invalidateSession,
     ]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={value}>
+    {logoutError ? <div role="alert" className="p-3 text-sm text-[var(--mf-text)]">
+      <p>{logoutError}</p>
+      <button type="button" className="mt-2 underline" onClick={() => void logout()}>Reintentar cierre</button>
+    </div> : null}
+    {children}
+  </AuthContext.Provider>;
 }
 
 export function useAuth() {
