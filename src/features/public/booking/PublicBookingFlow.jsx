@@ -1,4 +1,4 @@
-﻿import {
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from '../../../components/ui/dialog.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import { useAuth } from '../../../context/AuthContext.jsx';
 import {
   validatePublicBookingContacts,
 } from './publicBookingApi.js';
@@ -291,8 +292,18 @@ function readRewardBookingContext() {
     ).trim();
     const idServicioCanje = String(parsed?.id_servicio_canje || '').trim();
     const idSucursal = String(parsed?.id_sucursal || '').trim();
-    if (!canjeContextToken || !idServicioCanje || !idSucursal) return null;
+    const ownerUserId = typeof parsed?.owner_id_usuario === 'string' ? parsed.owner_id_usuario.trim() : '';
+    const ownerClienteId = typeof parsed?.owner_id_cliente === 'string' ? parsed.owner_id_cliente.trim() : '';
+    if (!canjeContextToken || !idServicioCanje || !idSucursal || !ownerUserId || !ownerClienteId) return null;
+    const [prefix, encoded, signature, extra] = canjeContextToken.split('.');
+    if (prefix !== 'mf_reward_ctx_v1' || !encoded || !/^[A-Za-z0-9_-]{43}$/.test(signature || '') || extra !== undefined) return null;
+    const decoded = JSON.parse(window.atob(encoded.replace(/-/g, '+').replace(/_/g, '/')));
+    // AM: Coherencia local, no validación criptográfica: la firma sigue siendo autoridad del backend.
+    if (decoded?.v !== 1 || decoded?.id_cliente !== ownerClienteId
+      || decoded?.id_servicio_canje !== idServicioCanje || decoded?.id_sucursal !== idSucursal) return null;
     return {
+      owner_id_usuario: ownerUserId,
+      owner_id_cliente: ownerClienteId,
       canje_context_token: canjeContextToken,
       id_points_tx_canje: canjeContextToken,
       id_servicio_canje: idServicioCanje,
@@ -315,6 +326,7 @@ function persistRewardBookingContext(context) {
 }
 
 export default function PublicBookingFlow() {
+  const { user: rewardUser } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const notifications = useNotifications();
@@ -632,8 +644,14 @@ const agendaAutoLoadKeyRef = useRef('');
     ? (String(selectedBranch?.nombre_sucursal || '').trim() || 'esta sucursal')
     : 'esta sucursal';
 
+  const rewardOwnerMatches = Boolean(
+    rewardUser?.id_usuario && rewardUser?.cliente_id
+    && rewardBookingContext?.owner_id_usuario === rewardUser.id_usuario
+    && rewardBookingContext?.owner_id_cliente === rewardUser.cliente_id
+  );
   const rewardModeActive = Boolean(
     canUseClienteHold
+    && rewardOwnerMatches
     && rewardBookingContext
     && String(rewardBookingContext?.canje_context_token || rewardBookingContext?.id_points_tx_canje || '').trim()
     && String(rewardBookingContext?.id_servicio_canje || '').trim()
@@ -1717,7 +1735,9 @@ const agendaAutoLoadKeyRef = useRef('');
   }, [canUseClienteHold]);
 
   useEffect(() => {
+    if (bookingMode === 'loading') return;
     if (!rewardModeActive) {
+      setRewardBookingContext(null);
       persistRewardBookingContext(null);
       rewardPreparedShownRef.current = false;
       rewardUnavailableShownRef.current = false;
@@ -1725,7 +1745,7 @@ const agendaAutoLoadKeyRef = useRef('');
       return;
     }
     persistRewardBookingContext(rewardBookingContext);
-  }, [rewardBookingContext, rewardModeActive]);
+  }, [bookingMode, rewardBookingContext, rewardModeActive]);
 
   useEffect(() => {
     if (!rewardModeActive) return;
@@ -3346,11 +3366,11 @@ const agendaAutoLoadKeyRef = useRef('');
       ?? holdResult?.total_hnl
       ?? 0
     );
-    const rewardContextToken = String(
+    const rewardContextToken = rewardModeActive ? String(
       rewardBookingContext?.canje_context_token
       || rewardBookingContext?.id_points_tx_canje
       || ''
-    ).trim();
+    ).trim() : '';
     const requestTimeoutMs = 20000;
     const requestController = typeof AbortController !== 'undefined'
       ? new AbortController()
@@ -3488,6 +3508,7 @@ const agendaAutoLoadKeyRef = useRef('');
     navigate,
     notifications,
     rewardBookingContext,
+    rewardModeActive,
     setBookingSuccessResult,
     setPaymentResult,
   ]);

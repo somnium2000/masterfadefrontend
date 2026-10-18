@@ -436,6 +436,9 @@ export default function AdminServicesCatalogPage() {
     const [listError, setListError] = useState('');
     const requestGenerationRef = useRef(0);
     const mountedRef = useRef(false);
+    const editorGenerationRef = useRef(0);
+    const saveOperationRef = useRef(null);
+    const refreshServicesRef = useRef(null);
     const canQueryScope = branchesContext === permissionsKey && allBranches.length > 0
         && (isSuperAdmin || Boolean(roles?.includes('admin') && sucursal
             && allBranches.some((branch) => branch.id_sucursal === sucursal)));
@@ -625,6 +628,9 @@ export default function AdminServicesCatalogPage() {
         mountedRef.current = true;
         currentScopeRef.current = requestScope;
         requestGenerationRef.current += 1;
+        editorGenerationRef.current += 1;
+        saveOperationRef.current = null;
+        setFormLoading(false);
         setServicios([]);
         setListError('');
         setLoading(false);
@@ -637,6 +643,8 @@ export default function AdminServicesCatalogPage() {
         return () => {
             mountedRef.current = false;
             requestGenerationRef.current += 1;
+            editorGenerationRef.current += 1;
+            saveOperationRef.current = null;
         };
     }, [requestScope, canQueryScope]);
 
@@ -670,6 +678,10 @@ export default function AdminServicesCatalogPage() {
             }
         }
     }, [sucursal, navigate, canQueryScope, requestScope]);
+
+    useLayoutEffect(() => {
+        refreshServicesRef.current = fetchServicios;
+    }, [fetchServicios]);
 
     useEffect(() => {
         void fetchServicios();
@@ -728,6 +740,9 @@ export default function AdminServicesCatalogPage() {
     }
 
     function openCrear() {
+        editorGenerationRef.current += 1;
+        saveOperationRef.current = null;
+        setFormLoading(false);
         setEditTarget(null);
         setFormValues(FORM_DEFAULTS);
         setCreateBranchTariffs(sucursal ? [buildDefaultBranchTariff(sucursal)] : []);
@@ -747,6 +762,9 @@ export default function AdminServicesCatalogPage() {
             return;
         }
 
+        editorGenerationRef.current += 1;
+        saveOperationRef.current = null;
+        setFormLoading(false);
         setEditTarget({ ...servicio, _mutation_branch_id: mutationBranchId });
         setFormValues({
             nombre_servicio: servicio.nombre_servicio ?? '',
@@ -808,7 +826,17 @@ export default function AdminServicesCatalogPage() {
         return () => { cancelled = true; };
     }, [canManageServiceBarberAssignments, dialogOpen, editTarget, formValues.servicio_informativo]);
 
+    function handleServiceDialogOpenChange(open) {
+        if (!open) {
+            editorGenerationRef.current += 1;
+            saveOperationRef.current = null;
+            setFormLoading(false);
+        }
+        setDialogOpen(open);
+    }
+
     async function handleGuardar() {
+        if (!mountedRef.current || saveOperationRef.current) return;
         const validationError = validateForm(formValues, { includeTariffFields: false });
         if (validationError) { setFormError(validationError); return; }
         if (!editTarget && createBranchTariffs.length === 0) {
@@ -845,6 +873,11 @@ export default function AdminServicesCatalogPage() {
             return;
         }
 
+        const operation = {};
+        const editorGeneration = editorGenerationRef.current;
+        saveOperationRef.current = operation;
+        const isCurrent = () => mountedRef.current && saveOperationRef.current === operation
+            && editorGenerationRef.current === editorGeneration && currentScopeRef.current === requestScope;
         setFormLoading(true);
         setFormError('');
 
@@ -876,6 +909,7 @@ export default function AdminServicesCatalogPage() {
             id_sucursal: mutationBranchId,
         };
 
+        let servicePersisted = false;
         try {
             let savedServiceData = null;
             if (editTarget) {
@@ -885,6 +919,7 @@ export default function AdminServicesCatalogPage() {
                 const response = await createAdminServicio(createPayload);
                 savedServiceData = response?.data ?? response;
             }
+            servicePersisted = true;
 
             if (canManageServiceBarberAssignments && editTarget && Boolean(formValues.servicio_informativo)) {
                 const savedServiceId = savedServiceData?.id_servicio || editTarget.id_servicio || editTarget.id;
@@ -892,6 +927,12 @@ export default function AdminServicesCatalogPage() {
                     id_sucursal: mutationBranchId,
                     id_empleados: serviceBarberAssignments.selectedIds,
                 });
+            }
+            // AM: La mutación persistida sigue siendo real aunque su editor haya perdido vigencia.
+            emitCatalogSync(editTarget ? 'servicio-updated' : 'servicio-created');
+            if (!isCurrent()) {
+                if (mountedRef.current) void refreshServicesRef.current?.({ silent: true });
+                return;
             }
             if (editTarget) {
                 notifications.success('Servicio actualizado.', { dedupeKey: 'servicios-save-ok' });
@@ -903,18 +944,25 @@ export default function AdminServicesCatalogPage() {
                     });
                 }
             }
-            // AM: Publica sincronizacion para que catalogo publico y otras vistas refresquen al instante.
-            emitCatalogSync(editTarget ? 'servicio-updated' : 'servicio-created');
             await fetchServicios();
+            if (!isCurrent()) return;
             setDialogOpen(false);
         } catch (err) {
+            if (servicePersisted) {
+                emitCatalogSync(editTarget ? 'servicio-updated' : 'servicio-created');
+                if (mountedRef.current) void refreshServicesRef.current?.({ silent: true });
+            }
+            if (!isCurrent()) return;
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
             const message = extractMessage(err);
             setFormError(message);
             notifications.error(message, { dedupeKey: 'servicios-save-error' });
         } finally {
-            setFormLoading(false);
+            if (isCurrent()) {
+                saveOperationRef.current = null;
+                setFormLoading(false);
+            }
         }
     }
 
@@ -1412,7 +1460,7 @@ export default function AdminServicesCatalogPage() {
             )}
 
             {/* Dialog Crear / Editar */}
-            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <Dialog open={dialogOpen} onOpenChange={handleServiceDialogOpenChange}>
                 <DialogContent className={`w-[calc(100vw-1rem)] max-h-[calc(100vh-1.5rem)] overflow-y-auto ${canManageServiceBarberAssignments && editTarget ? 'sm:max-w-2xl' : 'sm:max-w-md'}`}>
                     <DialogHeader>
                         <DialogTitle>{editTarget ? 'Editar servicio' : 'Nuevo servicio'}</DialogTitle>
@@ -1572,7 +1620,7 @@ export default function AdminServicesCatalogPage() {
                         <ErrorBanner message={formError} />
                     )}
                     <DialogFooter className="mt-2">
-                        <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>
+                        <Button variant="outline" onClick={() => handleServiceDialogOpenChange(false)} disabled={formLoading}>
                             Cancelar
                         </Button>
                         <Button

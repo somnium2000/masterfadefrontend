@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../../context/AuthContext.jsx';
 import { Filter, RotateCcw, Search, Shield } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
@@ -150,6 +151,7 @@ function safeStringify(value) {
 }
 
 export default function AdminSeguridadLoginLogsPage() {
+  const { roles, user } = useAuth();
   const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: DEFAULT_FILTERS.limit, total: 0, total_pages: 1 });
@@ -174,7 +176,26 @@ export default function AdminSeguridadLoginLogsPage() {
     || Number(filters.limit) !== Number(DEFAULT_FILTERS.limit)
   ), [filters]);
 
+  const listContext = JSON.stringify([filters, page, roles, user?.id_usuario]);
+  const listContextRef = useRef(listContext);
+  const listGenerationRef = useRef(0);
+  const listMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    listMountedRef.current = true;
+    listContextRef.current = listContext;
+    listGenerationRef.current += 1;
+    setRows([]);
+    setPagination({ page: 1, limit: DEFAULT_FILTERS.limit, total: 0, total_pages: 1 });
+    setError('');
+    setLoading(false);
+    return () => { listMountedRef.current = false; listGenerationRef.current += 1; };
+  }, [listContext]);
+
   const fetchRows = useCallback(async () => {
+    if (!listMountedRef.current || listContextRef.current !== listContext) return;
+    const generation = ++listGenerationRef.current;
+    const isCurrent = () => listMountedRef.current && listGenerationRef.current === generation && listContextRef.current === listContext;
+    if (!roles.some(role => ['super_admin', 'security_admin', 'security_auditor', 'root'].includes(role))) return;
     setLoading(true);
     setError('');
     try {
@@ -189,9 +210,11 @@ export default function AdminSeguridadLoginLogsPage() {
         toAt: filters.toAt,
       });
       const parsed = unwrapCollectionResponse(response);
+      if (!isCurrent()) return;
       setRows(parsed.items);
       setPagination(parsed.pagination);
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -204,9 +227,9 @@ export default function AdminSeguridadLoginLogsPage() {
       setRows([]);
       setPagination({ page: 1, limit: filters.limit, total: 0, total_pages: 1 });
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [filters, navigate, page]);
+  }, [filters, navigate, page, listContext, roles]);
 
   useEffect(() => {
     void fetchRows();

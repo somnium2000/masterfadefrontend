@@ -114,6 +114,8 @@ async function parseResponse(response) {
 }
 
 const inFlightControllers = new Set();
+const sessionBoundControllers = new Set();
+let sessionGeneration = 0;
 const inFlightRequests = new Map();
 const safeResponseCache = new Map();
 const SAFE_RESPONSE_CACHE_TTL_MS = 10000;
@@ -158,8 +160,9 @@ function cacheCsrfToken(token) {
 async function fetchCsrfTokenFromApi(baseUrl) {
   if (csrfFetchInFlight) return csrfFetchInFlight;
 
+  const generation = sessionGeneration;
   const csrfUrl = joinUrl(baseUrl, "/v1/auth/csrf");
-  csrfFetchInFlight = (async () => {
+  const pending = (async () => {
     const response = await fetch(csrfUrl, {
       method: "GET",
       credentials: "include",
@@ -169,16 +172,18 @@ async function fetchCsrfTokenFromApi(baseUrl) {
     const data = await parseResponse(response);
     const payload = data?.data || data;
     const token = String(payload?.csrf_token || "").trim();
+    if (generation !== sessionGeneration) return "";
     if (token) cacheCsrfToken(token);
     return token;
   })();
+  csrfFetchInFlight = pending;
 
   try {
-    return await csrfFetchInFlight;
+    return await pending;
   } catch {
     return "";
   } finally {
-    csrfFetchInFlight = null;
+    if (csrfFetchInFlight === pending) csrfFetchInFlight = null;
   }
 }
 
@@ -220,9 +225,28 @@ function getResponseErrorCode(data) {
 }
 
 export function abortInFlightRequests(reason = "request_aborted") {
+  advanceSessionGeneration(reason);
   inFlightControllers.forEach((controller) => controller.abort(reason));
   inFlightControllers.clear();
   inFlightRequests.clear();
+}
+
+function advanceSessionGeneration(reason = "session_changed") {
+  sessionGeneration += 1;
+  cacheCsrfToken("");
+  csrfFetchInFlight = null;
+  sessionBoundControllers.forEach(controller => controller.abort(reason));
+  sessionBoundControllers.clear();
+  for (const key of inFlightRequests.keys()) {
+    if (key.startsWith("session ")) inFlightRequests.delete(key);
+  }
+}
+
+function createObsoleteRequestError() {
+  const error = new Error("La solicitud ya no está vigente.");
+  error.name = "AbortError";
+  error.code = "REQUEST_CONTEXT_CHANGED";
+  return error;
 }
 
 function notifySessionInvalidation(reason, details = {}) {
@@ -235,8 +259,8 @@ function notifySessionInvalidation(reason, details = {}) {
 }
 
 export function resetSessionInvalidation() {
+  advanceSessionGeneration();
   sessionInvalidated = false;
-  cacheCsrfToken("");
 }
 
 export function registerSessionInvalidationHandler(handler) {
@@ -264,10 +288,18 @@ export function request(path, options = {}) {
 
   const baseUrl = import.meta.env.VITE_API_URL;
   const url = joinUrl(baseUrl, path);
+  const pathname = toPathname(path, baseUrl);
+  if (isUnsafeMethod(method) && ["/v1/auth/login", "/v1/auth/register", "/v1/auth/exchange", "/v1/auth/social/confirm"].includes(pathname)) {
+    resetSessionInvalidation();
+  }
+  const generation = sessionGeneration;
+  const sessionBound = !pathname.startsWith("/v1/public/")
+    || Object.keys(headers).some(key => key.toLowerCase() === "authorization");
   // AM: Un body sensible nunca participa en claves, cache ni deduplicacion.
-  const requestKey = sensitiveBody ? null : buildRequestKey(method, url, body);
-  const canDedupe = Boolean(!sensitiveBody && dedupe && !signal);
-  const canCache = Boolean(!sensitiveBody && cache);
+  const requestKey = sensitiveBody ? null : `${sessionBound ? `session ${generation} ` : ""}${buildRequestKey(method, url, body)}`;
+  // AM: Los GET ligados a sesión nunca reutilizan caché ni promesas privadas.
+  const canDedupe = Boolean(!sensitiveBody && dedupe && !signal && !(sessionBound && isSafeMethod(method)));
+  const canCache = Boolean(!sensitiveBody && cache && !sessionBound);
   if (canCache) {
     const cached = safeResponseCache.get(requestKey);
     if (cached && cached.expiresAt > Date.now()) return cached.data;
@@ -280,6 +312,13 @@ export function request(path, options = {}) {
   const requestPromise = (async () => {
   const finalHeaders = { ...headers };
   const controller = new AbortController();
+  let invalidatedByThisRequest = false;
+  const assertCurrent = () => {
+    if ((sessionBound && generation !== sessionGeneration) || controller.signal.aborted || signal?.aborted) {
+      throw createObsoleteRequestError();
+    }
+  };
+  assertCurrent();
 
   const hasBody = body !== undefined && body !== null;
   if (hasBody && !finalHeaders["Content-Type"]) {
@@ -299,12 +338,14 @@ export function request(path, options = {}) {
   if (signal?.aborted) {
     controller.abort(signal.reason);
   }
+  assertCurrent();
 
   const forwardAbort = () => controller.abort(signal?.reason);
   if (signal && typeof signal.addEventListener === "function") {
     signal.addEventListener("abort", forwardAbort, { once: true });
   }
   inFlightControllers.add(controller);
+  if (sessionBound) sessionBoundControllers.add(controller);
 
   try {
     const response = await fetch(url, {
@@ -315,7 +356,9 @@ export function request(path, options = {}) {
       credentials: "include",
     });
 
+    assertCurrent();
     const data = await parseResponse(response);
+    assertCurrent();
     if (data && typeof data === "object") {
       Object.defineProperty(data, "__meta", {
         value: {
@@ -350,6 +393,7 @@ export function request(path, options = {}) {
         const reason = err.code === "AUTH_SESSION_IDLE_EXPIRED"
           ? "AUTH_SESSION_IDLE_EXPIRED"
           : "private_endpoint_401";
+        invalidatedByThisRequest = true;
         notifySessionInvalidation(reason, { code: err.code || null });
       }
       throw err;
@@ -363,12 +407,14 @@ export function request(path, options = {}) {
     }
     return data;
   } catch (err) {
+    if (!invalidatedByThisRequest) assertCurrent();
     if (isNetworkFetchError(err)) {
       throw createNetworkUnavailableError(err);
     }
     throw err;
   } finally {
     inFlightControllers.delete(controller);
+    sessionBoundControllers.delete(controller);
     if (signal && typeof signal.removeEventListener === "function") {
       signal.removeEventListener("abort", forwardAbort);
     }

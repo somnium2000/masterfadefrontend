@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Calendar, Camera, Coins, LockKeyhole, MapPin, Phone, Scissors, ShieldCheck, Trash2, UserRound } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext.jsx';
@@ -56,6 +56,16 @@ function InfoRow({ icon: Icon, label, value, highlight = false }) {
 }
 
 export default function ClientePerfilPage() {
+  const { user, clienteId, isAuthenticated, isHydrated, isHydrating } = useAuth();
+  const identity = JSON.stringify([user?.id_usuario || '', clienteId || user?.cliente_id || '']);
+  // AM: La identidad forma parte del árbol; nunca renderiza datos del titular anterior.
+  if (!isAuthenticated || !user?.id_usuario || !isHydrated || isHydrating) {
+    return <div className="mf-skeleton h-72 rounded-3xl" role="status" aria-label="Esperando sesión de cliente" />;
+  }
+  return <ClientePerfilContent key={identity} identity={identity} />;
+}
+
+function ClientePerfilContent({ identity }) {
   const navigate = useNavigate();
   const { error: notifyError } = useNotifications();
   const { isAuthenticated, isHydrated, isHydrating, logout, user } = useAuth();
@@ -67,20 +77,30 @@ export default function ClientePerfilPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [accountDeletionOpen, setAccountDeletionOpen] = useState(false);
   const [profilePhotoError, setProfilePhotoError] = useState(false);
+  const mountedRef = useRef(false);
+  const requestGenerationRef = useRef(0);
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; requestGenerationRef.current += 1; };
+  }, []);
 
   const canLoadProfile = Boolean(isAuthenticated && isHydrated && !isHydrating  );
 
   const loadProfile = useCallback(async ({ silent = false } = {}) => {
     if (!canLoadProfile) return;
+    const generation = ++requestGenerationRef.current;
+    const isCurrent = () => mountedRef.current && requestGenerationRef.current === generation;
     if (!silent) setLoading(true);
     try {
       const payload = await getClienteMe();
+      if (!isCurrent()) return;
       setData(payload);
       setProfilePhotoError(false);
       if (refreshClienteProfile) {
         void refreshClienteProfile({ silent: true });
       }
     } catch (error) {
+      if (!isCurrent()) return;
       if (Number(error?.status) === 401) {
         logout();
         navigate('/login', { replace: true });
@@ -88,7 +108,7 @@ export default function ClientePerfilPage() {
       }
       notifyError(error?.data?.error?.message || error?.message || 'No se pudo cargar tu perfil.');
     } finally {
-      if (!silent) setLoading(false);
+      if (isCurrent() && !silent) setLoading(false);
     }
   }, [canLoadProfile, logout, navigate, notifyError, refreshClienteProfile]);
 
@@ -107,6 +127,7 @@ export default function ClientePerfilPage() {
   const profileIsComplete = Boolean(completion?.is_complete || profileCompletionPercent >= 100);
 
   function handleProfileSaved(payload) {
+    if (!mountedRef.current) return;
     setData(payload);
     if (refreshClienteProfile) {
       void refreshClienteProfile({ silent: true });
@@ -246,6 +267,7 @@ export default function ClientePerfilPage() {
       </section>
 
       <ClienteProfileEditModal
+        key={identity}
         open={modalOpen}
         onOpenChange={setModalOpen}
         profile={profile}

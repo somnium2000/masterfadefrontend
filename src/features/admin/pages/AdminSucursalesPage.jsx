@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Building2, CheckCircle2, MapPin, Pencil, Phone, Plus, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext.jsx';
@@ -298,6 +298,10 @@ export default function AdminSucursalesPage() {
   const { roles } = useAuth();
 
   const isSuperAdmin = Array.isArray(roles) && roles.includes('super_admin');
+  const mountedRef = useRef(false);
+  const listRequestRef = useRef(0);
+  const selectionRequestRef = useRef(0);
+  const selectionPendingRef = useRef(false);
 
   const [sucursales, setSucursales] = useState([]);
   const [empresas, setEmpresas] = useState([]);
@@ -393,6 +397,8 @@ export default function AdminSucursalesPage() {
   }, [empresaNameById, filters, search]);
 
   const fetchSucursales = useCallback(async ({ silent = false } = {}) => {
+    const requestId = ++listRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === listRequestRef.current;
     if (!silent) {
       setLoading(true);
       setListError('');
@@ -400,9 +406,11 @@ export default function AdminSucursalesPage() {
 
     try {
       const response = await listAdminSucursales();
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       setSucursales(Array.isArray(payload?.sucursales) ? payload.sucursales : []);
     } catch (err) {
+      if (!isCurrent()) return;
       if (err.status === 401) {
         navigate('/login');
         return;
@@ -415,7 +423,7 @@ export default function AdminSucursalesPage() {
         setListError(extractMessage(err));
       }
     } finally {
-      if (!silent) {
+      if (isCurrent()) {
         setLoading(false);
       }
     }
@@ -432,10 +440,16 @@ export default function AdminSucursalesPage() {
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     void fetchSucursales();
     if (isSuperAdmin) {
       void fetchEmpresas();
     }
+    return () => {
+      mountedRef.current = false;
+      listRequestRef.current += 1;
+      selectionRequestRef.current += 1;
+    };
   }, [fetchEmpresas, fetchSucursales, isSuperAdmin]);
 
   function clearAllFilters() {
@@ -456,6 +470,9 @@ export default function AdminSucursalesPage() {
   }
 
   function openCreate() {
+    selectionRequestRef.current += 1;
+    if (selectionPendingRef.current) setFormLoading(false);
+    selectionPendingRef.current = false;
     setEditingId('');
     setFormValues(FORM_DEFAULTS);
     setFormError('');
@@ -463,16 +480,21 @@ export default function AdminSucursalesPage() {
   }
 
   async function openEdit(idSucursal) {
+    const requestId = ++selectionRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
+    selectionPendingRef.current = true;
     setFormError('');
     setFormLoading(true);
 
     try {
       const response = await getAdminSucursal(idSucursal);
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       setEditingId(idSucursal);
       setFormValues(mapSucursalToForm(payload?.sucursal || null));
       setFormOpen(true);
     } catch (err) {
+      if (!isCurrent()) return;
       if (err.status === 401) {
         navigate('/login');
         return;
@@ -483,8 +505,20 @@ export default function AdminSucursalesPage() {
       }
       notifications.error(extractMessage(err), { dedupeKey: 'sucursales-open-edit-error' });
     } finally {
-      setFormLoading(false);
+      if (isCurrent()) {
+        selectionPendingRef.current = false;
+        setFormLoading(false);
+      }
     }
+  }
+
+  function handleFormOpenChange(open) {
+    if (!open) {
+      selectionRequestRef.current += 1;
+      if (selectionPendingRef.current) setFormLoading(false);
+      selectionPendingRef.current = false;
+    }
+    setFormOpen(open);
   }
 
   async function handleSubmit() {
@@ -725,7 +759,7 @@ export default function AdminSucursalesPage() {
         />
       ) : null}
 
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+      <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Editar sucursal' : 'Nueva sucursal'}</DialogTitle>
@@ -738,7 +772,7 @@ export default function AdminSucursalesPage() {
           ) : null}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFormOpen(false)} disabled={formLoading}>Cancelar</Button>
+            <Button variant="outline" onClick={() => handleFormOpenChange(false)} disabled={formLoading}>Cancelar</Button>
             <Button onClick={handleSubmit} disabled={formLoading} className="min-w-[110px]">
               {formLoading ? 'Guardando...' : editingId ? 'Actualizar' : 'Crear sucursal'}
             </Button>

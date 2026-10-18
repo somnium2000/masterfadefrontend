@@ -17,8 +17,8 @@ function SideNavItem({ item, activeId, compact = false }) {
       whileTap={item.disabled ? undefined : { scale: 0.9 }}
       onClick={item.onClick}
       disabled={item.disabled}
-      className={`relative flex min-w-[56px] flex-1 flex-col items-center justify-center ${
-        compact ? 'gap-1.5 rounded-xl px-1.5 py-2' : 'gap-[3px] px-2 py-1.5'
+      className={`relative flex min-h-[44px] min-w-0 flex-1 basis-0 flex-col items-center justify-center ${
+        compact ? 'gap-1.5 rounded-xl px-1.5 py-2' : 'gap-[3px] px-0 py-1.5 min-[400px]:px-2'
       } transition-colors duration-200 ${
         item.disabled ? 'cursor-default' : 'cursor-pointer'
       }`}
@@ -56,7 +56,7 @@ function SideNavItem({ item, activeId, compact = false }) {
           isActive
             ? 'font-semibold text-[var(--mf-accent)]'
             : 'font-normal text-[var(--mf-nav-inactive)]'
-        } max-w-full truncate text-center leading-[1.05]`}
+        } max-w-full break-words whitespace-normal text-center leading-[1.05]`}
       >
         {item.label}
       </span>
@@ -79,7 +79,7 @@ export default function PremiumBottomNav({
   const frameClass = isDesktop ? 'mf-mobile-frame px-0 md:mx-auto md:w-full md:max-w-[600px] md:px-0' : 'mf-mobile-frame px-0';
   const navClass = compactBarberPreset
     ? 'mf-glass-nav mf-safe-bottom mx-2 mb-2 flex items-end justify-between rounded-[20px] border border-[var(--mf-nav-border)] px-2 pb-[calc(env(safe-area-inset-bottom,8px)+5px)] pt-1.5 shadow-[0_-8px_28px_rgba(0,0,0,0.16)]'
-    : 'mf-glass-nav mf-safe-bottom flex items-end justify-between px-4 pb-[calc(env(safe-area-inset-bottom,8px)+8px)] pt-1 shadow-[0_-8px_28px_rgba(0,0,0,0.12)]';
+    : 'mf-glass-nav mf-safe-bottom flex items-end justify-between px-1 min-[360px]:px-2 min-[400px]:px-4 pb-[calc(env(safe-area-inset-bottom,8px)+8px)] pt-1 shadow-[0_-8px_28px_rgba(0,0,0,0.12)]';
   const fabClass = compactBarberPreset
     ? 'mf-focus-ring mf-accent-gradient mf-fab-shadow -mt-[20px] inline-flex h-12 w-12 items-center justify-center rounded-full border-2 border-[var(--mf-nav-bg)]'
     : 'mf-focus-ring mf-accent-gradient mf-fab-shadow -mt-[26px] inline-flex h-14 w-14 items-center justify-center rounded-full border-[3px] border-[var(--mf-nav-bg)]';
@@ -93,13 +93,13 @@ export default function PremiumBottomNav({
         <nav className={navClass}>
           {hasFab ? (
             <>
-              <div className={`flex flex-1 items-end justify-between ${compactBarberPreset ? 'gap-1' : ''}`}>
+              <div className={`flex min-w-0 flex-1 basis-0 items-end justify-between ${compactBarberPreset ? 'gap-1' : ''}`}>
                 {items.slice(0, 2).map((item) => (
                   <SideNavItem key={item.id} item={item} activeId={activeId} compact={compactBarberPreset} />
                 ))}
               </div>
 
-              <div className={`${compactBarberPreset ? 'mx-1.5' : 'mx-2'} flex shrink-0 flex-col items-center`}>
+              <div className={`${compactBarberPreset ? 'mx-1.5' : 'mx-1 min-[360px]:mx-2'} flex shrink-0 flex-col items-center`}>
                 <motion.button
                   type="button"
                   whileHover={{ scale: 1.08, y: -2 }}
@@ -115,7 +115,7 @@ export default function PremiumBottomNav({
                 </span>
               </div>
 
-              <div className={`flex flex-1 items-end justify-between ${compactBarberPreset ? 'gap-1' : ''}`}>
+              <div className={`flex min-w-0 flex-1 basis-0 items-end justify-between ${compactBarberPreset ? 'gap-1' : ''}`}>
                 {items.slice(2).map((item) => (
                   <SideNavItem key={item.id} item={item} activeId={activeId} compact={compactBarberPreset} />
                 ))}

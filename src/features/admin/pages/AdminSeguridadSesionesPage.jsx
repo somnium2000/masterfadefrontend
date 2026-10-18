@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Filter, RotateCcw, Search, ShieldCheck } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
@@ -138,7 +138,7 @@ function safeStringify(value) {
 export default function AdminSeguridadSesionesPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
-  const { roles } = useAuth();
+  const { roles, user } = useAuth();
   const realtimeChannels = useMemo(() => ['security.sessions.changed'], []);
 
   const canWrite = useMemo(
@@ -173,7 +173,7 @@ export default function AdminSeguridadSesionesPage() {
     || Number(filters.limit) !== Number(DEFAULT_FILTERS.limit)
   ), [filters]);
 
-  const hydrateDirectory = useCallback(async (items) => {
+  const hydrateDirectory = useCallback(async (items, isCurrent) => {
     try {
       const ids = Array.from(new Set((items || []).map((item) => item?.id_usuario).filter(Boolean)));
       if (!ids.length) return;
@@ -193,6 +193,7 @@ export default function AdminSeguridadSesionesPage() {
           sortDir: 'desc',
         });
         const parsed = unwrapCollectionResponse(response);
+        if (!isCurrent()) return;
         (parsed.items || []).forEach((userItem) => {
           if (pending.includes(userItem.id_usuario)) {
             collected[userItem.id_usuario] = {
@@ -205,7 +206,7 @@ export default function AdminSeguridadSesionesPage() {
         currentPage += 1;
       }
 
-      if (Object.keys(collected).length > 0) {
+      if (isCurrent() && Object.keys(collected).length > 0) {
         setUserDirectory((prev) => ({ ...prev, ...collected }));
       }
     } catch {
@@ -213,7 +214,26 @@ export default function AdminSeguridadSesionesPage() {
     }
   }, [userDirectory]);
 
+  const listContext = JSON.stringify([filters, page, roles, user?.id_usuario]);
+  const listContextRef = useRef(listContext);
+  const listGenerationRef = useRef(0);
+  const listMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    listMountedRef.current = true;
+    listContextRef.current = listContext;
+    listGenerationRef.current += 1;
+    setRows([]);
+    setPagination({ page: 1, limit: DEFAULT_FILTERS.limit, total: 0, total_pages: 1 });
+    setError('');
+    setLoading(false);
+    return () => { listMountedRef.current = false; listGenerationRef.current += 1; };
+  }, [listContext]);
+
   const fetchRows = useCallback(async () => {
+    if (!listMountedRef.current || listContextRef.current !== listContext) return;
+    const generation = ++listGenerationRef.current;
+    const isCurrent = () => listMountedRef.current && listGenerationRef.current === generation && listContextRef.current === listContext;
+    if (!roles.some(role => ['super_admin', 'security_admin', 'security_auditor', 'root'].includes(role))) return;
     setLoading(true);
     setError('');
     try {
@@ -227,10 +247,12 @@ export default function AdminSeguridadSesionesPage() {
         toAt: filters.toAt,
       });
       const parsed = unwrapCollectionResponse(response);
+      if (!isCurrent()) return;
       setRows(parsed.items);
       setPagination(parsed.pagination);
-      void hydrateDirectory(parsed.items);
+      void hydrateDirectory(parsed.items, isCurrent);
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -243,9 +265,9 @@ export default function AdminSeguridadSesionesPage() {
       setRows([]);
       setPagination({ page: 1, limit: filters.limit, total: 0, total_pages: 1 });
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [filters, hydrateDirectory, navigate, page]);
+  }, [filters, hydrateDirectory, navigate, page, listContext, roles]);
 
   const realtime = useSecurityRealtime({
     enabled: true,

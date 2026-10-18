@@ -1,4 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { BadgeCheck, BriefcaseBusiness, Mail, MapPin, Phone, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
@@ -190,12 +191,31 @@ function InfoSection({ title, items }) {
 }
 
 export default function BarberoProfilePage() {
+  const { user, empleadoId, isAuthenticated, isHydrated, isHydrating } = useAuth();
+  const identity = JSON.stringify([user?.id_usuario || '', empleadoId || user?.empleado_id || '']);
+  if (!isAuthenticated || !user?.id_usuario || !isHydrated || isHydrating) {
+    return <div role="status" aria-label="Esperando sesión de barbero" className="mf-skeleton h-64 rounded-2xl" />;
+  }
+  return <BarberoProfileContent key={identity} />;
+}
+
+function BarberoProfileContent() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
   const [failedPhotoUrl, setFailedPhotoUrl] = useState('');
+  const mountedRef = useRef(false);
+  const requestGenerationRef = useRef(0);
+
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestGenerationRef.current += 1;
+    };
+  }, []);
 
   const profile = data?.perfil || null;
 
@@ -212,16 +232,20 @@ export default function BarberoProfilePage() {
   }, [navigate]);
 
   const loadProfile = useCallback(async () => {
+    const generation = ++requestGenerationRef.current;
+    const isCurrent = () => mountedRef.current && generation === requestGenerationRef.current;
     setLoading(true);
     setError('');
     try {
       const payload = await getBarberoPerfil();
+      if (!isCurrent()) return;
       setData(payload);
     } catch (err) {
+      if (!isCurrent()) return;
       if (handleAuthError(err)) return;
       setError(extractMessage(err));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [handleAuthError]);
 

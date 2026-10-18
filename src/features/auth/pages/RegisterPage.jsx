@@ -88,6 +88,17 @@ export default function RegisterPage() {
     setShowConfirmPasswordWhilePress(false);
   }
 
+  function handlePasswordRevealKeyDown(field, event) {
+    if (event.key !== ' ' && event.key !== 'Enter') return;
+    handlePasswordRevealStart(field, event);
+  }
+
+  function handlePasswordRevealKeyUp(field, event) {
+    if (event.key !== ' ' && event.key !== 'Enter') return;
+    event.preventDefault();
+    handlePasswordRevealEnd(field);
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
     setError('');
@@ -101,35 +112,30 @@ export default function RegisterPage() {
     if (!normalizedNombres || !normalizedApellidos) {
       const message = 'Nombre y apellido son obligatorios.';
       setError(message);
-      notifications.warning(message, { dedupeKey: 'auth-register-required-name' });
       return;
     }
 
     if (!EMAIL_REGEX.test(normalizedCorreo)) {
       const message = 'Debes ingresar un correo valido.';
       setError(message);
-      notifications.warning(message, { dedupeKey: 'auth-register-invalid-email' });
       return;
     }
 
     if (!PASSWORD_REGEX.test(password)) {
       const message = 'La contraseña debe tener al menos 8 caracteres, mayúscula, minúscula y número.';
       setError(message);
-      notifications.warning(message, { dedupeKey: 'auth-register-weak-password' });
       return;
     }
 
     if (password !== passwordConfirm) {
       const message = 'La confirmación de contraseña no coincide.';
       setError(message);
-      notifications.warning(message, { dedupeKey: 'auth-register-password-mismatch' });
       return;
     }
 
-    if (!aceptaTerminos || !consentimientoMarketing) {
-      const message = 'para crear un usuario debes seleccionar los consentimientos de cuenta para una MASTER experiencia.';
+    if (!aceptaTerminos) {
+      const message = 'Debes aceptar los términos y condiciones para crear tu cuenta. Recibir comunicaciones es opcional.';
       setError(message);
-      notifications.warning(message, { dedupeKey: 'auth-register-terms-required' });
       return;
     }
 
@@ -167,7 +173,6 @@ export default function RegisterPage() {
         submitError?.message ||
         'No se pudo completar el registro.';
       setError(message);
-      notifications.error(message, { dedupeKey: 'auth-register-error' });
     } finally {
       setLoading(false);
     }
@@ -228,7 +233,7 @@ export default function RegisterPage() {
               ) : null}
             </div>
 
-            <form className="mf-login-form" onSubmit={handleSubmit}>
+            <form className="mf-login-form" onSubmit={handleSubmit} aria-describedby={error ? 'register-error' : undefined}>
               <div className="mf-register-grid">
                 <div className="mf-form-group">
                   <label className="mf-label mf-register-label" htmlFor="register_nombres">
@@ -316,6 +321,8 @@ export default function RegisterPage() {
                       title="Mantén presionado para ver la contraseña"
                       disabled={loading}
                       onPointerDown={(event) => handlePasswordRevealStart('password', event)}
+                      onKeyDown={(event) => handlePasswordRevealKeyDown('password', event)}
+                      onKeyUp={(event) => handlePasswordRevealKeyUp('password', event)}
                       onPointerUp={() => handlePasswordRevealEnd('password')}
                       onPointerLeave={() => handlePasswordRevealEnd('password')}
                       onPointerCancel={() => handlePasswordRevealEnd('password')}
@@ -350,6 +357,8 @@ export default function RegisterPage() {
                       title="Mantén presionado para ver la contraseña"
                       disabled={loading}
                       onPointerDown={(event) => handlePasswordRevealStart('confirm', event)}
+                      onKeyDown={(event) => handlePasswordRevealKeyDown('confirm', event)}
+                      onKeyUp={(event) => handlePasswordRevealKeyUp('confirm', event)}
                       onPointerUp={() => handlePasswordRevealEnd('confirm')}
                       onPointerLeave={() => handlePasswordRevealEnd('confirm')}
                       onPointerCancel={() => handlePasswordRevealEnd('confirm')}
@@ -400,7 +409,7 @@ export default function RegisterPage() {
                 </div>
               </div>
 
-              {error ? <div className="mf-error">{error}</div> : null}
+              {error ? <div id="register-error" className="mf-error" role="alert">{error}</div> : null}
 
               <div className="mf-actions mf-actions-end">
                 <button className="mf-btn" type="submit" disabled={loading}>

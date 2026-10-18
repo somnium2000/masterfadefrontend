@@ -50,6 +50,13 @@ afterEach(() => {
   cleanup();
 });
 
+test('QA11 historial no presenta diagnóstico técnico aunque llegue de una versión anterior', async () => {
+  api.listAdminConfigComunicacionCampaniaEnvios.mockResolvedValue({ data: { envios: [{ id_envio: A, estado_envio: 'fallido', ultimo_error: 'smtp internal.test token=SYNTHETIC /private/key' }], total: 1 } });
+  render(<Page />);
+  expect(await screen.findByText('No se pudo enviar el correo. Reintenta más tarde.')).toBeInTheDocument();
+  expect(screen.queryByText(/internal.test|SYNTHETIC|private\/key/)).not.toBeInTheDocument();
+});
+
 test.each(['success', 'error'])('listado antiguo (%s) no sustituye busqueda vigente', async (outcome) => {
   const pending = deferred();
   api.listAdminConfigComunicacionCampanias.mockImplementation(({ q }) => q === 'A' ? pending.promise : Promise.resolve({ data: { campanias: q === 'B' ? [campaign(B)] : [], total: q === 'B' ? 1 : 0, offset: 0 } }));

@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Building2, CheckCircle2, Eye, KeyRound, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Users, X } from 'lucide-react';
 import {
@@ -222,6 +222,14 @@ function AccessBadge({ cliente }) {
 
 export default function AdminClientesPage() {
   const navigate = useNavigate();
+  const mountedRef = useRef(true);
+  const listRequestRef = useRef(0);
+  const selectionRequestRef = useRef(0);
+  const selectionPendingRef = useRef(false);
+  const invalidateRequests = useCallback(() => {
+    ++listRequestRef.current;
+    ++selectionRequestRef.current;
+  }, []);
   const [clientes, setClientes] = useState([]);
   const [sucursales, setSucursales] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -336,22 +344,27 @@ export default function AdminClientesPage() {
   }, [search, filters, view]);
 
   const fetchClientes = useCallback(async ({ silent = false } = {}) => {
+    if (!mountedRef.current) return;
+    const requestId = ++listRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === listRequestRef.current;
     if (!silent) {
       setLoading(true);
       setListError('');
     }
     try {
       const response = await listAdminPersonasClientes();
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       setClientes(Array.isArray(payload?.clientes) ? payload.clientes : []);
     } catch (err) {
+      if (!isCurrent()) return;
       if (err.status === 401) return navigate('/login');
       if (err.status === 403) return navigate('/unauthorized');
       if (!silent) {
         setListError(extractMessage(err));
       }
     } finally {
-      if (!silent) {
+      if (isCurrent()) {
         setLoading(false);
       }
     }
@@ -368,11 +381,43 @@ export default function AdminClientesPage() {
   }, []);
 
   useEffect(() => {
-    void fetchClientes();
-    void fetchCatalogos();
-  }, [fetchCatalogos, fetchClientes]);
+    mountedRef.current = true;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      void fetchClientes();
+      void fetchCatalogos();
+    });
+    return () => {
+      active = false;
+      mountedRef.current = false;
+      invalidateRequests();
+    };
+  }, [fetchCatalogos, fetchClientes, invalidateRequests]);
+
+  function handleFormOpenChange(open) {
+    if (!open) {
+      ++selectionRequestRef.current;
+      if (selectionPendingRef.current) setFormLoading(false);
+      selectionPendingRef.current = false;
+    }
+    setFormOpen(open);
+  }
+
+  function handleDetailOpenChange(open) {
+    if (!open) {
+      ++selectionRequestRef.current;
+      if (selectionPendingRef.current) setFormLoading(false);
+      selectionPendingRef.current = false;
+    }
+    setDetailOpen(open);
+  }
 
   function openCreate() {
+    ++selectionRequestRef.current;
+    if (selectionPendingRef.current) setFormLoading(false);
+    selectionPendingRef.current = false;
+    setDetailOpen(false);
     setEditingId('');
     setSelectedCliente(null);
     setFormValues(FORM_DEFAULTS);
@@ -381,10 +426,15 @@ export default function AdminClientesPage() {
   }
 
   async function openEdit(idCliente) {
+    const requestId = ++selectionRequestRef.current;
+    selectionPendingRef.current = true;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
+    setDetailOpen(false);
     setFormError('');
     setFormLoading(true);
     try {
       const response = await getAdminPersonaCliente(idCliente);
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       const cliente = payload?.cliente || null;
       setSelectedCliente(cliente);
@@ -392,23 +442,37 @@ export default function AdminClientesPage() {
       setFormValues(mapClienteToForm(cliente));
       setFormOpen(true);
     } catch (err) {
+      if (!isCurrent()) return;
       notifications.error(extractMessage(err), { dedupeKey: 'personas-clientes-open-edit-error' });
     } finally {
-      setFormLoading(false);
+      if (isCurrent()) {
+        selectionPendingRef.current = false;
+        setFormLoading(false);
+      }
     }
   }
 
   async function openDetail(idCliente) {
+    const requestId = ++selectionRequestRef.current;
+    selectionPendingRef.current = true;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
+    setFormOpen(false);
+    setSelectedCliente(null);
     setFormLoading(true);
     try {
       const response = await getAdminPersonaCliente(idCliente);
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       setSelectedCliente(payload?.cliente || null);
       setDetailOpen(true);
     } catch (err) {
+      if (!isCurrent()) return;
       notifications.error(extractMessage(err), { dedupeKey: 'personas-clientes-open-detail-error' });
     } finally {
-      setFormLoading(false);
+      if (isCurrent()) {
+        selectionPendingRef.current = false;
+        setFormLoading(false);
+      }
     }
   }
 
@@ -687,7 +751,7 @@ export default function AdminClientesPage() {
         </div>
       ) : null}
 
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+      <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingId ? 'Editar Cliente' : 'Nuevo Cliente'}</DialogTitle></DialogHeader>
 
@@ -771,13 +835,13 @@ export default function AdminClientesPage() {
           {formError && <p className="mt-2 rounded-[12px] bg-red-500/10 px-3 py-2 text-sm text-red-400">{formError}</p>}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFormOpen(false)} disabled={formLoading}>Cancelar</Button>
+            <Button variant="outline" onClick={() => handleFormOpenChange(false)} disabled={formLoading}>Cancelar</Button>
             <Button onClick={handleSubmit} disabled={formLoading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar cliente' : 'Crear cliente'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-5xl">
           <DialogHeader><DialogTitle>Detalle Cliente</DialogTitle></DialogHeader>
           {selectedCliente && (

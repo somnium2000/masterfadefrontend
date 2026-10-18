@@ -135,8 +135,8 @@ async function uploadPreparedFile(prepared, file) {
   }
 }
 
-export async function getClienteMe() {
-  const response = await http.get(`${BASE}/me`);
+export async function getClienteMe(options = {}) {
+  const response = await http.get(`${BASE}/me`, options);
   return normalizeResponsePayload(response);
 }
 

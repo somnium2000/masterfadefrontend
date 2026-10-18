@@ -1469,7 +1469,7 @@ export default function AdminConfiguracionComunicacionPage() {
                                 <p className="text-xs text-[var(--mf-text-2)]">Intentos: {Number(row.intentos || 0)}</p>
                                 <p className="text-xs text-[var(--mf-text-2)]">Enviar en: {formatDateTime(row.enviar_en)}</p>
                                 <p className="text-xs text-[var(--mf-text-2)]">Enviado en: {formatDateTime(row.enviado_at)}</p>
-                                {row.ultimo_error ? <p className="text-xs text-amber-300">Error: {row.ultimo_error}</p> : null}
+                                {row.ultimo_error ? <p className="text-xs text-amber-300">{row.estado_envio === "omitido" ? "Destinatario omitido tras verificar su elegibilidad actual." : "No se pudo enviar el correo. Reintenta más tarde."}</p> : null}
                                 <p className="text-xs text-[var(--mf-text-2)]">Creado: {formatDateTime(row.created_at)}</p>
                               </div>
                             ))}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Building2, CheckCircle2, Eye, KeyRound, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Users, X } from 'lucide-react';
 import {
@@ -286,6 +286,14 @@ function EstadoAccesoBadge({ estado }) {
 
 export default function AdminEmpleadosPage() {
   const navigate = useNavigate();
+  const mountedRef = useRef(true);
+  const listRequestRef = useRef(0);
+  const selectionRequestRef = useRef(0);
+  const selectionPendingRef = useRef(false);
+  const invalidateRequests = useCallback(() => {
+    ++listRequestRef.current;
+    ++selectionRequestRef.current;
+  }, []);
   const { roles: actorRoles = [] } = useAuth();
   const isAdminOnly = actorRoles.includes('admin') && !actorRoles.includes('super_admin');
   const [empleados, setEmpleados] = useState([]);
@@ -437,22 +445,27 @@ export default function AdminEmpleadosPage() {
   }, [search, filters, view]);
 
   const fetchEmpleados = useCallback(async ({ silent = false } = {}) => {
+    if (!mountedRef.current) return;
+    const requestId = ++listRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === listRequestRef.current;
     if (!silent) {
       setLoading(true);
       setListError('');
     }
     try {
       const response = await listAdminPersonasEmpleados();
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       setEmpleados(Array.isArray(payload?.empleados) ? payload.empleados : []);
     } catch (err) {
+      if (!isCurrent()) return;
       if (err.status === 401) return navigate('/login');
       if (err.status === 403) return navigate('/unauthorized');
       if (!silent) {
         setListError(extractMessage(err));
       }
     } finally {
-      if (!silent) {
+      if (isCurrent()) {
         setLoading(false);
       }
     }
@@ -471,11 +484,43 @@ export default function AdminEmpleadosPage() {
   }, []);
 
   useEffect(() => {
-    void fetchEmpleados();
-    void fetchCatalogos();
-  }, [fetchCatalogos, fetchEmpleados]);
+    mountedRef.current = true;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      void fetchEmpleados();
+      void fetchCatalogos();
+    });
+    return () => {
+      active = false;
+      mountedRef.current = false;
+      invalidateRequests();
+    };
+  }, [fetchCatalogos, fetchEmpleados, invalidateRequests]);
+
+  function handleFormOpenChange(open) {
+    if (!open) {
+      ++selectionRequestRef.current;
+      if (selectionPendingRef.current) setFormLoading(false);
+      selectionPendingRef.current = false;
+    }
+    setFormOpen(open);
+  }
+
+  function handleDetailOpenChange(open) {
+    if (!open) {
+      ++selectionRequestRef.current;
+      if (selectionPendingRef.current) setFormLoading(false);
+      selectionPendingRef.current = false;
+    }
+    setDetailOpen(open);
+  }
 
   function openCreate() {
+    ++selectionRequestRef.current;
+    if (selectionPendingRef.current) setFormLoading(false);
+    selectionPendingRef.current = false;
+    setDetailOpen(false);
     setEditingId('');
     setFormValues(FORM_DEFAULTS);
     setFormError('');
@@ -483,10 +528,15 @@ export default function AdminEmpleadosPage() {
   }
 
   async function openEdit(idEmpleado) {
+    const requestId = ++selectionRequestRef.current;
+    selectionPendingRef.current = true;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
+    setDetailOpen(false);
     setFormError('');
     setFormLoading(true);
     try {
       const response = await getAdminPersonaEmpleado(idEmpleado);
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       if (isAdminOnly && isPrivilegedEmployee(payload?.empleado)) {
         notifications.error('No puedes modificar una cuenta Super Admin.', { dedupeKey: 'personas-empleados-privileged' });
@@ -496,23 +546,37 @@ export default function AdminEmpleadosPage() {
       setFormValues(mapEmpleadoToForm(payload?.empleado));
       setFormOpen(true);
     } catch (err) {
+      if (!isCurrent()) return;
       notifications.error(extractMessage(err), { dedupeKey: 'personas-empleados-open-edit-error' });
     } finally {
-      setFormLoading(false);
+      if (isCurrent()) {
+        selectionPendingRef.current = false;
+        setFormLoading(false);
+      }
     }
   }
 
   async function openDetail(idEmpleado) {
+    const requestId = ++selectionRequestRef.current;
+    selectionPendingRef.current = true;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
+    setFormOpen(false);
+    setSelectedEmpleado(null);
     setFormLoading(true);
     try {
       const response = await getAdminPersonaEmpleado(idEmpleado);
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       setSelectedEmpleado(payload?.empleado || null);
       setDetailOpen(true);
     } catch (err) {
+      if (!isCurrent()) return;
       notifications.error(extractMessage(err), { dedupeKey: 'personas-empleados-open-detail-error' });
     } finally {
-      setFormLoading(false);
+      if (isCurrent()) {
+        selectionPendingRef.current = false;
+        setFormLoading(false);
+      }
     }
   }
 
@@ -813,7 +877,7 @@ export default function AdminEmpleadosPage() {
         </div>
       ) : null}
 
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+      <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingId ? 'Editar Empleado' : 'Nuevo Empleado'}</DialogTitle></DialogHeader>
 
@@ -1033,13 +1097,13 @@ export default function AdminEmpleadosPage() {
           {formError && <p className="mt-3 rounded-[12px] bg-red-500/10 px-3 py-2 text-sm text-red-400">{formError}</p>}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFormOpen(false)} disabled={formLoading}>Cancelar</Button>
+            <Button variant="outline" onClick={() => handleFormOpenChange(false)} disabled={formLoading}>Cancelar</Button>
             <Button onClick={handleSubmit} disabled={formLoading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar' : 'Crear empleado'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-5xl">
           <DialogHeader><DialogTitle>Detalle Empleado</DialogTitle></DialogHeader>
           {selectedEmpleado && (

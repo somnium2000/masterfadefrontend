@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Filter, RotateCcw, Search, Siren } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
@@ -191,7 +191,7 @@ function safeStringify(value) {
 export default function AdminSeguridadAlertasPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
-  const { roles } = useAuth();
+  const { roles, user } = useAuth();
   const realtimeChannels = useMemo(() => ['security.alerts.changed'], []);
   const isRoot = useMemo(() => roles.includes('root'), [roles]);
 
@@ -240,7 +240,26 @@ export default function AdminSeguridadAlertasPage() {
     return options;
   }, [draftFilters.tipo, rows]);
 
+  const listContext = JSON.stringify([filters, page, roles, user?.id_usuario]);
+  const listContextRef = useRef(listContext);
+  const listGenerationRef = useRef(0);
+  const listMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    listMountedRef.current = true;
+    listContextRef.current = listContext;
+    listGenerationRef.current += 1;
+    setRows([]);
+    setPagination({ page: 1, limit: DEFAULT_FILTERS.limit, total: 0, total_pages: 1 });
+    setError('');
+    setLoading(false);
+    return () => { listMountedRef.current = false; listGenerationRef.current += 1; };
+  }, [listContext]);
+
   const fetchRows = useCallback(async () => {
+    if (!listMountedRef.current || listContextRef.current !== listContext) return;
+    const generation = ++listGenerationRef.current;
+    const isCurrent = () => listMountedRef.current && listGenerationRef.current === generation && listContextRef.current === listContext;
+    if (!isRoot) return;
     if (!isRoot) {
       setLoading(false);
       return;
@@ -261,9 +280,11 @@ export default function AdminSeguridadAlertasPage() {
         toAt: filters.toAt,
       });
       const parsed = unwrapCollectionResponse(response);
+      if (!isCurrent()) return;
       setRows(parsed.items);
       setPagination(parsed.pagination);
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -276,9 +297,9 @@ export default function AdminSeguridadAlertasPage() {
       setRows([]);
       setPagination({ page: 1, limit: filters.limit, total: 0, total_pages: 1 });
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [filters, isRoot, navigate, page]);
+  }, [filters, isRoot, navigate, page, listContext]);
 
   const realtime = useSecurityRealtime({
     enabled: isRoot,

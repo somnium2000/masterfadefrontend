@@ -15,12 +15,13 @@ const api = vi.hoisted(() => ({
 }));
 const branchesApi = vi.hoisted(() => ({ listAdminSucursales: vi.fn() }));
 const notifications = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const sync = vi.hoisted(() => vi.fn());
 
 vi.mock("../../../../context/AuthContext.jsx", () => ({ useAuth: () => auth }));
 vi.mock("../../../../context/NotificationsContext.jsx", () => ({ useNotifications: () => notifications }));
 vi.mock("../../lib/adminCortesiasApi.js", () => api);
 vi.mock("../../lib/adminSucursalesApi.js", () => branchesApi);
-vi.mock("../../../../lib/catalogSync.js", () => ({ emitCatalogSync: vi.fn() }));
+vi.mock("../../../../lib/catalogSync.js", () => ({ emitCatalogSync: sync }));
 
 const courtesy = {
   id: ID, nombre: "Corte gratis", descripcion: "Original",
@@ -39,6 +40,7 @@ async function openEdit() {
 }
 
 beforeEach(() => {
+  sync.mockReset();
   auth.user = null;
   auth.branchIds = [];
   auth.roles = ["super_admin"];
@@ -65,6 +67,142 @@ const deferred = () => {
 };
 const result = (nombre) => ({ data: { cortesias: [{ ...courtesy, nombre }] } });
 const selectBranch = (value) => fireEvent.change(screen.getByLabelText("Sucursal"), { target: { value } });
+
+async function startQa10Save() {
+  const view = render(<AdminCortesiasCatalogPage />);
+  await screen.findByText('Corte gratis');
+  fireEvent.click(screen.getByTitle('Editar cortesía maestra'));
+  const dialog = screen.getByRole('dialog', { name: 'Editar cortesía maestra' });
+  fireEvent.change(within(dialog).getByLabelText('Descripción'), { target: { value: 'Cambio QA10' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+  const confirm = screen.getByRole('dialog', { name: 'Modificar información global' });
+  expect(api.updateAdminCortesia).not.toHaveBeenCalled();
+  fireEvent.click(within(confirm).getByRole('button', { name: 'Confirmar cambios' }));
+  await waitFor(() => expect(api.updateAdminCortesia).toHaveBeenCalledTimes(1));
+  return view;
+}
+
+describe('QA10 vigencia del guardado de cortesías', () => {
+  test.each(['success', 401, 403, 500])('desmontaje descarta efectos visuales: %s', async outcome => {
+    const pending = deferred(); api.updateAdminCortesia.mockReturnValue(pending.promise);
+    const view = await startQa10Save(); view.unmount();
+    await act(async () => {
+      if (outcome === 'success') pending.resolve({ data: courtesy }); else pending.reject({ status: outcome });
+    });
+    expect(notifications.success).not.toHaveBeenCalled(); expect(notifications.error).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenCalledTimes(outcome === 'success' ? 1 : 0);
+    expect(api.listAdminCortesias).toHaveBeenCalledTimes(1);
+  });
+  test('éxito vigente conserva confirmación, aviso, sincronización y refresco único', async () => {
+    await startQa10Save();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(notifications.success).toHaveBeenCalledExactlyOnceWith('Cortesía actualizada');
+    expect(sync).toHaveBeenCalledExactlyOnceWith('admin-cortesias');
+    expect(api.listAdminCortesias).toHaveBeenCalledTimes(2);
+    expect(api.updateAdminCortesia).toHaveBeenCalledWith(ID, { descripcion: 'Cambio QA10' });
+  });
+  test.each([401, 403, 409])('error vigente %s conserva formulario y mensaje', async status => {
+    api.updateAdminCortesia.mockRejectedValue({ status, data: { error: { message: 'No fue posible guardar' } } });
+    await startQa10Save();
+    expect(await screen.findByRole('alert')).toHaveTextContent('No fue posible guardar');
+    expect(screen.getByRole('dialog', { name: 'Editar cortesía maestra' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeEnabled();
+    expect(sync).not.toHaveBeenCalled(); expect(api.listAdminCortesias).toHaveBeenCalledTimes(1);
+  });
+  test.each(['success', 401, 403])('cambio de alcance y creación B descartan finalización A: %s', async outcome => {
+    const a = deferred(), b = deferred(); api.updateAdminCortesia.mockReturnValue(a.promise); api.createAdminCortesia.mockReturnValue(b.promise);
+    const view = await startQa10Save();
+    auth.roles = ['admin']; auth.branchIds = [A]; view.rerender(<AdminCortesiasCatalogPage />);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Nueva maestra' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Nueva maestra' }));
+    const dialog = screen.getByRole('dialog', { name: 'Nueva cortesía maestra' });
+    fireEvent.change(within(dialog).getByLabelText(/Nombre/), { target: { value: 'Formulario B' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Crear cortesía maestra' }));
+    await waitFor(() => expect(api.createAdminCortesia).toHaveBeenCalledTimes(1));
+    await act(async () => { if (outcome === 'success') a.resolve({ data: courtesy }); else a.reject({ status: outcome }); });
+    expect(screen.getByDisplayValue('Formulario B')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Crear cortesía maestra' })).toBeDisabled();
+    expect(notifications.success).not.toHaveBeenCalled(); expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    b.resolve({ data: courtesy }); await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(notifications.success).toHaveBeenCalledExactlyOnceWith('Cortesía creada');
+  });
+  test('doble clic en confirmación no duplica el PATCH', async () => {
+    const pending = deferred(); api.updateAdminCortesia.mockReturnValue(pending.promise);
+    render(<AdminCortesiasCatalogPage />); await screen.findByText('Corte gratis');
+    fireEvent.click(screen.getByTitle('Editar cortesía maestra'));
+    const dialog = screen.getByRole('dialog', { name: 'Editar cortesía maestra' });
+    fireEvent.change(within(dialog).getByLabelText('Descripción'), { target: { value: 'Cambio doble' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+    const button = within(screen.getByRole('dialog', { name: 'Modificar información global' })).getByRole('button', { name: 'Confirmar cambios' });
+    act(() => { fireEvent.click(button); fireEvent.click(button); });
+    expect(api.updateAdminCortesia).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve({ data: courtesy }));
+  });
+});
+
+describe('QA11 vigencia del cambio de estado', () => {
+  async function start() {
+    const view = render(<AdminCortesiasCatalogPage />);
+    await screen.findByText('Corte gratis');
+    fireEvent.click(screen.getByTitle('Inactivar en esta sucursal'));
+    const button = within(screen.getByRole('dialog', { name: 'Inactivar cortesía en sucursal' })).getByRole('button', { name: 'Inactivar' });
+    return { view, button };
+  }
+  test.each(['success', 'error'])('desmontaje descarta estado y avisos: %s', async outcome => {
+    const pending = deferred(); api.setAdminCortesiaEstado.mockReturnValue(pending.promise);
+    const { view, button } = await start(); fireEvent.click(button); view.unmount();
+    await act(async () => outcome === 'success' ? pending.resolve({ data: courtesy }) : pending.reject({ status: 500 }));
+    expect(notifications.success).not.toHaveBeenCalled(); expect(notifications.error).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenCalledTimes(outcome === 'success' ? 1 : 0);
+    expect(api.listAdminCortesias).toHaveBeenCalledTimes(1);
+  });
+  test.each(['success', 'error'])('respuesta A no cierra confirmación nueva de B: %s', async outcome => {
+    const pending = deferred(); api.setAdminCortesiaEstado.mockReturnValueOnce(pending.promise);
+    const { button } = await start(); fireEvent.click(button);
+    selectBranch(B); await screen.findByText('Corte gratis');
+    fireEvent.click(screen.getByTitle('Inactivar en esta sucursal'));
+    await act(async () => outcome === 'success' ? pending.resolve({ data: courtesy }) : pending.reject({ status: 500 }));
+    expect(screen.getByRole('dialog', { name: 'Inactivar cortesía en sucursal' })).toBeInTheDocument();
+    expect(notifications.success).not.toHaveBeenCalled(); expect(notifications.error).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenCalledTimes(outcome === 'success' ? 1 : 0);
+    expect(api.listAdminCortesias).toHaveBeenCalledTimes(2);
+  });
+  test('doble clic envía un solo cambio de estado', async () => {
+    const pending = deferred(); api.setAdminCortesiaEstado.mockReturnValue(pending.promise);
+    const { button } = await start();
+    act(() => { fireEvent.click(button); fireEvent.click(button); });
+    expect(api.setAdminCortesiaEstado).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve({ data: courtesy }));
+    expect(sync).toHaveBeenCalledExactlyOnceWith('admin-cortesias');
+    expect(notifications.success).toHaveBeenCalledExactlyOnceWith('Cortesía inactivada');
+    expect(api.listAdminCortesias).toHaveBeenCalledTimes(2);
+  });
+  test('error vigente conserva aviso y permite reintentar', async () => {
+    api.setAdminCortesiaEstado.mockRejectedValue({ status: 403, data: { error: { message: 'Operación no permitida' } } });
+    const { button } = await start(); fireEvent.click(button);
+    await waitFor(() => expect(notifications.error).toHaveBeenCalledExactlyOnceWith('Operación no permitida'));
+    expect(button).toBeEnabled(); expect(sync).not.toHaveBeenCalled();
+  });
+  test('respuesta vieja no libera el loading de una nueva operación y StrictMode conserva el éxito', async () => {
+    const old = deferred(), current = deferred();
+    api.setAdminCortesiaEstado.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
+    render(<StrictMode><AdminCortesiasCatalogPage /></StrictMode>);
+    await screen.findByText('Corte gratis');
+    fireEvent.click(screen.getByTitle('Inactivar en esta sucursal'));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Inactivar' }));
+    selectBranch(B); await screen.findByText('Corte gratis');
+    fireEvent.click(screen.getByTitle('Inactivar en esta sucursal'));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Inactivar' }));
+    expect(api.setAdminCortesiaEstado).toHaveBeenCalledTimes(2);
+    await act(async () => old.resolve({ data: courtesy }));
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Inactivar' })).toBeDisabled();
+    expect(notifications.success).not.toHaveBeenCalled();
+    await act(async () => current.resolve({ data: courtesy }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(notifications.success).toHaveBeenCalledTimes(1); expect(sync).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("concurrencia y selección por alcance", () => {
   test.each(["resolve", "reject"])('A → B descarta respuesta/error tardío A: %s', async (outcome) => {

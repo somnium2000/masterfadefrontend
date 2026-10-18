@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Building2, CheckCircle2, Eye, KeyRound, RefreshCw, RotateCcw, Search, ShieldCheck, SlidersHorizontal, Users, X } from 'lucide-react';
 import {
@@ -165,6 +165,11 @@ function isActivationState(estadoAcceso) {
 
 export default function AdminUsuariosPage() {
   const navigate = useNavigate();
+  const mountedRef = useRef(true);
+  const listRequestRef = useRef(0);
+  const invalidateRequests = useCallback(() => {
+    ++listRequestRef.current;
+  }, []);
   const { roles: actorRoles = [] } = useAuth();
   const isAdminOnly = actorRoles.includes('admin') && !actorRoles.includes('super_admin');
   const [usuarios, setUsuarios] = useState([]);
@@ -294,30 +299,45 @@ export default function AdminUsuariosPage() {
   }, [search, filters, view]);
 
   const fetchUsuarios = useCallback(async ({ silent = false } = {}) => {
+    if (!mountedRef.current) return;
+    const requestId = ++listRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === listRequestRef.current;
     if (!silent) {
       setLoading(true);
       setListError('');
     }
     try {
       const response = await listAdminPersonasUsuarios();
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       setUsuarios(Array.isArray(payload?.usuarios) ? payload.usuarios : []);
     } catch (err) {
+      if (!isCurrent()) return;
       if (err.status === 401) return navigate('/login');
       if (err.status === 403) return navigate('/unauthorized');
       if (!silent) {
         setListError(extractMessage(err));
       }
     } finally {
-      if (!silent) {
+      if (isCurrent()) {
         setLoading(false);
       }
     }
   }, [navigate]);
 
   useEffect(() => {
-    void fetchUsuarios();
-  }, [fetchUsuarios]);
+    mountedRef.current = true;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      void fetchUsuarios();
+    });
+    return () => {
+      active = false;
+      mountedRef.current = false;
+      invalidateRequests();
+    };
+  }, [fetchUsuarios, invalidateRequests]);
 
   function openDetail(usuario) {
     setSelectedUsuario(usuario || null);
