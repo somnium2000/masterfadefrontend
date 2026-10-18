@@ -36,4 +36,28 @@ describe('httpClient sensitiveBody', () => {
     expect(panReads).toBe(2);
     expect(cvvReads).toBe(2);
   });
+
+  it('envia la consulta publica de estado sin correo en URL ni preflight CSRF', async () => {
+    const body = {
+      id_grupo_cita: '11111111-2222-4333-8444-555555555555',
+      id_intent: '99999999-9999-4999-8999-999999999999',
+      titular_email: 'cliente@example.com',
+    };
+
+    await request('/v1/public/pagos/estado', {
+      method: 'POST',
+      body,
+      sensitiveBody: true,
+      cache: false,
+      dedupe: false,
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toContain('/v1/public/pagos/estado');
+    expect(url).not.toContain('titular_email');
+    expect(url).not.toContain(body.titular_email);
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual(body);
+  });
 });

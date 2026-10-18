@@ -92,6 +92,7 @@ function shouldSkipCsrfPrefetch(path, baseUrl) {
     "/v1/public/citas/validar-contactos",
     "/v1/public/citas/validar-titular",
     "/v1/public/pagos/crear-intent",
+    "/v1/public/pagos/estado",
     "/v1/public/pagos/mock-completar",
     "/v1/public/pagos/simulator/event",
     "/v1/public/pagos/pixelpay/sale",
