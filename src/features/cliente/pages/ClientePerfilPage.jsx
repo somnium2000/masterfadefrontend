@@ -79,20 +79,32 @@ function ClientePerfilContent({ identity }) {
   const [profilePhotoError, setProfilePhotoError] = useState(false);
   const mountedRef = useRef(false);
   const requestGenerationRef = useRef(0);
+  const activeProfileControllerRef = useRef(null);
   useLayoutEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; requestGenerationRef.current += 1; };
+    return () => {
+      mountedRef.current = false;
+      requestGenerationRef.current += 1;
+      activeProfileControllerRef.current?.abort();
+      activeProfileControllerRef.current = null;
+    };
   }, []);
 
   const canLoadProfile = Boolean(isAuthenticated && isHydrated && !isHydrating  );
 
   const loadProfile = useCallback(async ({ silent = false } = {}) => {
     if (!canLoadProfile) return;
+    activeProfileControllerRef.current?.abort();
+    const controller = new AbortController();
     const generation = ++requestGenerationRef.current;
-    const isCurrent = () => mountedRef.current && requestGenerationRef.current === generation;
+    activeProfileControllerRef.current = controller;
+    const isCurrent = () => mountedRef.current
+      && requestGenerationRef.current === generation
+      && activeProfileControllerRef.current === controller
+      && !controller.signal.aborted;
     if (!silent) setLoading(true);
     try {
-      const payload = await getClienteMe();
+      const payload = await getClienteMe({ signal: controller.signal });
       if (!isCurrent()) return;
       setData(payload);
       setProfilePhotoError(false);
@@ -109,6 +121,9 @@ function ClientePerfilContent({ identity }) {
       notifyError(error?.data?.error?.message || error?.message || 'No se pudo cargar tu perfil.');
     } finally {
       if (isCurrent() && !silent) setLoading(false);
+      if (activeProfileControllerRef.current === controller) {
+        activeProfileControllerRef.current = null;
+      }
     }
   }, [canLoadProfile, logout, navigate, notifyError, refreshClienteProfile]);
 
