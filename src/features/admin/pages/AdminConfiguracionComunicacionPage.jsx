@@ -9,6 +9,7 @@ import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import { useAuth } from '../../../context/AuthContext.jsx';
 import {
   cancelAdminConfigComunicacionCampania,
   createAdminConfigComunicacionCampania,
@@ -31,12 +32,8 @@ const FORM_DEFAULTS = {
 };
 const CAMPAIGNS_PAGE_SIZE = 100;
 
-function extractMessage(error) {
-  const raw = error?.data?.error?.message || error?.message || 'Error desconocido.';
-  if (/sql|postgres|stack|trace|syntax|jwt|token|supabase|smtp|provider/i.test(String(raw))) {
-    return 'No se pudo completar la operación en este momento.';
-  }
-  return raw;
+function extractMessage() {
+  return 'No se pudo completar la operación en este momento.';
 }
 
 function normalizeRequiredText(value) {
@@ -173,6 +170,12 @@ function getCampaignAttentionLabel(campaign) {
 }
 
 export default function AdminConfiguracionComunicacionPage() {
+  const { user, roles = [] } = useAuth();
+  if (!roles.some(role => role === 'admin' || role === 'super_admin')) return null;
+  return <CommunicationContent key={JSON.stringify([user?.id_usuario, roles])} />;
+}
+
+function CommunicationContent() {
   const notifications = useNotifications();
   const editorPanelRef = useRef(null);
 
@@ -229,6 +232,8 @@ export default function AdminConfiguracionComunicacionPage() {
   const shipmentsRequestRef = useRef(0);
   const campaignContextRef = useRef({ id: '', generation: 0 });
   const editorGenerationRef = useRef(0);
+  const saveOperationRef = useRef(null);
+  const campaignOperationRef = useRef(null);
   const listKey = JSON.stringify([searchQuery, filterOperationalState, showCancelledCampaigns, sortKey, campaignsOffset]);
   const listKeyRef = useRef(listKey);
 
@@ -251,6 +256,10 @@ export default function AdminConfiguracionComunicacionPage() {
 
   // AM: Cambiar campaña invalida sus consultas y limpia inmediatamente el contexto anterior.
   const resetCampaignContext = useCallback((id = '') => {
+    saveOperationRef.current = null;
+    campaignOperationRef.current = null;
+    setScheduling(false); setSending(false); setRetryingFailed(false); setCancellingCampaign(false);
+    setConfirmDialog(prev => ({ ...prev, open: false, action: '' }));
     campaignContextRef.current = { id, generation: campaignContextRef.current.generation + 1 };
     detailRequestRef.current += 1;
     eligibilityRequestRef.current += 1;
@@ -540,6 +549,7 @@ export default function AdminConfiguracionComunicacionPage() {
   }, [panelMode]);
 
   function openCreatePanel() {
+    saveOperationRef.current = null;
     detailRequestRef.current += 1;
     editorGenerationRef.current += 1;
     setDetailLoading(false);
@@ -550,6 +560,7 @@ export default function AdminConfiguracionComunicacionPage() {
   }
 
   function closeEditorPanel() {
+    saveOperationRef.current = null;
     detailRequestRef.current += 1;
     editorGenerationRef.current += 1;
     setDetailLoading(false);
@@ -602,9 +613,11 @@ export default function AdminConfiguracionComunicacionPage() {
   }
 
   async function handleSave() {
+    if (!mountedRef.current || saveOperationRef.current) return;
+    const operation = {};
     const editorGeneration = editorGenerationRef.current;
     const contextGeneration = campaignContextRef.current.generation;
-    const current = () => mountedRef.current && editorGenerationRef.current === editorGeneration && campaignContextRef.current.generation === contextGeneration;
+    const current = () => mountedRef.current && saveOperationRef.current === operation && editorGenerationRef.current === editorGeneration && campaignContextRef.current.generation === contextGeneration;
     const validationError = validateForm(formValues);
     if (validationError) {
       setFormError(validationError);
@@ -612,6 +625,7 @@ export default function AdminConfiguracionComunicacionPage() {
     }
 
     const payload = buildPayload(formValues);
+    saveOperationRef.current = operation;
     setSaving(true);
     setFormError('');
 
@@ -653,8 +667,24 @@ export default function AdminConfiguracionComunicacionPage() {
         await fetchCampaignDetail(selectedCampaign.id_campania);
       }
     } finally {
-      if (current()) setSaving(false);
+      if (saveOperationRef.current === operation) {
+        saveOperationRef.current = null;
+        if (mountedRef.current) setSaving(false);
+      }
     }
+  }
+
+  function beginCampaignOperation() {
+    if (!mountedRef.current || campaignOperationRef.current || !selectedCampaign?.id_campania) return null;
+    const generation = campaignContextRef.current.generation;
+    const id = selectedCampaign.id_campania;
+    const operation = {};
+    campaignOperationRef.current = operation;
+    return {
+      current: () => mountedRef.current && campaignOperationRef.current === operation
+        && campaignContextRef.current.generation === generation && campaignContextRef.current.id === id,
+      release: () => { if (campaignOperationRef.current === operation) campaignOperationRef.current = null; },
+    };
   }
 
   async function handleScheduleCampaign() {
@@ -673,6 +703,8 @@ export default function AdminConfiguracionComunicacionPage() {
       }
     }
 
+    const operation = beginCampaignOperation();
+    if (!operation) return;
     setScheduling(true);
     try {
       const payload = {
@@ -680,6 +712,7 @@ export default function AdminConfiguracionComunicacionPage() {
         id_clientes_excluidos: manuallyExcludedIds,
       };
       const response = await programAdminConfigComunicacionCampania(selectedCampaign.id_campania, payload);
+      if (!operation.current()) return;
       const data = response?.data || response;
       const totalProgramados = Number(data?.total_destinatarios_programados || 0);
       notifications.success(
@@ -689,19 +722,23 @@ export default function AdminConfiguracionComunicacionPage() {
         { dedupeKey: 'comm-campaign-schedule-ok' }
       );
       await fetchCampaignDetail(selectedCampaign.id_campania);
-      setPanelMode('view');
+      if (operation.current()) setPanelMode('view');
     } catch (error) {
-      notifications.error(extractMessage(error), { dedupeKey: 'comm-campaign-schedule-error' });
+      if (operation.current()) notifications.error(extractMessage(error), { dedupeKey: 'comm-campaign-schedule-error' });
     } finally {
-      setScheduling(false);
+      if (operation.current()) setScheduling(false);
+      operation.release();
     }
   }
 
   async function executeSendCampaign() {
     if (!selectedCampaign?.id_campania) return;
+    const operation = beginCampaignOperation();
+    if (!operation) return;
     setSending(true);
     try {
       const response = await sendAdminConfigComunicacionCampania(selectedCampaign.id_campania);
+      if (!operation.current()) return;
       const data = response?.data || response;
       setSendSummary(data || null);
       notifications.success(
@@ -709,18 +746,22 @@ export default function AdminConfiguracionComunicacionPage() {
         { dedupeKey: 'comm-campaign-send-ok' }
       );
       await fetchCampaignDetail(selectedCampaign.id_campania);
-      setPanelMode('view');
+      if (operation.current()) setPanelMode('view');
     } catch (error) {
-      notifications.error(extractMessage(error), { dedupeKey: 'comm-campaign-send-error' });
+      if (operation.current()) notifications.error(extractMessage(error), { dedupeKey: 'comm-campaign-send-error' });
     } finally {
-      setSending(false);
+      if (operation.current()) setSending(false);
+      operation.release();
     }
   }
   async function executeRetryFailedShipments() {
     if (!selectedCampaign?.id_campania) return;
+    const operation = beginCampaignOperation();
+    if (!operation) return;
     setRetryingFailed(true);
     try {
       const response = await retryFailedAdminConfigComunicacionCampania(selectedCampaign.id_campania);
+      if (!operation.current()) return;
       const data = response?.data || response;
       setRetrySummary(data || null);
       notifications.success(
@@ -728,26 +769,30 @@ export default function AdminConfiguracionComunicacionPage() {
         { dedupeKey: 'comm-campaign-retry-ok' }
       );
       await fetchCampaignDetail(selectedCampaign.id_campania);
-      setPanelMode('view');
+      if (operation.current()) setPanelMode('view');
     } catch (error) {
-      notifications.error(extractMessage(error), { dedupeKey: 'comm-campaign-retry-error' });
+      if (operation.current()) notifications.error(extractMessage(error), { dedupeKey: 'comm-campaign-retry-error' });
     } finally {
-      setRetryingFailed(false);
+      if (operation.current()) setRetryingFailed(false);
+      operation.release();
     }
   }
   async function executeCancelCampaign() {
     if (!selectedCampaign?.id_campania) return;
+    const operation = beginCampaignOperation();
+    if (!operation) return;
     setCancellingCampaign(true);
     try {
-      const response = await cancelAdminConfigComunicacionCampania(selectedCampaign.id_campania);
-      const data = response?.data || response;
-      notifications.success(data?.mensaje || 'Campaña cancelada correctamente.', { dedupeKey: 'comm-campaign-cancel-ok' });
+      await cancelAdminConfigComunicacionCampania(selectedCampaign.id_campania);
+      if (!operation.current()) return;
+      notifications.success('Campaña cancelada correctamente.', { dedupeKey: 'comm-campaign-cancel-ok' });
       await fetchCampaignDetail(selectedCampaign.id_campania);
-      setPanelMode('view');
+      if (operation.current()) setPanelMode('view');
     } catch (error) {
-      notifications.error(extractMessage(error), { dedupeKey: 'comm-campaign-cancel-error' });
+      if (operation.current()) notifications.error(extractMessage(error), { dedupeKey: 'comm-campaign-cancel-error' });
     } finally {
-      setCancellingCampaign(false);
+      if (operation.current()) setCancellingCampaign(false);
+      operation.release();
     }
   }
   function openConfirmDialog(action) {
@@ -796,7 +841,7 @@ export default function AdminConfiguracionComunicacionPage() {
     } else if (confirmDialog.action === 'cancel') {
       await executeCancelCampaign();
     }
-    setConfirmDialog((prev) => ({ ...prev, open: false, action: '' }));
+    if (mountedRef.current) setConfirmDialog((prev) => prev === confirmDialog ? ({ ...prev, open: false, action: '' }) : prev);
   }
   function handleSendCampaign() {
     if (!selectedCampaign?.id_campania || !canSendScheduledCampaign || sending) return;

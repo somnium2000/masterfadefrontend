@@ -137,6 +137,20 @@ export default function AdminSeguridadUsuariosPage() {
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState('');
+  const actionOperationRef = useRef(null);
+  const actionGenerationRef = useRef(0);
+  const identityContext = JSON.stringify([roles, user?.id_usuario]);
+
+  useLayoutEffect(() => {
+    actionGenerationRef.current += 1;
+    actionOperationRef.current = null;
+    setConfirmTarget(null);
+    setActionLoadingId('');
+    return () => {
+      actionGenerationRef.current += 1;
+      actionOperationRef.current = null;
+    };
+  }, [identityContext]);
 
   const hasActiveFilters = useMemo(() => (
     filters.estadoAcceso !== DEFAULT_FILTERS.estadoAcceso
@@ -229,7 +243,7 @@ export default function AdminSeguridadUsuariosPage() {
   }
 
   async function confirmAccessChange() {
-    if (!confirmTarget?.id_usuario || !confirmTarget?.nextState || actionLoadingId) return;
+    if (!canWrite || !listMountedRef.current || !confirmTarget?.id_usuario || !confirmTarget?.nextState || actionOperationRef.current) return;
     if (confirmTarget.isProtected === true && confirmTarget.nextState !== 'activo') {
       setConfirmTarget(null);
       notifications.error('El usuario root protegido no puede ser bloqueado ni inactivado.', {
@@ -237,15 +251,22 @@ export default function AdminSeguridadUsuariosPage() {
       });
       return;
     }
+    const operation = {};
+    const generation = actionGenerationRef.current;
+    actionOperationRef.current = operation;
+    const isCurrent = () => listMountedRef.current && actionGenerationRef.current === generation
+      && actionOperationRef.current === operation;
     setActionLoadingId(confirmTarget.id_usuario);
     try {
       await updateAdminSecurityUserAccessState(confirmTarget.id_usuario, confirmTarget.nextState);
+      if (!isCurrent()) return;
       notifications.success('Estado de acceso actualizado correctamente.', {
         dedupeKey: 'security-users-access-updated',
       });
       setConfirmTarget(null);
       await fetchRows();
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -258,7 +279,10 @@ export default function AdminSeguridadUsuariosPage() {
         dedupeKey: 'security-users-access-update-error',
       });
     } finally {
-      setActionLoadingId('');
+      if (isCurrent()) {
+        actionOperationRef.current = null;
+        setActionLoadingId('');
+      }
     }
   }
 

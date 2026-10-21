@@ -118,7 +118,7 @@ function ClientePerfilContent({ identity }) {
         navigate('/login', { replace: true });
         return;
       }
-      notifyError(error?.data?.error?.message || error?.message || 'No se pudo cargar tu perfil.');
+      notifyError('No se pudo cargar tu perfil.');
     } finally {
       if (isCurrent() && !silent) setLoading(false);
       if (activeProfileControllerRef.current === controller) {

@@ -169,6 +169,17 @@ function normalizeSummary(payload) {
 }
 
 export default function AdminMasterPuntosPage() {
+  const { user, roles = [], branchIds = [], empresaId } = useAuth();
+  const readScope = JSON.stringify({
+    userId: user?.id_usuario || user?.id || null,
+    roles: roles.map((role) => normalizeText(role).toLowerCase()).sort(),
+    branchIds: [...branchIds].sort(),
+    empresaId: empresaId || null,
+  });
+  return <AdminMasterPuntosContent key={readScope} />;
+}
+
+function AdminMasterPuntosContent() {
   const navigate = useNavigate();
   const notifications = useNotifications();
   const { roles } = useAuth();
@@ -187,6 +198,7 @@ export default function AdminMasterPuntosPage() {
   const mountedRef = useRef(false);
   const selectionSeqRef = useRef(0);
   const rewardRequestSeqRef = useRef(0);
+  const readControllersRef = useRef({});
   const adjustmentLockRef = useRef(false);
   const rewardSaveLockRef = useRef(false);
 
@@ -217,6 +229,7 @@ export default function AdminMasterPuntosPage() {
   }, [roles]);
 
   useEffect(() => {
+    const readControllers = readControllersRef.current;
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
@@ -224,6 +237,7 @@ export default function AdminMasterPuntosPage() {
       searchRequestSeqRef.current += 1;
       selectionSeqRef.current += 1;
       rewardRequestSeqRef.current += 1;
+      Object.values(readControllers).forEach((controller) => controller.abort());
     };
   }, [canManagePoints]);
 
@@ -268,12 +282,15 @@ export default function AdminMasterPuntosPage() {
 
   const loadRewardConfig = useCallback(async () => {
     const requestSeq = ++rewardRequestSeqRef.current;
+    readControllersRef.current.reward?.abort();
+    const controller = new AbortController();
+    readControllersRef.current.reward = controller;
     const isCurrent = () => mountedRef.current && rewardRequestSeqRef.current === requestSeq;
     setRewardConfigLoading(true);
     setRewardConfigLoaded(false);
     setRewardConfigError('');
     try {
-      const response = await getAdminMasterPuntosRegalias();
+      const response = await getAdminMasterPuntosRegalias({ signal: controller.signal });
       if (!isCurrent()) return;
       const normalized = normalizeRewardConfigPayload(response?.data || response);
       setRewardRule(normalized.regla);
@@ -300,6 +317,7 @@ export default function AdminMasterPuntosPage() {
   const loadSummary = useCallback(async (idCliente, options = {}) => {
     const safeId = normalizeText(idCliente);
     const keepCurrent = Boolean(options?.keepCurrent);
+    readControllersRef.current.summary?.abort();
     if (!safeId) {
       summaryRequestSeqRef.current += 1;
       setSummary(null);
@@ -309,13 +327,15 @@ export default function AdminMasterPuntosPage() {
     }
     const requestSeq = summaryRequestSeqRef.current + 1;
     summaryRequestSeqRef.current = requestSeq;
+    const controller = new AbortController();
+    readControllersRef.current.summary = controller;
     setSummaryLoading(true);
     setSummaryError('');
     if (!keepCurrent) {
       setSummary(null);
     }
     try {
-      const response = await getAdminClientePuntosResumen(safeId);
+      const response = await getAdminClientePuntosResumen(safeId, { signal: controller.signal });
       if (!mountedRef.current || summaryRequestSeqRef.current !== requestSeq) return;
       const nextSummary = normalizeSummary(response?.data || response);
       setSummary(nextSummary);
@@ -397,12 +417,15 @@ export default function AdminMasterPuntosPage() {
 
     const requestSeq = searchRequestSeqRef.current + 1;
     searchRequestSeqRef.current = requestSeq;
+    const controller = new AbortController();
+    readControllersRef.current.search?.abort();
+    readControllersRef.current.search = controller;
     setSearchingClientes(true);
     setClientesError('');
 
     void (async () => {
       try {
-        const response = await searchAdminClientesActivos(query, { limit: CLIENT_SEARCH_LIMIT });
+        const response = await searchAdminClientesActivos(query, { limit: CLIENT_SEARCH_LIMIT, signal: controller.signal });
         if (!mountedRef.current || searchRequestSeqRef.current !== requestSeq) return;
         const payload = response?.data || response || {};
         const nextResults = Array.isArray(payload?.clientes)
@@ -428,7 +451,7 @@ export default function AdminMasterPuntosPage() {
         }
       }
     })();
-    return () => { searchRequestSeqRef.current += 1; };
+    return () => { searchRequestSeqRef.current += 1; controller.abort(); };
   }, [canManagePoints, clientePickerOpen, debouncedSearch, debouncedSearchSeq, navigate]);
 
   useEffect(() => {
@@ -501,15 +524,19 @@ export default function AdminMasterPuntosPage() {
     const safeId = normalizeText(cliente?.id_cliente);
     if (!safeId) return;
     searchRequestSeqRef.current += 1;
+    readControllersRef.current.search?.abort();
     if (safeId !== selectedClienteId) {
       selectionSeqRef.current += 1;
       summaryRequestSeqRef.current += 1;
+      readControllersRef.current.summary?.abort();
       setSummary(null);
       setSummaryError('');
       setAjustePointsAdd('');
       setAjustePointsSubtract('');
       setAjusteReason('');
       setNegativeConfirmOpen(false);
+    } else if (summaryError && !summaryLoading) {
+      void loadSummary(safeId);
     }
     setSelectedClienteId(safeId);
     setSelectedClienteData(normalizeClienteRecord(cliente, 0));
@@ -915,6 +942,7 @@ export default function AdminMasterPuntosPage() {
           setClientePickerOpen(nextOpen);
           if (!nextOpen) {
             searchRequestSeqRef.current += 1;
+            readControllersRef.current.search?.abort();
             setSearchDraft('');
             setDebouncedSearch('');
             setSearchResults([]);
@@ -938,6 +966,7 @@ export default function AdminMasterPuntosPage() {
               value={searchDraft}
               onChange={(event) => {
                 searchRequestSeqRef.current += 1;
+                readControllersRef.current.search?.abort();
                 setSearchResults([]);
                 setClientesError('');
                 setSearchingClientes(normalizeText(event.target.value).length >= CLIENT_SEARCH_MIN_LENGTH);

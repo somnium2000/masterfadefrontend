@@ -14,6 +14,15 @@ function deferred() { let resolve, reject; const promise = new Promise((yes, no)
 const payload = id => ({ perfil: { nombre_completo: `BARBER-${id}`, correo_principal: `${id}@example.test`, es_barbero: true, salario_base: 1234, observaciones: 'synthetic-note', foto_perfil_url: `https://synthetic.invalid/${id}.jpg`, certificaciones_titulos: ['Certificado sintético'] } });
 beforeEach(() => { Object.assign(auth, { user: { id_usuario: 'synthetic-A' }, empleadoId: 'employee-A', isAuthenticated: true, isHydrated: true, isHydrating: false }); api.getBarberoPerfil.mockReset().mockResolvedValue(payload('A')); navigate.mockReset(); });
 afterEach(cleanup);
+
+test('QA12B: error técnico no se expone y conserva reintento', async () => {
+  api.getBarberoPerfil.mockRejectedValueOnce({ message: 'ECONNREFUSED private.internal password=SYNTHETIC' });
+  render(<Page />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo cargar el perfil del barbero.');
+  expect(screen.queryByText(/ECONNREFUSED/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /reintentar/i }));
+  await screen.findByRole('heading', { name: 'BARBER-A' });
+});
 test('cambiar identidad limpia inmediatamente perfil y foto A', async () => {
   const view = render(<Page />); await screen.findByRole('heading', { name: 'BARBER-A' });
   api.getBarberoPerfil.mockResolvedValue(payload('B')); auth.user = { id_usuario: 'synthetic-B' }; view.rerender(<Page />);

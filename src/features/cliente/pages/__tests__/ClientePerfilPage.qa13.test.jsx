@@ -23,6 +23,25 @@ function identity(id) { auth.user = { id_usuario: `account-${id}` }; auth.client
 beforeEach(() => { identity('A'); auth.isAuthenticated = true; auth.isHydrated = true; auth.isHydrating = false; auth.logout.mockReset(); nav.mockReset(); layout.refreshClienteProfile.mockReset(); Object.values(notices).forEach(m => m.mockReset()); Object.values(api).forEach(m => m.mockReset()); api.getClienteMe.mockResolvedValue(payload('A')); api.updateClienteMe.mockResolvedValue(payload('A')); api.prepareClienteProfileImageUpload.mockResolvedValue({ asset_id: 'new-asset' }); api.getClienteProfileImageReadUrl.mockResolvedValue({ url: 'https://synthetic.invalid/new.jpg' }); });
 afterEach(cleanup);
 
+test('QA12A: carga del perfil no expone mensajes técnicos arbitrarios', async () => {
+  api.getClienteMe.mockRejectedValue({ status: 503, message: 'ECONNREFUSED private.internal password=SYNTHETIC' });
+  render(<Page />);
+  await waitFor(() => expect(notices.error).toHaveBeenCalledWith('No se pudo cargar tu perfil.'));
+});
+
+test.each(['save', 'upload'])('QA12A: %s no expone mensajes técnicos arbitrarios', async kind => {
+  const error = { message: 'ECONNREFUSED private.internal password=SYNTHETIC' };
+  render(<Editor open profile={profile('A')} onSaved={vi.fn()} onOpenChange={vi.fn()} />);
+  if (kind === 'save') {
+    api.updateClienteMe.mockRejectedValue(error);
+    fireEvent.submit(screen.getByRole('dialog').querySelector('form'));
+  } else {
+    api.prepareClienteProfileImageUpload.mockRejectedValue(error);
+    fireEvent.change(screen.getByLabelText('Archivo de fotografía privada'), { target: { files: [new File(['x'], 'x.jpg', { type: 'image/jpeg' })] } });
+  }
+  await waitFor(() => expect(notices.error).toHaveBeenCalledWith(kind === 'save' ? 'No se pudo actualizar tu perfil.' : 'No se pudo cargar la imagen de perfil.'));
+});
+
 describe('aislamiento del perfil', () => {
   test('A normal; cambio a B elimina inmediatamente nombre y URL A', async () => {
     const view = render(<Page />); await screen.findAllByText('CLIENT-A');
@@ -78,7 +97,7 @@ describe('editor vigente', () => {
     expect(api.updateClienteMe.mock.calls[0][0]).not.toHaveProperty('foto_perfil_asset_id'); expect(api.prepareClienteProfileImageUpload).not.toHaveBeenCalled();
   });
   test('error vigente conserva editor y permite reintento', async () => {
-    api.updateClienteMe.mockRejectedValue({ data: { error: { message: 'No fue posible guardar' } } }); const v = mount(); submit(); await waitFor(() => expect(notices.error).toHaveBeenCalledWith('No fue posible guardar'));
+    api.updateClienteMe.mockRejectedValue({ data: { error: { message: 'No fue posible guardar' } } }); const v = mount(); submit(); await waitFor(() => expect(notices.error).toHaveBeenCalledWith('No se pudo actualizar tu perfil.'));
     expect(v.saved).not.toHaveBeenCalled(); expect(v.close).not.toHaveBeenCalled(); expect(screen.getByRole('button', { name: 'Guardar perfil' })).toBeEnabled();
   });
   test('doble submit no duplica mutación', async () => { const p = deferred(); api.updateClienteMe.mockReturnValue(p.promise); mount(); act(() => { submit(); submit(); }); expect(api.updateClienteMe).toHaveBeenCalledTimes(1); await act(async () => p.resolve(payload('A'))); });
@@ -109,7 +128,7 @@ describe('editor vigente', () => {
   test.each(['Formato no válido', 'Fallo simulado'])('upload rechazado %s conserva fotografía', async message => {
     api.prepareClienteProfileImageUpload.mockRejectedValue(new Error(message)); mount();
     fireEvent.change(screen.getByLabelText('Archivo de fotografía privada'), { target: { files: [new File(['x'], 'x.txt', { type: 'text/plain' })] } });
-    await waitFor(() => expect(notices.error).toHaveBeenCalledWith(message)); expect(api.updateClienteMe).not.toHaveBeenCalled(); expect(screen.getByAltText('Foto de perfil')).toHaveAttribute('src', 'https://synthetic.invalid/A.jpg');
+    await waitFor(() => expect(notices.error).toHaveBeenCalledWith('No se pudo cargar la imagen de perfil.')); expect(api.updateClienteMe).not.toHaveBeenCalled(); expect(screen.getByAltText('Foto de perfil')).toHaveAttribute('src', 'https://synthetic.invalid/A.jpg');
   });
   test('retiro voluntario envía null explícito', async () => { mount(); fireEvent.click(screen.getByRole('button', { name: 'Quitar' })); submit(); await waitFor(() => expect(api.updateClienteMe).toHaveBeenCalled()); expect(api.updateClienteMe.mock.calls[0][0].foto_perfil_asset_id).toBeNull(); });
   test('upload vigente conserva asset y URL para el guardado explícito', async () => {

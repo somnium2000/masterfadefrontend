@@ -339,6 +339,25 @@ select {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--mf-accent) 24%, transparent);
 }
 
+/* Landing only: preserve shared palette and focus styles in other modules. */
+.mf-landing {
+  --mf-landing-muted: var(--mf-text-2);
+}
+
+.mf-landing .mf-landing-muted {
+  color: var(--mf-landing-muted);
+}
+
+:root[data-theme="light"] .mf-landing {
+  --mf-landing-muted: #514b46;
+}
+
+.mf-landing button:focus-visible {
+  outline: 3px solid var(--mf-accent);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px var(--mf-bg);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

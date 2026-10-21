@@ -150,20 +150,9 @@ export function normalizeAdminExecutionResponse(response = {}) {
 }
 
 export function sanitizeAdminAccountDeletionError(error, fallback = "No fue posible completar la operacion. Intenta nuevamente.") {
-  const raw = String(error?.data?.error?.message || error?.message || "").trim();
-  if (!raw) return fallback;
-  const lowered = raw.toLowerCase();
-  if (
-    lowered.includes("postgres") ||
-    lowered.includes("sql") ||
-    lowered.includes("stack") ||
-    lowered.includes("token") ||
-    lowered.includes("hash") ||
-    lowered.includes("storage")
-  ) {
-    return fallback;
-  }
-  return raw;
+  const code = String(error?.data?.error?.code || error?.code || '');
+  if (code === 'AUTH_FORBIDDEN') return 'No tienes permisos para realizar esta operación.';
+  return fallback;
 }
 
 export function buildApprovalPayload({ reauthToken, phrase, acknowledged, comment }) {

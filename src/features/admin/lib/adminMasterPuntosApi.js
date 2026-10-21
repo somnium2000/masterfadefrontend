@@ -2,12 +2,13 @@ import { http } from '../../../services/httpClient.js';
 
 const BASE = '/v1/admin/puntos';
 
-export async function getAdminClientePuntosResumen(idCliente) {
+export async function getAdminClientePuntosResumen(idCliente, { signal } = {}) {
   const safeId = String(idCliente || '').trim();
   if (!safeId) {
     throw new Error('Debes seleccionar un cliente.');
   }
-  return http.get(`${BASE}/clientes/${safeId}/resumen`);
+  const path = `${BASE}/clientes/${safeId}/resumen`;
+  return signal ? http.get(path, { signal }) : http.get(path);
 }
 
 export async function createAdminClientePuntosAjuste(idCliente, payload) {
@@ -18,7 +19,7 @@ export async function createAdminClientePuntosAjuste(idCliente, payload) {
   return http.post(`${BASE}/clientes/${safeId}/ajuste`, payload);
 }
 
-export async function searchAdminClientesActivos(query, { limit = 10 } = {}) {
+export async function searchAdminClientesActivos(query, { limit = 10, signal } = {}) {
   const safeQuery = String(query || '').trim();
   const safeLimit = Number.isFinite(Number(limit)) ? Math.max(1, Math.min(20, Math.trunc(Number(limit)))) : 10;
   if (safeQuery.length < 2) {
@@ -28,11 +29,13 @@ export async function searchAdminClientesActivos(query, { limit = 10 } = {}) {
     q: safeQuery,
     limit: String(safeLimit),
   });
-  return http.get(`${BASE}/clientes/buscar?${params.toString()}`);
+  const path = `${BASE}/clientes/buscar?${params.toString()}`;
+  return signal ? http.get(path, { signal }) : http.get(path);
 }
 
-export async function getAdminMasterPuntosRegalias() {
-  return http.get(`${BASE}/regalias`);
+export async function getAdminMasterPuntosRegalias({ signal } = {}) {
+  const path = `${BASE}/regalias`;
+  return signal ? http.get(path, { signal }) : http.get(path);
 }
 
 export async function updateAdminMasterPuntosRegalias(payload) {

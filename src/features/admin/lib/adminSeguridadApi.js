@@ -134,8 +134,8 @@ export async function listAdminSecurityLoginLogs(params = {}) {
   return http.get(`/v1/admin/seguridad/login-logs${toQueryString(query)}`);
 }
 
-export async function getAdminSecurityLoginLogDetail(idLoginLog) {
-  return http.get(`/v1/admin/seguridad/login-logs/${encodeURIComponent(String(idLoginLog || ''))}`);
+export async function getAdminSecurityLoginLogDetail(idLoginLog, { signal } = {}) {
+  return http.get(`/v1/admin/seguridad/login-logs/${encodeURIComponent(String(idLoginLog || ''))}`, { signal });
 }
 
 export async function listAdminSecuritySessions(params = {}) {
@@ -143,8 +143,8 @@ export async function listAdminSecuritySessions(params = {}) {
   return http.get(`/v1/admin/seguridad/sesiones${toQueryString(query)}`);
 }
 
-export async function getAdminSecuritySessionDetail(idSesion) {
-  return http.get(`/v1/admin/seguridad/sesiones/${encodeURIComponent(String(idSesion || ''))}`);
+export async function getAdminSecuritySessionDetail(idSesion, { signal } = {}) {
+  return http.get(`/v1/admin/seguridad/sesiones/${encodeURIComponent(String(idSesion || ''))}`, { signal });
 }
 
 export async function revokeAdminSecuritySession(idSesion) {
@@ -175,8 +175,8 @@ export async function listAdminSecurityAlerts(params = {}) {
   return http.get(`/v1/admin/seguridad/alertas${toQueryString(query)}`);
 }
 
-export async function getAdminSecurityAlertDetail(idAlerta) {
-  return http.get(`/v1/admin/seguridad/alertas/${encodeURIComponent(String(idAlerta || ''))}`);
+export async function getAdminSecurityAlertDetail(idAlerta, { signal } = {}) {
+  return http.get(`/v1/admin/seguridad/alertas/${encodeURIComponent(String(idAlerta || ''))}`, { signal });
 }
 
 export async function updateAdminSecurityAlertState(idAlerta, estado, comentario = '') {

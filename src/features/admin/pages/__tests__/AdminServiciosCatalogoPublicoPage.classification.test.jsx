@@ -28,6 +28,15 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+test('QA11: fallo de sucursales no expone detalles técnicos y permite reintentar', async () => {
+  api.listPublicCatalogBranches.mockRejectedValueOnce({ message: 'ECONNREFUSED private.internal password=SYNTHETIC' }).mockResolvedValueOnce({ branches: [{ id_sucursal: 'A', nombre_sucursal: 'Centro' }] });
+  render(<AdminServiciosCatalogoPublicoPage />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo cargar el catálogo público.');
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+  await screen.findByText('Reservable');
+  expect(api.listPublicCatalogBranches).toHaveBeenCalledTimes(2);
+});
+
 test('clasifica servicios por el contrato sin duplicar y conserva datos y orden', async () => {
   render(<AdminServiciosCatalogoPublicoPage />);
   const booked = (await screen.findByRole('heading', { name: 'Servicios agendables' })).closest('section');

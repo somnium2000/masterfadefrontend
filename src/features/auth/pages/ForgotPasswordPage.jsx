@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { http } from '../../../services/httpClient.js';
 import AuthLandingBrandBlock from '../components/AuthLandingBrandBlock.jsx';
+import { NEUTRAL_RECOVERY_MESSAGE, publicAuthError } from '../lib/publicAuthErrors.js';
 import './LoginPage.css';
 import './PasswordRecovery.css';
 
@@ -50,7 +51,6 @@ export default function ForgotPasswordPage() {
     if (!value || !value.includes('@')) {
       const message = 'Ingresa un correo valido.';
       setError(message);
-      notifications.warning(message, { dedupeKey: 'auth-forgot-invalid-email' });
       return;
     }
 
@@ -58,7 +58,6 @@ export default function ForgotPasswordPage() {
     if (retryAfter > 0) {
       const message = 'Este correo esta temporalmente bloqueado por demasiados intentos.';
       setError(message);
-      notifications.warning(message, { dedupeKey: 'auth-forgot-temporary-blocked' });
       return;
     }
 
@@ -67,14 +66,12 @@ export default function ForgotPasswordPage() {
       const response = await http.post('/v1/auth/forgot-password', { email: value }, { skipCsrf: true });
       const data = response?.data || response;
 
-      const successMessage =
-        data?.data?.message ||
-        'Si el correo existe, recibirás un enlace para restablecer tu contraseña.';
+      const successMessage = NEUTRAL_RECOVERY_MESSAGE;
 
       setMsg(successMessage);
       notifications.success(successMessage, { dedupeKey: 'auth-forgot-send-ok' });
 
-      if (data?.data?.rateLimit) setRateInfo(data.data.rateLimit);
+      if (data?.rateLimit) setRateInfo(data.rateLimit);
       setRetryAfter(0);
     } catch (requestError) {
       const rl = requestError?.data?.error?.details?.rateLimit;
@@ -83,9 +80,8 @@ export default function ForgotPasswordPage() {
       if (rl) setRateInfo(rl);
       if (typeof ra === 'number') setRetryAfter(ra);
 
-      const message = requestError?.data?.error?.message || requestError?.message || 'No se pudo enviar el enlace.';
+      const message = publicAuthError(requestError, 'recovery');
       setError(message);
-      notifications.error(message, { dedupeKey: 'auth-forgot-send-error' });
     } finally {
       setLoading(false);
     }

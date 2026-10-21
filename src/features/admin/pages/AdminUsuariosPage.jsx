@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Building2, CheckCircle2, Eye, KeyRound, RefreshCw, RotateCcw, Search, ShieldCheck, SlidersHorizontal, Users, X } from 'lucide-react';
 import {
@@ -80,22 +80,15 @@ function extractMessage(err) {
     return PROTECTED_ROOT_MESSAGE;
   }
 
-  const rawMessage = String(err?.data?.error?.message || err?.message || '').trim();
-  if (!rawMessage) return 'No se pudo completar la operacion de usuarios.';
-  const lowered = rawMessage.toLowerCase();
-  const hasSensitivePattern =
-    lowered.includes('sql')
-    || lowered.includes('syntax error')
-    || lowered.includes('supabase')
-    || lowered.includes('auth.users')
-    || lowered.includes('stack')
-    || lowered.includes('trace')
-    || lowered.includes('relation')
-    || lowered.includes('constraint');
-  if (hasSensitivePattern) {
-    return 'Ocurrio un error procesando la solicitud. Intenta nuevamente.';
-  }
-  return rawMessage;
+  const messages = {
+    PERSONAS_SUPER_ADMIN_TARGET_FORBIDDEN: 'No tienes permisos para gestionar esta cuenta.',
+    PERSONAS_USER_SETUP_BLOCKED: 'La cuenta esta bloqueada o inactiva. Revisa su estado antes de enviar el mensaje.',
+    PERSONAS_USER_ACTIVATE_ROLE_REQUIRED: 'Activa primero el perfil de Empleado o Cliente y sus roles.',
+    PERSONAS_USER_ACTIVATE_EMPLOYEE_INACTIVE: 'Activa primero el empleado relacionado.',
+    PERSONAS_USER_ACTIVATE_CLIENT_INACTIVE: 'Activa primero el cliente relacionado.',
+    PERSONAS_USER_NOT_FOUND: 'El usuario ya no esta disponible. Actualiza el listado.',
+  };
+  return messages[errorCode] || 'No se pudo completar la operacion de usuarios. Intenta nuevamente.';
 }
 
 function AccessBadge({ estadoAcceso }) {
@@ -167,10 +160,13 @@ export default function AdminUsuariosPage() {
   const navigate = useNavigate();
   const mountedRef = useRef(true);
   const listRequestRef = useRef(0);
+  const actionRef = useRef(null);
+  const contextRef = useRef(null);
   const invalidateRequests = useCallback(() => {
     ++listRequestRef.current;
   }, []);
-  const { roles: actorRoles = [] } = useAuth();
+  const { roles: actorRoles = [], user: actor } = useAuth();
+  const actorKey = `${actor?.id_usuario || ''}:${[...actorRoles].sort().join(',')}`;
   const isAdminOnly = actorRoles.includes('admin') && !actorRoles.includes('super_admin');
   const [usuarios, setUsuarios] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -184,6 +180,7 @@ export default function AdminUsuariosPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState(USER_FILTER_DEFAULTS);
   const notifications = useNotifications();
+  const dismissNotification = notifications.dismiss;
   const [view, setView] = useState(() => {
     try {
       const value = localStorage.getItem('mf-view-usuarios');
@@ -192,6 +189,25 @@ export default function AdminUsuariosPage() {
       return 'cards';
     }
   });
+
+  useLayoutEffect(() => {
+    const context = {};
+    contextRef.current = context;
+    invalidateRequests();
+    actionRef.current = null;
+    setUsuarios([]);
+    setListError('');
+    setLoadingUserId('');
+    setDetailOpen(false);
+    setSelectedUsuario(null);
+    setConfirmTarget(null);
+    return () => {
+      if (contextRef.current === context) contextRef.current = null;
+      invalidateRequests();
+      if (actionRef.current?.loadingId) dismissNotification(actionRef.current.loadingId);
+      actionRef.current = null;
+    };
+  }, [actorKey, invalidateRequests, dismissNotification]);
 
   const visibleUsuarios = useMemo(
     () => (isAdminOnly ? usuarios.filter((usuario) => !isPrivilegedUsuario(usuario)) : usuarios),
@@ -337,7 +353,7 @@ export default function AdminUsuariosPage() {
       mountedRef.current = false;
       invalidateRequests();
     };
-  }, [fetchUsuarios, invalidateRequests]);
+  }, [fetchUsuarios, invalidateRequests, actorKey]);
 
   function openDetail(usuario) {
     setSelectedUsuario(usuario || null);
@@ -345,16 +361,21 @@ export default function AdminUsuariosPage() {
   }
 
   async function runUserAction(userId, action, options) {
-    if (!userId || loadingUserId) return;
+    if (!userId || actionRef.current || !mountedRef.current) return false;
+    const operation = { context: contextRef.current };
+    actionRef.current = operation;
+    const isCurrent = () => mountedRef.current && actionRef.current === operation && operation.context === contextRef.current;
     const successMessage = options?.successMessage || 'Operacion completada.';
     const loadingMessage = options?.loadingMessage || '';
     const loadingId = loadingMessage
       ? notifications.loading(loadingMessage, { dedupeKey: options?.loadingDedupeKey || '' })
       : null;
+    operation.loadingId = loadingId;
 
     setLoadingUserId(userId);
     try {
       const response = await action(userId);
+      if (!isCurrent()) return false;
       const payload = response?.data ?? response;
       if (payload?.usuario) {
         setUsuarios((prev) => replaceItemById(prev, payload.usuario, (entry) => entry?.id_usuario));
@@ -370,7 +391,14 @@ export default function AdminUsuariosPage() {
         notifications.success(successMessage, { dedupeKey: options?.successDedupeKey || 'personas-usuarios-action-ok' });
       }
       void fetchUsuarios({ silent: true });
+      return true;
     } catch (err) {
+      if (!isCurrent()) return false;
+      if (err.status === 401 || err.status === 403) {
+        if (loadingId) notifications.dismiss(loadingId);
+        navigate(err.status === 401 ? '/login' : '/unauthorized');
+        return true;
+      }
       const errorMessage = extractMessage(err);
       if (loadingId) {
         notifications.update(loadingId, {
@@ -382,8 +410,12 @@ export default function AdminUsuariosPage() {
       } else {
         notifications.error(errorMessage, { dedupeKey: options?.errorDedupeKey || 'personas-usuarios-action-error' });
       }
+      return true;
     } finally {
-      setLoadingUserId('');
+      if (isCurrent()) {
+        actionRef.current = null;
+        setLoadingUserId('');
+      }
     }
   }
 
@@ -419,7 +451,7 @@ export default function AdminUsuariosPage() {
   async function handleToggleBlock(usuario) {
     const shouldActivate = isActivationState(usuario?.estado_acceso);
     if (isAdminOnly && isPrivilegedUsuario(usuario)) return;
-    if (!shouldActivate && isProtectedRootUser(usuario)) {
+    if (isProtectedRootUser(usuario)) {
       notifications.error(PROTECTED_ROOT_MESSAGE, { dedupeKey: 'personas-usuarios-root-protected' });
       return;
     }
@@ -438,13 +470,13 @@ export default function AdminUsuariosPage() {
       setConfirmTarget(null);
       return;
     }
-    if (!shouldActivate && isProtectedRootUser(usuario)) {
+    if (isProtectedRootUser(usuario)) {
       notifications.error(PROTECTED_ROOT_MESSAGE, { dedupeKey: 'personas-usuarios-root-protected' });
       setConfirmTarget(null);
       return;
     }
 
-    await runUserAction(
+    const completed = await runUserAction(
       usuario.id_usuario,
       shouldActivate ? activateAdminPersonaUsuario : blockAdminPersonaUsuario,
       {
@@ -452,14 +484,14 @@ export default function AdminUsuariosPage() {
       }
     );
 
-    setConfirmTarget(null);
+    if (completed) setConfirmTarget((current) => current === usuario ? null : current);
   }
 
   function renderActions(usuario) {
     const loadingActions = loadingUserId === usuario.id_usuario;
     const shouldActivate = isActivationState(usuario.estado_acceso);
     const protectedRoot = isProtectedRootUser(usuario);
-    const protectedActionDisabled = protectedRoot && !shouldActivate;
+    const protectedActionDisabled = protectedRoot;
     const protectedTitle = protectedActionDisabled ? PROTECTED_ROOT_MESSAGE : null;
     return (
       <div className="flex w-full flex-wrap items-center justify-start gap-2">
@@ -660,7 +692,7 @@ export default function AdminUsuariosPage() {
       ) : null}
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-4xl">
+        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-4xl" aria-describedby={undefined}>
           <DialogHeader><DialogTitle>Detalle de Usuario</DialogTitle></DialogHeader>
           {selectedUsuario && (
             /* AM: Vista de detalle premium orientada a trazabilidad de acceso para soporte operativo. */
@@ -716,7 +748,7 @@ export default function AdminUsuariosPage() {
       </Dialog>
 
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="sm:max-w-xl" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Filtros de Usuarios</DialogTitle>
           </DialogHeader>
@@ -752,8 +784,9 @@ export default function AdminUsuariosPage() {
           </div>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <Label className="mf-label">Estado de acceso</Label>
+              <Label className="mf-label" htmlFor="usuarios-filter-access">Estado de acceso</Label>
               <select
+                id="usuarios-filter-access"
                 className="mf-select mt-1"
                 value={filters.estadoAcceso}
                 onChange={(event) => setFilters((prev) => ({ ...prev, estadoAcceso: event.target.value }))}
@@ -765,8 +798,9 @@ export default function AdminUsuariosPage() {
               </select>
             </div>
             <div>
-              <Label className="mf-label">Rol interno</Label>
+              <Label className="mf-label" htmlFor="usuarios-filter-role">Rol interno</Label>
               <select
+                id="usuarios-filter-role"
                 className="mf-select mt-1"
                 value={filters.rol}
                 onChange={(event) => setFilters((prev) => ({ ...prev, rol: event.target.value }))}
@@ -778,8 +812,9 @@ export default function AdminUsuariosPage() {
               </select>
             </div>
             <div className="sm:col-span-2">
-              <Label className="mf-label">Origen</Label>
+              <Label className="mf-label" htmlFor="usuarios-filter-origin">Origen</Label>
               <select
+                id="usuarios-filter-origin"
                 className="mf-select mt-1"
                 value={filters.origen}
                 onChange={(event) => setFilters((prev) => ({ ...prev, origen: event.target.value }))}

@@ -68,6 +68,26 @@ const deferred = () => {
 const result = (nombre) => ({ data: { cortesias: [{ ...courtesy, nombre }] } });
 const selectBranch = (value) => fireEvent.change(screen.getByLabelText("Sucursal"), { target: { value } });
 
+test.each(['list', 'save', 'state'])('QA08: %s no expone mensajes técnicos arbitrarios', async kind => {
+  const error = { status: 503, data: { error: { message: 'SQL_INTERNAL_SYNTHETIC' } } };
+  if (kind === 'list') {
+    api.listAdminCortesias.mockRejectedValue(error);
+    render(<AdminCortesiasCatalogPage />);
+  } else if (kind === 'save') {
+    api.updateAdminCortesia.mockRejectedValue(error);
+    await startQa10Save();
+  } else {
+    api.setAdminCortesiaEstado.mockRejectedValue(error);
+    await renderReady();
+    fireEvent.click(screen.getByTitle('Inactivar en esta sucursal'));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Inactivar cortesía en sucursal' })).getByRole('button', { name: 'Inactivar' }));
+    await waitFor(() => expect(notifications.error).toHaveBeenCalledExactlyOnceWith('No se pudo completar la operación de cortesías.'));
+    return;
+  }
+  expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo completar la operación de cortesías.');
+  expect(screen.queryByText('SQL_INTERNAL_SYNTHETIC')).not.toBeInTheDocument();
+});
+
 async function startQa10Save() {
   const view = render(<AdminCortesiasCatalogPage />);
   await screen.findByText('Corte gratis');
@@ -104,7 +124,7 @@ describe('QA10 vigencia del guardado de cortesías', () => {
   test.each([401, 403, 409])('error vigente %s conserva formulario y mensaje', async status => {
     api.updateAdminCortesia.mockRejectedValue({ status, data: { error: { message: 'No fue posible guardar' } } });
     await startQa10Save();
-    expect(await screen.findByRole('alert')).toHaveTextContent('No fue posible guardar');
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo completar la operación de cortesías.');
     expect(screen.getByRole('dialog', { name: 'Editar cortesía maestra' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeEnabled();
     expect(sync).not.toHaveBeenCalled(); expect(api.listAdminCortesias).toHaveBeenCalledTimes(1);
@@ -181,7 +201,7 @@ describe('QA11 vigencia del cambio de estado', () => {
   test('error vigente conserva aviso y permite reintentar', async () => {
     api.setAdminCortesiaEstado.mockRejectedValue({ status: 403, data: { error: { message: 'Operación no permitida' } } });
     const { button } = await start(); fireEvent.click(button);
-    await waitFor(() => expect(notifications.error).toHaveBeenCalledExactlyOnceWith('Operación no permitida'));
+    await waitFor(() => expect(notifications.error).toHaveBeenCalledExactlyOnceWith('No se pudo completar la operación de cortesías.'));
     expect(button).toBeEnabled(); expect(sync).not.toHaveBeenCalled();
   });
   test('respuesta vieja no libera el loading de una nueva operación y StrictMode conserva el éxito', async () => {
@@ -468,7 +488,7 @@ describe("edición segura de cortesías", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar cambios" }));
     const confirm = screen.getByRole("dialog", { name: "Modificar información global" });
     fireEvent.click(within(confirm).getByRole("button", { name: "Confirmar cambios" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("No fue posible guardar");
+    expect(await screen.findByRole("alert")).toHaveTextContent("No se pudo completar la operación de cortesías.");
     expect(screen.getByRole("dialog", { name: "Editar cortesía maestra" })).toBeInTheDocument();
   });
 
