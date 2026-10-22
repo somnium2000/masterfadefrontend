@@ -61,7 +61,7 @@ function extractMessage(error) {
   if (error?.data?.error?.code === "CORTESIA_NAME_DUPLICATE") {
     return "Ya existe una cortesía con ese nombre. Usa la cortesía existente o cambia el nombre.";
   }
-  return error?.data?.error?.message || error?.message || "Error desconocido.";
+  return "No se pudo completar la operación de cortesías.";
 }
 
 function normalizeFormText(value) {

@@ -74,6 +74,118 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
+test('QA06: errores desconocidos no exponen detalles técnicos', async () => {
+  packagesApi.updateAdminPaquete.mockRejectedValue({ data: { error: { message: 'SQL INTERNAL_SYNTHETIC password=secret' } } });
+  const dialog = await openMasterEditor();
+  fireEvent.change(within(dialog).getByLabelText('Nombre del paquete maestro *'), { target: { value: 'Nuevo nombre' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo completar la operación de paquetes.');
+  expect(screen.queryByText(/INTERNAL_SYNTHETIC/)).not.toBeInTheDocument();
+});
+
+test('QA06: dos clics en el mismo render guardan una sola vez', async () => {
+  const pending = deferred();
+  packagesApi.updateAdminPaquete.mockReturnValue(pending.promise);
+  const dialog = await openMasterEditor();
+  fireEvent.change(within(dialog).getByLabelText('Nombre del paquete maestro *'), { target: { value: 'Nuevo nombre' } });
+  const save = within(dialog).getByRole('button', { name: 'Guardar cambios' });
+  act(() => { save.click(); save.click(); });
+  expect(packagesApi.updateAdminPaquete).toHaveBeenCalledTimes(1);
+  await act(async () => pending.resolve({ data: { ...originalPackage, nombre_paquete: 'Nuevo nombre' } }));
+});
+
+test('QA06: dos confirmaciones simultáneas cambian estado una sola vez', async () => {
+  const pending = deferred();
+  packagesApi.setAdminPaqueteEstado.mockReturnValue(pending.promise);
+  render(<AdminPackagesCatalogPage />);
+  await screen.findByText('Paquete base');
+  fireEvent.click(screen.getByRole('button', { name: 'Inactivar oferta' }));
+  const confirm = within(await screen.findByRole('dialog')).getByRole('button', { name: 'Inactivar oferta' });
+  act(() => { confirm.click(); confirm.click(); });
+  expect(packagesApi.setAdminPaqueteEstado).toHaveBeenCalledTimes(1);
+  await act(async () => pending.resolve({ data: { ...originalPackage, activo: false } }));
+});
+
+test.each(['save', 'state'])('QA06: operación %s de A no libera el bloqueo ni altera B', async (kind) => {
+  const a = deferred(); const b = deferred();
+  const api = kind === 'save' ? packagesApi.updateAdminPaquete : packagesApi.setAdminPaqueteEstado;
+  api.mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise);
+  authState.user = { id_usuario: 'cliente-a' };
+  const view = render(<AdminPackagesCatalogPage />);
+  const start = async () => {
+    await screen.findByText('Paquete base');
+    fireEvent.click(screen.getByRole('button', { name: kind === 'save' ? 'Editar maestro' : 'Inactivar oferta' }));
+    const dialog = await screen.findByRole('dialog');
+    if (kind === 'save') fireEvent.change(within(dialog).getByLabelText('Nombre del paquete maestro *'), { target: { value: 'Edición vigente' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: kind === 'save' ? 'Guardar cambios' : 'Inactivar oferta' }));
+    return dialog;
+  };
+  await start();
+  authState.user = { id_usuario: 'cliente-b' };
+  view.rerender(<AdminPackagesCatalogPage />);
+  const dialogB = await start();
+  expect(api).toHaveBeenCalledTimes(2);
+  await act(async () => a.reject({ status: 401 }));
+  expect(navigateMock).not.toHaveBeenCalled();
+  expect(notifications.success).not.toHaveBeenCalled();
+  expect(notifications.error).not.toHaveBeenCalled();
+  expect(dialogB).toBeInTheDocument();
+  const pendingButton = within(dialogB).getByRole('button', { name: kind === 'save' ? 'Guardar cambios' : 'Inactivar oferta' });
+  expect(pendingButton).toBeDisabled();
+  await act(async () => b.resolve({ data: { ...originalPackage, activo: false } }));
+  expect(notifications.success).toHaveBeenCalledTimes(1);
+});
+
+test.each(['save', 'state'])('QA06: 401 vigente en %s conserva redirección', async (kind) => {
+  const api = kind === 'save' ? packagesApi.updateAdminPaquete : packagesApi.setAdminPaqueteEstado;
+  api.mockRejectedValue({ status: 401 });
+  const dialog = kind === 'save' ? await openMasterEditor() : await (async () => {
+    render(<AdminPackagesCatalogPage />);
+    await screen.findByText('Paquete base');
+    fireEvent.click(screen.getByRole('button', { name: 'Inactivar oferta' }));
+    return screen.findByRole('dialog');
+  })();
+  if (kind === 'save') fireEvent.change(within(dialog).getByLabelText('Nombre del paquete maestro *'), { target: { value: 'Nuevo nombre' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: kind === 'save' ? 'Guardar cambios' : 'Inactivar oferta' }));
+  await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/login'));
+});
+
+test.each(['save', 'state'])('QA06: fallo vigente libera %s para reintento sin duplicados', async (kind) => {
+  const api = kind === 'save' ? packagesApi.updateAdminPaquete : packagesApi.setAdminPaqueteEstado;
+  api.mockRejectedValueOnce({ status: 503, message: 'INTERNAL_SYNTHETIC' }).mockResolvedValueOnce({ data: originalPackage });
+  render(<AdminPackagesCatalogPage />);
+  await screen.findByText('Paquete base');
+  fireEvent.click(screen.getByRole('button', { name: kind === 'save' ? 'Editar maestro' : 'Inactivar oferta' }));
+  const dialog = await screen.findByRole('dialog');
+  if (kind === 'save') fireEvent.change(within(dialog).getByLabelText('Nombre del paquete maestro *'), { target: { value: 'Nuevo nombre' } });
+  const button = within(dialog).getByRole('button', { name: kind === 'save' ? 'Guardar cambios' : 'Inactivar oferta' });
+  fireEvent.click(button);
+  await waitFor(() => expect(notifications.error).toHaveBeenCalledWith('No se pudo completar la operación de paquetes.', expect.anything()));
+  expect(button).toBeEnabled();
+  fireEvent.click(button);
+  await waitFor(() => expect(notifications.success).toHaveBeenCalledTimes(1));
+  expect(api).toHaveBeenCalledTimes(2);
+});
+
+test('QA06: confirmación de citas futuras conserva el contrato y permite confirmar', async () => {
+  packagesApi.setAdminPaqueteEstado.mockRejectedValueOnce({ data: { error: {
+    code: 'CATALOG_PACKAGE_PENDING_APPOINTMENTS_CONFIRMATION_REQUIRED', message: 'INTERNAL_SYNTHETIC',
+    details: { total_citas_futuras: 2 },
+  } } }).mockResolvedValueOnce({ data: { ...originalPackage, activo: false } });
+  render(<AdminPackagesCatalogPage />);
+  await screen.findByText('Paquete base');
+  fireEvent.click(screen.getByRole('button', { name: 'Inactivar oferta' }));
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Inactivar oferta' }));
+  await within(dialog).findByText(/2 cita\(s\) futura\(s\)/);
+  expect(notifications.warning).toHaveBeenCalledWith('La oferta tiene citas futuras. Confirma la inactivación para continuar.', expect.anything());
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Inactivar oferta' }));
+  await waitFor(() => expect(notifications.success).toHaveBeenCalledTimes(1));
+  expect(packagesApi.setAdminPaqueteEstado).toHaveBeenLastCalledWith(PACKAGE, {
+    activo: false, id_sucursal: BRANCH, confirmar_citas_pendientes: true,
+  });
+});
+
 const deferred = () => {
   let resolve; let reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });

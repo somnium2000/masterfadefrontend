@@ -91,7 +91,10 @@ function extractMessage(error) {
   if (code === "CATALOG_PLAN_COURTESY_OUT_OF_SCOPE") {
     return "Una o más cortesías del plan no están disponibles en la sucursal seleccionada.";
   }
-  return error?.data?.error?.message || error?.message || "Error desconocido.";
+  if (code === "CATALOG_PLAN_BENEFITS_BRANCH_CONFLICT") {
+    return "Los beneficios no estan disponibles en todas las sucursales.";
+  }
+  return "No se pudo completar la operación de planes.";
 }
 
 function extractActiveSubscribersCount(error) {
@@ -794,7 +797,8 @@ function PlanForm({
 }
 export default function AdminPlansCatalogPage() {
   const navigate = useNavigate();
-  const { branchIds, roles = [] } = useAuth();
+  const { user, branchIds, roles = [] } = useAuth();
+  const identityKey = user?.id_usuario ?? null;
   const notifications = useNotifications();
   const canManagePlans = roles.includes("super_admin") || roles.includes("admin");
   const isSuperAdmin = roles.includes("super_admin");
@@ -847,9 +851,11 @@ export default function AdminPlansCatalogPage() {
   const branchesRequest = useRef(0);
   const catalogRequest = useRef(0);
   const formRequest = useRef(0);
+  const saveOperationRef = useRef(null);
+  const stateOperationRef = useRef(null);
   const offersRef = useRef([]);
   const validScope = canManagePlans && (isSuperAdmin || (Boolean(sucursal) && branchIds.includes(sucursal)));
-  const scopeKey = JSON.stringify([isSuperAdmin, canManagePlans, branchKey, sucursal]);
+  const scopeKey = JSON.stringify([identityKey, isSuperAdmin, canManagePlans, branchKey, sucursal]);
 
   // AM: Invalida solicitudes y formularios del alcance anterior antes de pintar.
   useLayoutEffect(() => {
@@ -858,6 +864,8 @@ export default function AdminPlansCatalogPage() {
     plansRequest.current += 1;
     catalogRequest.current += 1;
     formRequest.current += 1;
+    saveOperationRef.current = null;
+    stateOperationRef.current = null;
     setPlanes([]);
     setServices([]);
     setCourtesies([]);
@@ -881,6 +889,7 @@ export default function AdminPlansCatalogPage() {
 
   function closeForm() {
     formRequest.current += 1;
+    saveOperationRef.current = null;
     catalogRequest.current += 1;
     setLoadingServices(false);
     setDialogOpen(false);
@@ -1136,7 +1145,7 @@ export default function AdminPlansCatalogPage() {
     if (!canManagePlans) return;
     void fetchBranches();
     return () => { branchesRequest.current += 1; };
-  }, [canManagePlans, fetchBranches]);
+  }, [identityKey, canManagePlans, fetchBranches]);
 
   useEffect(() => {
     if (!validScope) return;
@@ -1377,10 +1386,12 @@ export default function AdminPlansCatalogPage() {
   }
 
   async function handleGuardar() {
-    if (!validScope || loadingServices) return;
+    if (!validScope || loadingServices || !mountedRef.current || saveOperationRef.current) return;
     const scope = scopeGeneration.current;
     const form = formRequest.current;
-    const current = () => mountedRef.current && scope === scopeGeneration.current && form === formRequest.current;
+    const operation = {};
+    const current = () => mountedRef.current && scope === scopeGeneration.current && form === formRequest.current
+      && saveOperationRef.current === operation;
     const validationError = validateForm(formValues, dialogMode);
     if (validationError) {
       setFormError(validationError);
@@ -1537,6 +1548,7 @@ export default function AdminPlansCatalogPage() {
           orden_visual: Number(formValues.orden_visual),
         };
 
+    saveOperationRef.current = operation;
     try {
       if (dialogMode === "editMaster" && Object.keys(payload).length === 0) {
         setDialogOpen(false);
@@ -1569,14 +1581,19 @@ export default function AdminPlansCatalogPage() {
       setFormError(extractMessage(error));
       notifications.error(extractMessage(error));
     } finally {
-      if (current()) setFormLoading(false);
+      if (current()) {
+        saveOperationRef.current = null;
+        setFormLoading(false);
+      }
     }
   }
 
   async function handleConfirmState() {
-    if (!validScope || !stateTarget?.id_plan) return;
+    if (!validScope || !stateTarget?.id_plan || !mountedRef.current || stateOperationRef.current) return;
     const scope = scopeGeneration.current;
-    const current = () => mountedRef.current && scope === scopeGeneration.current;
+    const operation = {};
+    stateOperationRef.current = operation;
+    const current = () => mountedRef.current && scope === scopeGeneration.current && stateOperationRef.current === operation;
 
     setStateLoading(true);
     try {
@@ -1614,7 +1631,10 @@ export default function AdminPlansCatalogPage() {
       }
       notifications.error(extractMessage(error));
     } finally {
-      if (current()) setStateLoading(false);
+      if (current()) {
+        stateOperationRef.current = null;
+        setStateLoading(false);
+      }
     }
   }
 

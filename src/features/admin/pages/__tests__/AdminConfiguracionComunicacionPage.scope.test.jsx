@@ -14,6 +14,8 @@ const api = vi.hoisted(() => ({
   programAdminConfigComunicacionCampania: vi.fn(), sendAdminConfigComunicacionCampania: vi.fn(), retryFailedAdminConfigComunicacionCampania: vi.fn(), cancelAdminConfigComunicacionCampania: vi.fn(),
 }));
 const notifications = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
+const auth = vi.hoisted(() => ({ roles: ['admin'], user: { id_usuario: 'actor-a' } }));
+vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => auth }));
 vi.mock('../../lib/adminConfiguracionApi.js', () => api);
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => notifications }));
 vi.mock('../../../../components/data/CardsCarousel.jsx', () => ({ default: ({ items, renderItem }) => <div>{items.map((item) => <div key={item.id_campania}>{renderItem(item)}</div>)}</div> }));
@@ -34,6 +36,7 @@ async function pick(id) {
   fireEvent.click(await screen.findByRole('button', { name: new RegExp(`Campaña ${id === A ? 'A' : 'B'}`) }));
 }
 beforeEach(() => {
+  auth.roles = ['admin']; auth.user = { id_usuario: 'actor-a' };
   HTMLElement.prototype.scrollIntoView = vi.fn();
   Object.values(api).forEach((mock) => mock.mockReset());
   Object.values(notifications).forEach((mock) => mock.mockReset());
@@ -55,6 +58,25 @@ test('QA11 historial no presenta diagnóstico técnico aunque llegue de una vers
   render(<Page />);
   expect(await screen.findByText('No se pudo enviar el correo. Reintenta más tarde.')).toBeInTheDocument();
   expect(screen.queryByText(/internal.test|SYNTHETIC|private\/key/)).not.toBeInTheDocument();
+});
+
+test('QA13: listado no expone mensaje técnico arbitrario', async () => {
+  api.listAdminConfigComunicacionCampanias.mockRejectedValue({ message: 'ECONNREFUSED private.internal password=SYNTHETIC' }); render(<Page />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo completar la operación en este momento.');
+});
+test('QA13: cambio de identidad limpia campaña y editor anterior', async () => {
+  const view = render(<Page />); await pick(A); await screen.findByText('Asunto A');
+  auth.user = { id_usuario: 'actor-b' }; api.listAdminConfigComunicacionCampanias.mockResolvedValue({ data: { campanias: [], total: 0, offset: 0 } }); view.rerender(<Page />);
+  expect(screen.queryByText('Asunto A')).not.toBeInTheDocument();
+});
+test('QA13: doble guardado emite un solo borrador', async () => {
+  const pending = deferred(); api.createAdminConfigComunicacionCampania.mockReturnValue(pending.promise);
+  render(<Page />); await panel().findByText('Campaña A'); fireEvent.click(screen.getByRole('button', { name: 'Nueva' }));
+  const fields = panel().getAllByRole('textbox').filter(field => !field.disabled);
+  ['Nombre sintético','Asunto sintético','Contenido sintético','Notas'].forEach((value, index) => fireEvent.change(fields[index], { target: { value } }));
+  const button = screen.getByRole('button', { name: 'Crear borrador' }); act(() => { button.click(); button.click(); });
+  expect(api.createAdminConfigComunicacionCampania).toHaveBeenCalledTimes(1);
+  await act(async () => pending.resolve({ data: { campania: campaign(B) } }));
 });
 
 test.each(['success', 'error'])('listado antiguo (%s) no sustituye busqueda vigente', async (outcome) => {
@@ -202,7 +224,7 @@ test('una falla de consulta no borra exclusiones manuales de la misma campaña',
   const audience = screen.getByText('Control operativo de audiencia').closest('details');
   api.getAdminConfigComunicacionElegibilidad.mockRejectedValueOnce({ data: { error: { message: 'Consulta no disponible' } } });
   fireEvent.click(within(audience).getByRole('button', { name: 'Actualizar' }));
-  await screen.findByText('Consulta no disponible');
+  await screen.findByText('No se pudo completar la operación en este momento.');
   fireEvent.click(within(audience).getByRole('button', { name: 'Actualizar' }));
   await waitFor(() => expect(screen.getByRole('checkbox', { name: /elegible A/ })).toBeDisabled());
 });

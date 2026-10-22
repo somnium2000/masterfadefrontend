@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Eye, Loader2, RefreshCw, Search } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext.jsx";
 import { resolveHomePath } from "../../home/lib/roleRouting.js";
@@ -38,7 +38,7 @@ function dependenciesLabel(item) {
 }
 
 export default function AdminAccountDeletionPage() {
-  const { roles } = useAuth();
+  const { roles, user } = useAuth();
   const basePath = resolveHomePath(roles) || "/home/admin";
   const [tab, setTab] = useState("personal");
   const [filters, setFilters] = useState({ search: "", subject: "personal", status: "all", page: 1, limit: 20 });
@@ -51,37 +51,72 @@ export default function AdminAccountDeletionPage() {
   const [detail, setDetail] = useState(null);
   const [decisionMode, setDecisionMode] = useState(null);
   const [retrying, setRetrying] = useState(false);
+  const mountedRef = useRef(false);
+  const listGenerationRef = useRef(0);
+  const detailGenerationRef = useRef(0);
+  const operationRef = useRef(null);
+  const identityKey = JSON.stringify([roles, user?.id_usuario]);
+
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    listGenerationRef.current += 1;
+    detailGenerationRef.current += 1;
+    operationRef.current = null;
+    setListData(null); setDetail(null); setDetailOpen(false); setDecisionMode(null);
+    setNotice(''); setErrorMessage(''); setDetailLoading(false); setRetrying(false);
+    return () => {
+      mountedRef.current = false;
+      listGenerationRef.current += 1;
+      detailGenerationRef.current += 1;
+      operationRef.current = null;
+    };
+  }, [identityKey]);
+
+  useLayoutEffect(() => {
+    listGenerationRef.current += 1;
+    setListData(null);
+  }, [filters]);
 
   const activeFilters = useMemo(() => countActiveAdminDeletionFilters(filters), [filters]);
 
   const loadList = useCallback(async () => {
+    const generation = ++listGenerationRef.current;
+    const current = () => mountedRef.current && generation === listGenerationRef.current;
     setLoading(true);
     setErrorMessage("");
     try {
-      setListData(await listAdminAccountDeletionRequests(filters));
+      const data = await listAdminAccountDeletionRequests(filters);
+      if (current()) setListData(data);
     } catch (error) {
+      if (!current()) return;
       setErrorMessage(sanitizeAdminAccountDeletionError(error, "No se pudo cargar el listado."));
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [filters]);
 
   useEffect(() => {
     void loadList();
-  }, [loadList]);
+  }, [loadList, identityKey]);
 
   const loadDetail = useCallback(async (requestId = detail?.request?.id_solicitud) => {
     if (!requestId) return;
+    const generation = ++detailGenerationRef.current;
+    const current = () => mountedRef.current && generation === detailGenerationRef.current;
+    operationRef.current = null;
+    setRetrying(false); setDecisionMode(null); setDetail(null); setDetailOpen(true);
     setDetailLoading(true);
     setErrorMessage("");
     try {
       const nextDetail = await getAdminAccountDeletionRequestDetail(requestId);
+      if (!current()) return;
       setDetail(nextDetail);
       setDetailOpen(true);
     } catch (error) {
+      if (!current()) return;
       setErrorMessage(sanitizeAdminAccountDeletionError(error, "No se pudo cargar el detalle."));
     } finally {
-      setDetailLoading(false);
+      if (current()) setDetailLoading(false);
     }
   }, [detail?.request?.id_solicitud]);
 
@@ -97,34 +132,56 @@ export default function AdminAccountDeletionPage() {
   }, [tab]);
 
   const handleApprove = useCallback(async (payload) => {
+    if (!mountedRef.current || operationRef.current || !detail?.request?.id_solicitud) return;
+    const operation = {}; operationRef.current = operation;
+    const generation = detailGenerationRef.current;
+    const current = () => mountedRef.current && operationRef.current === operation && generation === detailGenerationRef.current;
+    try {
     const result = await approveAdminAccountDeletionRequest(detail.request.id_solicitud, payload);
+    if (!current()) return;
     setNotice(result.completed ? "Solicitud completada." : "Solicitud aprobada con proceso tecnico pendiente.");
     await loadList();
+    if (!current()) return;
     await loadDetail(detail.request.id_solicitud);
+    } finally { if (operationRef.current === operation) operationRef.current = null; }
   }, [detail?.request?.id_solicitud, loadDetail, loadList]);
 
   const handleReject = useCallback(async (comment) => {
+    if (!mountedRef.current || operationRef.current || !detail?.request?.id_solicitud) return;
+    const operation = {}; operationRef.current = operation;
+    const generation = detailGenerationRef.current;
+    const current = () => mountedRef.current && operationRef.current === operation && generation === detailGenerationRef.current;
+    try {
     await rejectAdminAccountDeletionRequest(detail.request.id_solicitud, comment);
+    if (!current()) return;
     setNotice("Solicitud rechazada. La cuenta permanece activa.");
     await loadList();
+    if (!current()) return;
     await loadDetail(detail.request.id_solicitud);
+    } finally { if (operationRef.current === operation) operationRef.current = null; }
   }, [detail?.request?.id_solicitud, loadDetail, loadList]);
 
   const handleRetry = useCallback(async () => {
-    if (!detail?.request?.id_solicitud || retrying) return;
+    if (!mountedRef.current || !detail?.request?.id_solicitud || operationRef.current) return;
+    const operation = {}; operationRef.current = operation;
+    const generation = detailGenerationRef.current;
+    const current = () => mountedRef.current && operationRef.current === operation && generation === detailGenerationRef.current;
     setRetrying(true);
     setErrorMessage("");
     try {
       const result = await retryAdminAccountDeletionRequest(detail.request.id_solicitud);
+      if (!current()) return;
       setNotice(result.completed ? "Proceso completado." : "Proceso reintentado; sigue pendiente tecnico.");
       await loadList();
+      if (!current()) return;
       await loadDetail(detail.request.id_solicitud);
     } catch (error) {
+      if (!current()) return;
       setErrorMessage(sanitizeAdminAccountDeletionError(error, "No se pudo reintentar el proceso."));
     } finally {
-      setRetrying(false);
+      if (current()) { operationRef.current = null; setRetrying(false); }
     }
-  }, [detail?.request?.id_solicitud, loadDetail, loadList, retrying]);
+  }, [detail?.request?.id_solicitud, loadDetail, loadList]);
 
   return (
     <section className="mx-auto w-full max-w-7xl space-y-6">
@@ -224,13 +281,21 @@ export default function AdminAccountDeletionPage() {
         basePath={basePath}
         loading={detailLoading}
         retrying={retrying}
-        onOpenChange={setDetailOpen}
+        onOpenChange={(open) => {
+          setDetailOpen(open);
+          if (!open) {
+            detailGenerationRef.current += 1;
+            operationRef.current = null;
+            setDetail(null); setDecisionMode(null); setDetailLoading(false); setRetrying(false);
+          }
+        }}
         onRefresh={() => loadDetail()}
         onApprove={() => setDecisionMode("approve")}
         onReject={() => setDecisionMode("reject")}
         onRetry={handleRetry}
       />
       <AdminAccountDeletionDecisionDialog
+        key={`${identityKey}:${detail?.request?.id_solicitud || ''}:${decisionMode || ''}`}
         open={Boolean(decisionMode)}
         mode={decisionMode}
         detail={detail}

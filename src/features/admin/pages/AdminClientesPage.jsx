@@ -95,22 +95,21 @@ function quickFilterButtonClass(isActive) {
 }
 
 function extractMessage(err) {
-  const rawMessage = String(err?.data?.error?.message || err?.message || '').trim();
-  if (!rawMessage) return 'No se pudo completar la operacion de clientes.';
-  const lowered = rawMessage.toLowerCase();
-  const hasSensitivePattern =
-    lowered.includes('sql')
-    || lowered.includes('syntax error')
-    || lowered.includes('supabase')
-    || lowered.includes('auth.users')
-    || lowered.includes('stack')
-    || lowered.includes('trace')
-    || lowered.includes('relation')
-    || lowered.includes('constraint');
-  if (hasSensitivePattern) {
-    return 'Ocurrio un error procesando la solicitud. Intenta nuevamente.';
-  }
-  return rawMessage;
+  const messages = {
+    PERSONAS_EMAIL_ALREADY_EXISTS: 'El correo ya esta vinculado a otra persona.',
+    PERSONAS_AUTH_EMAIL_ALREADY_EXISTS: 'El correo ya pertenece a una cuenta registrada.',
+    PERSONAS_DNI_ALREADY_EXISTS: 'El DNI ya esta vinculado a otra persona.',
+    PERSONAS_RTN_ALREADY_EXISTS: 'El RTN ya esta vinculado a otra persona.',
+    PERSONAS_CLIENT_NOT_FOUND: 'El cliente ya no esta disponible.',
+    PERSONAS_BRANCH_NOT_FOUND: 'La sucursal no esta disponible.',
+    PERSONAS_SUPER_ADMIN_TARGET_FORBIDDEN: 'No tienes permiso para gestionar esta cuenta.',
+    PERSONAS_CLIENT_ACCESS_REQUIRED: 'El cliente debe conservar su cuenta de acceso.',
+  };
+  const code = err?.data?.error?.code;
+  if (Object.hasOwn(messages, code)) return messages[code];
+  if (Number(err?.status) === 401) return 'Tu sesion ya no esta disponible. Inicia sesion nuevamente.';
+  if (Number(err?.status) === 403) return 'No tienes permiso para realizar esta operacion.';
+  return 'No se pudo completar la operacion de clientes. Intenta nuevamente.';
 }
 
 function normalizeDigits(value) {
@@ -226,6 +225,8 @@ export default function AdminClientesPage() {
   const listRequestRef = useRef(0);
   const selectionRequestRef = useRef(0);
   const selectionPendingRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const lifecycleLockRef = useRef(false);
   const invalidateRequests = useCallback(() => {
     ++listRequestRef.current;
     ++selectionRequestRef.current;
@@ -477,13 +478,16 @@ export default function AdminClientesPage() {
   }
 
   async function handleSubmit() {
-    if (formLoading) return;
+    if (formLoading || saveLockRef.current) return;
     const error = validateForm(formValues, { isEditing: Boolean(editingId), selectedCliente });
     if (error) {
       setFormError(error);
       return;
     }
     setFormError('');
+    saveLockRef.current = true;
+    const requestId = selectionRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
     setFormLoading(true);
 
     try {
@@ -491,6 +495,7 @@ export default function AdminClientesPage() {
       const response = editingId
         ? await updateAdminPersonaCliente(editingId, payload)
         : await createAdminPersonaCliente(payload);
+      if (!isCurrent()) return;
       const data = response?.data ?? response;
       const baseMessage = editingId ? 'Cliente actualizado.' : 'Cliente creado.';
       notifications.success(baseMessage, { dedupeKey: 'personas-clientes-save-ok' });
@@ -509,9 +514,11 @@ export default function AdminClientesPage() {
       // AM: Revalida en segundo plano para no mostrar recarga brusca al usuario.
       void fetchClientes({ silent: true });
     } catch (err) {
+      if (!isCurrent()) return;
       setFormError(extractMessage(err));
     } finally {
-      setFormLoading(false);
+      saveLockRef.current = false;
+      if (mountedRef.current && !selectionPendingRef.current) setFormLoading(false);
     }
   }
 
@@ -521,12 +528,16 @@ export default function AdminClientesPage() {
 
   async function handleToggleLifecycle() {
     const cliente = confirmTarget;
-    if (!cliente || actionLoadingId) return;
+    if (!cliente || actionLoadingId || lifecycleLockRef.current) return;
+    lifecycleLockRef.current = true;
+    const requestId = selectionRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
     const isActive = Boolean(cliente?.estado_cliente);
     setActionLoadingId(cliente.id_cliente);
     try {
       if (isActive) {
         const response = await inactivateAdminPersonaCliente(cliente.id_cliente);
+        if (!isCurrent()) return;
         const payload = response?.data ?? response;
         if (payload?.cliente) {
           setClientes((prev) => replaceItemById(prev, payload.cliente, (entry) => entry?.id_cliente));
@@ -534,6 +545,7 @@ export default function AdminClientesPage() {
         notifications.warning('Cliente inactivado y acceso bloqueado.', { dedupeKey: 'personas-clientes-toggle-ok' });
       } else {
         const response = await activateAdminPersonaCliente(cliente.id_cliente);
+        if (!isCurrent()) return;
         const payload = response?.data ?? response;
         if (payload?.cliente) {
           setClientes((prev) => replaceItemById(prev, payload.cliente, (entry) => entry?.id_cliente));
@@ -543,9 +555,11 @@ export default function AdminClientesPage() {
       setConfirmTarget(null);
       void fetchClientes({ silent: true });
     } catch (err) {
+      if (!isCurrent()) return;
       notifications.error(extractMessage(err), { dedupeKey: 'personas-clientes-toggle-error' });
     } finally {
-      setActionLoadingId('');
+      lifecycleLockRef.current = false;
+      if (mountedRef.current) setActionLoadingId('');
     }
   }
 

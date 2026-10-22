@@ -98,7 +98,7 @@ export default function LandingPage() {
   ];
 
   return (
-    <div className="relative min-h-[100dvh] overflow-hidden bg-[var(--mf-bg)] font-[var(--font-body)]">
+    <div className="mf-landing relative min-h-[100dvh] overflow-hidden bg-[var(--mf-bg)] font-[var(--font-body)]">
       <main aria-labelledby="landing-title">
       <h1 id="landing-title" className="sr-only">MASTERFADE — Barbería premium en Honduras</h1>
       <div className="absolute inset-0">
@@ -110,7 +110,7 @@ export default function LandingPage() {
       <div className="relative z-10 md:hidden">
         <section className="mx-auto flex min-h-[calc(100dvh-88px)] w-full max-w-[430px] flex-col items-center px-6 pt-[calc(env(safe-area-inset-top,0px)+16px)] pb-[120px]">
           <div className="w-full flex justify-end">
-            <ThemeSwitcher labelClassName="text-[var(--mf-text-2)]" />
+            <ThemeSwitcher labelClassName="mf-landing-muted" />
           </div>
 
           <div className="flex w-full flex-1 items-center justify-center">
@@ -123,7 +123,7 @@ export default function LandingPage() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.6, delay: 0.6, ease }}
-                  className="mt-5 text-center text-[13px] leading-[1.6] tracking-[0.04em] text-[var(--mf-text-2)]"
+                  className="mt-5 text-center text-[13px] leading-[1.6] tracking-[0.04em] text-[var(--mf-landing-muted)]"
                 >
                   Tu estilo, nuestra pasión.
                   <br />
@@ -147,7 +147,7 @@ export default function LandingPage() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.5, delay: 0.5 }}
-                  className="mb-6 text-[11px] uppercase tracking-[0.15em] text-[var(--mf-text-2)]"
+                  className="mb-6 text-[11px] uppercase tracking-[0.15em] text-[var(--mf-landing-muted)]"
                 >
                   ¿Qué deseas hacer?
                 </motion.p>
@@ -171,7 +171,7 @@ export default function LandingPage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.6, delay: 0.6, ease }}
-              className="mt-6 text-center text-[14px] leading-[1.7] tracking-[0.04em] text-[var(--mf-text-2)]"
+              className="mt-6 text-center text-[14px] leading-[1.7] tracking-[0.04em] text-[var(--mf-landing-muted)]"
             >
               Tu estilo, nuestra pasión.
               <br />
@@ -196,7 +196,7 @@ export default function LandingPage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.5, delay: 0.5 }}
-              className="mb-7 w-full max-w-[380px] text-center text-[11px] uppercase tracking-[0.15em] text-[var(--mf-text-2)]"
+              className="mb-7 w-full max-w-[380px] text-center text-[11px] uppercase tracking-[0.15em] text-[var(--mf-landing-muted)]"
             >
               ¿Qué deseas hacer?
             </motion.p>
@@ -213,7 +213,7 @@ export default function LandingPage() {
               transition={{ duration: 0.5, delay: 1 }}
               className="mt-9"
             >
-              <ThemeSwitcher labelClassName="text-[var(--mf-text-2)]" />
+              <ThemeSwitcher labelClassName="mf-landing-muted" />
             </motion.div>
           </div>
         </div>

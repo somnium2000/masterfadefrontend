@@ -74,11 +74,11 @@ test('Crear invalida edición pendiente', async () => {
   const first = f.openEdit('A'); await f.openCreate(); a.resolve(detail('A')); await first;
   expect(f.state.EditingId).toBe(''); expect(f.state.FormValues).toEqual({}); expect(f.state.FormLoading).toBe(false);
 });
-test('cerrar invalida lectura y no libera guardado', async () => {
+test('cerrar invalida lectura y Crear restablece loading del nuevo formulario', async () => {
   const f = fixture(), a = deferred(); f.env.getAdminSucursal.mockReturnValue(a.promise);
   const first = f.openEdit('A'); await f.handleFormOpenChange(false); a.resolve(detail('A')); await first;
   expect(f.state.FormOpen).toBe(false);
-  f.state.FormLoading = true; await f.handleFormOpenChange(false); await f.openCreate(); expect(f.state.FormLoading).toBe(true);
+  f.state.FormLoading = true; await f.handleFormOpenChange(false); await f.openCreate(); expect(f.state.FormLoading).toBe(false);
 });
 test('error y finally antiguos no alteran edición vigente', async () => {
   const f = fixture(), a = deferred(), b = deferred();

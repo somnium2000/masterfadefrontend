@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Loader2, ShieldCheck } from "lucide-react";
 import {
   Dialog,
@@ -62,6 +62,14 @@ export default function AdminAccountDeletionDecisionDialog({
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const generationRef = useRef(0);
+  const operationRef = useRef(null);
+  useLayoutEffect(() => {
+    generationRef.current += 1;
+    operationRef.current = null;
+    setPhrase(''); setAcknowledged(false); setPassword(''); setComment(''); setSubmitting(false); setErrorMessage('');
+    return () => { generationRef.current += 1; operationRef.current = null; };
+  }, [open, mode, detail?.request?.id_solicitud, user?.id_usuario]);
   const permissions = detail?.permissions || {};
   const canSubmit = approving
     ? canSubmitApproval({ permissions, phrase, acknowledged, submitting })
@@ -83,7 +91,10 @@ export default function AdminAccountDeletionDecisionDialog({
   }, [onOpenChange, reset, submitting]);
 
   const handleSubmit = useCallback(async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || !open || operationRef.current) return;
+    const generation = generationRef.current;
+    const operation = {}; operationRef.current = operation;
+    const current = () => generationRef.current === generation && operationRef.current === operation;
     setSubmitting(true);
     setErrorMessage("");
     let reauthToken = "";
@@ -94,6 +105,7 @@ export default function AdminAccountDeletionDecisionDialog({
           email: user?.email,
           password,
         });
+        if (!current()) return;
         await onApprove({
           reauthToken,
           phrase,
@@ -103,15 +115,20 @@ export default function AdminAccountDeletionDecisionDialog({
       } else {
         await onReject(comment);
       }
-      handleOpenChange(false);
+      if (!current()) return;
+      onOpenChange(false);
+      reset();
     } catch (error) {
-      setErrorMessage(sanitizeAdminAccountDeletionError(error));
+      if (current()) setErrorMessage(sanitizeAdminAccountDeletionError(error));
     } finally {
       reauthToken = "";
-      setPassword("");
-      setSubmitting(false);
+      if (current()) {
+        operationRef.current = null;
+        setPassword("");
+        setSubmitting(false);
+      }
     }
-  }, [acknowledged, approving, canSubmit, comment, handleOpenChange, onApprove, onReject, password, phrase, user?.email, user?.id_usuario]);
+  }, [acknowledged, approving, canSubmit, comment, onOpenChange, reset, open, onApprove, onReject, password, phrase, user?.email, user?.id_usuario]);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>

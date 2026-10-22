@@ -1,9 +1,11 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Eye } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
-import { supabase } from '../../../config/supabaseClient.js';
+import { http } from '../../../services/httpClient.js';
+import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import { PASSWORD_POLICY_MESSAGE, publicAuthError } from '../lib/publicAuthErrors.js';
 import './LoginPage.css';
 import './PasswordRecovery.css';
 
@@ -13,11 +15,10 @@ function parseHash(hash) {
   const h = (hash || '').startsWith('#') ? hash.slice(1) : (hash || '');
   const params = new URLSearchParams(h);
   return {
-    access_token: params.get('access_token') || '',
-    refresh_token: params.get('refresh_token') || '',
+    token_hash: params.get('token_hash') || '',
     type: params.get('type') || '',
     error: params.get('error') || '',
-    error_description: params.get('error_description') || '',
+    error_code: params.get('error_code') || '',
   };
 }
 
@@ -26,7 +27,11 @@ export default function ResetPasswordPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
 
-  const hashData = useMemo(() => parseHash(location.hash), [location.hash]);
+  const [hashData] = useState(() => parseHash(location.hash));
+  const { logout } = useAuth();
+  const requestRef = useRef(null);
+  const submitLockRef = useRef(false);
+  const [passwordUpdated, setPasswordUpdated] = useState(false);
 
   const [newPass, setNewPass] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -34,54 +39,15 @@ export default function ResetPasswordPage() {
   const [showConfirmPasswordWhilePress, setShowConfirmPasswordWhilePress] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const [ready, setReady] = useState(false);
+  const ready = hashData.type === 'recovery' && /^[A-Za-z0-9_-]{20,2048}$/.test(hashData.token_hash) && !hashData.error && !hashData.error_code;
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function init() {
-      setError('');
-      setMsg('');
-
-      if (!supabase) {
-        setError('Supabase no está configurado (revisa VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY).');
-        return;
-      }
-
-      if (hashData.error) {
-        setError(hashData.error_description || 'Enlace inválido o expirado.');
-        return;
-      }
-
-      if (hashData.access_token && hashData.refresh_token) {
-        const { error: setSessionError } = await supabase.auth.setSession({
-          access_token: hashData.access_token,
-          refresh_token: hashData.refresh_token,
-        });
-        if (setSessionError) {
-          setError(setSessionError.message || 'No se pudo validar la sesión de recuperación.');
-          return;
-        }
-
-        if (!cancelled) navigate('/reset-password', { replace: true });
-      }
-
-      const { data } = await supabase.auth.getSession();
-      if (!data?.session) {
-        setError('No hay una sesión de recuperación activa. Vuelve a pedir el enlace.');
-        return;
-      }
-
-      if (!cancelled) setReady(true);
-    }
-
-    init();
-    return () => {
-      cancelled = true;
-    };
-  }, [hashData.access_token, hashData.refresh_token, hashData.error, hashData.error_description, navigate]);
+    if (window.location.hash) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (!ready) setError(publicAuthError({ code: hashData.error_code || hashData.error }, 'link'));
+    return () => requestRef.current?.abort();
+  }, [hashData, ready]);
 
   function handlePasswordRevealStart(field, event) {
     event.preventDefault();
@@ -100,43 +66,60 @@ export default function ResetPasswordPage() {
     setShowConfirmPasswordWhilePress(false);
   }
 
+  function handlePasswordRevealKeyDown(field, event) {
+    if (event.key === ' ' || event.key === 'Enter') handlePasswordRevealStart(field, event);
+  }
+
+  function handlePasswordRevealKeyUp(field, event) {
+    if (event.key !== ' ' && event.key !== 'Enter') return;
+    event.preventDefault();
+    handlePasswordRevealEnd(field);
+  }
+
   async function onSubmit(e) {
     e.preventDefault();
     setError('');
     setMsg('');
 
-    if (!supabase) return;
+    if (!ready || submitLockRef.current) return;
 
-    if (!PASSWORD_REGEX.test(newPass)) {
-      const message = 'La contraseña debe tener al menos 8 caracteres, mayúscula, minúscula y número.';
+    if (!passwordUpdated && !PASSWORD_REGEX.test(newPass)) {
+      const message = PASSWORD_POLICY_MESSAGE;
       setError(message);
-      notifications.warning(message, { dedupeKey: 'auth-reset-password-policy' });
       return;
     }
-    if (newPass !== confirm) {
+    if (!passwordUpdated && newPass !== confirm) {
       const message = 'Las contraseñas no coinciden.';
       setError(message);
-      notifications.warning(message, { dedupeKey: 'auth-reset-password-match' });
       return;
     }
 
+    submitLockRef.current = true;
+    const controller = new AbortController(); requestRef.current = controller;
     setLoading(true);
-    const { error: updateError } = await supabase.auth.updateUser({ password: newPass });
-    setLoading(false);
-
-    if (updateError) {
-      const message = updateError.message || 'No se pudo actualizar la contraseña.';
-      setError(message);
-      notifications.error(message, { dedupeKey: 'auth-reset-password-error' });
-      return;
+    try {
+      if (!passwordUpdated) {
+        await http.post('/v1/auth/reset-password', { token_hash: hashData.token_hash, contrasena: newPass, confirmar_contrasena: confirm },
+          { skipCsrf: true, sensitiveBody: true, skipAuthInvalidation: true, signal: controller.signal });
+        if (controller.signal.aborted) return;
+        setPasswordUpdated(true); setNewPass(''); setConfirm('');
+      }
+      const closed = await logout();
+      if (controller.signal.aborted) return;
+      if (!closed?.ok) {
+        setError('Contraseña actualizada, pero no se confirmó el cierre de esta sesión. Intenta finalizar el cierre.'); return;
+      }
+      const successMessage = 'Contraseña actualizada. Ahora puedes iniciar sesión con tu nueva contraseña.';
+      setMsg(successMessage);
+      notifications.success(successMessage, { dedupeKey: 'auth-reset-password-ok' });
+      navigate('/login', { replace: true });
+    } catch (requestError) {
+      if (!controller.signal.aborted) setError(publicAuthError(requestError,
+        requestError?.status === 401 ? 'link' : 'update'));
+    } finally {
+      submitLockRef.current = false;
+      if (!controller.signal.aborted) setLoading(false);
     }
-
-    const successMessage = 'Contraseña actualizada. Ahora puedes iniciar sesión con tu nueva contraseña.';
-    setMsg(successMessage);
-    notifications.success(successMessage, { dedupeKey: 'auth-reset-password-ok' });
-
-    await supabase.auth.signOut();
-    setTimeout(() => navigate('/login', { replace: true }), 1200);
   }
 
   return (
@@ -184,6 +167,8 @@ export default function ResetPasswordPage() {
                       aria-label="Mantén presionado para ver la contraseña"
                       title="Mantén presionado para ver la contraseña"
                       onPointerDown={(event) => handlePasswordRevealStart('new', event)}
+                      onKeyDown={(event) => handlePasswordRevealKeyDown('new', event)}
+                      onKeyUp={(event) => handlePasswordRevealKeyUp('new', event)}
                       onPointerUp={() => handlePasswordRevealEnd('new')}
                       onPointerLeave={() => handlePasswordRevealEnd('new')}
                       onPointerCancel={() => handlePasswordRevealEnd('new')}
@@ -213,6 +198,8 @@ export default function ResetPasswordPage() {
                       aria-label="Mantén presionado para ver la contraseña"
                       title="Mantén presionado para ver la contraseña"
                       onPointerDown={(event) => handlePasswordRevealStart('confirm', event)}
+                      onKeyDown={(event) => handlePasswordRevealKeyDown('confirm', event)}
+                      onKeyUp={(event) => handlePasswordRevealKeyUp('confirm', event)}
                       onPointerUp={() => handlePasswordRevealEnd('confirm')}
                       onPointerLeave={() => handlePasswordRevealEnd('confirm')}
                       onPointerCancel={() => handlePasswordRevealEnd('confirm')}
@@ -230,7 +217,7 @@ export default function ResetPasswordPage() {
                 <div className="mf-actions">
                   <Link className="mf-link" to="/login">Volver a login</Link>
                   <button className="mf-btn" type="submit" disabled={loading}>
-                    {loading ? 'Guardando...' : 'Actualizar contraseña'}
+                    {loading ? 'Guardando...' : passwordUpdated ? 'Finalizar cierre de sesión' : 'Actualizar contraseña'}
                   </button>
                 </div>
               </>

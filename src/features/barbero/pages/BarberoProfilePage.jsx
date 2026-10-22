@@ -8,8 +8,8 @@ import { getUserDisplayName, useAuth } from '../../../context/AuthContext.jsx';
 import { getBarberoPerfil } from '../lib/barberoApi.js';
 import { withImageVersion } from '../../../lib/imageCache.js';
 
-function extractMessage(error) {
-  return error?.data?.error?.message || error?.message || 'No se pudo cargar el perfil del barbero.';
+function extractMessage() {
+  return 'No se pudo cargar el perfil del barbero.';
 }
 
 function toSafeText(value, fallback = 'No registrado') {

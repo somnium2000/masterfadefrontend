@@ -59,7 +59,13 @@ function extractMessage(err) {
     if (extractErrorCode(err) === 'CATALOG_PACKAGE_SERVICE_OUT_OF_SCOPE') {
         return 'Uno o más servicios del paquete no están disponibles en la sucursal seleccionada.';
     }
-    return err?.data?.error?.message || err?.message || 'Error desconocido.';
+    if (extractErrorCode(err) === 'CATALOG_PACKAGE_COMPOSITION_BRANCH_CONFLICT') {
+        return 'La composición no está disponible en todas las sucursales.';
+    }
+    if (extractErrorCode(err) === 'CATALOG_PACKAGE_PENDING_APPOINTMENTS_CONFIRMATION_REQUIRED') {
+        return 'La oferta tiene citas futuras. Confirma la inactivación para continuar.';
+    }
+    return 'No se pudo completar la operación de paquetes.';
 }
 
 function extractErrorCode(err) {
@@ -707,6 +713,8 @@ export default function AdminPackagesCatalogPage() {
     const servicesGenerationRef = useRef(0);
     const branchesGenerationRef = useRef(0);
     const dialogGenerationRef = useRef(0);
+    const saveOperationRef = useRef(null);
+    const stateOperationRef = useRef(null);
 
     // AM: Descarta datos y formularios del alcance anterior antes de mostrarlos.
     useLayoutEffect(() => {
@@ -716,6 +724,8 @@ export default function AdminPackagesCatalogPage() {
         packagesGenerationRef.current += 1;
         servicesGenerationRef.current += 1;
         dialogGenerationRef.current += 1;
+        saveOperationRef.current = null;
+        stateOperationRef.current = null;
         serviciosByBranchRef.current = {};
         createOffersRef.current = [];
         setPaquetes([]);
@@ -743,6 +753,7 @@ export default function AdminPackagesCatalogPage() {
     useLayoutEffect(() => {
         if (dialogOpen) return;
         dialogGenerationRef.current += 1;
+        saveOperationRef.current = null;
         servicesGenerationRef.current += 1;
         serviciosByBranchRef.current = {};
         createOffersRef.current = [];
@@ -1173,10 +1184,12 @@ export default function AdminPackagesCatalogPage() {
     }
 
     async function handleGuardar() {
-        if (actionsLockedByBranch) return;
+        if (actionsLockedByBranch || !mountedRef.current || saveOperationRef.current) return;
         const epoch = scopeEpochRef.current;
         const dialog = dialogGenerationRef.current;
-        const isCurrent = () => mountedRef.current && scopeEpochRef.current === epoch && dialogGenerationRef.current === dialog;
+        const operation = {};
+        const isCurrent = () => mountedRef.current && scopeEpochRef.current === epoch
+            && dialogGenerationRef.current === dialog && saveOperationRef.current === operation;
         const validationError = validateForm(formValues, dialogMode);
         if (validationError) {
             setFormError(validationError);
@@ -1232,6 +1245,7 @@ export default function AdminPackagesCatalogPage() {
             return;
         }
 
+        saveOperationRef.current = operation;
         try {
             const response = editTarget
                 ? await updateAdminPaquete(editTarget.id_paquete, payload)
@@ -1271,7 +1285,10 @@ export default function AdminPackagesCatalogPage() {
             setFormError(message);
             notifications.error(message, { dedupeKey: 'paquetes-save-error' });
         } finally {
-            if (isCurrent()) setFormLoading(false);
+            if (isCurrent()) {
+                saveOperationRef.current = null;
+                setFormLoading(false);
+            }
         }
     }
 
@@ -1295,9 +1312,12 @@ export default function AdminPackagesCatalogPage() {
     }
 
     async function handleConfirmState() {
-        if (!stateTarget || actionsLockedByBranch) return;
+        if (!stateTarget || actionsLockedByBranch || !mountedRef.current || stateOperationRef.current) return;
         const epoch = scopeEpochRef.current;
-        const isCurrent = () => mountedRef.current && scopeEpochRef.current === epoch;
+        const operation = {};
+        stateOperationRef.current = operation;
+        const isCurrent = () => mountedRef.current && scopeEpochRef.current === epoch
+            && stateOperationRef.current === operation;
 
         setStateLoading(true);
         try {
@@ -1354,7 +1374,10 @@ export default function AdminPackagesCatalogPage() {
 
             notifications.error(extractMessage(err), { dedupeKey: 'paquetes-state-error' });
         } finally {
-            if (isCurrent()) setStateLoading(false);
+            if (isCurrent()) {
+                stateOperationRef.current = null;
+                setStateLoading(false);
+            }
         }
     }
 

@@ -50,8 +50,6 @@ function extractMessage(err) {
     if (err?.data?.error?.code === 'CATALOG_SERVICE_PRICE_REQUIRED') {
         return 'Configura una tarifa para una sucursal antes de reactivar este servicio.';
     }
-    const apiMessage = err?.data?.error?.message;
-    if (typeof apiMessage === 'string' && apiMessage.trim()) return apiMessage.trim();
     return 'No se pudo completar la operación de servicios.';
 }
 
@@ -438,6 +436,8 @@ export default function AdminServicesCatalogPage() {
     const mountedRef = useRef(false);
     const editorGenerationRef = useRef(0);
     const saveOperationRef = useRef(null);
+    const tariffGenerationRef = useRef(0);
+    const tariffOperationRef = useRef(null);
     const refreshServicesRef = useRef(null);
     const canQueryScope = branchesContext === permissionsKey && allBranches.length > 0
         && (isSuperAdmin || Boolean(roles?.includes('admin') && sucursal
@@ -630,6 +630,12 @@ export default function AdminServicesCatalogPage() {
         requestGenerationRef.current += 1;
         editorGenerationRef.current += 1;
         saveOperationRef.current = null;
+        tariffGenerationRef.current += 1;
+        tariffOperationRef.current = null;
+        setTariffFormLoading(false);
+        setTariffFormError('');
+        setTariffDialogOpen(false);
+        setTariffTarget(null);
         setFormLoading(false);
         setServicios([]);
         setListError('');
@@ -645,6 +651,8 @@ export default function AdminServicesCatalogPage() {
             requestGenerationRef.current += 1;
             editorGenerationRef.current += 1;
             saveOperationRef.current = null;
+            tariffGenerationRef.current += 1;
+            tariffOperationRef.current = null;
         };
     }, [requestScope, canQueryScope]);
 
@@ -974,6 +982,9 @@ export default function AdminServicesCatalogPage() {
             return;
         }
 
+        tariffGenerationRef.current += 1;
+        tariffOperationRef.current = null;
+        setTariffFormLoading(false);
         setTariffTarget({ servicio, tarifa });
         setTariffFormValues({
             precio_hnl: tarifa.precio_hnl == null ? '' : String(tarifa.precio_hnl),
@@ -1006,6 +1017,9 @@ export default function AdminServicesCatalogPage() {
             servicio_informativo: fallbackTariff?.servicio_informativo ?? false,
         };
 
+        tariffGenerationRef.current += 1;
+        tariffOperationRef.current = null;
+        setTariffFormLoading(false);
         setTariffTarget({ servicio, tarifa: targetTariff });
         setTariffFormValues({
             precio_hnl: targetTariff.precio_hnl == null ? '' : String(targetTariff.precio_hnl),
@@ -1022,7 +1036,19 @@ export default function AdminServicesCatalogPage() {
         setTariffFormValues((prev) => ({ ...prev, [field]: value }));
     }
 
+    function handleTariffDialogOpenChange(open) {
+        if (!open) {
+            tariffGenerationRef.current += 1;
+            tariffOperationRef.current = null;
+            setTariffFormLoading(false);
+            setTariffFormError('');
+            setTariffTarget(null);
+        }
+        setTariffDialogOpen(open);
+    }
+
     async function handleGuardarTarifa() {
+        if (!mountedRef.current || currentScopeRef.current !== requestScope || tariffOperationRef.current) return;
         const validationError = validateTariffForm(tariffFormValues);
         if (validationError) {
             setTariffFormError(validationError);
@@ -1036,6 +1062,13 @@ export default function AdminServicesCatalogPage() {
             return;
         }
 
+        const operation = {};
+        const generation = tariffGenerationRef.current;
+        const editorGeneration = editorGenerationRef.current;
+        tariffOperationRef.current = operation;
+        const isCurrent = () => mountedRef.current && tariffOperationRef.current === operation
+            && tariffGenerationRef.current === generation && editorGenerationRef.current === editorGeneration
+            && currentScopeRef.current === requestScope;
         setTariffFormLoading(true);
         setTariffFormError('');
         try {
@@ -1051,20 +1084,26 @@ export default function AdminServicesCatalogPage() {
             } else {
                 await createAdminServicioTarifa(serviceId, { ...payload, id_sucursal: branchId });
             }
+            if (!isCurrent()) return;
             notifications.success('Tarifa actualizada.', { dedupeKey: 'servicios-tarifa-save-ok' });
             // AM: Refresca catalogos que dependen de tarifa por sucursal.
             emitCatalogSync('servicio-tarifa-updated');
             await fetchServicios();
+            if (!isCurrent()) return;
             setTariffDialogOpen(false);
             setTariffTarget(null);
         } catch (err) {
+            if (!isCurrent()) return;
             if (err.status === 401) { navigate('/login'); return; }
             if (err.status === 403) { navigate('/unauthorized'); return; }
             const message = extractMessage(err);
             setTariffFormError(message);
             notifications.error(message, { dedupeKey: 'servicios-tarifa-save-error' });
         } finally {
-            setTariffFormLoading(false);
+            if (isCurrent()) {
+                tariffOperationRef.current = null;
+                setTariffFormLoading(false);
+            }
         }
     }
 
@@ -1634,7 +1673,7 @@ export default function AdminServicesCatalogPage() {
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={tariffDialogOpen} onOpenChange={setTariffDialogOpen}>
+            <Dialog open={tariffDialogOpen} onOpenChange={handleTariffDialogOpenChange}>
                 <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-2xl">
                     <DialogHeader>
                         <DialogTitle>Editar tarifa</DialogTitle>
@@ -1650,7 +1689,7 @@ export default function AdminServicesCatalogPage() {
                     />
                     {tariffFormError ? <ErrorBanner message={tariffFormError} /> : null}
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setTariffDialogOpen(false)} disabled={tariffFormLoading}>
+                        <Button variant="outline" onClick={() => handleTariffDialogOpenChange(false)} disabled={tariffFormLoading}>
                             Cancelar
                         </Button>
                         <Button onClick={handleGuardarTarifa} disabled={tariffFormLoading} className="gap-2 min-w-[120px]">

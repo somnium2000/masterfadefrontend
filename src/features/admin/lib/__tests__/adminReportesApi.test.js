@@ -13,6 +13,19 @@ function setSession(userId, roles = ['super_admin'], branchIds = ['branch-1']) {
 }
 
 describe('adminReportesApi session cache', () => {
+  it('peticiones cancelables tienen señal propia y no comparten cache ni solicitud', async () => {
+    getMock.mockReset();
+    getMock.mockResolvedValue({ data: {} });
+    const controller = new AbortController();
+    for (const load of [api.getAdminReportesContext, api.getAdminReportesDashboard]) {
+      await load({}, { signal: controller.signal });
+      await load({}, { signal: controller.signal });
+    }
+    expect(getMock).toHaveBeenCalledTimes(4);
+    for (const [, options] of getMock.mock.calls) {
+      expect(options).toEqual({ cache: false, dedupe: false, signal: controller.signal });
+    }
+  });
   beforeEach(() => {
     getMock.mockReset();
     api.setAdminReportesSessionScope();

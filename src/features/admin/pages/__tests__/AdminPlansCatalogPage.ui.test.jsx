@@ -55,6 +55,7 @@ async function renderCatalog(plans) {
 }
 
 beforeEach(() => {
+  auth.user = { id_usuario: "admin-a" };
   auth.branchIds = [];
   auth.roles = ["super_admin"];
   Object.values(plansApi).forEach((mock) => mock.mockReset());
@@ -75,6 +76,120 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
+
+async function openQa07Offer() {
+  auth.roles = ["admin"]; auth.branchIds = [BRANCH_A];
+  await renderCatalog([makePlan(1)]);
+  fireEvent.click(screen.getByRole("button", { name: "Editar oferta" }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.change(within(dialog).getByLabelText(/Precio/), { target: { value: "1500" } });
+  return dialog;
+}
+
+test("QA07: mensajes desconocidos no exponen errores técnicos", async () => {
+  plansApi.updateAdminPlan.mockRejectedValue({ message: "SQL_INTERNAL_SYNTHETIC" });
+  const dialog = await openQa07Offer();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Guardar cambios" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("No se pudo completar la operación de planes.");
+});
+
+test("QA07: dos clics del mismo render guardan una sola vez", async () => {
+  const pending = deferred(); plansApi.updateAdminPlan.mockReturnValue(pending.promise);
+  const dialog = await openQa07Offer();
+  const save = within(dialog).getByRole("button", { name: "Guardar cambios" });
+  act(() => { save.click(); save.click(); });
+  expect(plansApi.updateAdminPlan).toHaveBeenCalledTimes(1);
+  await act(async () => pending.resolve({ data: makePlan(1) }));
+});
+
+test("QA07: dos confirmaciones del mismo render cambian estado una sola vez", async () => {
+  auth.roles = ["admin"]; auth.branchIds = [BRANCH_A];
+  const pending = deferred(); plansApi.setAdminPlanEstado.mockReturnValue(pending.promise);
+  await renderCatalog([makePlan(1)]);
+  fireEvent.click(screen.getByRole("button", { name: "Inactivar oferta" }));
+  const confirm = within(await screen.findByRole("dialog")).getByRole("button", { name: "Inactivar oferta" });
+  act(() => { confirm.click(); confirm.click(); });
+  expect(plansApi.setAdminPlanEstado).toHaveBeenCalledTimes(1);
+  await act(async () => pending.resolve({ data: makePlan(1, BRANCH_A, { activo: false }) }));
+});
+
+test("QA07: cambio de identidad con mismos roles limpia datos y descarta 401 anterior", async () => {
+  auth.roles = ["admin"]; auth.branchIds = [BRANCH_A];
+  const pending = deferred(); plansApi.updateAdminPlan.mockReturnValue(pending.promise);
+  plansApi.listAdminPlanes.mockResolvedValueOnce({ data: { planes: [makePlan(1)] } }).mockResolvedValue({ data: { planes: [makePlan(2)] } });
+  const view = render(<AdminPlansCatalogPage />);
+  await screen.findByText("Plan VIP 1");
+  fireEvent.click(screen.getByRole("button", { name: "Editar oferta" }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Guardar cambios" }));
+  auth.user = { id_usuario: "admin-b" };
+  view.rerender(<AdminPlansCatalogPage />);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await screen.findByText("Plan VIP 2");
+  await act(async () => pending.reject({ status: 401 }));
+  expect(notifications.error).not.toHaveBeenCalled();
+  expect(notifications.success).not.toHaveBeenCalled();
+  expect(navigateMock).not.toHaveBeenCalled();
+  expect(screen.queryByText("Plan VIP 1")).not.toBeInTheDocument();
+});
+
+test.each(["save", "state"])("QA07: resultado anterior de %s no libera ni altera operación de B", async (kind) => {
+  auth.roles = ["admin"]; auth.branchIds = [BRANCH_A];
+  const a = deferred(), b = deferred();
+  const api = kind === "save" ? plansApi.updateAdminPlan : plansApi.setAdminPlanEstado;
+  api.mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise);
+  plansApi.listAdminPlanes.mockResolvedValue({ data: { planes: [makePlan(1)] } });
+  const view = render(<AdminPlansCatalogPage />);
+  const start = async () => {
+    await screen.findByText("Plan VIP 1");
+    fireEvent.click(screen.getByRole("button", { name: kind === "save" ? "Editar oferta" : "Inactivar oferta" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: kind === "save" ? "Guardar cambios" : "Inactivar oferta" }));
+    return dialog;
+  };
+  await start();
+  auth.user = { id_usuario: "admin-b" }; view.rerender(<AdminPlansCatalogPage />);
+  const dialogB = await start();
+  expect(api).toHaveBeenCalledTimes(2);
+  await act(async () => a.reject({ status: 401, message: "INTERNAL_SYNTHETIC" }));
+  expect(dialogB).toBeInTheDocument();
+  expect(within(dialogB).getByRole("button", { name: kind === "save" ? "Guardar cambios" : "Inactivar oferta" })).toBeDisabled();
+  expect(notifications.error).not.toHaveBeenCalled();
+  expect(notifications.success).not.toHaveBeenCalled();
+  expect(navigateMock).not.toHaveBeenCalled();
+  await act(async () => b.resolve({ data: makePlan(1) }));
+  expect(notifications.success).toHaveBeenCalledTimes(1);
+});
+
+test("QA07: confirmación de suscripciones conserva payload y libera bloqueo para confirmar", async () => {
+  auth.roles = ["admin"]; auth.branchIds = [BRANCH_A];
+  plansApi.setAdminPlanEstado.mockRejectedValueOnce({ data: { error: {
+    code: "CATALOG_PLAN_ACTIVE_SUBSCRIPTIONS_CONFIRM_REQUIRED", details: { total_clientes_activos: 2 },
+  } } }).mockResolvedValueOnce({ data: makePlan(1, BRANCH_A, { activo: false }) });
+  await renderCatalog([makePlan(1)]);
+  fireEvent.click(screen.getByRole("button", { name: "Inactivar oferta" }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Inactivar oferta" }));
+  await within(dialog).findByText(/2 cliente\(s\) con suscripcion vigente/);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Inactivar oferta" }));
+  await waitFor(() => expect(notifications.success).toHaveBeenCalledTimes(1));
+  expect(plansApi.setAdminPlanEstado).toHaveBeenLastCalledWith(makePlan(1).id_plan, {
+    activo: false, id_sucursal: BRANCH_A, confirmar_clientes_activos: true,
+  });
+});
+
+test.each([401, 403, 503])("QA07: error vigente %s se procesa y permite reintentar", async (status) => {
+  plansApi.updateAdminPlan.mockRejectedValueOnce({ status, message: "INTERNAL_SYNTHETIC" }).mockResolvedValueOnce({ data: makePlan(1) });
+  const dialog = await openQa07Offer();
+  const save = within(dialog).getByRole("button", { name: "Guardar cambios" });
+  fireEvent.click(save);
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("No se pudo completar la operación de planes.");
+  expect(save).toBeEnabled();
+  expect(notifications.error).toHaveBeenCalledTimes(1);
+  fireEvent.click(save);
+  await waitFor(() => expect(notifications.success).toHaveBeenCalledTimes(1));
+  expect(plansApi.updateAdminPlan).toHaveBeenCalledTimes(2);
+});
 
 test("servicios no agendables o sin precio positivo no son seleccionables", async () => {
   auth.roles = ["admin"];
@@ -455,7 +570,7 @@ describe("catálogo responsive de planes VIP", () => {
 
     plansApi.listAdminPlanes.mockRejectedValue({ data: { error: { message: "No fue posible cargar los planes." } } });
     render(<AdminPlansCatalogPage />);
-    expect(await screen.findByText("No fue posible cargar los planes.")).toBeInTheDocument();
+    expect(await screen.findByText("No se pudo completar la operación de planes.")).toBeInTheDocument();
     expect(screen.queryByText(/stack|select \*/i)).not.toBeInTheDocument();
   });
 });

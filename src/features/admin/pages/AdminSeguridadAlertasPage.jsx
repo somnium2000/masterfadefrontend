@@ -212,6 +212,33 @@ export default function AdminSeguridadAlertasPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [detailData, setDetailData] = useState(null);
+  const identityContext = JSON.stringify([roles, user?.id_usuario]);
+  const actionGenerationRef = useRef(0);
+  const actionOperationRef = useRef(null);
+  const detailGenerationRef = useRef(0);
+  const detailControllerRef = useRef(null);
+
+  useLayoutEffect(() => {
+    actionGenerationRef.current += 1;
+    actionOperationRef.current = null;
+    detailGenerationRef.current += 1;
+    detailControllerRef.current?.abort();
+    detailControllerRef.current = null;
+    setConfirmTarget(null);
+    setResolutionComment('');
+    setActionLoadingId('');
+    setDetailOpen(false);
+    setDetailData(null);
+    setDetailError('');
+    setDetailLoading(false);
+    return () => {
+      actionGenerationRef.current += 1;
+      actionOperationRef.current = null;
+      detailGenerationRef.current += 1;
+      detailControllerRef.current?.abort();
+      detailControllerRef.current = null;
+    };
+  }, [identityContext]);
 
   const hasActiveFilters = useMemo(() => (
     filters.estado !== DEFAULT_FILTERS.estado
@@ -345,15 +372,23 @@ export default function AdminSeguridadAlertasPage() {
   }
 
   async function openDetail(idAlerta) {
-    if (!idAlerta) return;
+    if (!idAlerta || !isRoot || !listMountedRef.current) return;
+    const generation = ++detailGenerationRef.current;
+    detailControllerRef.current?.abort();
+    const controller = new AbortController();
+    detailControllerRef.current = controller;
+    const isCurrent = () => listMountedRef.current && detailGenerationRef.current === generation
+      && detailControllerRef.current === controller && !controller.signal.aborted;
     setDetailOpen(true);
     setDetailLoading(true);
     setDetailError('');
     setDetailData(null);
     try {
-      const response = await getAdminSecurityAlertDetail(idAlerta);
+      const response = await getAdminSecurityAlertDetail(idAlerta, { signal: controller.signal });
+      if (!isCurrent()) return;
       setDetailData(unwrapSingleResponse(response));
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -364,12 +399,21 @@ export default function AdminSeguridadAlertasPage() {
       }
       setDetailError('No fue posible cargar el detalle de la alerta.');
     } finally {
-      setDetailLoading(false);
+      if (isCurrent()) {
+        detailControllerRef.current = null;
+        setDetailLoading(false);
+      }
     }
   }
 
   async function confirmStateUpdate() {
-    if (!confirmTarget?.id_alerta || !confirmTarget?.nextState || actionLoadingId) return;
+    if (!canWrite || !listMountedRef.current || !confirmTarget?.id_alerta || !confirmTarget?.nextState
+      || actionOperationRef.current || !String(resolutionComment || '').trim()) return;
+    const operation = {};
+    const generation = actionGenerationRef.current;
+    actionOperationRef.current = operation;
+    const isCurrent = () => listMountedRef.current && actionGenerationRef.current === generation
+      && actionOperationRef.current === operation;
     setActionLoadingId(confirmTarget.id_alerta);
     try {
       await updateAdminSecurityAlertState(
@@ -377,6 +421,7 @@ export default function AdminSeguridadAlertasPage() {
         confirmTarget.nextState,
         resolutionComment
       );
+      if (!isCurrent()) return;
       notifications.success('Estado de alerta actualizado correctamente.', {
         dedupeKey: 'security-alerts-state-updated',
       });
@@ -384,6 +429,7 @@ export default function AdminSeguridadAlertasPage() {
       setResolutionComment('');
       await fetchRows();
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -396,7 +442,10 @@ export default function AdminSeguridadAlertasPage() {
         dedupeKey: 'security-alerts-state-update-error',
       });
     } finally {
-      setActionLoadingId('');
+      if (isCurrent()) {
+        actionOperationRef.current = null;
+        setActionLoadingId('');
+      }
     }
   }
 
@@ -688,6 +737,9 @@ export default function AdminSeguridadAlertasPage() {
         onOpenChange={(open) => {
           setDetailOpen(open);
           if (!open) {
+            detailGenerationRef.current += 1;
+            detailControllerRef.current?.abort();
+            detailControllerRef.current = null;
             setDetailData(null);
             setDetailError('');
             setDetailLoading(false);

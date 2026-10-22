@@ -14,6 +14,7 @@ import { Button } from '../../../components/ui/button.jsx';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -105,7 +106,22 @@ function quickFilterButtonClass(isActive) {
 }
 
 function extractMessage(err) {
-  return err?.data?.error?.message || 'No se pudo completar la operación. Intenta nuevamente.';
+  const messages = {
+    PERSONAS_EMAIL_ALREADY_EXISTS: 'El correo ya esta vinculado a otra persona.',
+    PERSONAS_AUTH_EMAIL_ALREADY_EXISTS: 'El correo ya pertenece a una cuenta registrada.',
+    PERSONAS_DNI_ALREADY_EXISTS: 'El DNI ya esta vinculado a otra persona.',
+    PERSONAS_RTN_ALREADY_EXISTS: 'El RTN ya esta vinculado a otra persona.',
+    PERSONAS_BRANCH_NOT_FOUND: 'La sucursal no esta disponible.',
+    PERSONAS_EMPLOYEE_NOT_FOUND: 'El empleado ya no esta disponible.',
+    PERSONAS_SUPER_ADMIN_ROLE_FORBIDDEN: 'No tienes permiso para asignar Super Admin.',
+    PERSONAS_SUPER_ADMIN_TARGET_FORBIDDEN: 'No tienes permiso para gestionar esta cuenta.',
+    PERSONAS_EMPLOYEE_ACTIVATE_ROLES_REQUIRED: 'Revisa los roles del empleado antes de activarlo.',
+  };
+  const code = err?.data?.error?.code;
+  if (Object.hasOwn(messages, code)) return messages[code];
+  if (Number(err?.status) === 401) return 'Tu sesion ya no esta disponible. Inicia sesion nuevamente.';
+  if (Number(err?.status) === 403) return 'No tienes permiso para realizar esta operacion.';
+  return 'No se pudo completar la operacion de empleados. Intenta nuevamente.';
 }
 
 function toDateTimeIso(dateValue) {
@@ -290,6 +306,8 @@ export default function AdminEmpleadosPage() {
   const listRequestRef = useRef(0);
   const selectionRequestRef = useRef(0);
   const selectionPendingRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const lifecycleLockRef = useRef(false);
   const invalidateRequests = useCallback(() => {
     ++listRequestRef.current;
     ++selectionRequestRef.current;
@@ -581,6 +599,7 @@ export default function AdminEmpleadosPage() {
   }
 
   async function handleSubmit() {
+    if (formLoading || saveLockRef.current) return;
     const safeFormValues = isAdminOnly
       ? { ...formValues, roles: getAssignableEmployeeRoles(formValues.roles, true) }
       : formValues;
@@ -591,12 +610,16 @@ export default function AdminEmpleadosPage() {
     }
 
     setFormError('');
+    saveLockRef.current = true;
+    const requestId = selectionRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
     setFormLoading(true);
     try {
       const payload = buildPayload(safeFormValues);
       const response = editingId
         ? await updateAdminPersonaEmpleado(editingId, payload)
         : await createAdminPersonaEmpleado(payload);
+      if (!isCurrent()) return;
       const data = response?.data ?? response;
       const baseMessage = editingId ? 'Empleado actualizado.' : 'Empleado creado.';
       notifications.success(baseMessage, { dedupeKey: 'personas-empleados-save-ok' });
@@ -616,9 +639,11 @@ export default function AdminEmpleadosPage() {
       // AM: Revalidacion silenciosa para evitar parpadeo de cards/lista y mantener consistencia.
       void fetchEmpleados({ silent: true });
     } catch (err) {
+      if (!isCurrent()) return;
       setFormError(extractMessage(err));
     } finally {
-      setFormLoading(false);
+      saveLockRef.current = false;
+      if (mountedRef.current && !selectionPendingRef.current) setFormLoading(false);
     }
   }
 
@@ -629,16 +654,20 @@ export default function AdminEmpleadosPage() {
 
   async function handleToggleLifecycle() {
     const empleado = confirmTarget;
-    if (!empleado) return;
+    if (!empleado || actionLoadingId || lifecycleLockRef.current) return;
     if (isAdminOnly && isPrivilegedEmployee(empleado)) {
       setConfirmTarget(null);
       return;
     }
     const isActive = Boolean(empleado?.estado_laboral);
+    lifecycleLockRef.current = true;
+    const requestId = selectionRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
     setActionLoadingId(empleado.id_empleado);
     try {
       if (isActive) {
         const response = await inactivateAdminPersonaEmpleado(empleado.id_empleado);
+        if (!isCurrent()) return;
         const payload = response?.data ?? response;
         if (payload?.empleado) {
           setEmpleados((prev) =>
@@ -648,6 +677,7 @@ export default function AdminEmpleadosPage() {
         notifications.warning('Empleado inactivado y acceso bloqueado.', { dedupeKey: 'personas-empleados-toggle-ok' });
       } else {
         const response = await activateAdminPersonaEmpleado(empleado.id_empleado);
+        if (!isCurrent()) return;
         const payload = response?.data ?? response;
         if (payload?.empleado) {
           setEmpleados((prev) =>
@@ -659,9 +689,11 @@ export default function AdminEmpleadosPage() {
       setConfirmTarget(null);
       void fetchEmpleados({ silent: true });
     } catch (err) {
+      if (!isCurrent()) return;
       notifications.error(extractMessage(err), { dedupeKey: 'personas-empleados-toggle-error' });
     } finally {
-      setActionLoadingId('');
+      lifecycleLockRef.current = false;
+      if (mountedRef.current) setActionLoadingId('');
     }
   }
 
@@ -879,34 +911,34 @@ export default function AdminEmpleadosPage() {
 
       <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editingId ? 'Editar Empleado' : 'Nuevo Empleado'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? 'Editar Empleado' : 'Nuevo Empleado'}</DialogTitle><DialogDescription className="sr-only">Datos personales, roles y sucursal. Los campos con asterisco son obligatorios.</DialogDescription></DialogHeader>
 
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <Label className="mf-label">Nombres *</Label>
-              <Input className="mf-input mt-1" value={formValues.nombres} onChange={(e) => setFormValues((p) => ({ ...p, nombres: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-nombres">Nombres *</Label>
+              <Input id="empleado-nombres" className="mf-input mt-1" value={formValues.nombres} onChange={(e) => setFormValues((p) => ({ ...p, nombres: e.target.value }))} />
             </div>
             <div>
-              <Label className="mf-label">Apellidos *</Label>
-              <Input className="mf-input mt-1" value={formValues.apellidos} onChange={(e) => setFormValues((p) => ({ ...p, apellidos: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-apellidos">Apellidos *</Label>
+              <Input id="empleado-apellidos" className="mf-input mt-1" value={formValues.apellidos} onChange={(e) => setFormValues((p) => ({ ...p, apellidos: e.target.value }))} />
             </div>
 
             <div>
-              <Label className="mf-label">Fecha nacimiento</Label>
-              <Input type="date" className="mf-input mt-1" value={formValues.fecha_nacimiento} onChange={(e) => setFormValues((p) => ({ ...p, fecha_nacimiento: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-fecha_nacimiento">Fecha nacimiento</Label>
+              <Input id="empleado-fecha_nacimiento" type="date" className="mf-input mt-1" value={formValues.fecha_nacimiento} onChange={(e) => setFormValues((p) => ({ ...p, fecha_nacimiento: e.target.value }))} />
             </div>
             <div>
-              <Label className="mf-label">DNI *</Label>
-              <Input className="mf-input mt-1" value={formValues.dni} onChange={(e) => setFormValues((p) => ({ ...p, dni: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-dni">DNI *</Label>
+              <Input id="empleado-dni" className="mf-input mt-1" value={formValues.dni} onChange={(e) => setFormValues((p) => ({ ...p, dni: e.target.value }))} />
             </div>
             <div>
-              <Label className="mf-label">RTN (opcional)</Label>
-              <Input className="mf-input mt-1" value={formValues.rtn} onChange={(e) => setFormValues((p) => ({ ...p, rtn: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-rtn">RTN (opcional)</Label>
+              <Input id="empleado-rtn" className="mf-input mt-1" value={formValues.rtn} onChange={(e) => setFormValues((p) => ({ ...p, rtn: e.target.value }))} />
             </div>
 
             <div className="sm:col-span-2">
-              <Label className="mf-label">Correo de acceso *</Label>
-              <Input className="mf-input mt-1" type="email" value={formValues.correo_principal} onChange={(e) => setFormValues((p) => ({ ...p, correo_principal: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-correo_principal">Correo de acceso *</Label>
+              <Input id="empleado-correo_principal" className="mf-input mt-1" type="email" value={formValues.correo_principal} onChange={(e) => setFormValues((p) => ({ ...p, correo_principal: e.target.value }))} />
             </div>
 
             <div className="sm:col-span-2">
@@ -938,33 +970,33 @@ export default function AdminEmpleadosPage() {
               ) : null}
             </div>
             <div>
-              <Label className="mf-label">Sucursal *</Label>
-              <select className="mf-select mt-1" value={formValues.id_sucursal} onChange={(e) => setFormValues((p) => ({ ...p, id_sucursal: e.target.value }))}>
+              <Label className="mf-label" htmlFor="empleado-id_sucursal">Sucursal *</Label>
+              <select id="empleado-id_sucursal" className="mf-select mt-1" value={formValues.id_sucursal} onChange={(e) => setFormValues((p) => ({ ...p, id_sucursal: e.target.value }))}>
                 <option value="">Selecciona sucursal</option>
                 {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
               </select>
             </div>
 
             <div>
-              <Label className="mf-label">Telefono *</Label>
-              <Input className="mf-input mt-1" value={formValues.telefono_principal} onChange={(e) => setFormValues((p) => ({ ...p, telefono_principal: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-telefono_principal">Telefono *</Label>
+              <Input id="empleado-telefono_principal" className="mf-input mt-1" value={formValues.telefono_principal} onChange={(e) => setFormValues((p) => ({ ...p, telefono_principal: e.target.value }))} />
             </div>
             <div>
-              <Label className="mf-label">Fecha ingreso</Label>
-              <Input className="mf-input mt-1" type="date" value={formValues.fecha_ingreso} onChange={(e) => setFormValues((p) => ({ ...p, fecha_ingreso: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-fecha_ingreso">Fecha ingreso</Label>
+              <Input id="empleado-fecha_ingreso" className="mf-input mt-1" type="date" value={formValues.fecha_ingreso} onChange={(e) => setFormValues((p) => ({ ...p, fecha_ingreso: e.target.value }))} />
             </div>
 
             <div>
-              <Label className="mf-label">Salario base HNL</Label>
-              <Input className="mf-input mt-1" type="number" min="0" step="0.01" value={formValues.salario_base} onChange={(e) => setFormValues((p) => ({ ...p, salario_base: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-salario_base">Salario base HNL</Label>
+              <Input id="empleado-salario_base" className="mf-input mt-1" type="number" min="0" step="0.01" value={formValues.salario_base} onChange={(e) => setFormValues((p) => ({ ...p, salario_base: e.target.value }))} />
             </div>
             <div className="sm:col-span-2">
-              <Label className="mf-label">Direccion</Label>
-              <Input className="mf-input mt-1" value={formValues.direccion_texto} onChange={(e) => setFormValues((p) => ({ ...p, direccion_texto: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-direccion_texto">Direccion</Label>
+              <Input id="empleado-direccion_texto" className="mf-input mt-1" value={formValues.direccion_texto} onChange={(e) => setFormValues((p) => ({ ...p, direccion_texto: e.target.value }))} />
             </div>
             <div className="sm:col-span-2">
-              <Label className="mf-label">Observaciones</Label>
-              <Input className="mf-input mt-1" value={formValues.observaciones} onChange={(e) => setFormValues((p) => ({ ...p, observaciones: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-observaciones">Observaciones</Label>
+              <Input id="empleado-observaciones" className="mf-input mt-1" value={formValues.observaciones} onChange={(e) => setFormValues((p) => ({ ...p, observaciones: e.target.value }))} />
             </div>
 
             {isBarberForm ? (
@@ -1000,8 +1032,8 @@ export default function AdminEmpleadosPage() {
                   </div>
 
                   <div className="sm:col-span-2">
-                    <Label className="mf-label">Alias publico</Label>
-                    <Input
+                    <Label className="mf-label" htmlFor="empleado-alias_publico">Alias publico</Label>
+                    <Input id="empleado-alias_publico"
                       className="mf-input mt-1"
                       maxLength={BARBER_PUBLIC_ALIAS_MAX}
                       value={formValues.alias_publico}
@@ -1011,12 +1043,12 @@ export default function AdminEmpleadosPage() {
 
                   <div className="sm:col-span-2">
                     <div className="flex items-center justify-between gap-2">
-                      <Label className="mf-label">Resumen publico</Label>
+                      <Label className="mf-label" htmlFor="empleado-resumen_publico">Resumen publico</Label>
                       <span className="text-[11px] text-[var(--mf-text-2)]">
                         {normalizeUnicodeText(formValues.resumen_publico).length}/{BARBER_PUBLIC_SUMMARY_MAX}
                       </span>
                     </div>
-                    <textarea
+                    <textarea id="empleado-resumen_publico"
                       className="mf-input mt-1 min-h-[110px] w-full resize-y"
                       maxLength={BARBER_PUBLIC_SUMMARY_MAX}
                       value={formValues.resumen_publico}

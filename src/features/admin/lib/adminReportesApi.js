@@ -74,6 +74,7 @@ async function resolveCachedRequest({
 export async function getAdminReportesContext(params = {}, options = {}) {
   const qs = buildQuery(params);
   const path = qs ? `${BASE}/contexto?${qs}` : `${BASE}/contexto`;
+  if (options?.signal) return http.get(path, { cache: false, dedupe: false, signal: options.signal });
   const cacheKey = `${sessionScopeKey}:context:${path}`;
   return resolveCachedRequest({
     key: cacheKey,
@@ -89,6 +90,7 @@ export async function getAdminReportesContext(params = {}, options = {}) {
 export async function getAdminReportesDashboard(params = {}, options = {}) {
   const qs = buildQuery(params);
   const path = qs ? `${BASE}/dashboard?${qs}` : `${BASE}/dashboard`;
+  if (options?.signal) return http.get(path, { cache: false, dedupe: false, signal: options.signal });
   const cacheKey = `${sessionScopeKey}:dashboard:${path}`;
   return resolveCachedRequest({
     key: cacheKey,

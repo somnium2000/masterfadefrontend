@@ -1,8 +1,8 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import ForgotPasswordPage from './features/auth/pages/ForgotPasswordPage.jsx';
-import LoginPage from './features/auth/pages/LoginPage.jsx';
+import LoginRoute from './features/auth/components/LoginRoute.jsx';
 import RegisterPage from './features/auth/pages/RegisterPage.jsx';
 import ResetPasswordPage from './features/auth/pages/ResetPasswordPage.jsx';
 import AuthCallbackPage from './features/auth/pages/AuthCallbackPage.jsx';
@@ -126,6 +126,7 @@ function InternalAccountDeletionDashboardShell() {
 }
 
 function App() {
+  const location = useLocation();
   const { isAuthenticated, user, roles, branchIds, empresaId } = useAuth();
   const reportSessionKey = JSON.stringify({
     userId: user?.id_usuario || null,
@@ -138,11 +139,11 @@ function App() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
 
-      <Route path="/login" element={isAuthenticated ? <Navigate to="/home" replace /> : <LoginPage />} />
+      <Route path="/login" element={<LoginRoute />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route path="/register" element={isAuthenticated ? <Navigate to="/home" replace /> : <RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage key={location.hash} />} />
       <Route path="/servicios" element={<ServicesPage />} />
       <Route path="/promociones" element={<PromotionsPage />} />
       <Route path="/barberos" element={<BarbersLandingPage />} />
@@ -275,15 +276,15 @@ function App() {
         <Route path="reportes/barberos" element={<RouteErrorBoundary><AdminReportesBarberosPage key={reportSessionKey} /></RouteErrorBoundary>} />
         <Route path="reportes/concurrencia" element={<RouteErrorBoundary><AdminReportesConcurrenciaPage key={reportSessionKey} /></RouteErrorBoundary>} />
         {/* JK: Sucursales oculto temporalmente en reportes; redirige a Ingresos. */}
-        <Route path="reportes/sucursales" element={<Navigate to="../ingresos" replace />} />
+        <Route path="reportes/sucursales" element={<Navigate to="/home/super/reportes/ingresos" replace />} />
         {/* JK: Compatibilidad temporal para ruta legacy del modulo anterior. */}
         <Route path="reportes/ventas" element={<RouteErrorBoundary><AdminReportesIngresosPage key={reportSessionKey} /></RouteErrorBoundary>} />
         {/* Masterpuntos */}
         <Route path="superpuntos" element={<RouteErrorBoundary><AdminMasterPuntosPage /></RouteErrorBoundary>} />
         {/* Configuración */}
-        <Route path="configuracion/notificaciones" element={<Navigate to="configuracion/comunicacion" replace />} />
-        <Route path="configuracion/perfil" element={<Navigate to="configuracion/comunicacion" replace />} />
-        <Route path="configuracion/spam" element={<Navigate to="configuracion/comunicacion" replace />} />
+        <Route path="configuracion/notificaciones" element={<Navigate to="/home/super/configuracion/comunicacion" replace />} />
+        <Route path="configuracion/perfil" element={<Navigate to="/home/super/configuracion/comunicacion" replace />} />
+        <Route path="configuracion/spam" element={<Navigate to="/home/super/configuracion/comunicacion" replace />} />
         <Route path="configuracion/comunicacion" element={<RouteErrorBoundary><AdminConfiguracionComunicacionPage /></RouteErrorBoundary>} />
         <Route path="configuracion/promociones" element={<RouteErrorBoundary><AdminConfiguracionPromocionesPage /></RouteErrorBoundary>} />
       </Route>

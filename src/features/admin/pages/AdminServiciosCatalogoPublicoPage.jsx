@@ -8,8 +8,8 @@ import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import { getPublicCatalog, listPublicCatalogBranches, listPublicCatalogPlans } from '../../public/lib/catalogApi.js';
 import { subscribeCatalogSync } from '../../../lib/catalogSync.js';
 
-function extractMessage(error) {
-  return error?.data?.error?.message || error?.message || 'Error desconocido.';
+function extractMessage() {
+  return 'No se pudo cargar el catálogo público.';
 }
 
 function sortByVisualOrder(items = [], nameKey) {
@@ -107,30 +107,32 @@ export default function AdminServiciosCatalogoPublicoPage() {
     }
   }, []);
 
+  const loadBranches = useCallback(async () => {
+    if (!isMountedRef.current) return;
+    const initialRequestId = ++requestRef.current;
+    setLoading(true);
+    setErrorMessage('');
+    try {
+      const response = await listPublicCatalogBranches();
+      if (!isMountedRef.current || initialRequestId !== requestRef.current) return;
+      const nextBranches = Array.isArray(response?.branches) ? response.branches : [];
+      setBranches(nextBranches);
+      branchesReadyRef.current = true;
+      const preferredBranchId = nextBranches.length === 1 ? nextBranches[0].id_sucursal : '';
+      selectedBranchRef.current = preferredBranchId;
+      setBranchId(preferredBranchId);
+      await loadData(preferredBranchId);
+    } catch (error) {
+      if (!isMountedRef.current || initialRequestId !== requestRef.current) return;
+      setErrorMessage(extractMessage(error));
+      setLoading(false);
+    }
+  }, [loadData]);
+
   useEffect(() => {
     isMountedRef.current = true;
     let active = true;
-    const initialRequestId = ++requestRef.current;
-    queueMicrotask(() => {
-      if (!active) return;
-      void (async () => {
-        try {
-          const response = await listPublicCatalogBranches();
-          if (!isMountedRef.current || initialRequestId !== requestRef.current) return;
-          const nextBranches = Array.isArray(response?.branches) ? response.branches : [];
-          setBranches(nextBranches);
-          branchesReadyRef.current = true;
-          const preferredBranchId = nextBranches.length === 1 ? nextBranches[0].id_sucursal : '';
-          selectedBranchRef.current = preferredBranchId;
-          setBranchId(preferredBranchId);
-          await loadData(preferredBranchId);
-        } catch (error) {
-          if (!isMountedRef.current || initialRequestId !== requestRef.current) return;
-          setErrorMessage(extractMessage(error));
-          setLoading(false);
-        }
-      })();
-    });
+    queueMicrotask(() => { if (active) void loadBranches(); });
 
     return () => {
       active = false;
@@ -138,7 +140,7 @@ export default function AdminServiciosCatalogoPublicoPage() {
       branchesReadyRef.current = false;
       requestRef.current += 1;
     };
-  }, [loadData]);
+  }, [loadBranches]);
 
   useEffect(() => {
     const unsubscribe = subscribeCatalogSync(() => {
@@ -222,7 +224,10 @@ export default function AdminServiciosCatalogoPublicoPage() {
         </div>
       </header>
 
-      {errorMessage ? <ErrorBanner message={errorMessage} onRetry={() => void loadData(branchId)} /> : null}
+      {errorMessage ? <ErrorBanner message={errorMessage} onRetry={() => {
+        if (!branchesReadyRef.current) void loadBranches();
+        else void loadData(branchId);
+      }} /> : null}
       {loading ? <LoadingSpinner /> : null}
       {!loading && !errorMessage && plansError ? (
         <ErrorBanner message="No se pudieron cargar los planes VIP." onRetry={() => void loadData(branchId, { silent: true, plansOnly: true })} />

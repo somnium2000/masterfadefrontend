@@ -183,7 +183,14 @@ function ClienteProfileEditor({ open, onOpenChange, profile, onSaved }) {
       setPhotoChanged(true);
       notifications.success('Imagen de perfil cargada. Guarda para confirmar cambios.');
     } catch (error) {
-      if (isCurrent()) notifications.error(error?.message || 'No se pudo cargar la imagen de perfil.');
+      if (isCurrent()) {
+        const validationMessages = new Set([
+          'Debes seleccionar una imagen.',
+          'Formato no válido. Usa JPG, PNG o WEBP.',
+          'La imagen supera el máximo permitido de 5MB.',
+        ]);
+        notifications.error(validationMessages.has(error?.message) ? error.message : 'No se pudo cargar la imagen de perfil.');
+      }
     } finally {
       if (isCurrent()) {
         operationRef.current = null;
@@ -233,8 +240,8 @@ function ClienteProfileEditor({ open, onOpenChange, profile, onSaved }) {
       notifications.success('Perfil actualizado correctamente.');
       onSaved?.(response);
       onOpenChange(false);
-    } catch (error) {
-      if (isCurrent()) notifications.error(error?.data?.error?.message || error?.message || 'No se pudo actualizar tu perfil.');
+    } catch {
+      if (isCurrent()) notifications.error('No se pudo actualizar tu perfil.');
     } finally {
       if (isCurrent()) { operationRef.current = null; setSaving(false); }
     }

@@ -8,6 +8,7 @@ import { consumeIdleSessionMessage, useAuth } from '../../../context/AuthContext
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { supabase } from '../../../config/supabaseClient.js';
 import AuthLandingBrandBlock from '../components/AuthLandingBrandBlock.jsx';
+import { getSafeLoginReturnPath } from '../lib/loginReturnPath.js';
 import './LoginPage.css';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -22,13 +23,6 @@ const SESSION_LIMIT_MESSAGE =
 const GENERIC_LOGIN_ERROR = 'No fue posible iniciar sesion en este momento. Intenta nuevamente.';
 const GENERIC_INVALID_CREDENTIALS = 'Credenciales invalidas o acceso no permitido.';
 const GENERIC_LOCKED_LOGIN = 'No fue posible iniciar sesion en este momento. Intenta nuevamente mas tarde.';
-
-function getSafeNextPath(rawPath) {
-  const value = String(rawPath || '').trim();
-  if (!value.startsWith('/')) return '';
-  if (value.startsWith('//')) return '';
-  return value;
-}
 
 function normalizeBranchId(rawBranchId) {
   const value = String(rawBranchId || '').trim();
@@ -105,7 +99,7 @@ export default function LoginPage() {
   const notifications = useNotifications();
 
   const queryParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
-  const nextPath = useMemo(() => getSafeNextPath(queryParams.get('next')), [queryParams]);
+  const nextPath = useMemo(() => getSafeLoginReturnPath(queryParams.get('next')), [queryParams]);
   const intent = useMemo(() => String(queryParams.get('intent') || '').trim().toLowerCase(), [queryParams]);
   const branchId = useMemo(() => normalizeBranchId(queryParams.get('id_sucursal')), [queryParams]);
   const planId = useMemo(() => String(queryParams.get('id_plan') || '').trim(), [queryParams]);
@@ -144,7 +138,6 @@ export default function LoginPage() {
     const idleMessage = consumeIdleSessionMessage();
     if (!idleMessage) return;
     setError(idleMessage);
-    notifications.error(idleMessage, { dedupeKey: 'auth-idle-session-expired' });
   }, [notifications]);
 
   async function onSubmit(event) {
@@ -160,14 +153,12 @@ export default function LoginPage() {
     if (!user || !pass) {
       const message = 'Por favor ingresa correo y contrasena.';
       setError(message);
-      notifications.warning(message, { dedupeKey: 'auth-login-required-fields' });
       return;
     }
 
     if (!user.includes('@')) {
       const message = 'Ingresa un correo valido.';
       setError(message);
-      notifications.warning(message, { dedupeKey: 'auth-login-invalid-email' });
       return;
     }
 
@@ -197,7 +188,6 @@ export default function LoginPage() {
       pendingSessionReplaceRef.current = null;
       const message = resolveSafeLoginMessage(result);
       setError(message);
-      notifications.error(message, { dedupeKey: 'auth-login-error' });
       return;
     }
 
@@ -220,7 +210,6 @@ export default function LoginPage() {
       handleSessionLimitCancel();
       const message = GENERIC_LOGIN_ERROR;
       setError(message);
-      notifications.error(message, { dedupeKey: 'auth-login-session-replace-missing' });
       return;
     }
 
@@ -239,7 +228,6 @@ export default function LoginPage() {
       if (!replaceResult.ok) {
         const message = GENERIC_LOGIN_ERROR;
         setError(message);
-        notifications.error(message, { dedupeKey: 'auth-login-session-replace-error' });
         return;
       }
 
@@ -262,7 +250,6 @@ export default function LoginPage() {
     if (!supabase) {
       const message = 'No fue posible iniciar autenticacion con Google en este momento.';
       setError(message);
-      notifications.error(message, { dedupeKey: 'auth-google-supabase-missing' });
       return;
     }
 
@@ -280,7 +267,6 @@ export default function LoginPage() {
     } catch {
       const message = 'No fue posible iniciar autenticacion con Google en este momento.';
       setError(message);
-      notifications.error(message, { dedupeKey: 'auth-google-oauth-error' });
       setLoadingGoogle(false);
     }
   }
@@ -292,6 +278,16 @@ export default function LoginPage() {
 
   function handlePasswordRevealEnd() {
     setShowPasswordWhilePress(false);
+  }
+
+  function handlePasswordRevealKeyDown(event) {
+    if (event.key === ' ' || event.key === 'Enter') handlePasswordRevealStart(event);
+  }
+
+  function handlePasswordRevealKeyUp(event) {
+    if (event.key !== ' ' && event.key !== 'Enter') return;
+    event.preventDefault();
+    handlePasswordRevealEnd();
   }
 
   return (
@@ -431,6 +427,8 @@ export default function LoginPage() {
                     aria-label="Manten presionado para ver la contrasena"
                     title="Manten presionado para ver la contrasena"
                     onPointerDown={handlePasswordRevealStart}
+                    onKeyDown={handlePasswordRevealKeyDown}
+                    onKeyUp={handlePasswordRevealKeyUp}
                     onPointerUp={handlePasswordRevealEnd}
                     onPointerLeave={handlePasswordRevealEnd}
                     onPointerCancel={handlePasswordRevealEnd}

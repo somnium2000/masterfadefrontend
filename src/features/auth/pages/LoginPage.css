@@ -44,6 +44,13 @@
   transition: color 0.2s ease;
 }
 
+/* Auth-only secondary text: contrast against the composed light surfaces. */
+:root[data-theme="light"] .mf-login-page .mf-login-back,
+:root[data-theme="light"] .mf-login-page .mf-login-trust-copy,
+:root[data-theme="light"] .mf-login-page .mf-register-help {
+  color: #514b46;
+}
+
 .mf-login-back:hover {
   color: var(--mf-accent);
 }

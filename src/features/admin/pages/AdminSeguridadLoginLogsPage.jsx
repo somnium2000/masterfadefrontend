@@ -165,6 +165,24 @@ export default function AdminSeguridadLoginLogsPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [detailData, setDetailData] = useState(null);
+  const detailGenerationRef = useRef(0);
+  const detailControllerRef = useRef(null);
+  const detailContext = JSON.stringify([roles, user?.id_usuario]);
+
+  useLayoutEffect(() => {
+    detailGenerationRef.current += 1;
+    detailControllerRef.current?.abort();
+    detailControllerRef.current = null;
+    setDetailOpen(false);
+    setDetailData(null);
+    setDetailError('');
+    setDetailLoading(false);
+    return () => {
+      detailGenerationRef.current += 1;
+      detailControllerRef.current?.abort();
+      detailControllerRef.current = null;
+    };
+  }, [detailContext]);
 
   const hasActiveFilters = useMemo(() => (
     filters.resultado !== DEFAULT_FILTERS.resultado
@@ -251,15 +269,24 @@ export default function AdminSeguridadLoginLogsPage() {
   }
 
   async function openDetail(idLoginLog) {
-    if (!idLoginLog) return;
+    if (!idLoginLog || !listMountedRef.current
+      || !roles.some(role => ['super_admin', 'security_admin', 'security_auditor', 'root'].includes(role))) return;
+    const generation = ++detailGenerationRef.current;
+    detailControllerRef.current?.abort();
+    const controller = new AbortController();
+    detailControllerRef.current = controller;
+    const isCurrent = () => listMountedRef.current && detailGenerationRef.current === generation
+      && detailControllerRef.current === controller && !controller.signal.aborted;
     setDetailOpen(true);
     setDetailLoading(true);
     setDetailError('');
     setDetailData(null);
     try {
-      const response = await getAdminSecurityLoginLogDetail(idLoginLog);
+      const response = await getAdminSecurityLoginLogDetail(idLoginLog, { signal: controller.signal });
+      if (!isCurrent()) return;
       setDetailData(unwrapSingleResponse(response));
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -270,7 +297,10 @@ export default function AdminSeguridadLoginLogsPage() {
       }
       setDetailError('No fue posible cargar el detalle del intento.');
     } finally {
-      setDetailLoading(false);
+      if (isCurrent()) {
+        detailControllerRef.current = null;
+        setDetailLoading(false);
+      }
     }
   }
 
@@ -511,6 +541,9 @@ export default function AdminSeguridadLoginLogsPage() {
         onOpenChange={(open) => {
           setDetailOpen(open);
           if (!open) {
+            detailGenerationRef.current += 1;
+            detailControllerRef.current?.abort();
+            detailControllerRef.current = null;
             setDetailData(null);
             setDetailError('');
             setDetailLoading(false);
