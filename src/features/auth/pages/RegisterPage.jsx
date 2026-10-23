@@ -10,7 +10,7 @@ import {
   Sparkles,
   UserRound,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
@@ -59,6 +59,13 @@ export default function RegisterPage() {
   const [showConfirmPasswordWhilePress, setShowConfirmPasswordWhilePress] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [pendingEmail, setPendingEmail] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
+  useEffect(() => {
+    if (resendCooldown <= 0) return undefined;
+    const timer = setTimeout(() => setResendCooldown(value => Math.max(0, value - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
   const loginHref = useMemo(() => {
     const params = new URLSearchParams();
@@ -141,7 +148,7 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      await http.post('/v1/auth/register', {
+      const response = await http.post('/v1/auth/register', {
         nombres: normalizedNombres,
         apellidos: normalizedApellidos,
         email: normalizedCorreo,
@@ -152,6 +159,14 @@ export default function RegisterPage() {
       }, {
         skipCsrf: true,
       });
+
+      if ((response?.data || response)?.pending_verification) {
+        setPendingEmail(normalizedCorreo);
+        setResendCooldown(60);
+        setContrasena('');
+        setConfirmarContrasena('');
+        return;
+      }
 
       // AM: Registro exitoso: iniciamos sesion automaticamente para mantener UX fluida.
       const loginResult = await login(normalizedCorreo, password, false);
@@ -411,8 +426,20 @@ export default function RegisterPage() {
 
               {error ? <div id="register-error" className="mf-error" role="alert">{error}</div> : null}
 
+              {pendingEmail ? <div role="status">
+                <p>Registro pendiente. Revisa tu correo para confirmar y elegir tu contraseña final. Todavía no se ha iniciado sesión.</p>
+                <button type="button" className="mf-btn mf-btn-secondary" disabled={loading || resendCooldown > 0} onClick={async () => {
+                  setLoading(true); setError('');
+                  try {
+                    await http.post('/v1/auth/register/resend', { email: pendingEmail }, { skipCsrf: true, sensitiveBody: true, skipAuthInvalidation: true });
+                    setResendCooldown(60);
+                  } catch { setError('No se pudo reenviar la confirmación. Espera un minuto e intenta más tarde.'); }
+                  finally { setLoading(false); }
+                }}>{resendCooldown > 0 ? `Reenviar en ${resendCooldown}s` : 'Solicitar nuevamente el enlace'}</button>
+              </div> : null}
+
               <div className="mf-actions mf-actions-end">
-                <button className="mf-btn" type="submit" disabled={loading}>
+                <button className="mf-btn" type="submit" disabled={loading || Boolean(pendingEmail)}>
                   {loading ? 'Creando cuenta...' : 'Crear cuenta'}
                 </button>
               </div>
