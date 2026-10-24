@@ -70,7 +70,7 @@ function readTodoPagoSimulationAmount() {
   }
 }
 
-export default function useBookingPayment({ currentGroupId = '' } = {}) {
+export default function useBookingPayment({ currentGroupId = '', authenticated = false } = {}) {
   const [paymentIntentState, setPaymentIntentState] = useState(null);
   const [paymentResultState, setPaymentResultState] = useState(null);
   const [bookingSuccessResultState, setBookingSuccessResultState] = useState(null);
@@ -233,7 +233,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     const promise = (async () => {
       const requestSeq = paymentStateSeqRef.current;
       setCreatingPaymentIntent(true);
-      const response = await createPublicPaymentIntent(payload);
+      const response = await createPublicPaymentIntent(payload, { authenticated });
       const intent = response?.data ?? response;
       if (
         !mountedRef.current
@@ -266,7 +266,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
       }
       if (mountedRef.current) setCreatingPaymentIntent(false);
     }
-  }, [isCurrentPaymentGroup, restorePaymentContext]);
+  }, [authenticated, isCurrentPaymentGroup, restorePaymentContext]);
 
   const fetchPaymentStatusOnce = useCallback(async ({
     groupId,
@@ -301,6 +301,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
           intentId: normalizedIntentId,
           titularEmail: normalizedEmail,
         }), {
+          authenticated,
           signal: controller?.signal,
         });
         const payload = response?.data ?? response;
@@ -328,7 +329,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
       }
       if (mountedRef.current) setCheckingPaymentStatus(false);
     }
-  }, [isCurrentPaymentGroup]);
+  }, [authenticated, isCurrentPaymentGroup]);
 
   const completeMockPaymentOnce = useCallback(async ({ groupId, intentId, titularEmail }) => {
     const normalizedGroupId = safeText(groupId);
@@ -340,9 +341,9 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
       groupId: normalizedGroupId,
       intentId: normalizedIntentId,
       titularEmail: normalizedEmail,
-    }));
+    }), { authenticated });
     return true;
-  }, [isCurrentPaymentGroup]);
+  }, [authenticated, isCurrentPaymentGroup]);
 
   const completeSimulatorPaymentOnce = useCallback(async ({ groupId, intentId, titularEmail, status = 'success' }) => {
     const normalizedGroupId = safeText(groupId);
@@ -357,14 +358,14 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
       titularEmail: normalizedEmail,
       status,
       amountForSimulation,
-    }));
+    }), { authenticated });
     const payload = response?.data ?? response;
     const normalizedStatus = safeText(payload?.normalized_status).toUpperCase();
     if (normalizedStatus && normalizedStatus !== 'PAID') {
       throw new Error(safeText(payload?.message) || 'El pago no fue aprobado por el simulador.');
     }
     return payload || true;
-  }, [isCurrentPaymentGroup]);
+  }, [authenticated, isCurrentPaymentGroup]);
 
   const salePixelPayOnce = useCallback(async ({ groupId, intentId, titularEmail, card, billing }) => {
     const normalizedGroupId = safeText(groupId);
@@ -389,7 +390,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
         billing_state: safeText(billing?.state),
         billing_city: safeText(billing?.city),
         billing_phone: safeText(billing?.phone),
-      }, { signal: controller.signal });
+      }, { authenticated, signal: controller.signal });
       if (mountedRef.current && isCurrentPaymentGroup(normalizedGroupId)) {
         setPaymentResultState(response);
       }
@@ -401,7 +402,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
     } finally {
       if (pixelPaySaleRef.current?.promise === promise) pixelPaySaleRef.current = null;
     }
-  }, [isCurrentPaymentGroup]);
+  }, [authenticated, isCurrentPaymentGroup]);
 
   const queryPixelPayStatusOnce = useCallback(async ({ groupId, intentId, titularEmail }) => {
     const normalizedGroupId = safeText(groupId);
@@ -419,7 +420,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
         id_grupo_cita: normalizedGroupId,
         id_intent: normalizedIntentId,
         titular_email: normalizedEmail,
-      }, { signal: controller?.signal });
+      }, { authenticated, signal: controller?.signal });
       if (mountedRef.current && isCurrentPaymentGroup(normalizedGroupId)) {
         setPaymentResultState(response);
       }
@@ -432,7 +433,7 @@ export default function useBookingPayment({ currentGroupId = '' } = {}) {
       if (pixelPayStatusRef.current?.promise === promise) pixelPayStatusRef.current = null;
       if (mountedRef.current) setCheckingPaymentStatus(false);
     }
-  }, [isCurrentPaymentGroup]);
+  }, [authenticated, isCurrentPaymentGroup]);
 
   return {
     paymentIntent: paymentIntentState,

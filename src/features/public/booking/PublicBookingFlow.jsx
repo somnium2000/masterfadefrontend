@@ -916,6 +916,7 @@ const agendaAutoLoadKeyRef = useRef('');
     isCurrentPaymentGroup,
   } = useBookingPayment({
     currentGroupId: holdResult?.id_grupo_cita || '',
+    authenticated: canUseClienteHold,
   });
 
   const handleSelectedSlotUnavailable = useCallback(() => {

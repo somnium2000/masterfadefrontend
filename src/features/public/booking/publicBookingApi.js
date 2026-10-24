@@ -132,30 +132,52 @@ export async function confirmClienteCitaHoldWithoutPayment(idGrupoCita, payload 
   return http.post(`/v1/citas/hold/${encodeURIComponent(String(idGrupoCita || '').trim())}/confirmar`, payload, options);
 }
 
-export async function createPublicPaymentIntent(payload) {
-  return http.post('/v1/public/pagos/crear-intent', payload);
+function bookingPaymentsPath(path, authenticated = false) {
+  const base = authenticated ? '/v1/pagos/reservas' : '/v1/public/pagos';
+  return `${base}${path}`;
+}
+
+function bookingPaymentRequestOptions(options = {}) {
+  const { authenticated: _authenticated, ...requestOptions } = options;
+  return requestOptions;
+}
+
+export async function createPublicPaymentIntent(payload, options = {}) {
+  return http.post(
+    bookingPaymentsPath('/crear-intent', options.authenticated),
+    payload,
+    bookingPaymentRequestOptions(options),
+  );
 }
 
 export async function getPublicPaymentStatus(params = {}, options = {}) {
-  return http.post('/v1/public/pagos/estado', params, {
-    ...options,
+  return http.post(bookingPaymentsPath('/estado', options.authenticated), params, {
+    ...bookingPaymentRequestOptions(options),
     sensitiveBody: true,
     dedupe: false,
     cache: false,
   });
 }
 
-export async function completePublicMockPayment(payload) {
-  return http.post('/v1/public/pagos/mock-completar', payload);
+export async function completePublicMockPayment(payload, options = {}) {
+  return http.post(
+    bookingPaymentsPath('/mock-completar', options.authenticated),
+    payload,
+    bookingPaymentRequestOptions(options),
+  );
 }
 
-export async function completePublicSimulatorPayment(payload) {
-  return http.post('/v1/public/pagos/simulator/event', payload);
+export async function completePublicSimulatorPayment(payload, options = {}) {
+  return http.post(
+    bookingPaymentsPath('/simulator/event', options.authenticated),
+    payload,
+    bookingPaymentRequestOptions(options),
+  );
 }
 
 export async function salePublicPixelPay(payload, options = {}) {
-  return unwrapResponseData(await http.post('/v1/public/pagos/pixelpay/sale', payload, {
-    ...options,
+  return unwrapResponseData(await http.post(bookingPaymentsPath('/pixelpay/sale', options.authenticated), payload, {
+    ...bookingPaymentRequestOptions(options),
     sensitiveBody: true,
     dedupe: false,
     cache: false,
@@ -163,8 +185,8 @@ export async function salePublicPixelPay(payload, options = {}) {
 }
 
 export async function queryPublicPixelPayStatus(payload, options = {}) {
-  return unwrapResponseData(await http.post('/v1/public/pagos/pixelpay/status', payload, {
-    ...options,
+  return unwrapResponseData(await http.post(bookingPaymentsPath('/pixelpay/status', options.authenticated), payload, {
+    ...bookingPaymentRequestOptions(options),
     dedupe: false,
     cache: false,
   }));
