@@ -104,6 +104,10 @@ function extractMessage(err) {
     PERSONAS_BRANCH_NOT_FOUND: 'La sucursal no esta disponible.',
     PERSONAS_SUPER_ADMIN_TARGET_FORBIDDEN: 'No tienes permiso para gestionar esta cuenta.',
     PERSONAS_CLIENT_ACCESS_REQUIRED: 'El cliente debe conservar su cuenta de acceso.',
+    PERSONAS_AUTH_IDENTITY_INCOMPLETE: 'El correo ya existe en Auth sin una vinculacion interna valida. Requiere revision.',
+    PERSONAS_EXISTING_USER_EMAIL: 'El correo ya pertenece a un usuario o perfil existente.',
+    PERSONAS_EMAIL_IDENTITY_CONFLICT: 'El correo tiene un conflicto de identidad que requiere revision.',
+    PERSONAS_GUEST_LINK_MISMATCH: 'La Persona seleccionada ya no corresponde al correo indicado.',
   };
   const code = err?.data?.error?.code;
   if (Object.hasOwn(messages, code)) return messages[code];
@@ -253,6 +257,7 @@ export default function AdminClientesPage() {
   const [formLoading, setFormLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState('');
   const [confirmTarget, setConfirmTarget] = useState(null);
+  const [guestLinkCandidate, setGuestLinkCandidate] = useState(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -477,7 +482,7 @@ export default function AdminClientesPage() {
     }
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(personaLink = null) {
     if (formLoading || saveLockRef.current) return;
     const error = validateForm(formValues, { isEditing: Boolean(editingId), selectedCliente });
     if (error) {
@@ -492,6 +497,7 @@ export default function AdminClientesPage() {
 
     try {
       const payload = buildPayload(formValues);
+      if (!editingId && personaLink) payload.vinculacion_persona = personaLink;
       const response = editingId
         ? await updateAdminPersonaCliente(editingId, payload)
         : await createAdminPersonaCliente(payload);
@@ -505,6 +511,7 @@ export default function AdminClientesPage() {
         notifications[tone](data.setup_password.mensaje, { dedupeKey: 'personas-clientes-setup-message' });
       }
       setFormOpen(false);
+      setGuestLinkCandidate(null);
       setEditingId('');
       setSelectedCliente(null);
       setFormValues(FORM_DEFAULTS);
@@ -515,6 +522,14 @@ export default function AdminClientesPage() {
       void fetchClientes({ silent: true });
     } catch (err) {
       if (!isCurrent()) return;
+      if (!editingId && err?.data?.error?.code === 'PERSONAS_GUEST_LINK_REQUIRED') {
+        const details = err?.data?.error?.details;
+        if (details?.id_persona && details?.requiere_confirmacion === true) {
+          setGuestLinkCandidate(details);
+          setFormError('Confirma la vinculacion con la Persona invitada antes de continuar.');
+          return;
+        }
+      }
       setFormError(extractMessage(err));
     } finally {
       saveLockRef.current = false;
@@ -850,7 +865,7 @@ export default function AdminClientesPage() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => handleFormOpenChange(false)} disabled={formLoading}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={formLoading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar cliente' : 'Crear cliente'}</Button>
+            <Button onClick={() => handleSubmit()} disabled={formLoading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar cliente' : 'Crear cliente'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -922,6 +937,18 @@ export default function AdminClientesPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      <ActionConfirmDialog
+        open={Boolean(guestLinkCandidate)}
+        onOpenChange={(open) => { if (!open && !formLoading) setGuestLinkCandidate(null); }}
+        tone="warning"
+        title="Vincular Persona invitada"
+        description={guestLinkCandidate ? `El correo pertenece a ${guestLinkCandidate.nombre_completo || 'una Persona invitada'} con historial existente. Confirma que verificaste su identidad. La vinculacion conservara su historial y no se realizara solo por coincidencia de correo.` : ''}
+        confirmLabel="Confirmar vinculacion"
+        cancelLabel="Cancelar"
+        loading={formLoading}
+        onConfirm={() => handleSubmit({ id_persona: guestLinkCandidate.id_persona, confirmar_vinculacion: true })}
+      />
 
       <ActionConfirmDialog
         open={Boolean(confirmTarget)}

@@ -115,6 +115,10 @@ function extractMessage(err) {
     PERSONAS_EMPLOYEE_NOT_FOUND: 'El empleado ya no esta disponible.',
     PERSONAS_SUPER_ADMIN_ROLE_FORBIDDEN: 'No tienes permiso para asignar Super Admin.',
     PERSONAS_SUPER_ADMIN_TARGET_FORBIDDEN: 'No tienes permiso para gestionar esta cuenta.',
+    PERSONAS_AUTH_IDENTITY_INCOMPLETE: 'El correo ya existe en Auth sin una vinculacion interna valida. Requiere revision.',
+    PERSONAS_EXISTING_USER_EMAIL: 'El correo ya pertenece a un usuario o perfil existente.',
+    PERSONAS_EMAIL_IDENTITY_CONFLICT: 'El correo tiene un conflicto de identidad que requiere revision.',
+    PERSONAS_GUEST_LINK_MISMATCH: 'La Persona seleccionada ya no corresponde al correo indicado.',
     PERSONAS_EMPLOYEE_ACTIVATE_ROLES_REQUIRED: 'Revisa los roles del empleado antes de activarlo.',
   };
   const code = err?.data?.error?.code;
@@ -337,6 +341,7 @@ export default function AdminEmpleadosPage() {
   const [formError, setFormError] = useState('');
   const [selectedEmpleado, setSelectedEmpleado] = useState(null);
   const [confirmTarget, setConfirmTarget] = useState(null);
+  const [guestLinkCandidate, setGuestLinkCandidate] = useState(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -598,7 +603,7 @@ export default function AdminEmpleadosPage() {
     }
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(personaLink = null) {
     if (formLoading || saveLockRef.current) return;
     const safeFormValues = isAdminOnly
       ? { ...formValues, roles: getAssignableEmployeeRoles(formValues.roles, true) }
@@ -616,6 +621,7 @@ export default function AdminEmpleadosPage() {
     setFormLoading(true);
     try {
       const payload = buildPayload(safeFormValues);
+      if (!editingId && personaLink) payload.vinculacion_persona = personaLink;
       const response = editingId
         ? await updateAdminPersonaEmpleado(editingId, payload)
         : await createAdminPersonaEmpleado(payload);
@@ -629,6 +635,7 @@ export default function AdminEmpleadosPage() {
         notifications[tone](data.setup_password.mensaje, { dedupeKey: 'personas-empleados-setup-message' });
       }
       setFormOpen(false);
+      setGuestLinkCandidate(null);
       setEditingId('');
       setFormValues(FORM_DEFAULTS);
       if (data?.empleado) {
@@ -640,6 +647,14 @@ export default function AdminEmpleadosPage() {
       void fetchEmpleados({ silent: true });
     } catch (err) {
       if (!isCurrent()) return;
+      if (!editingId && err?.data?.error?.code === 'PERSONAS_GUEST_LINK_REQUIRED') {
+        const details = err?.data?.error?.details;
+        if (details?.id_persona && details?.requiere_confirmacion === true) {
+          setGuestLinkCandidate(details);
+          setFormError('Confirma la vinculacion con la Persona invitada antes de continuar.');
+          return;
+        }
+      }
       setFormError(extractMessage(err));
     } finally {
       saveLockRef.current = false;
@@ -1130,7 +1145,7 @@ export default function AdminEmpleadosPage() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => handleFormOpenChange(false)} disabled={formLoading}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={formLoading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar' : 'Crear empleado'}</Button>
+            <Button onClick={() => handleSubmit()} disabled={formLoading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar' : 'Crear empleado'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1210,6 +1225,18 @@ export default function AdminEmpleadosPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      <ActionConfirmDialog
+        open={Boolean(guestLinkCandidate)}
+        onOpenChange={(open) => { if (!open && !formLoading) setGuestLinkCandidate(null); }}
+        tone="warning"
+        title="Vincular Persona invitada"
+        description={guestLinkCandidate ? `El correo pertenece a ${guestLinkCandidate.nombre_completo || 'una Persona invitada'} con historial existente. Confirma que verificaste su identidad. La vinculacion conservara su historial y no se realizara solo por coincidencia de correo.` : ''}
+        confirmLabel="Confirmar vinculacion"
+        cancelLabel="Cancelar"
+        loading={formLoading}
+        onConfirm={() => handleSubmit({ id_persona: guestLinkCandidate.id_persona, confirmar_vinculacion: true })}
+      />
 
       <ActionConfirmDialog
         open={Boolean(confirmTarget)}
