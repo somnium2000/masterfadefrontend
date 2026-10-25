@@ -198,9 +198,14 @@ export async function confirmMembershipPayment(id_payment_intent, options = {}) 
   const testAmount = Number(options?.monto_prueba_hnl);
   const response = await http.post(endpoint, {
     id_payment_intent,
+    ...(!shouldUseMembershipPaymentSimulator() ? { card: options.card, billing: options.billing } : {}),
     ...(shouldUseMembershipPaymentSimulator() && Number.isFinite(testAmount) && testAmount > 0
       ? { monto_prueba_hnl: testAmount }
       : {}),
+  }, shouldUseMembershipPaymentSimulator() ? undefined : {
+    sensitiveBody: true,
+    dedupe: false,
+    cache: false,
   });
   const payload = normalizeResponsePayload(response);
   const normalizedStatus = String(payload?.normalized_status || '').trim().toUpperCase();

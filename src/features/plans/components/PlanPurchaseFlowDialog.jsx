@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { CheckCircle2, CreditCard, Loader2, LockKeyhole } from "lucide-react";
 import { Button } from "../../../components/ui/button.jsx";
 import {
@@ -42,6 +43,28 @@ export default function PlanPurchaseFlowDialog({
   onConfirmPayment,
   onFinish,
 }) {
+  const [paymentForm, setPaymentForm] = useState({
+    cardNumber: "", cardHolder: "", expiry: "", cvv: "",
+    address: "", city: "", state: "HN-FM", phone: "",
+  });
+  const setPaymentField = (field) => (event) => {
+    setPaymentForm((current) => ({ ...current, [field]: event.target.value }));
+  };
+  const submitPixelPay = () => {
+    const expiryDigits = paymentForm.expiry.replace(/\D/g, "");
+    onConfirmPayment?.({
+      card: {
+        number: paymentForm.cardNumber.replace(/\D/g, ""), holder: paymentForm.cardHolder.trim(),
+        expire: expiryDigits.length === 4 ? `${expiryDigits.slice(2)}${expiryDigits.slice(0, 2)}` : expiryDigits,
+        cvv: paymentForm.cvv.replace(/\D/g, ""),
+      },
+      billing: {
+        address: paymentForm.address.trim(), country: "HN", state: paymentForm.state,
+        city: paymentForm.city.trim(), phone: paymentForm.phone.replace(/\D/g, ""),
+      },
+    });
+    setPaymentForm((current) => ({ ...current, cardNumber: "", expiry: "", cvv: "" }));
+  };
   const plan = orderSummary?.plan || {};
   const totals = orderSummary?.totales || {};
   const cliente = orderSummary?.cliente || {};
@@ -51,12 +74,25 @@ export default function PlanPurchaseFlowDialog({
     : (Array.isArray(plan?.beneficios) ? plan.beneficios : []);
   const serviceBenefits = benefits.filter((benefit) => String(benefit?.tipo || "").toLowerCase() !== "cortesia");
   const courtesyBenefits = benefits.filter((benefit) => String(benefit?.tipo || "").toLowerCase() === "cortesia");
+  const cardDigits = paymentForm.cardNumber.replace(/\D/g, "");
+  const expiryDigits = paymentForm.expiry.replace(/\D/g, "");
+  const cvvDigits = paymentForm.cvv.replace(/\D/g, "");
+  const phoneDigits = paymentForm.phone.replace(/\D/g, "");
+  const paymentFormValid = cardDigits.length >= 13 && cardDigits.length <= 19
+    && paymentForm.cardHolder.trim().length >= 2
+    && expiryDigits.length === 4
+    && cvvDigits.length >= 3 && cvvDigits.length <= 4
+    && paymentForm.address.trim().length >= 2
+    && paymentForm.city.trim().length >= 1
+    && /^HN-[A-Z]{2}$/.test(paymentForm.state)
+    && phoneDigits.length >= 8 && phoneDigits.length <= 15;
 
   const summaryText = `${plan?.nombre_plan || "Plan"} · ${branchLabel} · ${formatMoney(totals?.total_hnl)}`;
 
   return (
     <Dialog open={open} onOpenChange={(next) => {
       if (disableClose) return;
+      if (!next) setPaymentForm((current) => ({ ...current, cardNumber: "", expiry: "", cvv: "" }));
       onOpenChange?.(next);
     }}
     >
@@ -82,7 +118,7 @@ export default function PlanPurchaseFlowDialog({
               <DialogTitle>{step === "payment" ? "Pago seguro" : "Resumen de compra"}</DialogTitle>
               <DialogDescription>
                 {step === "payment"
-                  ? "Modo de prueba: no se realizara ningun cargo real."
+                  ? "Ingresa los datos solicitados para procesar el pago con PixelPay."
                   : "Verifica los datos antes de continuar al pago."}
               </DialogDescription>
             </DialogHeader>
@@ -100,25 +136,29 @@ export default function PlanPurchaseFlowDialog({
                       <LockKeyhole size={14} />
                       Pago seguro
                     </p>
-                    <p className="mt-1 text-[var(--mf-text-2)]">Modo de prueba: no se realizara ningun cargo real.</p>
+                    <p className="mt-1 text-[var(--mf-text-2)]">Los datos se envían a PixelPay y no se guardan en este navegador.</p>
 
                     <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <label className="text-xs text-[var(--mf-text-2)]">
                         Numero de tarjeta
-                        <input className="mf-input mt-1 w-full" type="text" value="4242 4242 4242 4242" readOnly />
+                        <input className="mf-input mt-1 w-full" type="text" autoComplete="cc-number" value={paymentForm.cardNumber} onChange={setPaymentField("cardNumber")} />
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         Nombre del titular
-                        <input className="mf-input mt-1 w-full" type="text" value="Cliente de prueba" readOnly />
+                        <input className="mf-input mt-1 w-full" type="text" autoComplete="cc-name" value={paymentForm.cardHolder} onChange={setPaymentField("cardHolder")} />
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         Vencimiento
-                        <input className="mf-input mt-1 w-full" type="text" value="12/34" readOnly />
+                        <input className="mf-input mt-1 w-full" type="text" placeholder="MM/AA" autoComplete="cc-exp" value={paymentForm.expiry} onChange={setPaymentField("expiry")} />
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         CVV
-                        <input className="mf-input mt-1 w-full" type="text" value="123" readOnly />
+                        <input className="mf-input mt-1 w-full" type="password" autoComplete="cc-csc" value={paymentForm.cvv} onChange={setPaymentField("cvv")} />
                       </label>
+                      <label className="text-xs text-[var(--mf-text-2)]">Dirección de facturación<input className="mf-input mt-1 w-full" value={paymentForm.address} onChange={setPaymentField("address")} /></label>
+                      <label className="text-xs text-[var(--mf-text-2)]">Ciudad<input className="mf-input mt-1 w-full" value={paymentForm.city} onChange={setPaymentField("city")} /></label>
+                      <label className="text-xs text-[var(--mf-text-2)]">Departamento<input className="mf-input mt-1 w-full" placeholder="HN-FM" value={paymentForm.state} onChange={setPaymentField("state")} /></label>
+                      <label className="text-xs text-[var(--mf-text-2)]">Teléfono<input className="mf-input mt-1 w-full" value={paymentForm.phone} onChange={setPaymentField("phone")} /></label>
                     </div>
                     <p className="mt-3 inline-flex items-center gap-2 text-xs text-[var(--mf-text-2)]">
                       <CreditCard size={13} />
@@ -207,9 +247,9 @@ export default function PlanPurchaseFlowDialog({
                   >
                     Volver al resumen
                   </Button>
-                  <Button type="button" onClick={onConfirmPayment} disabled={loading || disableClose}>
+                  <Button type="button" onClick={submitPixelPay} disabled={loading || disableClose || !paymentFormValid}>
                     {loading ? <Loader2 size={15} className="animate-spin" /> : null}
-                    Confirmar pago de prueba
+                    Pagar con PixelPay
                   </Button>
                 </div>
               ) : (

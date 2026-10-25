@@ -323,7 +323,8 @@ export default function MembershipPlansPage() {
   function getPurchaseAttempt(offerId) {
     const current = purchaseAttemptRef.current;
     if (current?.identity === purchaseIdentity && current.offerId === offerId
-      && current.branchId === selectedBranchRef.current && current.status === "pending") return current;
+      && current.branchId === selectedBranchRef.current
+      && ["pending", "resolved"].includes(current.status)) return current;
     let key;
     try {
       key = globalThis.crypto.randomUUID();
@@ -357,6 +358,17 @@ export default function MembershipPlansPage() {
     setPurchaseCompleted(false);
     setPurchaseModalOpen(false);
   }, []);
+
+  const discardPurchaseFlow = useCallback(() => {
+    purchaseAttemptRef.current = null;
+    storePurchaseAttempt(null);
+    resetPurchaseFlow();
+  }, [resetPurchaseFlow]);
+
+  const cancelPurchaseFlow = useCallback(() => {
+    if (membershipPaymentIntent) resetPurchaseFlow();
+    else discardPurchaseFlow();
+  }, [discardPurchaseFlow, membershipPaymentIntent, resetPurchaseFlow]);
 
   const loadPlansByBranch = useCallback(async (branchId) => {
     const safeBranchId = String(branchId || "").trim();
@@ -594,7 +606,7 @@ export default function MembershipPlansPage() {
     }
   }
 
-  async function handleConfirmPayment() {
+  async function handleConfirmPayment(paymentDetails = {}) {
     if (purchaseLoading || purchaseCompleted) return;
     const paymentIntentId = String(membershipPaymentIntent?.id_payment_intent || "").trim();
     if (!paymentIntentId) {
@@ -607,9 +619,18 @@ export default function MembershipPlansPage() {
     setPurchaseLoading(true);
     setPurchaseErrorMessage("");
     try {
-      await confirmMembershipPayment(paymentIntentId, {
+      const paymentResult = await confirmMembershipPayment(paymentIntentId, {
+        ...paymentDetails,
         monto_prueba_hnl: showMembershipSimulator ? DEFAULT_MEMBERSHIP_SIMULATION_AMOUNT : undefined,
       });
+      if (paymentResult?.pending_confirmation) {
+        setPurchaseErrorMessage("El resultado está pendiente de conciliación. No intentes pagar nuevamente.");
+        return;
+      }
+      if (paymentResult?.estado_intent_codigo === "fallido") {
+        setPurchaseErrorMessage("PixelPay rechazó el pago. La membresía no fue activada.");
+        return;
+      }
       if (!isCurrent()) return;
       setPurchaseCompleted(true);
       setPurchaseStep("success");
@@ -822,10 +843,10 @@ export default function MembershipPlansPage() {
         loading={purchaseLoading}
         errorMessage={purchaseErrorMessage}
         disableClose={purchaseLoading}
-        onCancel={resetPurchaseFlow}
+        onCancel={cancelPurchaseFlow}
         onContinueToPayment={handleContinueToPayment}
         onConfirmPayment={handleConfirmPayment}
-        onFinish={resetPurchaseFlow}
+        onFinish={discardPurchaseFlow}
       />
 
       <PremiumBottomNav

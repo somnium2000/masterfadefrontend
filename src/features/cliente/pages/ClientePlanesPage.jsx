@@ -14,6 +14,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { useNotifications } from "../../../context/NotificationsContext.jsx";
+import { useAuth } from "../../../context/AuthContext.jsx";
 import CardsCarousel from "../../../components/data/CardsCarousel.jsx";
 import { Button } from "../../../components/ui/button.jsx";
 import {
@@ -62,6 +63,30 @@ const MEMBERSHIP_SIMULATION_SCENARIOS = [
   { value: 1.56, label: "CVV incorrecto (1.56)" },
   { value: 1.57, label: "Timeout (1.57)" },
 ];
+const CLIENT_PURCHASE_ATTEMPT_STORAGE_KEY = "mf_cliente_vip_purchase_attempt_v1";
+const PURCHASE_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function readClientPurchaseAttempt() {
+  try {
+    const record = JSON.parse(window.sessionStorage.getItem(CLIENT_PURCHASE_ATTEMPT_STORAGE_KEY) || "null");
+    if (record?.version !== 1 || !record.identity || !record.offerId
+      || !PURCHASE_UUID_REGEX.test(String(record.branchId || ""))
+      || !PURCHASE_UUID_REGEX.test(String(record.key || ""))
+      || !["pending", "resolved"].includes(record.status)) return null;
+    return record;
+  } catch {
+    return null;
+  }
+}
+
+function storeClientPurchaseAttempt(record) {
+  try {
+    if (record) window.sessionStorage.setItem(CLIENT_PURCHASE_ATTEMPT_STORAGE_KEY, JSON.stringify(record));
+    else window.sessionStorage.removeItem(CLIENT_PURCHASE_ATTEMPT_STORAGE_KEY);
+  } catch {
+    // AM: La referencia en memoria conserva la clave si sessionStorage no esta disponible.
+  }
+}
 
 function readEnvFlag(value, fallback = false) {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -338,6 +363,7 @@ function PlanCard({
 }
 
 export default function ClientePlanesPage() {
+  const { user, clienteId } = useAuth();
   const notifications = useNotifications();
   const { error: notifyError, success: notifySuccess, warning: notifyWarning } = notifications;
   const lastErrorMessageRef = useRef("");
@@ -365,6 +391,10 @@ export default function ClientePlanesPage() {
   const [coverageInfoOpen, setCoverageInfoOpen] = useState(false);
   const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(MEMBERSHIP_SIMULATION_SCENARIOS[0].value);
   const plansSectionRef = useRef(null);
+  const purchaseAttemptRef = useRef(null);
+  const purchaseUserId = String(user?.id_usuario || user?.id || "").trim();
+  const purchaseClientId = String(clienteId || user?.cliente_id || "").trim();
+  const purchaseIdentity = purchaseUserId && purchaseClientId ? `${purchaseUserId}:${purchaseClientId}` : "";
   const showMembershipSimulator = shouldShowMembershipSimulator();
 
   const fetchPlans = useCallback(async (selectedBranchId) => {
@@ -442,6 +472,35 @@ export default function ClientePlanesPage() {
     setPurchaseModalOpen(false);
   }
 
+  function discardPurchaseFlow() {
+    purchaseAttemptRef.current = null;
+    storeClientPurchaseAttempt(null);
+    resetPurchaseFlow();
+  }
+
+  function getPurchaseAttempt(offerId) {
+    const stored = purchaseAttemptRef.current || readClientPurchaseAttempt();
+    if (stored?.identity === purchaseIdentity && stored.offerId === offerId
+      && stored.branchId === branchId && ["pending", "resolved"].includes(stored.status)) {
+      purchaseAttemptRef.current = stored;
+      return stored;
+    }
+    const key = globalThis.crypto?.randomUUID?.();
+    if (!purchaseIdentity || !PURCHASE_UUID_REGEX.test(String(key || ""))) {
+      throw Object.assign(new Error("No se pudo proteger la compra"), { code: "PURCHASE_KEY_UNAVAILABLE" });
+    }
+    const attempt = { version: 1, identity: purchaseIdentity, offerId, branchId, key, status: "pending" };
+    purchaseAttemptRef.current = attempt;
+    storeClientPurchaseAttempt(attempt);
+    return attempt;
+  }
+
+  function markPurchaseAttemptResolved(attempt) {
+    const resolved = { ...attempt, status: "resolved" };
+    purchaseAttemptRef.current = resolved;
+    storeClientPurchaseAttempt(resolved);
+  }
+
   function notifyPlanPurchaseLocked() {
     notifyWarning("La adquisicion de planes estara disponible proximamente.");
   }
@@ -453,7 +512,8 @@ export default function ClientePlanesPage() {
     }
     setLoadingPlanOfferId(offerId);
     try {
-      const orderResponse = await createMembershipOrder(offerId);
+      const attempt = getPurchaseAttempt(offerId);
+      const orderResponse = await createMembershipOrder(offerId, { idempotencyKey: attempt.key });
       const summary = orderResponse?.data || orderResponse;
       setPurchaseOrderSummary(summary);
       setMembershipPaymentIntent(null);
@@ -461,6 +521,7 @@ export default function ClientePlanesPage() {
       setPurchaseStep("summary");
       setPurchaseCompleted(false);
       setPurchaseModalOpen(true);
+      markPurchaseAttemptResolved(attempt);
     } catch (error) {
       notifyError(error?.data?.error?.message || error?.message || "No se pudo crear la orden del plan.");
     } finally {
@@ -522,7 +583,7 @@ export default function ClientePlanesPage() {
     }
   }
 
-  async function handleConfirmPayment() {
+  async function handleConfirmPayment(paymentDetails = {}) {
     if (!CLIENT_PLAN_PURCHASE_ENABLED) {
       notifyPlanPurchaseLocked();
       return;
@@ -537,9 +598,18 @@ export default function ClientePlanesPage() {
     setPurchaseLoading(true);
     setPurchaseErrorMessage("");
     try {
-      await confirmMembershipPayment(paymentIntentId, {
+      const paymentResult = await confirmMembershipPayment(paymentIntentId, {
+        ...paymentDetails,
         monto_prueba_hnl: showMembershipSimulator ? selectedSimulationAmount : undefined,
       });
+      if (paymentResult?.pending_confirmation) {
+        setPurchaseErrorMessage("El resultado está pendiente de conciliación. No intentes pagar nuevamente.");
+        return;
+      }
+      if (paymentResult?.estado_intent_codigo === "fallido") {
+        setPurchaseErrorMessage("PixelPay rechazó el pago. La membresía no fue activada.");
+        return;
+      }
       setPurchaseCompleted(true);
       setPurchaseStep("success");
       await Promise.all([
@@ -1011,11 +1081,11 @@ export default function ClientePlanesPage() {
         loading={purchaseLoading}
         errorMessage={purchaseErrorMessage}
         disableClose={purchaseLoading}
-        onCancel={resetPurchaseFlow}
+        onCancel={membershipPaymentIntent ? resetPurchaseFlow : discardPurchaseFlow}
         onBackToSummary={() => setPurchaseStep("summary")}
         onContinueToPayment={handleContinueToPayment}
         onConfirmPayment={handleConfirmPayment}
-        onFinish={resetPurchaseFlow}
+        onFinish={discardPurchaseFlow}
       />
 
       <Dialog

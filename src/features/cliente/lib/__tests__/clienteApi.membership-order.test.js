@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { createMembershipOrder } from '../clienteApi.js';
+import { confirmMembershipPayment, createMembershipOrder } from '../clienteApi.js';
 
 const http = vi.hoisted(() => ({ post: vi.fn() }));
 vi.mock('../../../../services/httpClient.js', () => ({ http }));
@@ -31,5 +31,22 @@ describe('contrato opcional de idempotencia de orden VIP', () => {
     http.post.mockRejectedValue(error);
     await expect(createMembershipOrder(OFFER, { idempotencyKey: KEY })).rejects.toBe(error);
     expect(http.post).toHaveBeenCalledTimes(1);
+  });
+});
+
+test('confirmación PixelPay marca el cuerpo sensible y no permite dedupe ni cache', async () => {
+  const card = { number: '4111111111111111', holder: 'Cliente QA', expire: '3012', cvv: '123' };
+  const billing = { address: 'Calle 1', country: 'HN', state: 'HN-FM', city: 'Tegucigalpa', phone: '99999999' };
+  http.post.mockResolvedValue({ data: { processed: true } });
+
+  await expect(confirmMembershipPayment(KEY, { card, billing })).resolves.toEqual({ processed: true });
+  expect(http.post).toHaveBeenCalledExactlyOnceWith('/v1/cliente/planes/confirmar-pago', {
+    id_payment_intent: KEY,
+    card,
+    billing,
+  }, {
+    sensitiveBody: true,
+    dedupe: false,
+    cache: false,
   });
 });

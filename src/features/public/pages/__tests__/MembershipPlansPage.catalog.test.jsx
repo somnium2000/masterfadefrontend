@@ -346,6 +346,19 @@ describe('persistencia aislada de intentos VIP', () => {
     expect(crypto.randomUUID).toHaveBeenCalledTimes(2);
   });
 
+  test('timeout de Sale, cierre del modal y nueva compra del mismo plan conservan la clave', async () => {
+    payment.confirmMembershipPayment.mockResolvedValue({ pending_confirmation: true });
+    await renderPurchase();
+    await act(async () => buy());
+    await act(async () => dialog.props.onContinueToPayment());
+    await act(async () => dialog.props.onConfirmPayment({ card: 'datos-no-persistidos' }));
+    expect(dialog.props.errorMessage).toContain('pendiente de conciliación');
+    act(() => dialog.props.onOpenChange(false));
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).toHaveBeenNthCalledWith(2, 'Plan A-offer', { idempotencyKey: KEY1 });
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+  });
+
   test('otra oferta crea otro intento y volver a oferta abandonada no reactiva su clave', async () => {
     payment.createMembershipOrder.mockRejectedValue({ status: 0 });
     await renderPurchase();
@@ -413,6 +426,16 @@ describe('persistencia aislada de intentos VIP', () => {
     await act(async () => buy());
     expect(payment.createMembershipOrder).toHaveBeenCalledExactlyOnceWith('Plan A-offer', { idempotencyKey: KEY1 });
     expect(crypto.randomUUID).not.toHaveBeenCalled();
+  });
+
+  test('reload reutiliza la clave de una orden resuelta sin persistir tarjeta', async () => {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, identity: `${USER}:${CLIENT}`,
+      offerId: 'Plan A-offer', branchId: A, key: KEY1, status: 'resolved' }));
+    await renderPurchase();
+    await act(async () => buy());
+    expect(payment.createMembershipOrder).toHaveBeenCalledExactlyOnceWith('Plan A-offer', { idempotencyKey: KEY1 });
+    expect(crypto.randomUUID).not.toHaveBeenCalled();
+    expect(JSON.stringify(sessionStorage)).not.toMatch(/411111|cvv|card/i);
   });
 
   test('cliente sin identidad válida no puede comprar', async () => {
