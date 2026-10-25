@@ -277,6 +277,7 @@ export default function MembershipPlansPage() {
   const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [purchaseErrorMessage, setPurchaseErrorMessage] = useState("");
   const [purchaseCompleted, setPurchaseCompleted] = useState(false);
+  const [purchasePendingConfirmation, setPurchasePendingConfirmation] = useState(false);
 
   const scrollRef = useRef(null);
   const showMembershipSimulator = shouldShowMembershipSimulator();
@@ -356,6 +357,7 @@ export default function MembershipPlansPage() {
     setPurchaseLoading(false);
     setPurchaseErrorMessage("");
     setPurchaseCompleted(false);
+    setPurchasePendingConfirmation(false);
     setPurchaseModalOpen(false);
   }, []);
 
@@ -547,6 +549,7 @@ export default function MembershipPlansPage() {
       }
       setPurchaseOrderSummary(summary);
       setMembershipPaymentIntent(null);
+      setPurchasePendingConfirmation(false);
       setPurchaseErrorMessage("");
       setPurchaseStep("summary");
       setPurchaseCompleted(false);
@@ -597,6 +600,9 @@ export default function MembershipPlansPage() {
       if (!isCurrent()) return;
       const intentData = intentResponse?.data || intentResponse;
       setMembershipPaymentIntent(intentData);
+      const isPending = String(intentData?.estado_intent_codigo || "").trim().toLowerCase() === "pendiente_confirmacion";
+      setPurchasePendingConfirmation(isPending);
+      if (isPending) setPurchaseErrorMessage("Existe un pago pendiente de verificación. No realices otro cobro");
       setPurchaseStep("payment");
     } catch (error) {
       if (!isCurrent()) return;
@@ -607,7 +613,7 @@ export default function MembershipPlansPage() {
   }
 
   async function handleConfirmPayment(paymentDetails = {}) {
-    if (purchaseLoading || purchaseCompleted) return;
+    if (purchaseLoading || purchaseCompleted || purchasePendingConfirmation) return;
     const paymentIntentId = String(membershipPaymentIntent?.id_payment_intent || "").trim();
     if (!paymentIntentId) {
       setPurchaseErrorMessage("No hay intent de pago disponible para confirmar.");
@@ -624,7 +630,8 @@ export default function MembershipPlansPage() {
         monto_prueba_hnl: showMembershipSimulator ? DEFAULT_MEMBERSHIP_SIMULATION_AMOUNT : undefined,
       });
       if (paymentResult?.pending_confirmation) {
-        setPurchaseErrorMessage("El resultado está pendiente de conciliación. No intentes pagar nuevamente.");
+        setPurchasePendingConfirmation(true);
+        setPurchaseErrorMessage("Existe un pago pendiente de verificación. No realices otro cobro");
         return;
       }
       if (paymentResult?.estado_intent_codigo === "fallido") {
@@ -842,7 +849,8 @@ export default function MembershipPlansPage() {
         paymentIntent={membershipPaymentIntent}
         loading={purchaseLoading}
         errorMessage={purchaseErrorMessage}
-        disableClose={purchaseLoading}
+        disableClose={purchaseLoading || purchasePendingConfirmation}
+        pendingConfirmation={purchasePendingConfirmation}
         onCancel={cancelPurchaseFlow}
         onContinueToPayment={handleContinueToPayment}
         onConfirmPayment={handleConfirmPayment}
