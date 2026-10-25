@@ -12,7 +12,7 @@ function fixture(plural, singular) {
     [`map${singular}ToForm`]: value => value,
     [`listAdminPersonas${plural}`]: vi.fn(), [`getAdminPersona${singular}`]: vi.fn(),
   };
-  for (const key of ['Loading', 'ListError', plural, 'FormLoading', 'FormError', 'EditingId', 'FormValues', 'FormOpen', 'DetailOpen', `Selected${singular}`]) {
+  for (const key of ['Loading', 'ListError', plural, 'FormLoading', 'FormError', 'EditingId', 'FormValues', 'FormOpen', 'DetailOpen', 'GuestLinkCandidate', 'GuestLinkError', `Selected${singular}`]) {
     env[`set${key}`] = value => { state[key] = value; };
   }
   const compile = (args, body) => new Function('env', `with (env) { return async function(${args}) { ${body} }; }`)(env);

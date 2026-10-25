@@ -342,6 +342,7 @@ export default function AdminEmpleadosPage() {
   const [selectedEmpleado, setSelectedEmpleado] = useState(null);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [guestLinkCandidate, setGuestLinkCandidate] = useState(null);
+  const [guestLinkError, setGuestLinkError] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -526,6 +527,9 @@ export default function AdminEmpleadosPage() {
       ++selectionRequestRef.current;
       if (selectionPendingRef.current) setFormLoading(false);
       selectionPendingRef.current = false;
+      setGuestLinkCandidate(null);
+      setGuestLinkError('');
+      setFormError('');
     }
     setFormOpen(open);
   }
@@ -547,6 +551,8 @@ export default function AdminEmpleadosPage() {
     setEditingId('');
     setFormValues(FORM_DEFAULTS);
     setFormError('');
+    setGuestLinkCandidate(null);
+    setGuestLinkError('');
     setFormOpen(true);
   }
 
@@ -615,6 +621,7 @@ export default function AdminEmpleadosPage() {
     }
 
     setFormError('');
+    if (personaLink) setGuestLinkError('');
     saveLockRef.current = true;
     const requestId = selectionRequestRef.current;
     const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
@@ -636,6 +643,7 @@ export default function AdminEmpleadosPage() {
       }
       setFormOpen(false);
       setGuestLinkCandidate(null);
+      setGuestLinkError('');
       setEditingId('');
       setFormValues(FORM_DEFAULTS);
       if (data?.empleado) {
@@ -651,9 +659,28 @@ export default function AdminEmpleadosPage() {
         const details = err?.data?.error?.details;
         if (details?.id_persona && details?.requiere_confirmacion === true) {
           setGuestLinkCandidate(details);
-          setFormError('Confirma la vinculacion con la Persona invitada antes de continuar.');
+          setGuestLinkError('');
+          setFormError('');
           return;
         }
+      }
+      if (personaLink) {
+        const code = err?.data?.error?.code;
+        const nonRetryableLinkCodes = new Set([
+          'PERSONAS_GUEST_LINK_MISMATCH',
+          'PERSONAS_AUTH_IDENTITY_INCOMPLETE',
+          'PERSONAS_EXISTING_USER_EMAIL',
+          'PERSONAS_EMAIL_IDENTITY_CONFLICT',
+        ]);
+        if (nonRetryableLinkCodes.has(code)) {
+          setGuestLinkCandidate(null);
+          setGuestLinkError('');
+          setFormError(extractMessage(err));
+          return;
+        }
+        setGuestLinkError(extractMessage(err));
+        setFormError('');
+        return;
       }
       setFormError(extractMessage(err));
     } finally {
@@ -1228,10 +1255,15 @@ export default function AdminEmpleadosPage() {
 
       <ActionConfirmDialog
         open={Boolean(guestLinkCandidate)}
-        onOpenChange={(open) => { if (!open && !formLoading) setGuestLinkCandidate(null); }}
+        onOpenChange={(open) => {
+          if (!open && !formLoading) {
+            setGuestLinkCandidate(null);
+            setGuestLinkError('');
+          }
+        }}
         tone="warning"
         title="Vincular Persona invitada"
-        description={guestLinkCandidate ? `El correo pertenece a ${guestLinkCandidate.nombre_completo || 'una Persona invitada'} con historial existente. Confirma que verificaste su identidad. La vinculacion conservara su historial y no se realizara solo por coincidencia de correo.` : ''}
+        description={guestLinkCandidate ? `El correo pertenece a ${guestLinkCandidate.nombre_completo || 'una Persona invitada'} con historial existente. Confirma que verificaste su identidad. La vinculacion conservara su historial y no se realizara solo por coincidencia de correo.${guestLinkError ? ` ${guestLinkError} Puedes reintentar sin cerrar el formulario.` : ''}` : ''}
         confirmLabel="Confirmar vinculacion"
         cancelLabel="Cancelar"
         loading={formLoading}

@@ -128,6 +128,55 @@ test('creación valida obligatorios localmente y cancelación no escribe', async
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
+test('vinculación confirmada de invitado barbero permite reintentar sin cerrar el formulario', async () => {
+  const guestRequired = {
+    data: {
+      error: {
+        code: 'PERSONAS_GUEST_LINK_REQUIRED',
+        details: {
+          id_persona: 'PERSONA-HISTORICA',
+          nombre_completo: 'Invitada Historica',
+          requiere_confirmacion: true,
+        },
+      },
+    },
+  };
+  api.createAdminPersonaEmpleado
+    .mockRejectedValueOnce(guestRequired)
+    .mockRejectedValueOnce(new Error('connect ECONNREFUSED internal.test'))
+    .mockResolvedValueOnce({ data: { empleado: client('C') } });
+
+  render(<Page />);
+  await screen.findByText('Empleado A Sintetico');
+  fireEvent.click(screen.getByRole('button', { name: 'Nuevo' }));
+  const form = screen.getByRole('dialog', { name: 'Nuevo Empleado' });
+  fireEvent.change(within(form).getByRole('textbox', { name: 'Nombres *' }), { target: { value: 'Invitada' } });
+  fireEvent.change(within(form).getByRole('textbox', { name: 'Apellidos *' }), { target: { value: 'Historica' } });
+  fireEvent.change(within(form).getByRole('textbox', { name: 'DNI *' }), { target: { value: '0801199012345' } });
+  fireEvent.change(within(form).getByRole('textbox', { name: 'Correo de acceso *' }), { target: { value: 'invitada@example.test' } });
+  fireEvent.change(within(form).getByRole('combobox', { name: 'Sucursal *' }), { target: { value: 'S' } });
+  fireEvent.change(within(form).getByRole('textbox', { name: 'Telefono *' }), { target: { value: '99990000' } });
+  fireEvent.click(within(form).getByRole('checkbox', { name: 'Barbero' }));
+  fireEvent.click(within(form).getByRole('button', { name: 'Crear empleado' }));
+
+  const confirmation = await screen.findByRole('dialog', { name: 'Vincular Persona invitada' });
+  expect(within(confirmation).queryByText('No se pudo completar la operacion de empleados. Intenta nuevamente.')).not.toBeInTheDocument();
+  fireEvent.click(within(confirmation).getByRole('button', { name: 'Confirmar vinculacion' }));
+  expect(await within(confirmation).findByText(/Puedes reintentar sin cerrar el formulario/)).toBeInTheDocument();
+
+  fireEvent.click(within(confirmation).getByRole('button', { name: 'Confirmar vinculacion' }));
+  await act(async () => {});
+  expect(api.createAdminPersonaEmpleado).toHaveBeenCalledTimes(3);
+  expect(api.createAdminPersonaEmpleado.mock.calls[1][0]).toMatchObject({
+    acceso: { roles: expect.arrayContaining(['barbero']) },
+    empleado: { es_barbero: true },
+    vinculacion_persona: { id_persona: 'PERSONA-HISTORICA', confirmar_vinculacion: true },
+  });
+  expect(screen.queryByRole('dialog', { name: 'Vincular Persona invitada' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog', { name: 'Nuevo Empleado' })).not.toBeInTheDocument();
+  expect(notices.success).toHaveBeenCalledWith('Empleado creado.', expect.any(Object));
+});
+
 test('campos obligatorios identificables por su etiqueta accesible', async () => {
   render(<Page />); await edit();
   expect(screen.getByRole('textbox', { name: 'Nombres *' })).toHaveValue('Empleado A');
