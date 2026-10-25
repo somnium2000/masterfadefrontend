@@ -2,6 +2,7 @@ import { supabase } from '../../../config/supabaseClient.js';
 import { http } from '../../../services/httpClient.js';
 
 const BASE = '/v1/cliente';
+const PURCHASE_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CITA_BASE = '/v1/citas';
 const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_PROFILE_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -213,6 +214,19 @@ export async function confirmMembershipPayment(id_payment_intent, options = {}) 
     throw new Error(String(payload?.message || 'El pago del plan no fue aprobado.'));
   }
   return payload;
+}
+
+export async function queryMembershipPaymentStatus(id_payment_intent) {
+  const safeIntentId = String(id_payment_intent || '').trim();
+  if (!PURCHASE_UUID_REGEX.test(safeIntentId)) {
+    throw new Error('No se pudo identificar el pago pendiente.');
+  }
+  const response = await http.post(
+    `${BASE}/planes/pago-intent/${encodeURIComponent(safeIntentId)}/estado`,
+    {},
+    { dedupe: false, cache: false }
+  );
+  return normalizeResponsePayload(response);
 }
 
 export async function cancelClientePlan(payload = {}) {

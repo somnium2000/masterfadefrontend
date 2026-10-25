@@ -7,7 +7,8 @@ import MembershipPlansPage from '../MembershipPlansPage.jsx';
 const state = vi.hoisted(() => ({ auth: {}, dialog: null }));
 const api = vi.hoisted(() => ({ listPublicCatalogBranches: vi.fn(), listPublicPlansByBranch: vi.fn() }));
 const payment = vi.hoisted(() => ({ getClientePlanEstado: vi.fn(), createMembershipOrder: vi.fn(),
-  createMembershipPaymentIntent: vi.fn(), confirmMembershipPayment: vi.fn() }));
+  createMembershipPaymentIntent: vi.fn(), confirmMembershipPayment: vi.fn(),
+  queryMembershipPaymentStatus: vi.fn() }));
 vi.mock('../../lib/catalogApi.js', () => api);
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => state.auth }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
@@ -34,6 +35,7 @@ beforeEach(() => {
   api.listPublicCatalogBranches.mockResolvedValue({ branches: [{ id_sucursal: A, nombre_sucursal: 'Centro' }] });
   api.listPublicPlansByBranch.mockResolvedValue({ plans: [{ id_plan: A, id_plan_sucursal: B, nombre_plan: 'VIP', precio_hnl: 100, categoria_nivel: 1, beneficios: [] }] });
   payment.getClientePlanEstado.mockResolvedValue({});
+  payment.queryMembershipPaymentStatus.mockResolvedValue({ normalized_status: 'PENDIENTE' });
   payment.createMembershipOrder.mockResolvedValue({ id_order: 'orden-A' });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });

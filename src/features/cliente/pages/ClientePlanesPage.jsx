@@ -34,8 +34,10 @@ import {
   createMembershipOrder,
   createMembershipPaymentIntent,
   getClientePlanEstado,
+  queryMembershipPaymentStatus,
 } from "../lib/clienteApi.js";
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
+import useMembershipPaymentPolling from "../../plans/hooks/useMembershipPaymentPolling.js";
 import { CLIENT_LOCK_MESSAGE, CLIENT_PLAN_PURCHASE_ENABLED } from "../lib/clientFeatureFlags.js";
 
 const CATEGORY_ICONS = {
@@ -448,6 +450,19 @@ export default function ClientePlanesPage() {
     void loadInitial();
   }, [loadInitial]);
 
+  useEffect(() => {
+    const stored = readClientPurchaseAttempt();
+    if (!purchaseIdentity || stored?.identity !== purchaseIdentity
+      || !stored?.orderSummary || !stored?.paymentIntent) return;
+    purchaseAttemptRef.current = stored;
+    setPurchaseOrderSummary(stored.orderSummary);
+    setMembershipPaymentIntent(stored.paymentIntent);
+    setPurchasePendingConfirmation(true);
+    setPurchaseErrorMessage("Existe un pago pendiente de verificación. No realices otro cobro");
+    setPurchaseStep("payment");
+    setPurchaseModalOpen(true);
+  }, [purchaseIdentity]);
+
   async function handleBranchChange(event) {
     const nextBranchId = String(event.target.value || "").trim();
     setBranchId(nextBranchId);
@@ -497,8 +512,8 @@ export default function ClientePlanesPage() {
     return attempt;
   }
 
-  function markPurchaseAttemptResolved(attempt) {
-    const resolved = { ...attempt, status: "resolved" };
+  function markPurchaseAttemptResolved(attempt, extra = {}) {
+    const resolved = { ...attempt, ...extra, status: "resolved" };
     purchaseAttemptRef.current = resolved;
     storeClientPurchaseAttempt(resolved);
   }
@@ -518,13 +533,17 @@ export default function ClientePlanesPage() {
       const orderResponse = await createMembershipOrder(offerId, { idempotencyKey: attempt.key });
       const summary = orderResponse?.data || orderResponse;
       setPurchaseOrderSummary(summary);
-      setMembershipPaymentIntent(null);
-      setPurchasePendingConfirmation(false);
-      setPurchaseErrorMessage("");
-      setPurchaseStep("summary");
+      const recoveredIntent = summary?.pending_reconciliation && summary?.id_payment_intent
+        ? { id_payment_intent: summary.id_payment_intent, estado_intent_codigo: "pendiente_confirmacion" }
+        : null;
+      setMembershipPaymentIntent(recoveredIntent);
+      setPurchasePendingConfirmation(Boolean(recoveredIntent));
+      setPurchaseErrorMessage(recoveredIntent
+        ? "Existe un pago pendiente de verificación. No realices otro cobro" : "");
+      setPurchaseStep(recoveredIntent ? "payment" : "summary");
       setPurchaseCompleted(false);
       setPurchaseModalOpen(true);
-      markPurchaseAttemptResolved(attempt);
+      markPurchaseAttemptResolved(attempt, { orderSummary: summary, paymentIntent: recoveredIntent });
     } catch (error) {
       notifyError(error?.data?.error?.message || error?.message || "No se pudo crear la orden del plan.");
     } finally {
@@ -578,6 +597,12 @@ export default function ClientePlanesPage() {
       const intentResponse = await createMembershipPaymentIntent(orderId);
       const intentData = intentResponse?.data || intentResponse;
       setMembershipPaymentIntent(intentData);
+      if (purchaseAttemptRef.current) {
+        markPurchaseAttemptResolved(purchaseAttemptRef.current, {
+          orderSummary: purchaseOrderSummary,
+          paymentIntent: intentData,
+        });
+      }
       const isPending = String(intentData?.estado_intent_codigo || "").trim().toLowerCase() === "pendiente_confirmacion";
       setPurchasePendingConfirmation(isPending);
       if (isPending) setPurchaseErrorMessage("Existe un pago pendiente de verificación. No realices otro cobro");
@@ -630,6 +655,34 @@ export default function ClientePlanesPage() {
       setPurchaseLoading(false);
     }
   }
+
+  const handleMembershipPollResult = useCallback((result) => {
+    const normalized = String(result?.normalized_status || "PENDIENTE").toUpperCase();
+    if (normalized === "PAGADO") {
+      setPurchasePendingConfirmation(false);
+      setPurchaseCompleted(true);
+      setPurchaseStep("success");
+      setPurchaseErrorMessage("");
+      purchaseAttemptRef.current = null;
+      storeClientPurchaseAttempt(null);
+      void fetchMembershipState();
+      if (branchId) void fetchPlans(branchId);
+      return;
+    }
+    if (normalized === "RECHAZADO") {
+      setPurchasePendingConfirmation(false);
+      setPurchaseErrorMessage("PixelPay rechazó el pago. La membresía no fue activada.");
+      return;
+    }
+    setPurchaseErrorMessage("Existe un pago pendiente de verificación. No realices otro cobro");
+  }, [branchId, fetchMembershipState, fetchPlans]);
+
+  useMembershipPaymentPolling({
+    active: purchasePendingConfirmation,
+    idPaymentIntent: membershipPaymentIntent?.id_payment_intent,
+    queryStatus: queryMembershipPaymentStatus,
+    onResult: handleMembershipPollResult,
+  });
 
   function handleOpenCancelPlanDialog(plan, planBranchName) {
     if (!plan?.id_suscripcion) return;

@@ -16,6 +16,7 @@ const dialog = vi.hoisted(() => ({ props: null }));
 const payment = vi.hoisted(() => ({
   getClientePlanEstado: vi.fn(), createMembershipOrder: vi.fn(),
   createMembershipPaymentIntent: vi.fn(), confirmMembershipPayment: vi.fn(),
+  queryMembershipPaymentStatus: vi.fn(),
 }));
 
 vi.mock('../../lib/catalogApi.js', () => api);
@@ -95,6 +96,7 @@ beforeEach(() => {
   payment.getClientePlanEstado.mockResolvedValue({});
   payment.createMembershipOrder.mockResolvedValue({ data: { id_order: 'orden-1' } });
   payment.createMembershipPaymentIntent.mockResolvedValue({ data: { id_payment_intent: 'intent-1' } });
+  payment.queryMembershipPaymentStatus.mockResolvedValue({ normalized_status: 'PENDIENTE' });
   sync.callback = null;
   sync.unsubscribe.mockReset();
   api.listPublicCatalogBranches.mockResolvedValue({ branches });
