@@ -21,6 +21,9 @@ export function buildNavModules(basePath, role, roles = []) {
     const isSecurityRole = role === 'security_admin' || role === 'security_auditor';
     const canSeeSecurityModule = role === 'super_admin';
     const canSeeSecurityAudit = roles.includes('root');
+    const hasCombinedBarberRole = !roles.includes('root') && roles.includes('barbero')
+        && (roles.includes('super_admin') || roles.includes('admin'));
+    const administrationPath = roles.includes('super_admin') ? '/home/super' : '/home/admin';
 
     if (isBarbero) {
         return [
@@ -45,6 +48,13 @@ export function buildNavModules(basePath, role, roles = []) {
                 path: `${basePath}/perfil`,
                 subItems: null,
             },
+            ...(hasCombinedBarberRole ? [{
+                id: 'volver-administracion',
+                label: 'Volver a Administración',
+                icon: Building2,
+                path: administrationPath,
+                subItems: null,
+            }] : []),
         ];
     }
 
@@ -192,6 +202,20 @@ export function buildNavModules(basePath, role, roles = []) {
         return modules.filter((module) => ['inicio'].includes(module.id));
     }
 
+    if (hasCombinedBarberRole && ['admin', 'super_admin'].includes(role) && roles.includes(role)) {
+        modules.push({
+            id: 'mi-espacio-barbero',
+            label: 'Mi espacio Barbero',
+            icon: Scissors,
+            path: '/home/barbero',
+            subItems: [
+                { id: 'mi-inicio-barbero', label: 'Inicio Barbero', path: '/home/barbero', exact: true },
+                { id: 'mi-calendario-barbero', label: 'Mi Calendario', path: '/home/barbero/citas' },
+                { id: 'mi-perfil-barbero', label: 'Mi Perfil Barbero', path: '/home/barbero/perfil' },
+            ],
+        });
+    }
+
     return modules;
 }
 
@@ -234,8 +258,11 @@ function resolveActiveModule(modules, pathname) {
 function SidebarItem({ module, isActive, isCollapsed, onClick }) {
     const Icon = module.icon;
     return (
+        <>
         <motion.button
             type="button"
+            aria-label={module.label}
+            aria-current={isActive ? 'page' : undefined}
             onClick={() => onClick(module)}
             whileTap={{ scale: 0.97 }}
             title={isCollapsed ? module.label : undefined}
@@ -278,6 +305,17 @@ function SidebarItem({ module, isActive, isCollapsed, onClick }) {
                 <ChevronDown size={13} className={`relative z-10 shrink-0 transition-transform duration-200 opacity-50 ${isActive ? 'rotate-180' : ''}`} />
             )}
         </motion.button>
+        {module.id === 'mi-espacio-barbero' && !isCollapsed && module.subItems.map((item) => (
+            <button
+                key={item.id}
+                type="button"
+                onClick={() => onClick(item)}
+                className="ml-4 rounded-xl border border-transparent px-3 py-2 text-left text-xs text-[var(--mf-text-2)] transition-colors hover:border-[var(--mf-nav-border)] hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-accent)]"
+            >
+                {item.label}
+            </button>
+        ))}
+        </>
     );
 }
 
@@ -288,11 +326,14 @@ function TopbarSubMenu({ subItems, currentPath }) {
     return (
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
             {subItems.map((item) => {
-                const isActive = isPathActive(currentPath, item.path);
+                const isActive = item.exact
+                    ? normalizePath(currentPath) === normalizePath(item.path)
+                    : isPathActive(currentPath, item.path);
                 return (
                     <button
                         key={item.id}
                         type="button"
+                        aria-current={isActive ? 'page' : undefined}
                         onClick={() => navigate(item.path)}
                         className={`
                             relative whitespace-nowrap rounded-full px-4 py-1.5 text-xs font-semibold tracking-wide
@@ -333,7 +374,8 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-    const basePath = String(basePathOverride || '').trim() || resolvedHomePath;
+    const basePath = String(basePathOverride || '').trim()
+        || (currentRole === 'barbero' ? '/home/barbero' : resolvedHomePath);
     const modules = buildNavModules(basePath, currentRole, roles);
     const canAccessInternalAccountDeletion = currentRole !== 'cliente';
 
@@ -564,6 +606,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                             />
                             <button
                                 type="button"
+                                aria-label="Abrir menú"
                                 onClick={() => setMobileMenuOpen(true)}
                                 className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)]"
                             >
@@ -611,6 +654,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                                     <MasterfadeLogo variant="compact" />
                                     <button
                                         type="button"
+                                        aria-label="Cerrar menú"
                                         onClick={() => setMobileMenuOpen(false)}
                                         className="flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)]"
                                     >
