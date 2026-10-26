@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { StrictMode } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import Page from '../BarberoProfilePage.jsx';
@@ -95,4 +95,60 @@ test('A antigua no elimina loading ni introduce error mientras B sigue pendiente
 });
 test('sin identificador autenticado no se consulta', () => {
   auth.user = {}; render(<Page />); expect(api.getBarberoPerfil).not.toHaveBeenCalled(); expect(screen.getByRole('status', { name: 'Esperando sesión de barbero' })).toBeInTheDocument();
+});
+
+test.each(['fecha_nacimiento', 'fecha_ingreso'])('QA-BARBERO-01B: %s conserva el día en America/Tegucigalpa', async (field) => {
+  const NativeDateTimeFormat = Intl.DateTimeFormat;
+  const formatter = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (locale, options) {
+    return new NativeDateTimeFormat(locale, { timeZone: 'America/Tegucigalpa', ...options });
+  });
+  try {
+    api.getBarberoPerfil.mockResolvedValueOnce({ perfil: { ...payload('A').perfil, [field]: '2026-10-26' } });
+    render(<Page />);
+    await screen.findByRole('heading', { name: 'BARBER-A' });
+    expect(screen.getByText('26 oct 2026', { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText(/25 oct 2026/)).not.toBeInTheDocument();
+  } finally { formatter.mockRestore(); }
+});
+
+test('QA-BARBERO-01B: sección laboral muestra campos permitidos y oculta los sensibles', async () => {
+  api.getBarberoPerfil.mockResolvedValueOnce({ perfil: { ...payload('A').perfil,
+    fecha_ingreso: '2026-10-26', cargo: 'Cargo autorizado QA', estado_laboral: true, estado_acceso: 'activo',
+    salario_base: 'SALARIO-OCULTO', comision_porcentaje: 'COMISION-OCULTA', dni: 'DNI-OCULTO', rtn: 'RTN-OCULTO',
+    observaciones: 'OBSERVACIONES-OCULTAS', credenciales_completadas_at: 'CREDENCIALES-OCULTAS',
+    id_persona: 'IDENTIFICADOR-OCULTO', api_token: 'TOKEN-OCULTO', created_at: 'AUDITORIA-OCULTA',
+  } });
+  render(<Page />);
+  const section = (await screen.findByRole('heading', { name: 'Información laboral' })).closest('section');
+  expect(within(section).getByText('Cargo autorizado QA')).toBeInTheDocument();
+  expect(within(section).getByText('26 oct 2026', { exact: true })).toBeInTheDocument();
+  expect(within(section).getByText('Estado laboral')).toBeInTheDocument();
+  expect(within(section).getByText('Estado acceso')).toBeInTheDocument();
+  expect(screen.queryByText(/OCULT[OA]/)).not.toBeInTheDocument();
+});
+
+test('QA-BARBERO-01B: cambio de identidad borra campos laborales antes de cargar la nueva', async () => {
+  api.getBarberoPerfil.mockResolvedValueOnce({ perfil: { ...payload('A').perfil, cargo: 'Cargo anterior QA', fecha_ingreso: '2025-01-15' } });
+  const view = render(<Page />);
+  const section = (await screen.findByRole('heading', { name: 'Información laboral' })).closest('section');
+  expect(within(section).getByText('Cargo anterior QA')).toBeInTheDocument();
+  const next = deferred(); api.getBarberoPerfil.mockReturnValueOnce(next.promise);
+  auth.user = { id_usuario: 'synthetic-B' }; view.rerender(<Page />);
+  expect(screen.queryByText('Cargo anterior QA')).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Información laboral' })).not.toBeInTheDocument();
+  await act(async () => next.resolve({ perfil: { ...payload('B').perfil, cargo: 'Cargo vigente QA', fecha_ingreso: '2026-10-26' } }));
+  const currentSection = (await screen.findByRole('heading', { name: 'Información laboral' })).closest('section');
+  expect(within(currentSection).getByText('Cargo vigente QA')).toBeInTheDocument();
+});
+
+test('QA-BARBERO-01B: respuesta obsoleta no reemplaza datos laborales de otra identidad', async () => {
+  const old = deferred(); api.getBarberoPerfil.mockReturnValueOnce(old.promise);
+  const view = render(<Page />);
+  api.getBarberoPerfil.mockResolvedValueOnce({ perfil: { ...payload('B').perfil, cargo: 'Cargo vigente QA', fecha_ingreso: '2026-10-26' } });
+  auth.user = { id_usuario: 'synthetic-B' }; view.rerender(<Page />);
+  const section = (await screen.findByRole('heading', { name: 'Información laboral' })).closest('section');
+  expect(within(section).getByText('Cargo vigente QA')).toBeInTheDocument();
+  await act(async () => old.resolve({ perfil: { ...payload('A').perfil, cargo: 'Cargo obsoleto QA', fecha_ingreso: '2025-01-15' } }));
+  expect(screen.queryByText('Cargo obsoleto QA')).not.toBeInTheDocument();
+  expect(within(section).getByText('Cargo vigente QA')).toBeInTheDocument();
 });

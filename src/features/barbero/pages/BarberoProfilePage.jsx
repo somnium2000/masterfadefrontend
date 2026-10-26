@@ -26,7 +26,11 @@ function formatDate(value) {
   if (!value) return null;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
-  return new Intl.DateTimeFormat('es-HN', { dateStyle: 'medium' }).format(parsed);
+  // AM: Una fecha calendario no representa un instante que deba desplazarse por zona horaria.
+  return new Intl.DateTimeFormat('es-HN', {
+    dateStyle: 'medium',
+    ...(/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? { timeZone: 'UTC' } : {}),
+  }).format(parsed);
 }
 
 function formatDateTime(value) {
@@ -123,6 +127,7 @@ function normalizeFieldValue(key, value) {
     if (!normalized) return null;
 
     if (key.includes('fecha') || key.endsWith('_at')) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return formatDate(normalized) || normalized;
       return formatDateTime(normalized) || formatDate(normalized) || normalized;
     }
 
@@ -368,6 +373,7 @@ function BarberoProfileContent() {
           </section>
 
           <InfoSection title="Informacion personal" items={groupedFields.personal} />
+          <InfoSection title="Información laboral" items={groupedFields.laboral} />
           {hasPublicProfileData ? (
             <section className="rounded-[24px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)] p-4 shadow-[var(--mf-shadow-soft)] sm:p-5">
               <h2 className="text-lg font-semibold text-[var(--mf-text)]">Perfil publico</h2>
