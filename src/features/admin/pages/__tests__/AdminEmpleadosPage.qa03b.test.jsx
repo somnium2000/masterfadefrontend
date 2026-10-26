@@ -34,11 +34,15 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-test.each(['resolve', 'reject'])('guardar A y abrir B: resultado tardío %s no cierra ni contamina B', async (outcome) => {
+test.each(['resolve', 'reject'])('guardar bloquea Escape; resultado %s de instancia anterior no contamina B', async (outcome) => {
   const pending = deferred(); api.updateAdminPersonaEmpleado.mockReturnValue(pending.promise);
-  render(<Page />); await edit();
+  const view = render(<Page />); await edit();
   fireEvent.click(within(dialog()).getByRole('button', { name: 'Actualizar' }));
   fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+  expect(screen.getByDisplayValue('Empleado A')).toBeInTheDocument();
+  expect(within(dialog()).getByRole('button', { name: 'Cancelar' })).toBeDisabled();
+  view.unmount();
+  render(<Page />);
   await edit('B');
   await act(async () => outcome === 'resolve' ? pending.resolve({ data: { empleado: client() } }) : pending.reject(new Error('connect ECONNREFUSED internal.test')));
   expect(screen.getByDisplayValue('Empleado B')).toBeInTheDocument();
@@ -212,4 +216,21 @@ test.each([[0, 'inactivo'], [2, 'barbero'], [3, 'T']])('filtro existente %s no c
   expect(screen.queryByText('Empleado A Sintetico')).not.toBeInTheDocument();
   expect(screen.getByText('Empleado B Sintetico')).toBeInTheDocument();
   expect(api.listAdminPersonasEmpleados).toHaveBeenCalledTimes(1);
+});
+
+test.each([false, true])('QA-UX conserva cambios de empleado y perfil público Barbero, barbero=%s', async (barbero) => {
+  if (barbero) {
+    auth.roles = ['super_admin'];
+    api.getAdminPersonaEmpleado.mockResolvedValue({ data: { empleado: { ...client(), roles: ['barbero'], es_barbero: true, alias_publico: 'Alias inicial' } } });
+  }
+  render(<Page />); await edit();
+  const label = barbero ? 'Alias publico' : 'Nombres *';
+  fireEvent.change(within(dialog()).getByLabelText(label), { target: { value: 'Cambio conservado' } });
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Seguir editando' }));
+  expect(within(dialog()).getByLabelText(label)).toHaveValue('Cambio conservado');
+  expect(api.updateAdminPersonaEmpleado).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });

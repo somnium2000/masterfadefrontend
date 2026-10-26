@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Building2, CheckCircle2, Eye, KeyRound, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Users, X } from 'lucide-react';
 import {
@@ -12,7 +13,7 @@ import {
 } from '../lib/adminPersonasApi.js';
 import { Button } from '../../../components/ui/button.jsx';
 import {
-  Dialog,
+  Dialog, DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -951,7 +952,7 @@ export default function AdminEmpleadosPage() {
         </div>
       ) : null}
 
-      <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
+      <UnsavedChangesDialog values={formValues} saving={formLoading} open={formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingId ? 'Editar Empleado' : 'Nuevo Empleado'}</DialogTitle><DialogDescription className="sr-only">Datos personales, roles y sucursal. Los campos con asterisco son obligatorios.</DialogDescription></DialogHeader>
 
@@ -1171,11 +1172,11 @@ export default function AdminEmpleadosPage() {
           {formError && <p className="mt-3 rounded-[12px] bg-red-500/10 px-3 py-2 text-sm text-red-400">{formError}</p>}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => handleFormOpenChange(false)} disabled={formLoading}>Cancelar</Button>
+            <DialogClose asChild><Button variant="outline" disabled={formLoading}>Cancelar</Button></DialogClose>
             <Button onClick={() => handleSubmit()} disabled={formLoading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar' : 'Crear empleado'}</Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
 
       <Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-5xl">

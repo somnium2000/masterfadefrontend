@@ -1,4 +1,5 @@
 ﻿// src/features/admin/pages/AdminServicesCatalogPage.jsx
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 // A3 - Pantalla CRUD de catalogo de servicios (Admin).
 // AM: La API administrativa determina las sucursales disponibles y su seleccion.
 
@@ -22,7 +23,7 @@ import {
 import { listAdminSucursales } from '../lib/adminSucursalesApi.js';
 import { Button } from '../../../components/ui/button.jsx';
 import {
-    Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+    Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '../../../components/ui/dialog.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
@@ -1499,7 +1500,7 @@ export default function AdminServicesCatalogPage() {
             )}
 
             {/* Dialog Crear / Editar */}
-            <Dialog open={dialogOpen} onOpenChange={handleServiceDialogOpenChange}>
+            <UnsavedChangesDialog values={{ formValues, createBranchTariffs, useSameTariffForAll, commonCreateTariff, selectedIds: serviceBarberAssignments.selectedIds }} saving={formLoading} open={dialogOpen} onOpenChange={handleServiceDialogOpenChange}>
                 <DialogContent className={`w-[calc(100vw-1rem)] max-h-[calc(100vh-1.5rem)] overflow-y-auto ${canManageServiceBarberAssignments && editTarget ? 'sm:max-w-2xl' : 'sm:max-w-md'}`}>
                     <DialogHeader>
                         <DialogTitle>{editTarget ? 'Editar servicio' : 'Nuevo servicio'}</DialogTitle>
@@ -1659,9 +1660,9 @@ export default function AdminServicesCatalogPage() {
                         <ErrorBanner message={formError} />
                     )}
                     <DialogFooter className="mt-2">
-                        <Button variant="outline" onClick={() => handleServiceDialogOpenChange(false)} disabled={formLoading}>
+                        <DialogClose asChild><Button variant="outline" disabled={formLoading}>
                             Cancelar
-                        </Button>
+                        </Button></DialogClose>
                         <Button
                             onClick={handleGuardar}
                             disabled={formLoading || (canManageServiceBarberAssignments && editTarget && Boolean(formValues.servicio_informativo) && serviceBarberAssignments.loading)}
@@ -1671,9 +1672,9 @@ export default function AdminServicesCatalogPage() {
                         </Button>
                     </DialogFooter>
                 </DialogContent>
-            </Dialog>
+            </UnsavedChangesDialog>
 
-            <Dialog open={tariffDialogOpen} onOpenChange={handleTariffDialogOpenChange}>
+            <UnsavedChangesDialog values={tariffFormValues} saving={tariffFormLoading} open={tariffDialogOpen} onOpenChange={handleTariffDialogOpenChange}>
                 <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-2xl">
                     <DialogHeader>
                         <DialogTitle>Editar tarifa</DialogTitle>
@@ -1689,15 +1690,15 @@ export default function AdminServicesCatalogPage() {
                     />
                     {tariffFormError ? <ErrorBanner message={tariffFormError} /> : null}
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => handleTariffDialogOpenChange(false)} disabled={tariffFormLoading}>
+                        <DialogClose asChild><Button variant="outline" disabled={tariffFormLoading}>
                             Cancelar
-                        </Button>
+                        </Button></DialogClose>
                         <Button onClick={handleGuardarTarifa} disabled={tariffFormLoading} className="gap-2 min-w-[120px]">
                             {tariffFormLoading ? 'Guardando...' : 'Guardar tarifa'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
-            </Dialog>
+            </UnsavedChangesDialog>
 
             <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
                 <DialogContent className="sm:max-w-xl">

@@ -1,4 +1,5 @@
 ﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import {
   Building2,
   Gift,
@@ -28,7 +29,7 @@ import { listAdminSucursales } from "../lib/adminSucursalesApi.js";
 import { emitCatalogSync } from "../../../lib/catalogSync.js";
 import { Button } from "../../../components/ui/button.jsx";
 import {
-  Dialog,
+  Dialog, DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -840,7 +841,7 @@ export default function AdminCortesiasCatalogPage() {
         </nav>
       ) : null}
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading) setDialogOpen(open); }}>
+      <UnsavedChangesDialog values={formValues} saving={formLoading} open={dialogOpen} onOpenChange={(open) => { if (!formLoading) setDialogOpen(open); }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editTarget ? "Editar cortesía maestra" : "Nueva cortesía maestra"}</DialogTitle>
@@ -857,14 +858,14 @@ export default function AdminCortesiasCatalogPage() {
           {formError ? <ErrorBanner message={formError} /> : null}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>Cancelar</Button>
+            <DialogClose asChild><Button variant="outline" disabled={formLoading}>Cancelar</Button></DialogClose>
             <Button onClick={handleGuardar} disabled={formLoading} className="gap-2 min-w-[120px]">
               {formLoading ? <Loader2 size={15} className="animate-spin" /> : null}
               {editTarget ? "Guardar cambios" : "Crear cortesía maestra"}
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl">

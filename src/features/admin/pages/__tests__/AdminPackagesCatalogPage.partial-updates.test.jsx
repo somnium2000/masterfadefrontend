@@ -345,6 +345,7 @@ describe('alcance, concurrencia y disponibilidad de paquetes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Nuevo maestro' }));
     fireEvent.click(within(screen.getByRole('dialog')).getByLabelText('Centro'));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }));
     fireEvent.click(screen.getByRole('button', { name: 'Nuevo maestro' }));
     const dialog = screen.getByRole('dialog');
     fireEvent.click(within(dialog).getByLabelText('Norte'));
@@ -659,4 +660,22 @@ describe('sucursales administrativas de la API', () => {
     await waitFor(() => expect(packagesApi.listAdminPaquetes).toHaveBeenLastCalledWith({ id_sucursal: BRANCH_B }));
     expect(branchesApi.listAdminSucursales).toHaveBeenCalledTimes(2);
   });
+});
+
+test.each(['maestro', 'oferta'])('QA-UX conserva cambios de paquete %s sin escribir al cancelar', async (kind) => {
+  let dialog;
+  if (kind === 'maestro') dialog = await openMasterEditor();
+  else {
+    render(<AdminPackagesCatalogPage />);
+    await screen.findByText('Paquete base');
+    fireEvent.click(screen.getByRole('button', { name: 'Editar oferta', exact: true }));
+    dialog = screen.getByRole('dialog');
+  }
+  const label = kind === 'maestro' ? 'Nombre del paquete maestro *' : 'Precio HNL de la oferta *';
+  const value = kind === 'maestro' ? 'Paquete pendiente' : '590';
+  fireEvent.change(within(dialog).getByLabelText(label), { target: { value } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Seguir editando' }));
+  expect(String(within(screen.getByRole('dialog')).getByLabelText(label).value)).toBe(value);
+  expect(packagesApi.updateAdminPaquete).not.toHaveBeenCalled();
 });

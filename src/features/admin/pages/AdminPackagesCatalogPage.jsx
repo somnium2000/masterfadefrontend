@@ -1,4 +1,5 @@
 // src/features/admin/pages/AdminPackagesCatalogPage.jsx
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 // AM: Catalogo administrativo de paquetes alineado al patron operativo de SERVICIOS.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -34,7 +35,7 @@ import { listAdminServicios } from '../lib/adminCatalogApi.js';
 import { listAdminSucursales } from '../lib/adminSucursalesApi.js';
 import { Button } from '../../../components/ui/button.jsx';
 import {
-    Dialog,
+    Dialog, DialogClose,
     DialogContent,
     DialogHeader,
     DialogTitle,
@@ -1619,7 +1620,7 @@ export default function AdminPackagesCatalogPage() {
                 </nav>
             ) : null}
 
-            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <UnsavedChangesDialog values={{ formValues, initialOfferBranchId }} saving={formLoading} open={dialogOpen} onOpenChange={setDialogOpen}>
                 <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>
@@ -1658,16 +1659,16 @@ export default function AdminPackagesCatalogPage() {
                     ) : null}
                     {formError ? <ErrorBanner message={formError} /> : null}
                     <DialogFooter className="mt-2">
-                        <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>
+                        <DialogClose asChild><Button variant="outline" disabled={formLoading}>
                             Cancelar
-                        </Button>
+                        </Button></DialogClose>
                         <Button onClick={handleGuardar} disabled={formLoading} className="gap-2 min-w-[120px]">
                             {formLoading ? <Loader2 size={15} className="animate-spin" /> : null}
                             {editTarget ? 'Guardar cambios' : 'Crear paquete maestro'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
-            </Dialog>
+            </UnsavedChangesDialog>
 
             <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
                 <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl">

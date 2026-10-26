@@ -595,3 +595,15 @@ describe('sucursales administrativas de la API', () => {
     expect(branchesApi.listAdminSucursales).toHaveBeenCalledTimes(2);
   });
 });
+
+test('QA-UX protege asociaciones de cortesía sin modificar el maestro ni sus ofertas', async () => {
+  const dialog = await openEdit();
+  fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Norte', exact: true }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Seguir editando' }));
+  expect(within(screen.getByRole('dialog')).getByRole('checkbox', { name: 'Norte', exact: true })).toBeChecked();
+  expect(api.updateAdminCortesia).not.toHaveBeenCalled();
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});

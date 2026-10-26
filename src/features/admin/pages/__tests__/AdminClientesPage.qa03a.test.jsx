@@ -32,11 +32,15 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-test.each(['resolve', 'reject'])('guardar A y abrir B: resultado tardío %s no cierra ni contamina B', async (outcome) => {
+test.each(['resolve', 'reject'])('guardar bloquea Escape; resultado %s de instancia anterior no contamina B', async (outcome) => {
   const pending = deferred(); api.updateAdminPersonaCliente.mockReturnValue(pending.promise);
-  render(<Page />); await edit();
+  const view = render(<Page />); await edit();
   fireEvent.click(within(dialog()).getByRole('button', { name: 'Actualizar cliente' }));
   fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+  expect(screen.getByDisplayValue('Cliente A')).toBeInTheDocument();
+  expect(within(dialog()).getByRole('button', { name: 'Cancelar' })).toBeDisabled();
+  view.unmount();
+  render(<Page />);
   await edit('B');
   await act(async () => outcome === 'resolve' ? pending.resolve({ data: { cliente: client() } }) : pending.reject(new Error('connect ECONNREFUSED internal.test')));
   expect(screen.getByDisplayValue('Cliente B')).toBeInTheDocument();
@@ -122,5 +126,17 @@ test('creación valida obligatorios localmente y cancelación no escribe', async
   fireEvent.click(within(dialog()).getByRole('button', { name: 'Crear cliente' }));
   expect(api.createAdminPersonaCliente).not.toHaveBeenCalled();
   fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancelar' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+test('QA-UX conserva teléfono del Cliente al seguir editando y descarta solo con confirmación', async () => {
+  render(<Page />); await edit();
+  fireEvent.change(within(dialog()).getByDisplayValue('99990000'), { target: { value: '99990001' } });
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Seguir editando' }));
+  expect(within(dialog()).getByDisplayValue('99990001')).toBeInTheDocument();
+  expect(api.updateAdminPersonaCliente).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });

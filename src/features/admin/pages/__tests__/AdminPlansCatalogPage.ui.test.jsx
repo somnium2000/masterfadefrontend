@@ -311,6 +311,7 @@ test("catalogos tardios de editor cancelado no reemplazan nueva seleccion", asyn
   catalogApi.listAdminServicios.mockImplementation(() => pending.promise);
   fireEvent.click(within(dialog).getByRole("checkbox", { name: "Centro" }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+  fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }));
   fireEvent.click(screen.getByRole("button", { name: "Nuevo plan maestro" }));
   dialog = await screen.findByRole("dialog");
   await act(async () => pending.resolve({ data: { servicios: [{ id_servicio: "old", nombre_servicio: "Antiguo", id_sucursal: BRANCH_A, activo: true, tarifa_activa: true, agendable: true, precio_hnl: 100 }] } }));
@@ -573,4 +574,19 @@ describe("catálogo responsive de planes VIP", () => {
     expect(await screen.findByText("No se pudo completar la operación de planes.")).toBeInTheDocument();
     expect(screen.queryByText(/stack|select \*/i)).not.toBeInTheDocument();
   });
+});
+
+test.each(['maestro', 'oferta'])('QA-UX protege cambios de plan %s y permite seguir editando', async (kind) => {
+  if (kind === 'oferta') { auth.roles = ['admin']; auth.branchIds = [BRANCH_A]; }
+  await renderCatalog([makePlan(1)]);
+  fireEvent.click(screen.getByRole('button', { name: kind === 'maestro' ? 'Editar maestro' : 'Editar oferta' }));
+  const dialog = await screen.findByRole('dialog');
+  const field = kind === 'maestro' ? within(dialog).getByDisplayValue('Plan VIP 1') : within(dialog).getByLabelText(/Precio/);
+  const value = kind === 'maestro' ? 'Plan pendiente' : '1900';
+  fireEvent.change(field, { target: { value } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Seguir editando' }));
+  expect(String(field.value)).toBe(value);
+  expect(field).toBeInTheDocument();
+  expect(plansApi.updateAdminPlan).not.toHaveBeenCalled();
 });

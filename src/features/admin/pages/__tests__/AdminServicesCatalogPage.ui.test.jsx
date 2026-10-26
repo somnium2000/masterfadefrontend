@@ -68,8 +68,9 @@ function setServices(items) {
 }
 
 async function renderLoaded() {
-  render(<AdminServicesCatalogPage />);
+  const view = render(<AdminServicesCatalogPage />);
   await screen.findByText('Corte clásico');
+  return view;
 }
 
 beforeEach(() => {
@@ -264,12 +265,12 @@ describe('alcance y concurrencia de servicios administrativos', () => {
   });
 });
 
-for (const failure of [false, true]) test(`QA09 editor B conserva cambios tras respuesta antigua A, error=${failure}`, async () => {
+for (const failure of [false, true]) test(`QA-UX guardado bloquea Escape y editor B conserva cambios tras instancia antigua A, error=${failure}`, async () => {
   let finish, reject;
   const pending = new Promise((resolve, fail) => { finish = resolve; reject = fail; });
   catalogApiMock.updateAdminServicio.mockReturnValue(pending);
   setServices([service(), service({ id_servicio: '22222222-2222-4222-8222-222222222222', nombre_servicio: 'Servicio B', descripcion: 'Texto B' })]);
-  await renderLoaded();
+  const view = await renderLoaded();
   const open = name => {
     const menu = screen.getByLabelText(`Acciones de ${name}`).closest('details');
     fireEvent.click(within(menu).getByLabelText(`Acciones de ${name}`));
@@ -278,7 +279,10 @@ for (const failure of [false, true]) test(`QA09 editor B conserva cambios tras r
   open('Corte clásico');
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Guardar cambios' }));
   fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', code: 'Escape' });
-  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+  expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancelar' })).toBeDisabled();
+  view.unmount();
+  await renderLoaded();
   open('Servicio B');
   fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('Descripción'), { target: { value: 'B sin guardar' } });
   await act(async () => { if (failure) reject({ status: 401 }); else finish({ data: {} }); });
@@ -486,4 +490,32 @@ describe('sucursales administrativas de la API', () => {
     await waitFor(() => expect(catalogApiMock.listAdminServiciosAgrupados).toHaveBeenLastCalledWith({ id_sucursal: BRANCH_B }));
     expect(branchesApiMock.listAdminSucursales).toHaveBeenCalledTimes(2);
   });
+});
+
+test.each(['servicio', 'tarifa'])('QA-UX conserva %s al cancelar y seguir editando', async (kind) => {
+  await renderLoaded();
+  if (kind === 'tarifa') await act(async () => fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_A } }));
+  const menu = screen.getByLabelText('Acciones de Corte clásico').closest('details');
+  fireEvent.click(within(menu).getByLabelText('Acciones de Corte clásico'));
+  fireEvent.click(within(menu).getByRole('button', { name: kind === 'tarifa' ? 'Editar tarifa' : 'Editar servicio global' }));
+  const dialog = screen.getByRole('dialog');
+  const label = kind === 'tarifa' ? 'Precio HNL *' : 'Descripción';
+  const value = kind === 'tarifa' ? '390' : 'Cambio pendiente';
+  fireEvent.change(within(dialog).getByLabelText(label), { target: { value } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Seguir editando' }));
+  expect(String(within(screen.getByRole('dialog')).getByLabelText(label).value)).toBe(value);
+  expect(catalogApiMock.updateAdminServicio).not.toHaveBeenCalled();
+  expect(catalogApiMock.updateAdminServicioTarifa).not.toHaveBeenCalled();
+});
+
+test('QA-UX detecta cambios de tarifa inicial aunque el maestro del servicio siga vacío', async () => {
+  await renderLoaded();
+  fireEvent.click(screen.getByRole('button', { name: 'Nuevo', exact: true }));
+  const dialog = screen.getByRole('dialog');
+  fireEvent.change(within(dialog).getByPlaceholderText('Precio HNL'), { target: { value: '390' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Seguir editando' }));
+  expect(within(screen.getByRole('dialog')).getByPlaceholderText('Precio HNL')).toHaveValue(390);
+  expect(catalogApiMock.createAdminServicio).not.toHaveBeenCalled();
 });

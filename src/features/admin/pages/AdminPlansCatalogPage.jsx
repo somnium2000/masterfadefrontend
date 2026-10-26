@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useNavigate } from "react-router-dom";
 import {
   Loader2,
@@ -34,7 +35,7 @@ import { listAdminServicios } from "../lib/adminCatalogApi.js";
 import { listAdminCortesias } from "../lib/adminCortesiasApi.js";
 import { Button } from "../../../components/ui/button.jsx";
 import {
-  Dialog,
+  Dialog, DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -1813,7 +1814,7 @@ export default function AdminPlansCatalogPage() {
         </nav>
       ) : null}
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading && !open) closeForm(); }}>
+      <UnsavedChangesDialog values={{ formValues, formBranchId }} saving={formLoading} open={dialogOpen} onOpenChange={(open) => { if (!formLoading && !open) closeForm(); }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
@@ -1853,11 +1854,11 @@ export default function AdminPlansCatalogPage() {
           {loadingServices ? <p className="text-xs text-[var(--mf-text-2)] flex items-center gap-2"><Loader2 size={13} className="animate-spin" />Cargando opciones de servicios y cortesias...</p> : null}
           {formError ? <ErrorBanner message={formError} /> : null}
           <DialogFooter className="mt-2">
-            <Button variant="outline" onClick={closeForm} disabled={formLoading}>Cancelar</Button>
+            <DialogClose asChild><Button variant="outline" disabled={formLoading}>Cancelar</Button></DialogClose>
             <Button onClick={handleGuardar} disabled={formLoading || loadingServices || !validScope} className="gap-2 min-w-[120px]">{formLoading ? <Loader2 size={15} className="animate-spin" /> : null}{editTarget ? "Guardar cambios" : "Crear plan maestro"}</Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl">
