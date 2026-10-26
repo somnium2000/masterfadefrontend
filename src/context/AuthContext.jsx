@@ -193,6 +193,21 @@ export function AuthProvider({ children }) {
   const idleExpirationHandledRef = useRef(false);
   const backendTouchInFlightRef = useRef(false);
 
+  const profileSyncGeneration = sessionGenerationRef.current;
+  const syncClienteProfile = useCallback((cliente, expectedUserId) => {
+    if (!expectedUserId || !cliente?.id_cliente
+      || typeof cliente.telefono_principal !== 'string' || !cliente.telefono_principal.trim()
+      || (cliente.id_usuario && cliente.id_usuario !== expectedUserId)
+      || profileSyncGeneration !== sessionGenerationRef.current) return;
+    // AM: Solo el telefono confirmado de la misma identidad y epoca puede actualizar Auth.
+    setUser((current) => {
+      if (profileSyncGeneration !== sessionGenerationRef.current
+        || current?.id_usuario !== expectedUserId
+        || current?.cliente_id !== cliente.id_cliente) return current;
+      return { ...current, telefono_principal: cliente.telefono_principal };
+    });
+  }, [profileSyncGeneration]);
+
   const applyUserState = useCallback((nextUser) => {
     if (nextUser?.id_usuario) restrictRewardContextToUser(nextUser);
     setAdminReportesSessionScope({
@@ -561,6 +576,7 @@ export function AuthProvider({ children }) {
       logout,
       logoutError,
       invalidateSession,
+      syncClienteProfile,
     }),
     [
       token,
@@ -578,6 +594,7 @@ export function AuthProvider({ children }) {
       logout,
       logoutError,
       invalidateSession,
+      syncClienteProfile,
     ]
   );
 

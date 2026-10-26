@@ -68,7 +68,7 @@ export default function ClientePerfilPage() {
 function ClientePerfilContent({ identity }) {
   const navigate = useNavigate();
   const { error: notifyError } = useNotifications();
-  const { isAuthenticated, isHydrated, isHydrating, logout, user } = useAuth();
+  const { isAuthenticated, isHydrated, isHydrating, logout, user, syncClienteProfile } = useAuth();
   const outletContext = useOutletContext() || {};
   const { refreshClienteProfile } = outletContext;
 
@@ -143,6 +143,10 @@ function ClientePerfilContent({ identity }) {
 
   function handleProfileSaved(payload) {
     if (!mountedRef.current) return;
+    const [expectedUserId, expectedClienteId] = JSON.parse(identity);
+    if (!expectedUserId || !expectedClienteId || payload?.cliente?.id_cliente !== expectedClienteId
+      || (payload.cliente.id_usuario && payload.cliente.id_usuario !== expectedUserId)) return;
+    syncClienteProfile(payload.cliente, expectedUserId);
     setData(payload);
     if (refreshClienteProfile) {
       void refreshClienteProfile({ silent: true });
