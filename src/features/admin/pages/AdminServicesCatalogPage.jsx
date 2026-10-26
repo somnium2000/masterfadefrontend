@@ -422,6 +422,7 @@ export default function AdminServicesCatalogPage() {
     const isSuperAdmin = Array.isArray(roles) && roles.includes('super_admin');
     const canManageServiceBarberAssignments = isSuperAdmin && SERVICE_BARBER_ASSIGNMENTS_ENABLED;
     const notifications = useNotifications();
+    const notifyBranchError = notifications.error;
 
     // Sucursal activa según reglas
     const [sucursal, setSucursal] = useState('');
@@ -605,11 +606,11 @@ export default function AdminServicesCatalogPage() {
                 // AM: Evita bloqueo silencioso cuando no se pueden cargar sucursales para operar servicios.
                 const message = extractMessage(err) || 'No se pudieron cargar las sucursales.';
                 setBranchLoadError(message);
-                notifications.error(message, { dedupeKey: 'servicios-branches-error' });
+                notifyBranchError(message, { dedupeKey: 'servicios-branches-error' });
             })
             .finally(() => { if (!cancelled) setLoadingBranches(false); });
         return () => { cancelled = true; };
-    }, [notifications, permissionsKey]);
+    }, [notifyBranchError, permissionsKey]);
 
     useLayoutEffect(() => {
         // AM: Solo la respuesta administrativa vigente determina opciones y seleccion automatica.
