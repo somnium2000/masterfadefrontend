@@ -665,6 +665,7 @@ export default function AdminPackagesCatalogPage() {
     const navigate = useNavigate();
     const { branchIds, roles = [], user } = useAuth();
     const notifications = useNotifications();
+    const notifyBranchError = notifications.error;
     const isSuperAdmin = roles.includes('super_admin');
 
     const [allBranches, setAllBranches] = useState([]);
@@ -887,13 +888,13 @@ export default function AdminPackagesCatalogPage() {
         } catch {
             if (!isCurrent()) return;
             setAllBranches([]);
-            notifications.error('No se pudieron cargar las sucursales para operar paquetes.', {
+            notifyBranchError('No se pudieron cargar las sucursales para operar paquetes.', {
                 dedupeKey: 'paquetes-branches-error',
             });
         } finally {
             if (isCurrent()) setLoadingBranches(false);
         }
-    }, [notifications, permissionsKey]);
+    }, [notifyBranchError, permissionsKey]);
 
     useEffect(() => {
         void fetchBranches();
