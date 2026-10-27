@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Loader2, ShieldCheck } from "lucide-react";
 import {
   Dialog,
@@ -18,30 +18,85 @@ import {
   sanitizeAdminAccountDeletionError,
 } from "../lib/adminAccountDeletionFlow.js";
 
-async function getFreshAdminDecisionReauthToken({ expectedUserId, email, password }) {
-  if (!supabase) throw new Error("Supabase no esta configurado para confirmar tu identidad.");
-  const expected = String(expectedUserId || "").trim();
-  const sessionResult = await supabase.auth.getSession();
-  const currentSession = sessionResult?.data?.session;
-  if (currentSession?.user?.id && String(currentSession.user.id) === expected) {
-    const refreshed = await supabase.auth.refreshSession();
-    const refreshedSession = refreshed?.data?.session;
-    const refreshedUserId = String(refreshed?.data?.user?.id || refreshedSession?.user?.id || "").trim();
-    const token = String(refreshedSession?.access_token || "").trim();
-    if (refreshed?.error || refreshedUserId !== expected || !token) {
-      throw new Error("No se pudo confirmar tu identidad administrativa.");
-    }
-    return token;
+// AM: El popup devuelve solo evidencia efimera al opener del mismo origen; nunca persiste credenciales.
+function relayDeletionGoogleResult() {
+  const url = new URL(window.location.href), nonce = url.searchParams.get('mf_delete_reauth');
+  if (!nonce || !window.opener) return;
+  const hash = new URLSearchParams(url.hash.slice(1)), token = hash.get('access_token');
+  url.hash = ''; url.searchParams.delete('mf_delete_reauth');
+  window.history.replaceState({}, '', url.pathname + url.search);
+  window.opener.postMessage({ type: 'mf-delete-reauth', nonce, token, failed: Boolean(hash.get('error') || !token) }, url.origin);
+  window.close();
+}
+
+// AM: Una sesion existente o refresh nunca sustituye password/OAuth nuevos.
+async function getFreshAdminDecisionReauthToken({ expectedUserId, email, password, method = 'password', isCurrent = () => true }) {
+  if (!supabase || !expectedUserId || !isCurrent()) throw new Error('No se pudo validar la identidad de esta sesion.');
+  const startedAt = Math.floor(Date.now() / 1000);
+  let token = '';
+  if (method === 'google') {
+    const nonce = crypto.randomUUID(), origin = window.location.origin;
+    const popup = window.open('about:blank', nonce, 'popup,width=480,height=720');
+    if (!popup) throw new Error('Permite la ventana de Google para confirmar tu identidad.');
+    try {
+      token = await new Promise((resolve, reject) => {
+        let timer, settled = false;
+        const finish = (value, failed) => {
+          if (settled) return; settled = true;
+          window.removeEventListener('message', receive); window.clearInterval(timer);
+          popup.close();
+          if (failed) reject(new Error('No se pudo confirmar Google. Intenta nuevamente con la misma cuenta.'));
+          else resolve(value);
+        };
+        const receive = event => {
+          if (event.origin !== origin || event.source !== popup || event.data?.type !== 'mf-delete-reauth' || event.data.nonce !== nonce) return;
+          finish(event.data.token, event.data.failed || typeof event.data.token !== 'string' || !isCurrent());
+        };
+        window.addEventListener('message', receive);
+        timer = window.setInterval(() => {
+          if (popup.closed || !isCurrent() || Date.now() / 1000 - startedAt > 180) { finish('', true); return; }
+          // AM: El retorno al mismo origen tambien funciona si el proveedor usa Site URL como fallback.
+          try {
+            if (popup.location.origin !== origin) return;
+            const hash = new URLSearchParams(popup.location.hash.slice(1));
+            if (!hash.has('access_token') && !hash.has('error')) return;
+            const result = hash.get('access_token');
+            popup.history.replaceState({}, '', popup.location.pathname);
+            finish(result, Boolean(hash.get('error') || !result));
+          } catch { /* AM: Mientras Google sea otro origen, esperar sin leer sus datos. */ }
+        }, 250);
+        const redirect = new URL(window.location.href); redirect.hash = '';
+        redirect.searchParams.set('mf_delete_reauth', nonce);
+        // AM: Mantener el formulario en la ventana original y forzar seleccion real de cuenta Google.
+        void supabase.auth.signInWithOAuth({ provider: 'google', options: {
+          redirectTo: redirect.href, skipBrowserRedirect: true,
+          queryParams: { prompt: 'select_account', max_age: '0', login_hint: String(email || '') },
+        } }).then(result => {
+          if (settled) return;
+          if (result.error || !result.data?.url || !isCurrent()) finish('', true);
+          else popup.location.replace(result.data.url);
+        }).catch(() => finish('', true));
+      });
+    } finally { popup.close(); }
+  } else {
+    if (!password || !email) throw new Error('Ingresa tu contrasena para confirmar tu identidad.');
+    const result = await supabase.auth.signInWithPassword({ email: String(email).trim().toLowerCase(), password });
+    if (result.error || result.data?.user?.id !== expectedUserId) throw new Error('La contrasena no pudo confirmar la misma identidad.');
+    token = result.data?.session?.access_token || '';
   }
-  if (!password) throw new Error("Ingresa tu contrasena para confirmar tu identidad.");
-  const passwordResult = await supabase.auth.signInWithPassword({
-    email: String(email || "").trim().toLowerCase(),
-    password,
-  });
-  const userId = String(passwordResult?.data?.user?.id || "").trim();
-  const token = String(passwordResult?.data?.session?.access_token || "").trim();
-  if (passwordResult?.error || userId !== expected || !token) {
-    throw new Error("No se pudo confirmar tu identidad administrativa.");
+  if (!token || !isCurrent()) throw new Error('La identidad cambio. Inicia nuevamente la operacion.');
+  const verified = await supabase.auth.getUser(token);
+  if (verified.error || verified.data?.user?.id !== expectedUserId || !isCurrent()) throw new Error('La identidad confirmada no coincide con tu cuenta.');
+  let payload;
+  try { payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch { /* AM: Evidencia incompleta se rechaza. */ }
+  const now = Math.floor(Date.now() / 1000);
+  const events = Array.isArray(payload?.amr) ? payload.amr : [];
+  const google = verified.data.user.app_metadata?.provider === 'google' || verified.data.user.identities?.some(identity => identity.provider === 'google');
+  if (payload?.sub !== expectedUserId || !Number.isInteger(payload?.iat) || now - payload.iat > 300 || payload.iat > now + 60
+    || !events.some(event => event.method === (method === 'google' ? 'oauth' : 'password')
+      && (method !== 'google' || google) && Number.isInteger(event.timestamp)
+      && event.timestamp >= startedAt - 1 && event.timestamp <= now + 60 && event.timestamp <= payload.iat + 60)) {
+    throw new Error('Falta una autenticacion reciente valida. Confirma nuevamente tu identidad.');
   }
   return token;
 }
@@ -59,6 +114,8 @@ export default function AdminAccountDeletionDecisionDialog({
   const [phrase, setPhrase] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const [password, setPassword] = useState("");
+  const [reauthMethod, setReauthMethod] = useState("password");
+  useEffect(relayDeletionGoogleResult, []);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -103,7 +160,7 @@ export default function AdminAccountDeletionDecisionDialog({
         reauthToken = await getFreshAdminDecisionReauthToken({
           expectedUserId: user?.id_usuario,
           email: user?.email,
-          password,
+          password, method: reauthMethod, isCurrent: current,
         });
         if (!current()) return;
         await onApprove({
@@ -128,7 +185,7 @@ export default function AdminAccountDeletionDecisionDialog({
         setSubmitting(false);
       }
     }
-  }, [acknowledged, approving, canSubmit, comment, onOpenChange, reset, open, onApprove, onReject, password, phrase, user?.email, user?.id_usuario]);
+  }, [acknowledged, approving, canSubmit, comment, onOpenChange, reset, open, onApprove, onReject, password, reauthMethod, phrase, user?.email, user?.id_usuario]);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -170,10 +227,17 @@ export default function AdminAccountDeletionDecisionDialog({
               <input id="admin-account-delete-phrase" className="mf-input" value={phrase} disabled={submitting} onChange={(event) => setPhrase(event.target.value)} />
             </div>
             <div className="space-y-2">
+                  {/* AM: Cada intento obtiene evidencia nueva; Google conserva el formulario original. */}
+                  <label className="text-sm font-semibold" htmlFor="admin-account-delete-password-method">Metodo de reautenticacion</label>
+                  <select id="admin-account-delete-password-method" className="mf-input w-full" value={reauthMethod} disabled={submitting} onChange={event => { setReauthMethod(event.target.value); setPassword(''); }}>
+                    <option value="password">Contrasena</option><option value="google">Google</option>
+                  </select>
+                  <p className="text-xs text-[var(--mf-text-2)]">Google abrira una ventana nueva. Selecciona la misma cuenta para continuar aqui.</p>
+
               <label htmlFor="admin-account-delete-password" className="text-sm font-semibold text-[var(--mf-text)]">
-                Contrasena si tu sesion Supabase no esta disponible
+                Contrasena de la cuenta
               </label>
-              <input id="admin-account-delete-password" type="password" className="mf-input" value={password} disabled={submitting} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} />
+              <input id="admin-account-delete-password" hidden={reauthMethod === "google"} type="password" className="mf-input" value={password} disabled={submitting} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} />
             </div>
           </div>
         ) : null}
