@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { playBookingConfirmationSound } from './bookingConfirmationSound.js';
 import { CalendarDays, Copy, CreditCard, ReceiptText, UserRound, Loader2 } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import { usePublicBookingFlow } from './BookingFlowContext.jsx';
@@ -52,6 +53,9 @@ function resolveBookingCodes({ bookingSuccessResult, paymentResult, holdResult }
 
 export default function PublicBookingSuccessStep() {
   const [copyMessage, setCopyMessage] = useState('');
+  const soundPlayed = useRef(false);
+  const stopSound = useRef(null);
+  useEffect(() => () => stopSound.current?.(), []);
   const {
     bookingSuccessResult,
     bookingBlocksSummary,
@@ -96,11 +100,17 @@ export default function PublicBookingSuccessStep() {
     }
   }
 
+  function onCheckDrawn(event) {
+    if (event.animationName !== 'booking-check-draw' || !isConfirmedUi || soundPlayed.current) return;
+    soundPlayed.current = true;
+    stopSound.current = playBookingConfirmationSound();
+  }
+
   if (isConfirmedUi) return (
     <div className="citas-confirm-wrap booking-confirmation-wrap">
       <section className="booking-confirmation-card" aria-labelledby="booking-confirmation-title">
         <div className="booking-confirmation-seal" aria-hidden="true">
-          <svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="33" /><path pathLength="1" d="m25 40 10 10 21-23" /></svg>
+          <svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="33" /><path onAnimationEnd={onCheckDrawn} pathLength="1" d="m25 40 10 10 21-23" /></svg>
           <span className="booking-confirmation-spark spark-one">✦</span><span className="booking-confirmation-spark spark-two">✦</span>
         </div>
         <header className="booking-confirmation-heading">
