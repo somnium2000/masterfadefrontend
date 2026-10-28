@@ -15,7 +15,7 @@ import {
   Gem,
   Trophy,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import MasterfadeLogo from "../../../components/branding/MasterfadeLogo.jsx";
 import PremiumBottomNav from "../../../components/navigation/PremiumBottomNav.jsx";
@@ -34,8 +34,14 @@ import {
   createMembershipOrder,
   createMembershipPaymentIntent,
   getClientePlanEstado,
+  queryMembershipPaymentStatus,
 } from "../../cliente/lib/clienteApi.js";
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
+import useMembershipPaymentPolling from "../../plans/hooks/useMembershipPaymentPolling.js";
+import { getPixelPayCustomerMessage, isPixelPayUncertainError } from "../../payments/pixelPayPresentation.js";
+
+const PIXELPAY_PENDING_MESSAGE = getPixelPayCustomerMessage({ pending_confirmation: true });
+const PIXELPAY_DECLINED_MESSAGE = getPixelPayCustomerMessage({ customer_error_code: "PIXELPAY_PAYMENT_DECLINED" });
 
 const CATEGORY_ICONS = {
   1: Shield,
@@ -46,6 +52,34 @@ const CATEGORY_ICONS = {
 };
 
 const DEFAULT_MEMBERSHIP_SIMULATION_AMOUNT = 1.00;
+const PURCHASE_ATTEMPT_STORAGE_KEY = "mf_vip_purchase_attempt_v1";
+const PURCHASE_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function readStoredPurchaseAttempt() {
+  try {
+    const record = JSON.parse(window.sessionStorage.getItem(PURCHASE_ATTEMPT_STORAGE_KEY) || "null");
+    if (record?.version !== 1 || typeof record.identity !== "string"
+      || typeof record.offerId !== "string" || !record.offerId
+      || typeof record.branchId !== "string" || !PURCHASE_UUID_REGEX.test(record.branchId)
+      || typeof record.key !== "string" || !PURCHASE_UUID_REGEX.test(record.key)
+      || !["pending", "resolved", "terminal"].includes(record.status)) return null;
+    return { version: 1, identity: record.identity, offerId: record.offerId,
+      branchId: record.branchId, key: record.key, status: record.status,
+      orderSummary: record.orderSummary && typeof record.orderSummary === "object" ? record.orderSummary : null,
+      paymentIntent: record.paymentIntent && typeof record.paymentIntent === "object" ? record.paymentIntent : null };
+  } catch {
+    return null;
+  }
+}
+
+function storePurchaseAttempt(record) {
+  try {
+    if (record) window.sessionStorage.setItem(PURCHASE_ATTEMPT_STORAGE_KEY, JSON.stringify(record));
+    else window.sessionStorage.removeItem(PURCHASE_ATTEMPT_STORAGE_KEY);
+  } catch {
+    // AM: La referencia del componente conserva el intento si sessionStorage no esta disponible.
+  }
+}
 
 function readEnvFlag(value, fallback = false) {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -216,11 +250,23 @@ function PlanCard({
 
 export default function MembershipPlansPage() {
   const navigate = useNavigate();
-  const { isAuthenticated, roles = [] } = useAuth();
+  const { isAuthenticated, roles = [], user, clienteId, isHydrating, isHydrated } = useAuth();
   const notifications = useNotifications();
   const isMountedRef = useRef(true);
   const selectedBranchRef = useRef("");
+  const validBranchIdsRef = useRef(new Set());
+  const branchRequestRef = useRef(0);
+  const planRequestRef = useRef(0);
+  const orderCreationOfferRef = useRef("");
+  const purchaseAttemptRef = useRef(null);
   const isClienteSession = Boolean(isAuthenticated && Array.isArray(roles) && roles.includes("cliente"));
+  const userId = String(user?.id_usuario || "").trim();
+  const authenticatedClienteId = String(clienteId || user?.cliente_id || "").trim();
+  const purchaseIdentity = isClienteSession && PURCHASE_UUID_REGEX.test(userId) && PURCHASE_UUID_REGEX.test(authenticatedClienteId)
+    ? `${userId}:${authenticatedClienteId}` : "";
+  const purchaseIdentityRef = useRef(purchaseIdentity);
+  const purchaseGenerationRef = useRef(0);
+  const membershipRequestRef = useRef(0);
 
   const [status, setStatus] = useState("loading");
   const [branches, setBranches] = useState([]);
@@ -230,6 +276,7 @@ export default function MembershipPlansPage() {
   const [membershipState, setMembershipState] = useState(null);
   const [membershipLoading, setMembershipLoading] = useState(false);
   const [processingPlanOfferId, setProcessingPlanOfferId] = useState("");
+  const [terminalOrderOfferId, setTerminalOrderOfferId] = useState("");
 
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [purchaseStep, setPurchaseStep] = useState("summary");
@@ -238,9 +285,86 @@ export default function MembershipPlansPage() {
   const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [purchaseErrorMessage, setPurchaseErrorMessage] = useState("");
   const [purchaseCompleted, setPurchaseCompleted] = useState(false);
+  const [purchasePendingConfirmation, setPurchasePendingConfirmation] = useState(false);
 
   const scrollRef = useRef(null);
   const showMembershipSimulator = shouldShowMembershipSimulator();
+
+  useLayoutEffect(() => {
+    const previousIdentity = purchaseAttemptRef.current?.identity || purchaseIdentityRef.current;
+    // AM: Una nueva sesion invalida tambien respuestas de la misma cuenta anterior al logout.
+    if (previousIdentity && previousIdentity !== purchaseIdentity) {
+      purchaseGenerationRef.current += 1;
+      membershipRequestRef.current += 1;
+      orderCreationOfferRef.current = "";
+      setProcessingPlanOfferId("");
+      setPurchaseModalOpen(false);
+      setPurchaseOrderSummary(null);
+      setMembershipPaymentIntent(null);
+      setPurchaseStep("summary");
+      setPurchaseLoading(false);
+      setPurchaseErrorMessage("");
+      setPurchaseCompleted(false);
+      setMembershipState(null);
+      setMembershipLoading(false);
+    }
+    purchaseIdentityRef.current = purchaseIdentity;
+    if (isHydrating || isHydrated === false) return;
+    const stored = readStoredPurchaseAttempt();
+    const candidate = purchaseAttemptRef.current?.identity === purchaseIdentity ? purchaseAttemptRef.current : stored;
+    if (!purchaseIdentity) {
+      purchaseAttemptRef.current = null;
+      setTerminalOrderOfferId("");
+      // AM: Un reload publico no hidrata Auth; ignorar el registro hasta confirmar identidad.
+      if (previousIdentity || isAuthenticated) storePurchaseAttempt(null);
+      return;
+    }
+    if (candidate?.identity !== purchaseIdentity) {
+      purchaseAttemptRef.current = null;
+      setTerminalOrderOfferId("");
+      storePurchaseAttempt(null);
+      return;
+    }
+    purchaseAttemptRef.current = candidate;
+    setTerminalOrderOfferId(candidate.status === "terminal" ? candidate.offerId : "");
+    if (candidate.orderSummary && candidate.paymentIntent) {
+      setPurchaseOrderSummary(candidate.orderSummary);
+      setMembershipPaymentIntent(candidate.paymentIntent);
+      setPurchasePendingConfirmation(true);
+      setPurchaseErrorMessage(PIXELPAY_PENDING_MESSAGE);
+      setPurchaseStep("payment");
+      setPurchaseModalOpen(true);
+    }
+  }, [purchaseIdentity, isAuthenticated, isHydrating, isHydrated]);
+
+  function getPurchaseAttempt(offerId) {
+    const current = purchaseAttemptRef.current;
+    if (current?.identity === purchaseIdentity && current.offerId === offerId
+      && current.branchId === selectedBranchRef.current
+      && ["pending", "resolved"].includes(current.status)) return current;
+    let key;
+    try {
+      key = globalThis.crypto.randomUUID();
+    } catch {
+      throw Object.assign(new Error(), { code: "PURCHASE_KEY_UNAVAILABLE" });
+    }
+    if (typeof key !== "string" || !PURCHASE_UUID_REGEX.test(key)) {
+      throw Object.assign(new Error(), { code: "PURCHASE_KEY_UNAVAILABLE" });
+    }
+    const attempt = { version: 1, identity: purchaseIdentity, offerId, branchId: selectedBranchRef.current, key, status: "pending" };
+    purchaseAttemptRef.current = attempt;
+    storePurchaseAttempt(attempt);
+    setTerminalOrderOfferId("");
+    return attempt;
+  }
+
+  function markPurchaseAttempt(attempt, status, extra = {}) {
+    if (!attempt || purchaseAttemptRef.current?.key !== attempt.key || purchaseIdentityRef.current !== attempt.identity) return;
+    const updated = { ...attempt, ...extra, status };
+    purchaseAttemptRef.current = updated;
+    storePurchaseAttempt(updated);
+    setTerminalOrderOfferId(status === "terminal" ? attempt.offerId : "");
+  }
 
   const resetPurchaseFlow = useCallback(() => {
     setPurchaseStep("summary");
@@ -249,22 +373,34 @@ export default function MembershipPlansPage() {
     setPurchaseLoading(false);
     setPurchaseErrorMessage("");
     setPurchaseCompleted(false);
+    setPurchasePendingConfirmation(false);
     setPurchaseModalOpen(false);
   }, []);
 
+  const discardPurchaseFlow = useCallback(() => {
+    purchaseAttemptRef.current = null;
+    storePurchaseAttempt(null);
+    resetPurchaseFlow();
+  }, [resetPurchaseFlow]);
+
+  const cancelPurchaseFlow = useCallback(() => {
+    if (membershipPaymentIntent) resetPurchaseFlow();
+    else discardPurchaseFlow();
+  }, [discardPurchaseFlow, membershipPaymentIntent, resetPurchaseFlow]);
+
   const loadPlansByBranch = useCallback(async (branchId) => {
     const safeBranchId = String(branchId || "").trim();
-    if (!safeBranchId) {
-      setPlans([]);
-      setStatus("idle");
-      return;
-    }
+    if (!safeBranchId || !validBranchIdsRef.current.has(safeBranchId)
+      || selectedBranchRef.current !== safeBranchId) return;
 
+    const requestId = ++planRequestRef.current;
+    const isCurrent = () => isMountedRef.current && requestId === planRequestRef.current
+      && selectedBranchRef.current === safeBranchId && validBranchIdsRef.current.has(safeBranchId);
     setStatus("loading");
     setErrorMessage("");
     try {
       const response = await listPublicPlansByBranch(safeBranchId);
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       const rawPlans = Array.isArray(response?.plans) ? response.plans : [];
       const normalizedPlans = rawPlans
         .map(normalizePublicPlan)
@@ -275,50 +411,60 @@ export default function MembershipPlansPage() {
         });
       setPlans(normalizedPlans);
       setStatus("success");
-    } catch (error) {
-      if (!isMountedRef.current) return;
-      setErrorMessage(error?.data?.error?.message || error?.message || "No se pudo cargar el catalogo de planes.");
+    } catch {
+      if (!isCurrent()) return;
+      setErrorMessage("No se pudo cargar el catalogo de planes.");
       setStatus("error");
     }
   }, []);
 
+  const loadBranches = useCallback(async () => {
+    const requestId = ++branchRequestRef.current;
+    setStatus("loading");
+    setErrorMessage("");
+    try {
+      const branchResult = await listPublicCatalogBranches();
+      if (!isMountedRef.current || requestId !== branchRequestRef.current) return;
+      const nextBranches = Array.isArray(branchResult?.branches)
+        ? branchResult.branches.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
+        : [];
+      validBranchIdsRef.current = new Set(nextBranches.map((branch) => String(branch.id_sucursal).trim()));
+      setBranches(nextBranches);
+      setStatus(nextBranches.length ? "idle" : "noBranches");
+    } catch {
+      if (!isMountedRef.current || requestId !== branchRequestRef.current) return;
+      setErrorMessage("No se pudieron cargar las sucursales.");
+      setStatus("branchesError");
+    }
+  }, []);
+
   const loadMembershipState = useCallback(async () => {
-    if (!isClienteSession) {
+    const requestId = ++membershipRequestRef.current;
+    const generation = purchaseGenerationRef.current;
+    const isCurrent = () => isMountedRef.current && requestId === membershipRequestRef.current
+      && generation === purchaseGenerationRef.current && purchaseIdentityRef.current === purchaseIdentity;
+    if (!purchaseIdentity || isHydrating || isHydrated === false) {
       setMembershipState(null);
+      setMembershipLoading(false);
       return;
     }
     setMembershipLoading(true);
     try {
       const payload = await getClientePlanEstado();
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       setMembershipState(payload);
     } catch {
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       setMembershipState(null);
     } finally {
-      if (isMountedRef.current) setMembershipLoading(false);
+      if (isCurrent()) setMembershipLoading(false);
     }
-  }, [isClienteSession]);
+  }, [purchaseIdentity, isHydrating, isHydrated]);
 
   useEffect(() => {
     isMountedRef.current = true;
-    void (async () => {
-      setStatus("loading");
-      setErrorMessage("");
-      try {
-        const branchResult = await listPublicCatalogBranches();
-        if (!isMountedRef.current) return;
-        const nextBranches = Array.isArray(branchResult?.branches)
-          ? branchResult.branches.filter((branch) => branch?.id_sucursal)
-          : [];
-        setBranches(nextBranches);
-        setStatus("idle");
-      } catch (error) {
-        if (!isMountedRef.current) return;
-        setErrorMessage(error?.data?.error?.message || error?.message || "No se pudieron cargar las sucursales.");
-        setStatus("error");
-      }
-    })();
+    let active = true;
+    queueMicrotask(() => { if (active) void loadBranches(); });
 
     const unsubscribe = subscribeCatalogSync(() => {
       if (!isMountedRef.current) return;
@@ -328,19 +474,30 @@ export default function MembershipPlansPage() {
     });
 
     return () => {
+      active = false;
       isMountedRef.current = false;
+      purchaseGenerationRef.current += 1;
+      membershipRequestRef.current += 1;
+      branchRequestRef.current += 1;
+      planRequestRef.current += 1;
       unsubscribe();
     };
-  }, [loadPlansByBranch]);
+  }, [loadBranches, loadPlansByBranch]);
 
   useEffect(() => {
     void loadMembershipState();
   }, [loadMembershipState]);
 
   function handleBranchChange(nextBranchId) {
+    if (orderCreationOfferRef.current) return;
     const safeId = String(nextBranchId || "").trim();
+    if (!validBranchIdsRef.current.has(safeId) || safeId === selectedBranchRef.current) return;
+    planRequestRef.current += 1;
     selectedBranchRef.current = safeId;
     setSelectedBranchId(safeId);
+    setPlans([]);
+    setStatus("loading");
+    setErrorMessage("");
     void loadPlansByBranch(safeId);
   }
 
@@ -358,6 +515,7 @@ export default function MembershipPlansPage() {
   }
 
   async function handlePlanSelect(plan) {
+    if (!isMountedRef.current || orderCreationOfferRef.current) return;
     if (!VIP_MEMBERSHIPS_PURCHASE_ENABLED) return;
 
     if (!selectedBranchId) {
@@ -386,66 +544,172 @@ export default function MembershipPlansPage() {
       notifications.warning("Este plan no tiene oferta valida para esta sucursal.");
       return;
     }
+    if (!purchaseIdentity || purchaseIdentityRef.current !== purchaseIdentity || isHydrating || isHydrated === false) {
+      notifications.error("No se pudo identificar tu perfil de cliente. Inicia sesión nuevamente.");
+      return;
+    }
 
+    // AM: Exclusion inmediata antes del render para conservar la oferta y sucursal de origen.
+    orderCreationOfferRef.current = planBranchOfferId;
+    const generation = purchaseGenerationRef.current;
     setProcessingPlanOfferId(planBranchOfferId);
+    let attempt;
     try {
-      const orderResponse = await createMembershipOrder(planBranchOfferId);
+      attempt = getPurchaseAttempt(planBranchOfferId);
+      const orderResponse = await createMembershipOrder(planBranchOfferId, { idempotencyKey: attempt.key });
+      if (!isMountedRef.current || generation !== purchaseGenerationRef.current || purchaseIdentityRef.current !== attempt.identity
+        || purchaseAttemptRef.current?.key !== attempt.key) return;
       const summary = orderResponse?.data || orderResponse;
+      if (!summary || typeof summary.id_order !== "string" || !summary.id_order.trim()) {
+        throw Object.assign(new Error(), { code: "PURCHASE_SUMMARY_UNAVAILABLE" });
+      }
       setPurchaseOrderSummary(summary);
-      setMembershipPaymentIntent(null);
-      setPurchaseErrorMessage("");
-      setPurchaseStep("summary");
+      const recoveredIntent = summary?.pending_reconciliation && summary?.id_payment_intent
+        ? { id_payment_intent: summary.id_payment_intent, estado_intent_codigo: "pendiente_confirmacion" }
+        : null;
+      setMembershipPaymentIntent(recoveredIntent);
+      setPurchasePendingConfirmation(Boolean(recoveredIntent));
+      setPurchaseErrorMessage(recoveredIntent
+        ? PIXELPAY_PENDING_MESSAGE : "");
+      setPurchaseStep(recoveredIntent ? "payment" : "summary");
       setPurchaseCompleted(false);
       setPurchaseModalOpen(true);
+      markPurchaseAttempt(attempt, "resolved", { orderSummary: summary, paymentIntent: recoveredIntent });
     } catch (error) {
-      notifications.error(error?.data?.error?.message || error?.message || "No se pudo crear la orden de compra.");
+      if (!isMountedRef.current || generation !== purchaseGenerationRef.current || purchaseIdentityRef.current !== purchaseIdentity
+        || (attempt && purchaseAttemptRef.current?.key !== attempt.key)) return;
+      const code = error?.data?.error?.code || error?.code;
+      if (["MEMBERSHIP_PURCHASE_IDEMPOTENCY_CONFLICT", "MEMBERSHIP_PURCHASE_IDEMPOTENCY_ORDER_UNAVAILABLE"].includes(code)) {
+        markPurchaseAttempt(attempt, "terminal");
+        notifications.error("Esta operación no puede retomarse. Pulsa Iniciar nueva compra para comenzar otro intento.");
+        return;
+      }
+      if (code === "MEMBERSHIP_PURCHASE_IDEMPOTENCY_SCHEMA_NOT_READY") {
+        notifications.warning("Las compras VIP no están disponibles temporalmente. Intenta más tarde.");
+        return;
+      }
+      if (code === "PURCHASE_KEY_UNAVAILABLE") {
+        notifications.error("No se pudo proteger esta compra. Utiliza un navegador compatible e intenta nuevamente.");
+      } else if (code === "PURCHASE_SUMMARY_UNAVAILABLE" || error?.status === 0
+        || ["NETWORK_UNAVAILABLE", "ETIMEDOUT"].includes(code)
+        || ["AbortError", "TimeoutError"].includes(error?.name)) {
+        notifications.error("No se pudo confirmar la compra. Reintenta la misma oferta para recuperar la operación.");
+      } else if (code === "MEMBERSHIP_PURCHASE_BRANCH_INACTIVE") {
+        notifications.error("Sucursal no disponible.");
+      } else {
+        notifications.error("No se pudo crear la orden de compra. Reintenta la misma oferta.");
+      }
     } finally {
-      setProcessingPlanOfferId("");
+      if (isMountedRef.current && generation === purchaseGenerationRef.current) {
+        orderCreationOfferRef.current = "";
+        setProcessingPlanOfferId("");
+      }
     }
   }
 
   async function handleContinueToPayment() {
     const orderId = String(purchaseOrderSummary?.id_order || "").trim();
     if (!orderId || purchaseLoading) return;
+    const generation = purchaseGenerationRef.current;
+    const isCurrent = () => isMountedRef.current && generation === purchaseGenerationRef.current;
 
     setPurchaseLoading(true);
     setPurchaseErrorMessage("");
     try {
       const intentResponse = await createMembershipPaymentIntent(orderId);
+      if (!isCurrent()) return;
       const intentData = intentResponse?.data || intentResponse;
       setMembershipPaymentIntent(intentData);
+      if (purchaseAttemptRef.current) {
+        markPurchaseAttempt(purchaseAttemptRef.current, "resolved", {
+          orderSummary: purchaseOrderSummary,
+          paymentIntent: intentData,
+        });
+      }
+      const isPending = String(intentData?.estado_intent_codigo || "").trim().toLowerCase() === "pendiente_confirmacion";
+      setPurchasePendingConfirmation(isPending);
+      if (isPending) setPurchaseErrorMessage(PIXELPAY_PENDING_MESSAGE);
       setPurchaseStep("payment");
     } catch (error) {
-      setPurchaseErrorMessage(error?.data?.error?.message || "No se pudo iniciar el pago del plan.");
+      if (!isCurrent()) return;
+      setPurchaseErrorMessage(getPixelPayCustomerMessage(error));
     } finally {
-      setPurchaseLoading(false);
+      if (isCurrent()) setPurchaseLoading(false);
     }
   }
 
-  async function handleConfirmPayment() {
-    if (purchaseLoading || purchaseCompleted) return;
+  async function handleConfirmPayment(paymentDetails = {}) {
+    if (purchaseLoading || purchaseCompleted || purchasePendingConfirmation) return;
     const paymentIntentId = String(membershipPaymentIntent?.id_payment_intent || "").trim();
     if (!paymentIntentId) {
       setPurchaseErrorMessage("No hay intent de pago disponible para confirmar.");
       return;
     }
+    const generation = purchaseGenerationRef.current;
+    const isCurrent = () => isMountedRef.current && generation === purchaseGenerationRef.current;
 
     setPurchaseLoading(true);
     setPurchaseErrorMessage("");
     try {
-      await confirmMembershipPayment(paymentIntentId, {
+      const paymentResult = await confirmMembershipPayment(paymentIntentId, {
+        ...paymentDetails,
         monto_prueba_hnl: showMembershipSimulator ? DEFAULT_MEMBERSHIP_SIMULATION_AMOUNT : undefined,
       });
+      if (paymentResult?.pending_confirmation) {
+        setPurchasePendingConfirmation(true);
+        setPurchaseErrorMessage(PIXELPAY_PENDING_MESSAGE);
+        return;
+      }
+      if (paymentResult?.estado_intent_codigo === "fallido") {
+        setPurchaseErrorMessage(getPixelPayCustomerMessage(paymentResult));
+        return;
+      }
+      if (!isCurrent()) return;
       setPurchaseCompleted(true);
       setPurchaseStep("success");
       await loadMembershipState();
+      if (!isCurrent()) return;
       notifications.success("Pago confirmado. Tu plan ya esta activo.");
     } catch (error) {
-      setPurchaseErrorMessage(error?.data?.error?.message || "No se pudo confirmar el pago del plan.");
+      if (!isCurrent()) return;
+      if (isPixelPayUncertainError(error)) {
+        setPurchasePendingConfirmation(true);
+        setPurchaseErrorMessage(getPixelPayCustomerMessage(error));
+        // AM: El polling existente consulta el estado persistido sin solapar otra solicitud.
+        return;
+      }
+      setPurchaseErrorMessage(getPixelPayCustomerMessage(error));
     } finally {
-      setPurchaseLoading(false);
+      if (isCurrent()) setPurchaseLoading(false);
     }
   }
+
+  const handleMembershipPollResult = useCallback((result) => {
+    const normalized = String(result?.normalized_status || "PENDIENTE").toUpperCase();
+    if (normalized === "PAGADO") {
+      setPurchasePendingConfirmation(false);
+      setPurchaseCompleted(true);
+      setPurchaseStep("success");
+      setPurchaseErrorMessage("");
+      purchaseAttemptRef.current = null;
+      storePurchaseAttempt(null);
+      void loadMembershipState();
+      return;
+    }
+    if (normalized === "RECHAZADO") {
+      setPurchasePendingConfirmation(false);
+      setPurchaseErrorMessage(PIXELPAY_DECLINED_MESSAGE);
+      return;
+    }
+    setPurchaseErrorMessage(PIXELPAY_PENDING_MESSAGE);
+  }, [loadMembershipState]);
+
+  useMembershipPaymentPolling({
+    active: purchasePendingConfirmation,
+    idPaymentIntent: membershipPaymentIntent?.id_payment_intent,
+    queryStatus: queryMembershipPaymentStatus,
+    onResult: handleMembershipPollResult,
+  });
 
   const showCarouselControls = plans.length > 3;
   const spotlightCategory = plans.reduce(
@@ -522,6 +786,7 @@ export default function MembershipPlansPage() {
                     key={branch.id_sucursal}
                     type="button"
                     onClick={() => handleBranchChange(branch.id_sucursal)}
+                    disabled={Boolean(processingPlanOfferId)}
                     className={[
                       "inline-flex min-h-10 w-full items-center justify-between gap-2 rounded-full border px-4 py-2 text-sm transition-all duration-200 sm:justify-start lg:w-auto",
                       isActive
@@ -539,10 +804,16 @@ export default function MembershipPlansPage() {
             </div>
           </div>
 
-          {!selectedBranchId && status !== "error" ? (
+          {!selectedBranchId && status === "idle" ? (
             <div className="mf-glass-surface mt-8 rounded-[28px] p-6 text-center">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Sucursal requerida</p>
               <p className="mt-4 text-sm leading-6 text-[var(--mf-text-2)]">Debes seleccionar una sucursal para ver los planes disponibles.</p>
+            </div>
+          ) : null}
+
+          {status === "noBranches" ? (
+            <div className="mf-glass-surface mt-8 rounded-[28px] p-6 text-center">
+              <p className="text-sm text-[var(--mf-text-2)]">No hay sucursales disponibles.</p>
             </div>
           ) : null}
 
@@ -555,11 +826,11 @@ export default function MembershipPlansPage() {
             </div>
           ) : null}
 
-          {status === "error" ? (
+          {status === "error" || status === "branchesError" ? (
             <div className="mf-glass-surface mt-8 rounded-[28px] p-6 text-center">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Error de membresias</p>
               <p className="mt-4 text-sm leading-6 text-[var(--mf-text-2)]">{errorMessage}</p>
-              <button type="button" onClick={() => void loadPlansByBranch(selectedBranchRef.current)} className="mf-accent-gradient mt-6 inline-flex h-11 items-center justify-center rounded-2xl px-5 text-sm font-semibold shadow-[var(--mf-shadow-accent)]">Reintentar</button>
+              <button type="button" onClick={() => void (status === "branchesError" ? loadBranches() : loadPlansByBranch(selectedBranchRef.current))} className="mf-accent-gradient mt-6 inline-flex h-11 items-center justify-center rounded-2xl px-5 text-sm font-semibold shadow-[var(--mf-shadow-accent)]">Reintentar</button>
             </div>
           ) : null}
 
@@ -605,7 +876,7 @@ export default function MembershipPlansPage() {
                           plan={plan}
                           onSelect={handlePlanSelect}
                           isSpotlight={normalizePlanCategory(plan?.categoria_nivel, 1) === spotlightCategory}
-                          ctaLabel={membershipCtaLabel}
+                          ctaLabel={terminalOrderOfferId === planOfferId ? "Iniciar nueva compra" : membershipCtaLabel}
                           loading={Boolean(planOfferId) && processingPlanOfferId === planOfferId}
                           disabled={Boolean(processingPlanOfferId && planOfferId && processingPlanOfferId !== planOfferId)}
                           purchaseLocked={!VIP_MEMBERSHIPS_PURCHASE_ENABLED}
@@ -637,11 +908,12 @@ export default function MembershipPlansPage() {
         paymentIntent={membershipPaymentIntent}
         loading={purchaseLoading}
         errorMessage={purchaseErrorMessage}
-        disableClose={purchaseLoading}
-        onCancel={resetPurchaseFlow}
+        disableClose={purchaseLoading || purchasePendingConfirmation}
+        pendingConfirmation={purchasePendingConfirmation}
+        onCancel={cancelPurchaseFlow}
         onContinueToPayment={handleContinueToPayment}
         onConfirmPayment={handleConfirmPayment}
-        onFinish={resetPurchaseFlow}
+        onFinish={discardPurchaseFlow}
       />
 
       <PremiumBottomNav

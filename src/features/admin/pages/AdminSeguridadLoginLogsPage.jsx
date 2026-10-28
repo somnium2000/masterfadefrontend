@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../../context/AuthContext.jsx';
 import { Filter, RotateCcw, Search, Shield } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
@@ -110,6 +111,8 @@ function formatReasonCode(value) {
     LOGIN_PROVIDER_ERROR: 'Error de proveedor',
     LOGIN_INTERNAL_ERROR: 'Error interno controlado',
     LOGIN_SESSION_LIMIT: 'Limite de sesion',
+    LOGIN_RATE_LIMITED: 'Login limitado por demasiados intentos',
+    LOGIN_TEMPORARILY_LOCKED: 'Usuario bloqueado temporalmente',
   };
   return dictionary[code] || 'Evento controlado';
 }
@@ -148,6 +151,7 @@ function safeStringify(value) {
 }
 
 export default function AdminSeguridadLoginLogsPage() {
+  const { roles, user } = useAuth();
   const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: DEFAULT_FILTERS.limit, total: 0, total_pages: 1 });
@@ -161,6 +165,24 @@ export default function AdminSeguridadLoginLogsPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [detailData, setDetailData] = useState(null);
+  const detailGenerationRef = useRef(0);
+  const detailControllerRef = useRef(null);
+  const detailContext = JSON.stringify([roles, user?.id_usuario]);
+
+  useLayoutEffect(() => {
+    detailGenerationRef.current += 1;
+    detailControllerRef.current?.abort();
+    detailControllerRef.current = null;
+    setDetailOpen(false);
+    setDetailData(null);
+    setDetailError('');
+    setDetailLoading(false);
+    return () => {
+      detailGenerationRef.current += 1;
+      detailControllerRef.current?.abort();
+      detailControllerRef.current = null;
+    };
+  }, [detailContext]);
 
   const hasActiveFilters = useMemo(() => (
     filters.resultado !== DEFAULT_FILTERS.resultado
@@ -172,7 +194,26 @@ export default function AdminSeguridadLoginLogsPage() {
     || Number(filters.limit) !== Number(DEFAULT_FILTERS.limit)
   ), [filters]);
 
+  const listContext = JSON.stringify([filters, page, roles, user?.id_usuario]);
+  const listContextRef = useRef(listContext);
+  const listGenerationRef = useRef(0);
+  const listMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    listMountedRef.current = true;
+    listContextRef.current = listContext;
+    listGenerationRef.current += 1;
+    setRows([]);
+    setPagination({ page: 1, limit: DEFAULT_FILTERS.limit, total: 0, total_pages: 1 });
+    setError('');
+    setLoading(false);
+    return () => { listMountedRef.current = false; listGenerationRef.current += 1; };
+  }, [listContext]);
+
   const fetchRows = useCallback(async () => {
+    if (!listMountedRef.current || listContextRef.current !== listContext) return;
+    const generation = ++listGenerationRef.current;
+    const isCurrent = () => listMountedRef.current && listGenerationRef.current === generation && listContextRef.current === listContext;
+    if (!roles.some(role => ['super_admin', 'security_admin', 'security_auditor', 'root'].includes(role))) return;
     setLoading(true);
     setError('');
     try {
@@ -187,9 +228,11 @@ export default function AdminSeguridadLoginLogsPage() {
         toAt: filters.toAt,
       });
       const parsed = unwrapCollectionResponse(response);
+      if (!isCurrent()) return;
       setRows(parsed.items);
       setPagination(parsed.pagination);
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -202,9 +245,9 @@ export default function AdminSeguridadLoginLogsPage() {
       setRows([]);
       setPagination({ page: 1, limit: filters.limit, total: 0, total_pages: 1 });
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [filters, navigate, page]);
+  }, [filters, navigate, page, listContext, roles]);
 
   useEffect(() => {
     void fetchRows();
@@ -226,15 +269,24 @@ export default function AdminSeguridadLoginLogsPage() {
   }
 
   async function openDetail(idLoginLog) {
-    if (!idLoginLog) return;
+    if (!idLoginLog || !listMountedRef.current
+      || !roles.some(role => ['super_admin', 'security_admin', 'security_auditor', 'root'].includes(role))) return;
+    const generation = ++detailGenerationRef.current;
+    detailControllerRef.current?.abort();
+    const controller = new AbortController();
+    detailControllerRef.current = controller;
+    const isCurrent = () => listMountedRef.current && detailGenerationRef.current === generation
+      && detailControllerRef.current === controller && !controller.signal.aborted;
     setDetailOpen(true);
     setDetailLoading(true);
     setDetailError('');
     setDetailData(null);
     try {
-      const response = await getAdminSecurityLoginLogDetail(idLoginLog);
+      const response = await getAdminSecurityLoginLogDetail(idLoginLog, { signal: controller.signal });
+      if (!isCurrent()) return;
       setDetailData(unwrapSingleResponse(response));
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -245,7 +297,10 @@ export default function AdminSeguridadLoginLogsPage() {
       }
       setDetailError('No fue posible cargar el detalle del intento.');
     } finally {
-      setDetailLoading(false);
+      if (isCurrent()) {
+        detailControllerRef.current = null;
+        setDetailLoading(false);
+      }
     }
   }
 
@@ -486,6 +541,9 @@ export default function AdminSeguridadLoginLogsPage() {
         onOpenChange={(open) => {
           setDetailOpen(open);
           if (!open) {
+            detailGenerationRef.current += 1;
+            detailControllerRef.current?.abort();
+            detailControllerRef.current = null;
             setDetailData(null);
             setDetailError('');
             setDetailLoading(false);

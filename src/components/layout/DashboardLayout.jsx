@@ -15,11 +15,15 @@ import { getRoleLabel, resolveHomePath } from '../../features/home/lib/roleRouti
 import PremiumBottomNav from '../navigation/PremiumBottomNav.jsx';
 
 // ── Definición de módulos del sidebar ────────────────────────────────────────────────────────
-function buildNavModules(basePath, role) {
+export function buildNavModules(basePath, role, roles = []) {
     const isBarbero = role === 'barbero';
     const isCliente = role === 'cliente';
     const isSecurityRole = role === 'security_admin' || role === 'security_auditor';
     const canSeeSecurityModule = role === 'super_admin';
+    const canSeeSecurityAudit = roles.includes('root');
+    const hasCombinedBarberRole = !roles.includes('root') && roles.includes('barbero')
+        && (roles.includes('super_admin') || roles.includes('admin'));
+    const administrationPath = roles.includes('super_admin') ? '/home/super' : '/home/admin';
 
     if (isBarbero) {
         return [
@@ -44,6 +48,13 @@ function buildNavModules(basePath, role) {
                 path: `${basePath}/perfil`,
                 subItems: null,
             },
+            ...(hasCombinedBarberRole ? [{
+                id: 'volver-administracion',
+                label: 'Volver a Administración',
+                icon: Building2,
+                path: administrationPath,
+                subItems: null,
+            }] : []),
         ];
     }
 
@@ -58,7 +69,9 @@ function buildNavModules(basePath, role) {
                     { id: 'seg-login-logs', label: 'Login Logs', path: `${basePath}/seguridad/login-logs` },
                     { id: 'seg-sesiones', label: 'Sesiones', path: `${basePath}/seguridad/sesiones` },
                     { id: 'seg-usuarios', label: 'Usuarios', path: `${basePath}/seguridad/usuarios` },
-                    { id: 'seg-alertas', label: 'Alertas', path: `${basePath}/seguridad/alertas` },
+                    ...(canSeeSecurityAudit
+                        ? [{ id: 'seg-alertas', label: 'Auditoria', path: `${basePath}/seguridad/alertas` }]
+                        : []),
                 ],
             },
         ];
@@ -108,6 +121,7 @@ function buildNavModules(basePath, role) {
                 { id: 'empleados', label: 'Empleados', path: `${basePath}/empleados` },
                 { id: 'clientes', label: 'Clientes', path: `${basePath}/clientes` },
                 { id: 'usuarios', label: 'Usuarios', path: `${basePath}/usuarios` },
+                { id: 'eliminacion-cuentas', label: 'Eliminacion de cuentas', path: `${basePath}/eliminacion-cuentas` },
             ],
         },
         {
@@ -147,11 +161,13 @@ function buildNavModules(basePath, role) {
                     { id: 'seg-login-logs', label: 'Login Logs', path: `${basePath}/seguridad/login-logs` },
                     { id: 'seg-sesiones', label: 'Sesiones', path: `${basePath}/seguridad/sesiones` },
                     { id: 'seg-usuarios', label: 'Usuarios', path: `${basePath}/seguridad/usuarios` },
-                    { id: 'seg-alertas', label: 'Alertas', path: `${basePath}/seguridad/alertas` },
+                    ...(canSeeSecurityAudit
+                        ? [{ id: 'seg-alertas', label: 'Auditoria', path: `${basePath}/seguridad/alertas` }]
+                        : []),
                 ],
             }]
             : []),
-        {
+        ...(role === 'super_admin' ? [{
             id: 'reportes',
             label: 'Reportes',
             icon: BarChart3,
@@ -165,7 +181,7 @@ function buildNavModules(basePath, role) {
                 { id: 'rep-barberos', label: 'Barberos', path: `${basePath}/reportes/barberos` },
                 { id: 'rep-concurrencia', label: 'Concurrencia', path: `${basePath}/reportes/concurrencia` },
             ],
-        },
+        }] : []),
         {
             id: 'superpuntos',
             label: 'Masterpuntos',
@@ -184,6 +200,20 @@ function buildNavModules(basePath, role) {
 
     if (isCliente) {
         return modules.filter((module) => ['inicio'].includes(module.id));
+    }
+
+    if (hasCombinedBarberRole && ['admin', 'super_admin'].includes(role) && roles.includes(role)) {
+        modules.push({
+            id: 'mi-espacio-barbero',
+            label: 'Mi espacio Barbero',
+            icon: Scissors,
+            path: '/home/barbero',
+            subItems: [
+                { id: 'mi-inicio-barbero', label: 'Inicio Barbero', path: '/home/barbero', exact: true },
+                { id: 'mi-calendario-barbero', label: 'Mi Calendario', path: '/home/barbero/citas' },
+                { id: 'mi-perfil-barbero', label: 'Mi Perfil Barbero', path: '/home/barbero/perfil' },
+            ],
+        });
     }
 
     return modules;
@@ -228,8 +258,11 @@ function resolveActiveModule(modules, pathname) {
 function SidebarItem({ module, isActive, isCollapsed, onClick }) {
     const Icon = module.icon;
     return (
+        <>
         <motion.button
             type="button"
+            aria-label={module.label}
+            aria-current={isActive ? 'page' : undefined}
             onClick={() => onClick(module)}
             whileTap={{ scale: 0.97 }}
             title={isCollapsed ? module.label : undefined}
@@ -272,6 +305,17 @@ function SidebarItem({ module, isActive, isCollapsed, onClick }) {
                 <ChevronDown size={13} className={`relative z-10 shrink-0 transition-transform duration-200 opacity-50 ${isActive ? 'rotate-180' : ''}`} />
             )}
         </motion.button>
+        {module.id === 'mi-espacio-barbero' && !isCollapsed && module.subItems.map((item) => (
+            <button
+                key={item.id}
+                type="button"
+                onClick={() => onClick(item)}
+                className="ml-4 rounded-xl border border-transparent px-3 py-2 text-left text-xs text-[var(--mf-text-2)] transition-colors hover:border-[var(--mf-nav-border)] hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-accent)]"
+            >
+                {item.label}
+            </button>
+        ))}
+        </>
     );
 }
 
@@ -282,11 +326,14 @@ function TopbarSubMenu({ subItems, currentPath }) {
     return (
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
             {subItems.map((item) => {
-                const isActive = isPathActive(currentPath, item.path);
+                const isActive = item.exact
+                    ? normalizePath(currentPath) === normalizePath(item.path)
+                    : isPathActive(currentPath, item.path);
                 return (
                     <button
                         key={item.id}
                         type="button"
+                        aria-current={isActive ? 'page' : undefined}
                         onClick={() => navigate(item.path)}
                         className={`
                             relative whitespace-nowrap rounded-full px-4 py-1.5 text-xs font-semibold tracking-wide
@@ -327,8 +374,10 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-    const basePath = String(basePathOverride || '').trim() || resolvedHomePath;
-    const modules = buildNavModules(basePath, currentRole);
+    const basePath = String(basePathOverride || '').trim()
+        || (currentRole === 'barbero' ? '/home/barbero' : resolvedHomePath);
+    const modules = buildNavModules(basePath, currentRole, roles);
+    const canAccessInternalAccountDeletion = currentRole !== 'cliente';
 
     // Módulo activo: el que cuya path coincide más con la ubicación actual
     const activeModule = resolveActiveModule(modules, location.pathname);
@@ -347,8 +396,14 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
         navigate('/login', { replace: true });
     }
 
+    function handleAccountDeletionRequest() {
+        navigate('/mi-cuenta/eliminacion');
+        setMobileMenuOpen(false);
+    }
+
     const sidebarWidth = isCollapsed ? 72 : 260;
     const isSecurityRole = currentRole === 'security_admin' || currentRole === 'security_auditor';
+    const canSeeSecurityAudit = roles.includes('root');
 
     // Mobile nav items
     const mobileItems = currentRole === 'barbero'
@@ -363,7 +418,9 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                 { id: 'seg-login-logs', label: 'Login Logs', icon: Shield, onClick: () => navigate(`${basePath}/seguridad/login-logs`) },
                 { id: 'seg-sesiones', label: 'Sesiones', icon: CalendarDays, onClick: () => navigate(`${basePath}/seguridad/sesiones`) },
                 { id: 'seg-usuarios', label: 'Usuarios', icon: Users, onClick: () => navigate(`${basePath}/seguridad/usuarios`) },
-                { id: 'seg-alertas', label: 'Alertas', icon: BarChart3, onClick: () => navigate(`${basePath}/seguridad/alertas`) },
+                ...(canSeeSecurityAudit
+                    ? [{ id: 'seg-alertas', label: 'Auditoria', icon: BarChart3, onClick: () => navigate(`${basePath}/seguridad/alertas`) }]
+                    : []),
                 { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
             ]
             : [
@@ -441,19 +498,41 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                             ${isCollapsed ? 'p-2' : 'p-4'}
                         `}>
                             {isCollapsed ? (
-                                <button
-                                    type="button"
-                                    onClick={handleLogout}
-                                    title="Cerrar sesión"
-                                    className="flex h-9 w-full items-center justify-center rounded-xl text-[var(--mf-accent)] transition-colors hover:bg-[var(--mf-btn-bg)]"
-                                >
-                                    <LogOut size={17} strokeWidth={1.9} />
-                                </button>
+                                <div className="flex flex-col gap-1">
+                                    {canAccessInternalAccountDeletion ? (
+                                        <button
+                                            type="button"
+                                            onClick={handleAccountDeletionRequest}
+                                            title="Solicitar eliminacion de cuenta"
+                                            className="flex h-9 w-full items-center justify-center rounded-xl text-[var(--mf-text-2)] transition-colors hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-accent)]"
+                                        >
+                                            <UserRound size={17} strokeWidth={1.9} />
+                                        </button>
+                                    ) : null}
+                                    <button
+                                        type="button"
+                                        onClick={handleLogout}
+                                        title="Cerrar sesión"
+                                        className="flex h-9 w-full items-center justify-center rounded-xl text-[var(--mf-accent)] transition-colors hover:bg-[var(--mf-btn-bg)]"
+                                    >
+                                        <LogOut size={17} strokeWidth={1.9} />
+                                    </button>
+                                </div>
                             ) : (
                                 <>
                                     <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--mf-text-2)]">Sesión activa</p>
                                     <p className="mt-2 text-sm font-semibold text-[var(--mf-text)] truncate">{displayName}</p>
                                     <p className="mt-1 text-xs text-[var(--mf-accent)]">{getRoleLabel(currentRole)}</p>
+                                    {canAccessInternalAccountDeletion ? (
+                                        <button
+                                            type="button"
+                                            onClick={handleAccountDeletionRequest}
+                                            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] text-xs font-semibold text-[var(--mf-text)] transition-colors hover:border-[var(--mf-btn-border)] hover:bg-[var(--mf-btn-bg)]"
+                                        >
+                                            <UserRound size={14} strokeWidth={1.9} />
+                                            Solicitar eliminacion de cuenta
+                                        </button>
+                                    ) : null}
                                     <button
                                         type="button"
                                         onClick={handleLogout}
@@ -527,6 +606,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                             />
                             <button
                                 type="button"
+                                aria-label="Abrir menú"
                                 onClick={() => setMobileMenuOpen(true)}
                                 className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)]"
                             >
@@ -574,6 +654,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                                     <MasterfadeLogo variant="compact" />
                                     <button
                                         type="button"
+                                        aria-label="Cerrar menú"
                                         onClick={() => setMobileMenuOpen(false)}
                                         className="flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)]"
                                     >
@@ -596,6 +677,16 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                                 <div className="mt-4 rounded-[20px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-4">
                                     <p className="text-xs text-[var(--mf-text-2)] truncate">{displayName}</p>
                                     <p className="mt-1 text-xs text-[var(--mf-accent)]">{getRoleLabel(currentRole)}</p>
+                                    {canAccessInternalAccountDeletion ? (
+                                        <button
+                                            type="button"
+                                            onClick={handleAccountDeletionRequest}
+                                            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] text-xs font-semibold text-[var(--mf-text)]"
+                                        >
+                                            <UserRound size={14} strokeWidth={1.9} />
+                                            Solicitar eliminacion de cuenta
+                                        </button>
+                                    ) : null}
                                     <button
                                         type="button"
                                         onClick={handleLogout}

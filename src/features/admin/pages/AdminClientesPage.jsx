@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Building2, CheckCircle2, Eye, KeyRound, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Users, X } from 'lucide-react';
 import {
@@ -12,7 +13,7 @@ import {
 } from '../lib/adminPersonasApi.js';
 import { Button } from '../../../components/ui/button.jsx';
 import {
-  Dialog,
+  Dialog, DialogClose,
   DialogContent,
   DialogFooter,
   DialogHeader,
@@ -28,7 +29,6 @@ import DetailInfoModalContent from '../../../components/data/DetailInfoModalCont
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
-import ImageUploaderField from '../../../components/data/ImageUploaderField.jsx';
 import {
   Table,
   TableBody,
@@ -42,7 +42,7 @@ import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialo
 import { replaceItemById } from '../../../lib/collectionState.js';
 
 const ACCESS_LABELS = {
-  pendiente_password: 'ContraseÃ±a pendiente',
+  pendiente_password: 'Contraseña pendiente',
   activo: 'Activo',
   bloqueado: 'Bloqueado',
   inactivo: 'Inactivo',
@@ -70,8 +70,6 @@ const FORM_DEFAULTS = {
   estado: true,
   consentimiento_marketing: false,
   acepta_terminos: false,
-  foto_perfil_asset_id: null,
-  foto_perfil_signed_url: '',
 };
 
 const CLIENTE_FILTER_DEFAULTS = {
@@ -98,22 +96,25 @@ function quickFilterButtonClass(isActive) {
 }
 
 function extractMessage(err) {
-  const rawMessage = String(err?.data?.error?.message || err?.message || '').trim();
-  if (!rawMessage) return 'No se pudo completar la operacion de clientes.';
-  const lowered = rawMessage.toLowerCase();
-  const hasSensitivePattern =
-    lowered.includes('sql')
-    || lowered.includes('syntax error')
-    || lowered.includes('supabase')
-    || lowered.includes('auth.users')
-    || lowered.includes('stack')
-    || lowered.includes('trace')
-    || lowered.includes('relation')
-    || lowered.includes('constraint');
-  if (hasSensitivePattern) {
-    return 'Ocurrio un error procesando la solicitud. Intenta nuevamente.';
-  }
-  return rawMessage;
+  const messages = {
+    PERSONAS_EMAIL_ALREADY_EXISTS: 'El correo ya esta vinculado a otra persona.',
+    PERSONAS_AUTH_EMAIL_ALREADY_EXISTS: 'El correo ya pertenece a una cuenta registrada.',
+    PERSONAS_DNI_ALREADY_EXISTS: 'El DNI ya esta vinculado a otra persona.',
+    PERSONAS_RTN_ALREADY_EXISTS: 'El RTN ya esta vinculado a otra persona.',
+    PERSONAS_CLIENT_NOT_FOUND: 'El cliente ya no esta disponible.',
+    PERSONAS_BRANCH_NOT_FOUND: 'La sucursal no esta disponible.',
+    PERSONAS_SUPER_ADMIN_TARGET_FORBIDDEN: 'No tienes permiso para gestionar esta cuenta.',
+    PERSONAS_CLIENT_ACCESS_REQUIRED: 'El cliente debe conservar su cuenta de acceso.',
+    PERSONAS_AUTH_IDENTITY_INCOMPLETE: 'El correo ya existe en Auth sin una vinculacion interna valida. Requiere revision.',
+    PERSONAS_EXISTING_USER_EMAIL: 'El correo ya pertenece a un usuario o perfil existente.',
+    PERSONAS_EMAIL_IDENTITY_CONFLICT: 'El correo tiene un conflicto de identidad que requiere revision.',
+    PERSONAS_GUEST_LINK_MISMATCH: 'La Persona seleccionada ya no corresponde al correo indicado.',
+  };
+  const code = err?.data?.error?.code;
+  if (Object.hasOwn(messages, code)) return messages[code];
+  if (Number(err?.status) === 401) return 'Tu sesion ya no esta disponible. Inicia sesion nuevamente.';
+  if (Number(err?.status) === 403) return 'No tienes permiso para realizar esta operacion.';
+  return 'No se pudo completar la operacion de clientes. Intenta nuevamente.';
 }
 
 function normalizeDigits(value) {
@@ -131,7 +132,7 @@ function normalizeUnicodeText(value) {
   return String(value || '').normalize('NFC').trim();
 }
 
-function mapClienteToForm(cliente) {
+export function mapClienteToForm(cliente) {
   return {
     nombres: cliente?.nombres || '',
     apellidos: cliente?.apellidos || '',
@@ -149,8 +150,6 @@ function mapClienteToForm(cliente) {
     estado: Boolean(cliente?.estado_cliente),
     consentimiento_marketing: Boolean(cliente?.consentimiento_marketing),
     acepta_terminos: Boolean(cliente?.acepta_terminos),
-    foto_perfil_asset_id: cliente?.foto_perfil_asset_id || null,
-    foto_perfil_signed_url: cliente?.foto_perfil_signed_url || '',
   };
 }
 
@@ -186,8 +185,8 @@ function validateForm(values, { isEditing, selectedCliente }) {
   return null;
 }
 
-function buildPayload(values) {
-  return {
+export function buildPayload(values) {
+  const payload = {
     persona: {
       nombres: normalizeUnicodeText(values.nombres),
       apellidos: normalizeUnicodeText(values.apellidos),
@@ -209,9 +208,9 @@ function buildPayload(values) {
       estado: Boolean(values.estado),
       consentimiento_marketing: Boolean(values.consentimiento_marketing),
       acepta_terminos: Boolean(values.acepta_terminos),
-      foto_perfil_asset_id: values.foto_perfil_asset_id || null,
     },
   };
+  return payload;
 }
 
 function AccessBadge({ cliente }) {
@@ -227,6 +226,16 @@ function AccessBadge({ cliente }) {
 
 export default function AdminClientesPage() {
   const navigate = useNavigate();
+  const mountedRef = useRef(true);
+  const listRequestRef = useRef(0);
+  const selectionRequestRef = useRef(0);
+  const selectionPendingRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const lifecycleLockRef = useRef(false);
+  const invalidateRequests = useCallback(() => {
+    ++listRequestRef.current;
+    ++selectionRequestRef.current;
+  }, []);
   const [clientes, setClientes] = useState([]);
   const [sucursales, setSucursales] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -249,6 +258,7 @@ export default function AdminClientesPage() {
   const [formLoading, setFormLoading] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState('');
   const [confirmTarget, setConfirmTarget] = useState(null);
+  const [guestLinkCandidate, setGuestLinkCandidate] = useState(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -341,22 +351,27 @@ export default function AdminClientesPage() {
   }, [search, filters, view]);
 
   const fetchClientes = useCallback(async ({ silent = false } = {}) => {
+    if (!mountedRef.current) return;
+    const requestId = ++listRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === listRequestRef.current;
     if (!silent) {
       setLoading(true);
       setListError('');
     }
     try {
       const response = await listAdminPersonasClientes();
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       setClientes(Array.isArray(payload?.clientes) ? payload.clientes : []);
     } catch (err) {
+      if (!isCurrent()) return;
       if (err.status === 401) return navigate('/login');
       if (err.status === 403) return navigate('/unauthorized');
       if (!silent) {
         setListError(extractMessage(err));
       }
     } finally {
-      if (!silent) {
+      if (isCurrent()) {
         setLoading(false);
       }
     }
@@ -373,11 +388,43 @@ export default function AdminClientesPage() {
   }, []);
 
   useEffect(() => {
-    void fetchClientes();
-    void fetchCatalogos();
-  }, [fetchCatalogos, fetchClientes]);
+    mountedRef.current = true;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      void fetchClientes();
+      void fetchCatalogos();
+    });
+    return () => {
+      active = false;
+      mountedRef.current = false;
+      invalidateRequests();
+    };
+  }, [fetchCatalogos, fetchClientes, invalidateRequests]);
+
+  function handleFormOpenChange(open) {
+    if (!open) {
+      ++selectionRequestRef.current;
+      if (selectionPendingRef.current) setFormLoading(false);
+      selectionPendingRef.current = false;
+    }
+    setFormOpen(open);
+  }
+
+  function handleDetailOpenChange(open) {
+    if (!open) {
+      ++selectionRequestRef.current;
+      if (selectionPendingRef.current) setFormLoading(false);
+      selectionPendingRef.current = false;
+    }
+    setDetailOpen(open);
+  }
 
   function openCreate() {
+    ++selectionRequestRef.current;
+    if (selectionPendingRef.current) setFormLoading(false);
+    selectionPendingRef.current = false;
+    setDetailOpen(false);
     setEditingId('');
     setSelectedCliente(null);
     setFormValues(FORM_DEFAULTS);
@@ -386,10 +433,15 @@ export default function AdminClientesPage() {
   }
 
   async function openEdit(idCliente) {
+    const requestId = ++selectionRequestRef.current;
+    selectionPendingRef.current = true;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
+    setDetailOpen(false);
     setFormError('');
     setFormLoading(true);
     try {
       const response = await getAdminPersonaCliente(idCliente);
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       const cliente = payload?.cliente || null;
       setSelectedCliente(cliente);
@@ -397,41 +449,60 @@ export default function AdminClientesPage() {
       setFormValues(mapClienteToForm(cliente));
       setFormOpen(true);
     } catch (err) {
+      if (!isCurrent()) return;
       notifications.error(extractMessage(err), { dedupeKey: 'personas-clientes-open-edit-error' });
     } finally {
-      setFormLoading(false);
+      if (isCurrent()) {
+        selectionPendingRef.current = false;
+        setFormLoading(false);
+      }
     }
   }
 
   async function openDetail(idCliente) {
+    const requestId = ++selectionRequestRef.current;
+    selectionPendingRef.current = true;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
+    setFormOpen(false);
+    setSelectedCliente(null);
     setFormLoading(true);
     try {
       const response = await getAdminPersonaCliente(idCliente);
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       setSelectedCliente(payload?.cliente || null);
       setDetailOpen(true);
     } catch (err) {
+      if (!isCurrent()) return;
       notifications.error(extractMessage(err), { dedupeKey: 'personas-clientes-open-detail-error' });
     } finally {
-      setFormLoading(false);
+      if (isCurrent()) {
+        selectionPendingRef.current = false;
+        setFormLoading(false);
+      }
     }
   }
 
-  async function handleSubmit() {
-    if (formLoading) return;
+  async function handleSubmit(personaLink = null) {
+    if (formLoading || saveLockRef.current) return;
     const error = validateForm(formValues, { isEditing: Boolean(editingId), selectedCliente });
     if (error) {
       setFormError(error);
       return;
     }
     setFormError('');
+    saveLockRef.current = true;
+    const requestId = selectionRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
     setFormLoading(true);
 
     try {
       const payload = buildPayload(formValues);
+      if (!editingId && personaLink) payload.vinculacion_persona = personaLink;
       const response = editingId
         ? await updateAdminPersonaCliente(editingId, payload)
         : await createAdminPersonaCliente(payload);
+      if (!isCurrent()) return;
       const data = response?.data ?? response;
       const baseMessage = editingId ? 'Cliente actualizado.' : 'Cliente creado.';
       notifications.success(baseMessage, { dedupeKey: 'personas-clientes-save-ok' });
@@ -441,6 +512,7 @@ export default function AdminClientesPage() {
         notifications[tone](data.setup_password.mensaje, { dedupeKey: 'personas-clientes-setup-message' });
       }
       setFormOpen(false);
+      setGuestLinkCandidate(null);
       setEditingId('');
       setSelectedCliente(null);
       setFormValues(FORM_DEFAULTS);
@@ -450,9 +522,19 @@ export default function AdminClientesPage() {
       // AM: Revalida en segundo plano para no mostrar recarga brusca al usuario.
       void fetchClientes({ silent: true });
     } catch (err) {
+      if (!isCurrent()) return;
+      if (!editingId && err?.data?.error?.code === 'PERSONAS_GUEST_LINK_REQUIRED') {
+        const details = err?.data?.error?.details;
+        if (details?.id_persona && details?.requiere_confirmacion === true) {
+          setGuestLinkCandidate(details);
+          setFormError('Confirma la vinculacion con la Persona invitada antes de continuar.');
+          return;
+        }
+      }
       setFormError(extractMessage(err));
     } finally {
-      setFormLoading(false);
+      saveLockRef.current = false;
+      if (mountedRef.current && !selectionPendingRef.current) setFormLoading(false);
     }
   }
 
@@ -462,12 +544,16 @@ export default function AdminClientesPage() {
 
   async function handleToggleLifecycle() {
     const cliente = confirmTarget;
-    if (!cliente || actionLoadingId) return;
+    if (!cliente || actionLoadingId || lifecycleLockRef.current) return;
+    lifecycleLockRef.current = true;
+    const requestId = selectionRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
     const isActive = Boolean(cliente?.estado_cliente);
     setActionLoadingId(cliente.id_cliente);
     try {
       if (isActive) {
         const response = await inactivateAdminPersonaCliente(cliente.id_cliente);
+        if (!isCurrent()) return;
         const payload = response?.data ?? response;
         if (payload?.cliente) {
           setClientes((prev) => replaceItemById(prev, payload.cliente, (entry) => entry?.id_cliente));
@@ -475,6 +561,7 @@ export default function AdminClientesPage() {
         notifications.warning('Cliente inactivado y acceso bloqueado.', { dedupeKey: 'personas-clientes-toggle-ok' });
       } else {
         const response = await activateAdminPersonaCliente(cliente.id_cliente);
+        if (!isCurrent()) return;
         const payload = response?.data ?? response;
         if (payload?.cliente) {
           setClientes((prev) => replaceItemById(prev, payload.cliente, (entry) => entry?.id_cliente));
@@ -484,9 +571,11 @@ export default function AdminClientesPage() {
       setConfirmTarget(null);
       void fetchClientes({ silent: true });
     } catch (err) {
+      if (!isCurrent()) return;
       notifications.error(extractMessage(err), { dedupeKey: 'personas-clientes-toggle-error' });
     } finally {
-      setActionLoadingId('');
+      lifecycleLockRef.current = false;
+      if (mountedRef.current) setActionLoadingId('');
     }
   }
 
@@ -692,7 +781,7 @@ export default function AdminClientesPage() {
         </div>
       ) : null}
 
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+      <UnsavedChangesDialog values={formValues} saving={formLoading} open={formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingId ? 'Editar Cliente' : 'Nuevo Cliente'}</DialogTitle></DialogHeader>
 
@@ -746,32 +835,6 @@ export default function AdminClientesPage() {
               <Input className="mf-input mt-1" value={formValues.observaciones} onChange={(e) => setFormValues((p) => ({ ...p, observaciones: e.target.value }))} />
             </div>
 
-            <div className="sm:col-span-2">
-              {editingId ? (
-                <ImageUploaderField
-                  label="Foto de perfil privada"
-                  helperText="Imagen interna del cliente (bucket privado). La vista usa URL firmada temporal."
-                  scopeKey="private_client_profile"
-                  entityType="cliente"
-                  entityId={editingId}
-                  idSucursal={formValues.id_sucursal_origen || selectedCliente?.id_sucursal_origen || null}
-                  allowedMimeTypes={['image/jpeg', 'image/png', 'image/webp']}
-                  valueAssetId={formValues.foto_perfil_asset_id}
-                  initialPreviewUrl={formValues.foto_perfil_signed_url}
-                  onChange={(payload) => {
-                    setFormValues((prev) => ({
-                      ...prev,
-                      foto_perfil_asset_id: payload?.asset_id || null,
-                      foto_perfil_signed_url: payload?.signed_read_url || payload?.public_url || '',
-                    }));
-                  }}
-                />
-              ) : (
-                <p className="rounded-lg border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_54%,transparent)] px-3 py-2 text-xs text-[var(--mf-text-2)]">
-                  Guarda primero el cliente para habilitar carga de foto de perfil privada.
-                </p>
-              )}
-            </div>
           </div>
 
           <div className="mt-3 rounded-[12px] border border-[var(--mf-nav-border)] p-3 text-sm">
@@ -802,13 +865,13 @@ export default function AdminClientesPage() {
           {formError && <p className="mt-2 rounded-[12px] bg-red-500/10 px-3 py-2 text-sm text-red-400">{formError}</p>}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFormOpen(false)} disabled={formLoading}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={formLoading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar cliente' : 'Crear cliente'}</Button>
+            <DialogClose asChild><Button variant="outline" disabled={formLoading}>Cancelar</Button></DialogClose>
+            <Button onClick={() => handleSubmit()} disabled={formLoading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar cliente' : 'Crear cliente'}</Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-5xl">
           <DialogHeader><DialogTitle>Detalle Cliente</DialogTitle></DialogHeader>
           {selectedCliente && (
@@ -875,6 +938,18 @@ export default function AdminClientesPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      <ActionConfirmDialog
+        open={Boolean(guestLinkCandidate)}
+        onOpenChange={(open) => { if (!open && !formLoading) setGuestLinkCandidate(null); }}
+        tone="warning"
+        title="Vincular Persona invitada"
+        description={guestLinkCandidate ? `El correo pertenece a ${guestLinkCandidate.nombre_completo || 'una Persona invitada'} con historial existente. Confirma que verificaste su identidad. La vinculacion conservara su historial y no se realizara solo por coincidencia de correo.` : ''}
+        confirmLabel="Confirmar vinculacion"
+        cancelLabel="Cancelar"
+        loading={formLoading}
+        onConfirm={() => handleSubmit({ id_persona: guestLinkCandidate.id_persona, confirmar_vinculacion: true })}
+      />
 
       <ActionConfirmDialog
         open={Boolean(confirmTarget)}
@@ -962,7 +1037,7 @@ export default function AdminClientesPage() {
                 onChange={(event) => setFilters((prev) => ({ ...prev, estadoAcceso: event.target.value }))}
               >
                 <option value="all">Todos</option>
-                <option value="pendiente_password">ContraseÃ±a pendiente</option>
+                <option value="pendiente_password">Contraseña pendiente</option>
                 <option value="activo">Activo</option>
                 <option value="bloqueado">Bloqueado</option>
                 <option value="inactivo">Inactivo</option>

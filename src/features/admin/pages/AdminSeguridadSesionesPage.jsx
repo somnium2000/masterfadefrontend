@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Filter, RotateCcw, Search, ShieldCheck } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
@@ -25,6 +25,7 @@ import {
   getAdminSecuritySessionDetail,
   listAdminSecuritySessions,
   listAdminSecurityUsers,
+  revokeAllAdminSecuritySessions,
   revokeAdminSecuritySession,
 } from '../lib/adminSeguridadApi.js';
 import useSecurityRealtime from '../lib/useSecurityRealtime.js';
@@ -137,11 +138,11 @@ function safeStringify(value) {
 export default function AdminSeguridadSesionesPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
-  const { roles } = useAuth();
+  const { roles, user } = useAuth();
   const realtimeChannels = useMemo(() => ['security.sessions.changed'], []);
 
   const canWrite = useMemo(
-    () => roles.includes('super_admin') || roles.includes('security_admin'),
+    () => roles.includes('super_admin') || roles.includes('security_admin') || roles.includes('root'),
     [roles]
   );
 
@@ -155,11 +156,42 @@ export default function AdminSeguridadSesionesPage() {
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState('');
+  const [bulkRevokeOpen, setBulkRevokeOpen] = useState(false);
+  const [bulkRevokeLoading, setBulkRevokeLoading] = useState(false);
   const [userDirectory, setUserDirectory] = useState({});
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [detailData, setDetailData] = useState(null);
+  const identityContext = JSON.stringify([roles, user?.id_usuario]);
+  const actionGenerationRef = useRef(0);
+  const actionOperationRef = useRef(null);
+  const detailGenerationRef = useRef(0);
+  const detailControllerRef = useRef(null);
+
+  useLayoutEffect(() => {
+    actionGenerationRef.current += 1;
+    actionOperationRef.current = null;
+    detailGenerationRef.current += 1;
+    detailControllerRef.current?.abort();
+    detailControllerRef.current = null;
+    setConfirmTarget(null);
+    setActionLoadingId('');
+    setBulkRevokeOpen(false);
+    setBulkRevokeLoading(false);
+    setDetailOpen(false);
+    setDetailData(null);
+    setDetailError('');
+    setDetailLoading(false);
+    setUserDirectory(previous => Object.keys(previous).length ? {} : previous);
+    return () => {
+      actionGenerationRef.current += 1;
+      actionOperationRef.current = null;
+      detailGenerationRef.current += 1;
+      detailControllerRef.current?.abort();
+      detailControllerRef.current = null;
+    };
+  }, [identityContext]);
 
   const hasActiveFilters = useMemo(() => (
     filters.estado !== DEFAULT_FILTERS.estado
@@ -170,7 +202,7 @@ export default function AdminSeguridadSesionesPage() {
     || Number(filters.limit) !== Number(DEFAULT_FILTERS.limit)
   ), [filters]);
 
-  const hydrateDirectory = useCallback(async (items) => {
+  const hydrateDirectory = useCallback(async (items, isCurrent) => {
     try {
       const ids = Array.from(new Set((items || []).map((item) => item?.id_usuario).filter(Boolean)));
       if (!ids.length) return;
@@ -190,6 +222,7 @@ export default function AdminSeguridadSesionesPage() {
           sortDir: 'desc',
         });
         const parsed = unwrapCollectionResponse(response);
+        if (!isCurrent()) return;
         (parsed.items || []).forEach((userItem) => {
           if (pending.includes(userItem.id_usuario)) {
             collected[userItem.id_usuario] = {
@@ -202,7 +235,7 @@ export default function AdminSeguridadSesionesPage() {
         currentPage += 1;
       }
 
-      if (Object.keys(collected).length > 0) {
+      if (isCurrent() && Object.keys(collected).length > 0) {
         setUserDirectory((prev) => ({ ...prev, ...collected }));
       }
     } catch {
@@ -210,7 +243,26 @@ export default function AdminSeguridadSesionesPage() {
     }
   }, [userDirectory]);
 
+  const listContext = JSON.stringify([filters, page, roles, user?.id_usuario]);
+  const listContextRef = useRef(listContext);
+  const listGenerationRef = useRef(0);
+  const listMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    listMountedRef.current = true;
+    listContextRef.current = listContext;
+    listGenerationRef.current += 1;
+    setRows([]);
+    setPagination({ page: 1, limit: DEFAULT_FILTERS.limit, total: 0, total_pages: 1 });
+    setError('');
+    setLoading(false);
+    return () => { listMountedRef.current = false; listGenerationRef.current += 1; };
+  }, [listContext]);
+
   const fetchRows = useCallback(async () => {
+    if (!listMountedRef.current || listContextRef.current !== listContext) return;
+    const generation = ++listGenerationRef.current;
+    const isCurrent = () => listMountedRef.current && listGenerationRef.current === generation && listContextRef.current === listContext;
+    if (!roles.some(role => ['super_admin', 'security_admin', 'security_auditor', 'root'].includes(role))) return;
     setLoading(true);
     setError('');
     try {
@@ -224,10 +276,12 @@ export default function AdminSeguridadSesionesPage() {
         toAt: filters.toAt,
       });
       const parsed = unwrapCollectionResponse(response);
+      if (!isCurrent()) return;
       setRows(parsed.items);
       setPagination(parsed.pagination);
-      void hydrateDirectory(parsed.items);
+      void hydrateDirectory(parsed.items, isCurrent);
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -240,9 +294,9 @@ export default function AdminSeguridadSesionesPage() {
       setRows([]);
       setPagination({ page: 1, limit: filters.limit, total: 0, total_pages: 1 });
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [filters, hydrateDirectory, navigate, page]);
+  }, [filters, hydrateDirectory, navigate, page, listContext, roles]);
 
   const realtime = useSecurityRealtime({
     enabled: true,
@@ -274,15 +328,24 @@ export default function AdminSeguridadSesionesPage() {
   }
 
   async function openDetail(idSesion) {
-    if (!idSesion) return;
+    if (!idSesion || !listMountedRef.current
+      || !roles.some(role => ['super_admin', 'security_admin', 'security_auditor', 'root'].includes(role))) return;
+    const generation = ++detailGenerationRef.current;
+    detailControllerRef.current?.abort();
+    const controller = new AbortController();
+    detailControllerRef.current = controller;
+    const isCurrent = () => listMountedRef.current && detailGenerationRef.current === generation
+      && detailControllerRef.current === controller && !controller.signal.aborted;
     setDetailOpen(true);
     setDetailLoading(true);
     setDetailError('');
     setDetailData(null);
     try {
-      const response = await getAdminSecuritySessionDetail(idSesion);
+      const response = await getAdminSecuritySessionDetail(idSesion, { signal: controller.signal });
+      if (!isCurrent()) return;
       setDetailData(unwrapSingleResponse(response));
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -293,19 +356,30 @@ export default function AdminSeguridadSesionesPage() {
       }
       setDetailError('No fue posible cargar el detalle de la sesion.');
     } finally {
-      setDetailLoading(false);
+      if (isCurrent()) {
+        detailControllerRef.current = null;
+        setDetailLoading(false);
+      }
     }
   }
 
   async function confirmRevoke() {
-    if (!confirmTarget?.id_sesion || actionLoadingId) return;
+    if (!canWrite || !listMountedRef.current || !confirmTarget?.id_sesion || actionOperationRef.current) return;
+    const operation = {};
+    const generation = actionGenerationRef.current;
+    actionOperationRef.current = operation;
+    const isCurrent = () => listMountedRef.current && actionGenerationRef.current === generation
+      && actionOperationRef.current === operation;
     setActionLoadingId(confirmTarget.id_sesion);
     try {
       await revokeAdminSecuritySession(confirmTarget.id_sesion);
+      if (!isCurrent()) return;
       notifications.success('Sesion cerrada correctamente.', { dedupeKey: 'security-sessions-revoke-ok' });
       setConfirmTarget(null);
+      setActionLoadingId('');
       await fetchRows();
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -328,7 +402,50 @@ export default function AdminSeguridadSesionesPage() {
         });
       }
     } finally {
-      setActionLoadingId('');
+      if (isCurrent()) {
+        actionOperationRef.current = null;
+        setActionLoadingId('');
+      }
+    }
+  }
+
+  async function confirmBulkRevoke() {
+    if (!canWrite || !listMountedRef.current || actionOperationRef.current) return;
+    const operation = {};
+    const generation = actionGenerationRef.current;
+    actionOperationRef.current = operation;
+    const isCurrent = () => listMountedRef.current && actionGenerationRef.current === generation
+      && actionOperationRef.current === operation;
+    setBulkRevokeLoading(true);
+    try {
+      const response = await revokeAllAdminSecuritySessions();
+      if (!isCurrent()) return;
+      const payload = response?.data || response || {};
+      const revokedCount = Number(payload?.revocadas || 0);
+      setBulkRevokeOpen(false);
+      setBulkRevokeLoading(false);
+      notifications.success(`Se cerraron ${revokedCount} sesion(es) correctamente.`, {
+        dedupeKey: 'security-sessions-revoke-all-ok',
+      });
+      await fetchRows();
+    } catch (requestError) {
+      if (!isCurrent()) return;
+      if (requestError?.status === 401) {
+        navigate('/login', { replace: true });
+        return;
+      }
+      if (requestError?.status === 403) {
+        navigate('/unauthorized', { replace: true });
+        return;
+      }
+      notifications.error('No fue posible cerrar todas las sesiones activas en este momento.', {
+        dedupeKey: 'security-sessions-revoke-all-error',
+      });
+    } finally {
+      if (isCurrent()) {
+        actionOperationRef.current = null;
+        setBulkRevokeLoading(false);
+      }
     }
   }
 
@@ -447,6 +564,16 @@ export default function AdminSeguridadSesionesPage() {
                 <Search size={14} />
                 Aplicar filtros
               </Button>
+              {canWrite ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={bulkRevokeLoading}
+                  onClick={() => setBulkRevokeOpen(true)}
+                >
+                  Cerrar todas las sesiones
+                </Button>
+              ) : null}
               {hasActiveFilters ? (
                 <Button type="button" variant="ghost" className="hidden gap-2 md:inline-flex" onClick={resetFilters}>
                   <RotateCcw size={14} />
@@ -603,6 +730,9 @@ export default function AdminSeguridadSesionesPage() {
         onOpenChange={(open) => {
           setDetailOpen(open);
           if (!open) {
+            detailGenerationRef.current += 1;
+            detailControllerRef.current?.abort();
+            detailControllerRef.current = null;
             setDetailData(null);
             setDetailError('');
             setDetailLoading(false);
@@ -662,6 +792,22 @@ export default function AdminSeguridadSesionesPage() {
         requireComment={false}
         showCommentInput={false}
         onConfirm={confirmRevoke}
+        tone="warning"
+      />
+
+      <SecurityActionConfirmModal
+        open={bulkRevokeOpen}
+        onOpenChange={(open) => {
+          if (!open && !bulkRevokeLoading) setBulkRevokeOpen(false);
+        }}
+        title="Cerrar todas las sesiones activas"
+        description="Se revocaran todas las sesiones activas excepto tu sesion actual. Esta accion requiere confirmacion."
+        confirmLabel="Cerrar todas"
+        cancelLabel="Cancelar"
+        loading={bulkRevokeLoading}
+        requireComment={false}
+        showCommentInput={false}
+        onConfirm={confirmBulkRevoke}
         tone="warning"
       />
     </div>

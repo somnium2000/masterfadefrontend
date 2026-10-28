@@ -7,6 +7,8 @@ const contextCache = new Map();
 const dashboardCache = new Map();
 const contextInflight = new Map();
 const dashboardInflight = new Map();
+let sessionScopeKey = 'anonymous';
+let cacheGeneration = 0;
 
 function buildQuery(params = {}) {
   const query = new URLSearchParams();
@@ -37,6 +39,8 @@ async function resolveCachedRequest({
   fetcher,
   forceRefresh = false,
 }) {
+  const requestGeneration = cacheGeneration;
+  const requestSessionScopeKey = sessionScopeKey;
   if (!forceRefresh) {
     const cachedValue = getValidCacheEntry(cache, key);
     if (cachedValue) return cachedValue;
@@ -49,10 +53,12 @@ async function resolveCachedRequest({
 
   const requestPromise = (async () => {
     const response = await fetcher();
-    cache.set(key, {
-      value: response,
-      expiresAt: Date.now() + Math.max(1, Number(ttlMs) || 1),
-    });
+    if (requestGeneration === cacheGeneration && requestSessionScopeKey === sessionScopeKey) {
+      cache.set(key, {
+        value: response,
+        expiresAt: Date.now() + Math.max(1, Number(ttlMs) || 1),
+      });
+    }
     return response;
   })();
 
@@ -68,13 +74,14 @@ async function resolveCachedRequest({
 export async function getAdminReportesContext(params = {}, options = {}) {
   const qs = buildQuery(params);
   const path = qs ? `${BASE}/contexto?${qs}` : `${BASE}/contexto`;
-  const cacheKey = `context:${path}`;
+  if (options?.signal) return http.get(path, { cache: false, dedupe: false, signal: options.signal });
+  const cacheKey = `${sessionScopeKey}:context:${path}`;
   return resolveCachedRequest({
     key: cacheKey,
     ttlMs: CONTEXT_CACHE_TTL_MS,
     cache: contextCache,
     inflight: contextInflight,
-    fetcher: () => http.get(path),
+    fetcher: () => http.get(path, { cache: false, dedupe: false }),
     forceRefresh: Boolean(options?.forceRefresh),
   });
 }
@@ -83,13 +90,14 @@ export async function getAdminReportesContext(params = {}, options = {}) {
 export async function getAdminReportesDashboard(params = {}, options = {}) {
   const qs = buildQuery(params);
   const path = qs ? `${BASE}/dashboard?${qs}` : `${BASE}/dashboard`;
-  const cacheKey = `dashboard:${path}`;
+  if (options?.signal) return http.get(path, { cache: false, dedupe: false, signal: options.signal });
+  const cacheKey = `${sessionScopeKey}:dashboard:${path}`;
   return resolveCachedRequest({
     key: cacheKey,
     ttlMs: DASHBOARD_CACHE_TTL_MS,
     cache: dashboardCache,
     inflight: dashboardInflight,
-    fetcher: () => http.get(path),
+    fetcher: () => http.get(path, { cache: false, dedupe: false }),
     forceRefresh: Boolean(options?.forceRefresh),
   });
 }
@@ -107,8 +115,23 @@ export function buildReportesExportExcelPath(params = {}) {
 
 // JK: Utilidad opcional para invalidar cache local de reportes cuando se requiera.
 export function clearAdminReportesApiCache() {
+  cacheGeneration += 1;
   contextCache.clear();
   dashboardCache.clear();
   contextInflight.clear();
   dashboardInflight.clear();
+}
+
+export function setAdminReportesSessionScope({ userId, roles = [], branchIds = [], empresaId = null } = {}) {
+  const nextScopeKey = userId
+    ? JSON.stringify({
+        userId: String(userId),
+        roles: [...roles].filter(Boolean).map(String).sort(),
+        branchIds: [...branchIds].filter(Boolean).map(String).sort(),
+        empresaId: empresaId == null ? null : String(empresaId),
+      })
+    : 'anonymous';
+  if (nextScopeKey === sessionScopeKey) return;
+  sessionScopeKey = nextScopeKey;
+  clearAdminReportesApiCache();
 }

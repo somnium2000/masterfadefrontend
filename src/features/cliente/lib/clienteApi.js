@@ -2,6 +2,7 @@ import { supabase } from '../../../config/supabaseClient.js';
 import { http } from '../../../services/httpClient.js';
 
 const BASE = '/v1/cliente';
+const PURCHASE_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CITA_BASE = '/v1/citas';
 const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_PROFILE_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -135,8 +136,8 @@ async function uploadPreparedFile(prepared, file) {
   }
 }
 
-export async function getClienteMe() {
-  const response = await http.get(`${BASE}/me`);
+export async function getClienteMe(options = {}) {
+  const response = await http.get(`${BASE}/me`, options);
   return normalizeResponsePayload(response);
 }
 
@@ -174,8 +175,15 @@ export async function acquireClientePlan(payload) {
   return normalizeResponsePayload(response);
 }
 
-export async function createMembershipOrder(id_plan_sucursal) {
-  const response = await http.post(`${BASE}/planes/orden`, { id_plan_sucursal });
+export async function createMembershipOrder(id_plan_sucursal, { idempotencyKey } = {}) {
+  if (idempotencyKey !== undefined && (typeof idempotencyKey !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idempotencyKey))) {
+    throw new Error('No se pudo proteger el intento de compra. La clave no es válida.');
+  }
+  const response = await http.post(`${BASE}/planes/orden`, {
+    id_plan_sucursal,
+    ...(idempotencyKey !== undefined ? { idempotency_key: idempotencyKey } : {}),
+  });
   return normalizeResponsePayload(response);
 }
 
@@ -191,9 +199,14 @@ export async function confirmMembershipPayment(id_payment_intent, options = {}) 
   const testAmount = Number(options?.monto_prueba_hnl);
   const response = await http.post(endpoint, {
     id_payment_intent,
+    ...(!shouldUseMembershipPaymentSimulator() ? { card: options.card, billing: options.billing } : {}),
     ...(shouldUseMembershipPaymentSimulator() && Number.isFinite(testAmount) && testAmount > 0
       ? { monto_prueba_hnl: testAmount }
       : {}),
+  }, shouldUseMembershipPaymentSimulator() ? undefined : {
+    sensitiveBody: true,
+    dedupe: false,
+    cache: false,
   });
   const payload = normalizeResponsePayload(response);
   const normalizedStatus = String(payload?.normalized_status || '').trim().toUpperCase();
@@ -201,6 +214,19 @@ export async function confirmMembershipPayment(id_payment_intent, options = {}) 
     throw new Error(String(payload?.message || 'El pago del plan no fue aprobado.'));
   }
   return payload;
+}
+
+export async function queryMembershipPaymentStatus(id_payment_intent) {
+  const safeIntentId = String(id_payment_intent || '').trim();
+  if (!PURCHASE_UUID_REGEX.test(safeIntentId)) {
+    throw new Error('No se pudo identificar el pago pendiente.');
+  }
+  const response = await http.post(
+    `${BASE}/planes/pago-intent/${encodeURIComponent(safeIntentId)}/estado`,
+    {},
+    { dedupe: false, cache: false }
+  );
+  return normalizeResponsePayload(response);
 }
 
 export async function cancelClientePlan(payload = {}) {
@@ -281,6 +307,48 @@ export async function getClienteProfileImageReadUrl(assetId, { expiresIn = 300 }
 
 export async function deleteClienteProfileImage() {
   const response = await http.del(`${BASE}/me/profile-image`);
+  return normalizeResponsePayload(response);
+}
+
+export async function getClienteAccountDeletionPreview() {
+  const response = await http.get(`${BASE}/me/account-deletion/preview`, { cache: false });
+  return normalizeResponsePayload(response);
+}
+
+export async function createClienteAccountDeletionRequest({ idempotencyKey } = {}) {
+  const response = await http.post(`${BASE}/me/account-deletion/requests`, {
+    idempotency_key: String(idempotencyKey || "").trim(),
+  }, { dedupe: false });
+  return normalizeResponsePayload(response);
+}
+
+export async function confirmClienteAccountDeletionRequest(requestId, payload = {}) {
+  const safeRequestId = String(requestId || "").trim();
+  if (!safeRequestId) {
+    throw new Error("No se pudo identificar la solicitud de eliminacion.");
+  }
+  const response = await http.post(`${BASE}/me/account-deletion/requests/${encodeURIComponent(safeRequestId)}/confirm`, {
+    reauth_token: payload.reauth_token,
+    confirmacion_texto: payload.confirmacion_texto,
+    acepta_perder_masterpuntos: payload.acepta_perder_masterpuntos === true,
+    acepta_cancelar_membresia: payload.acepta_cancelar_membresia === true,
+    acepta_historial_anonimizado: payload.acepta_historial_anonimizado === true,
+    acepta_irreversibilidad: payload.acepta_irreversibilidad === true,
+  }, { dedupe: false });
+  return normalizeResponsePayload(response);
+}
+
+export async function executePublicAccountDeletion(reference, executionToken) {
+  const safeReference = String(reference || "").trim();
+  const safeToken = String(executionToken || "").trim();
+  if (!safeReference || !safeToken) {
+    throw new Error("No se pudo validar la continuacion de eliminacion.");
+  }
+  const response = await http.post(
+    `/v1/public/account-deletion/requests/${encodeURIComponent(safeReference)}/execute`,
+    { execution_token: safeToken },
+    { token: "", dedupe: false }
+  );
   return normalizeResponsePayload(response);
 }
 

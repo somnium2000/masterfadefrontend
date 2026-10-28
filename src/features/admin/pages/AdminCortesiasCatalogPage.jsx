@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import {
   Building2,
   Gift,
@@ -10,6 +11,10 @@ import {
   ToggleLeft,
   ToggleRight,
   Eye,
+  LayoutGrid,
+  List,
+  ChevronLeft,
+  ChevronRight,
   RotateCcw,
 } from "lucide-react";
 import { useAuth } from "../../../context/AuthContext.jsx";
@@ -24,7 +29,7 @@ import { listAdminSucursales } from "../lib/adminSucursalesApi.js";
 import { emitCatalogSync } from "../../../lib/catalogSync.js";
 import { Button } from "../../../components/ui/button.jsx";
 import {
-  Dialog,
+  Dialog, DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -33,22 +38,14 @@ import {
 } from "../../../components/ui/dialog.jsx";
 import { Input } from "../../../components/ui/input.jsx";
 import { Label } from "../../../components/ui/label.jsx";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../../../components/ui/table.jsx";
 import ErrorBanner from "../../../components/data/ErrorBanner.jsx";
 import EmptyState from "../../../components/data/EmptyState.jsx";
 import LoadingSpinner from "../../../components/data/LoadingSpinner.jsx";
 import HoverActionButton from "../../../components/data/HoverActionButton.jsx";
 import DetailInfoModalContent from "../../../components/data/DetailInfoModalContent.jsx";
-import ViewToggle from "../../../components/data/ViewToggle.jsx";
-import CardsCarousel from "../../../components/data/CardsCarousel.jsx";
 import ActionConfirmDialog from "../../../components/feedback/ActionConfirmDialog.jsx";
+
+const PAGE_SIZE = 10;
 
 const FORM_DEFAULTS = {
   nombre: "",
@@ -65,7 +62,7 @@ function extractMessage(error) {
   if (error?.data?.error?.code === "CORTESIA_NAME_DUPLICATE") {
     return "Ya existe una cortesía con ese nombre. Usa la cortesía existente o cambia el nombre.";
   }
-  return error?.data?.error?.message || error?.message || "Error desconocido.";
+  return "No se pudo completar la operación de cortesías.";
 }
 
 function normalizeFormText(value) {
@@ -92,15 +89,13 @@ function CompactActionButton({
       tone={tone}
       onClick={onClick}
       disabled={disabled}
-      className="h-8 w-8 rounded-lg px-0 hover:w-8 hover:px-0 hover:gap-0 focus-visible:w-8 focus-visible:px-0 focus-visible:gap-0"
+      className="h-10 w-10 rounded-lg px-0 hover:w-10 hover:px-0 hover:gap-0 focus-visible:w-10 focus-visible:px-0 focus-visible:gap-0 sm:h-8 sm:w-8 sm:hover:w-8 sm:focus-visible:w-8"
     />
   );
 }
 
-function SucursalSelector({ branchIds, allBranches, selected, onChange, loading }) {
-  const available = branchIds.length > 0
-    ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-    : allBranches;
+function SucursalSelector({ allBranches, selected, onChange, loading, allowAll }) {
+  const available = allBranches;
   const selectedBranch = available.find((branch) => branch.id_sucursal === selected);
 
   if (available.length === 1 && selectedBranch) {
@@ -129,9 +124,12 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loading 
         id="cortesias-branch"
         className="mf-select h-10 w-full sm:h-9 sm:min-w-[220px] sm:w-auto"
         value={selected}
-        onChange={(event) => onChange(String(event.target.value || "").trim())}
+        onChange={(event) => {
+          const next = String(event.target.value || "").trim();
+          onChange(available.some((branch) => branch.id_sucursal === next) ? next : "");
+        }}
       >
-        <option value="">Todas las sucursales</option>
+        <option value="">{allowAll ? "Todas las sucursales" : "Selecciona una sucursal"}</option>
         {available.map((branch) => (
           <option key={branch.id_sucursal} value={branch.id_sucursal}>{branch.nombre_sucursal}</option>
         ))}
@@ -140,10 +138,8 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loading 
   );
 }
 
-function CortesiaForm({ values, onChange, branches, branchIds, lockBranchSelection }) {
-  const scopedBranches = branchIds.length > 0
-    ? branches.filter((branch) => branchIds.includes(branch.id_sucursal))
-    : branches;
+function CortesiaForm({ values, onChange, branches, lockBranchSelection }) {
+  const scopedBranches = branches;
 
   const selectedById = useMemo(() => new Map(values.sucursales.map((item) => [item.id_sucursal, item])), [values.sucursales]);
 
@@ -165,29 +161,29 @@ function CortesiaForm({ values, onChange, branches, branchIds, lockBranchSelecti
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="cortesia-nombre">Nombre *</Label>
-        <Input
-          id="cortesia-nombre"
-          value={values.nombre}
-          onChange={(event) => onChange("nombre", event.target.value)}
-          placeholder="Ej. Corte de bienvenida"
-        />
-      </div>
+      <section className="space-y-3 rounded-xl border border-[var(--mf-nav-border)] p-3 sm:p-4" aria-labelledby="cortesia-global-fields">
+        <div>
+          <h3 id="cortesia-global-fields" className="text-sm font-semibold text-[var(--mf-text)]">Información compartida</h3>
+          <p className="text-xs text-[var(--mf-text-2)]">Estos datos se muestran en todas las sucursales asociadas.</p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-1">
+            <Label htmlFor="cortesia-nombre">Nombre *</Label>
+            <Input id="cortesia-nombre" value={values.nombre} onChange={(event) => onChange("nombre", event.target.value)} placeholder="Ej. Corte de bienvenida" />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <Label htmlFor="cortesia-descripcion">Descripción</Label>
+            <Input id="cortesia-descripcion" value={values.descripcion} onChange={(event) => onChange("descripcion", event.target.value)} placeholder="Describe la cortesía maestra" />
+          </div>
+        </div>
+      </section>
 
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="cortesia-descripcion">Descripción</Label>
-        <Input
-          id="cortesia-descripcion"
-          value={values.descripcion}
-          onChange={(event) => onChange("descripcion", event.target.value)}
-          placeholder="Describe la cortesía maestra"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label>Sucursales asociadas *</Label>
-        <div className="space-y-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+      <section className="space-y-2 rounded-xl border border-[var(--mf-nav-border)] p-3 sm:p-4" aria-labelledby="cortesia-branches-fields">
+        <div>
+          <h3 id="cortesia-branches-fields" className="text-sm font-semibold text-[var(--mf-text)]">Asociaciones por sucursal</h3>
+          <p className="text-xs text-[var(--mf-text-2)]">Selecciona las sucursales disponibles y define su estado operativo.</p>
+        </div>
+        <div className="space-y-2 rounded-xl bg-[var(--mf-btn-bg)] p-2 sm:p-3">
           {scopedBranches.map((branch) => {
             const selected = selectedById.get(branch.id_sucursal);
             return (
@@ -220,12 +216,12 @@ function CortesiaForm({ values, onChange, branches, branchIds, lockBranchSelecti
             <p className="text-xs text-[var(--mf-text-2)]">No hay sucursales disponibles para asociar.</p>
           ) : null}
         </div>
-      </div>
+      </section>
     </div>
   );
 }
 
-function validateForm(values) {
+function validateForm(values, { requireBranch = true } = {}) {
   const nombre = normalizeFormText(values.nombre);
   if (!nombre) return "El nombre es obligatorio.";
   if (nombre.length > 140) return "El nombre no puede exceder 140 caracteres.";
@@ -233,7 +229,7 @@ function validateForm(values) {
   const descripcion = normalizeFormText(values.descripcion);
   if (descripcion.length > 500) return "La descripción no puede exceder 500 caracteres.";
 
-  if (!Array.isArray(values.sucursales) || values.sucursales.length === 0) {
+  if (requireBranch && (!Array.isArray(values.sucursales) || values.sucursales.length === 0)) {
     return "Debes seleccionar al menos una sucursal.";
   }
 
@@ -246,14 +242,17 @@ function validateForm(values) {
 }
 
 export default function AdminCortesiasCatalogPage() {
-  const { branchIds, roles = [] } = useAuth();
+  const { branchIds, roles = [], user } = useAuth();
   const notifications = useNotifications();
   const isSuperAdmin = roles.includes("super_admin");
 
   const [allBranches, setAllBranches] = useState([]);
+  const [branchesContext, setBranchesContext] = useState('');
+  const permissionsKey = JSON.stringify([user?.id_usuario ?? null, roles, [...branchIds].sort()]);
+  const branchesGenerationRef = useRef(0);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [branchLoadError, setBranchLoadError] = useState("");
-  const [sucursal, setSucursal] = useState(branchIds.length === 1 ? branchIds[0] : "");
+  const [sucursal, setSucursal] = useState("");
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -263,13 +262,15 @@ export default function AdminCortesiasCatalogPage() {
   const [cortesias, setCortesias] = useState([]);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState("");
-  const [view, setView] = useState("cards");
+  const [view, setView] = useState("list");
+  const [page, setPage] = useState(1);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [formValues, setFormValues] = useState(FORM_DEFAULTS);
   const [formError, setFormError] = useState("");
   const [formLoading, setFormLoading] = useState(false);
+  const [globalEditConfirmOpen, setGlobalEditConfirmOpen] = useState(false);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailTarget, setDetailTarget] = useState(null);
@@ -279,11 +280,9 @@ export default function AdminCortesiasCatalogPage() {
   const [stateLoading, setStateLoading] = useState(false);
 
   const availableBranches = useMemo(() => {
-    const scoped = branchIds.length > 0
-      ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-      : allBranches;
+    const scoped = branchesContext === permissionsKey && (isSuperAdmin || roles.includes('admin')) ? allBranches : [];
     return scoped.filter((branch) => branch?.id_sucursal);
-  }, [allBranches, branchIds]);
+  }, [allBranches, branchesContext, permissionsKey, isSuperAdmin, roles]);
 
   const branchNameById = useMemo(
     () => allBranches.reduce((acc, branch) => ({ ...acc, [branch.id_sucursal]: branch.nombre_sucursal }), {}),
@@ -317,9 +316,63 @@ export default function AdminCortesiasCatalogPage() {
     [filters, search]
   );
 
-  const mustSelectBranchForList = !isSuperAdmin && branchIds.length !== 1;
-  const actionsLockedByBranch = !sucursal && mustSelectBranchForList;
-  const isGlobalView = !sucursal;
+  const pageCount = Math.max(1, Math.ceil(visibleCortesias.length / PAGE_SIZE));
+  const paginatedCortesias = useMemo(
+    () => visibleCortesias.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [page, visibleCortesias]
+  );
+
+  const actionsLockedByBranch = branchesContext !== permissionsKey || availableBranches.length === 0
+    || (!isSuperAdmin && (!roles.includes("admin") || !sucursal
+      || !availableBranches.some((branch) => branch.id_sucursal === sucursal)));
+  const isGlobalView = isSuperAdmin && !sucursal;
+  const scopeContext = JSON.stringify([permissionsKey, sucursal, actionsLockedByBranch]);
+  const requestContext = JSON.stringify([scopeContext, searchInput.trim()]);
+  const scopeRef = useRef(scopeContext);
+  const contextRef = useRef(requestContext);
+  const generationRef = useRef(0);
+  const mountedRef = useRef(false);
+  const formGenerationRef = useRef(0);
+  const saveOperationRef = useRef(null);
+  const stateGenerationRef = useRef(0);
+  const stateOperationRef = useRef(null);
+
+  // AM: Invalida antes del debounce datos de otro alcance o busqueda.
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    contextRef.current = requestContext;
+    generationRef.current += 1;
+    setCortesias([]);
+    setListError("");
+    setLoading(false);
+    if (scopeRef.current !== scopeContext) {
+      scopeRef.current = scopeContext;
+      setDialogOpen(false);
+      setEditTarget(null);
+      setGlobalEditConfirmOpen(false);
+      setDetailOpen(false);
+      setDetailTarget(null);
+      setConfirmOpen(false);
+      setStateTarget(null);
+    }
+    return () => { mountedRef.current = false; generationRef.current += 1; };
+  }, [requestContext, scopeContext]);
+
+  useLayoutEffect(() => {
+    setFormLoading(false);
+    return () => {
+      formGenerationRef.current += 1;
+      saveOperationRef.current = null;
+    };
+  }, [scopeContext]);
+
+  useLayoutEffect(() => {
+    setStateLoading(false);
+    return () => {
+      stateGenerationRef.current += 1;
+      stateOperationRef.current = null;
+    };
+  }, [scopeContext]);
 
   useEffect(() => {
     const timeout = setTimeout(() => setSearch(searchInput.trim()), 250);
@@ -327,29 +380,37 @@ export default function AdminCortesiasCatalogPage() {
   }, [searchInput]);
 
   const fetchBranches = useCallback(async () => {
+    const generation = ++branchesGenerationRef.current;
+    const isCurrent = () => mountedRef.current && branchesGenerationRef.current === generation;
+    setAllBranches([]);
+    setBranchesContext('');
     setLoadingBranches(true);
     setBranchLoadError("");
 
     try {
       const response = await listAdminSucursales({ soloActivas: true });
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       const next = Array.isArray(payload?.sucursales)
         ? payload.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
         : [];
       setAllBranches(next);
+      setBranchesContext(permissionsKey);
     } catch (error) {
+      if (!isCurrent()) return;
+      setAllBranches([]);
       setBranchLoadError(extractMessage(error));
     } finally {
-      setLoadingBranches(false);
+      if (isCurrent()) setLoadingBranches(false);
     }
-  }, []);
+  }, [permissionsKey]);
 
   const fetchCortesias = useCallback(async () => {
-    if (actionsLockedByBranch) {
-      setCortesias([]);
-      setListError("Debes seleccionar una sucursal para consultar cortesías.");
-      return;
-    }
+    if (!mountedRef.current || contextRef.current !== requestContext
+      || actionsLockedByBranch || search !== searchInput.trim()) return;
+    const generation = ++generationRef.current;
+    const isCurrent = () => mountedRef.current && contextRef.current === requestContext
+      && generationRef.current === generation;
 
     setLoading(true);
     setListError("");
@@ -359,30 +420,41 @@ export default function AdminCortesiasCatalogPage() {
         id_sucursal: sucursal || undefined,
         buscar: search || undefined,
       });
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       const next = Array.isArray(payload?.cortesias) ? payload.cortesias : [];
       setCortesias(next);
     } catch (error) {
+      if (!isCurrent()) return;
       setListError(extractMessage(error));
       setCortesias([]);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [actionsLockedByBranch, search, sucursal]);
+  }, [actionsLockedByBranch, search, searchInput, sucursal, requestContext]);
 
   useEffect(() => {
     void fetchBranches();
+    return () => { branchesGenerationRef.current += 1; };
   }, [fetchBranches]);
 
   useEffect(() => {
     void fetchCortesias();
   }, [fetchCortesias]);
 
+  useLayoutEffect(() => {
+    // AM: Autoseleccion y revocacion dependen de la respuesta administrativa vigente.
+    if (sucursal && availableBranches.some((branch) => branch.id_sucursal === sucursal)) return;
+    setSucursal(availableBranches.length === 1 ? availableBranches[0].id_sucursal : '');
+  }, [sucursal, availableBranches]);
+
   useEffect(() => {
-    if (!sucursal && branchIds.length === 1) {
-      setSucursal(branchIds[0]);
-    }
-  }, [branchIds, sucursal]);
+    setPage(1);
+  }, [filters, search, sucursal]);
+
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
 
   function clearFilters() {
     setFilters({ ...FILTER_DEFAULTS });
@@ -394,10 +466,13 @@ export default function AdminCortesiasCatalogPage() {
   }
 
   function openNuevo() {
+    if (actionsLockedByBranch) return;
+    formGenerationRef.current += 1;
+    saveOperationRef.current = null;
     const defaults = sucursal
       ? [{ id_sucursal: sucursal, activa: true }]
-      : branchIds.length === 1
-      ? [{ id_sucursal: branchIds[0], activa: true }]
+      : availableBranches.length === 1
+      ? [{ id_sucursal: availableBranches[0].id_sucursal, activa: true }]
       : [];
     setEditTarget(null);
     setFormValues({ ...FORM_DEFAULTS, sucursales: defaults });
@@ -406,8 +481,11 @@ export default function AdminCortesiasCatalogPage() {
   }
 
   function openEditar(row) {
+    if (actionsLockedByBranch) return;
     const cortesia = cortesiasById.get(row.id);
     if (!cortesia) return;
+    formGenerationRef.current += 1;
+    saveOperationRef.current = null;
 
     const scoped = Array.isArray(cortesia.sucursales)
       ? cortesia.sucursales.map((item) => ({ id_sucursal: item.id_sucursal, activa: Boolean(item.activa) }))
@@ -430,50 +508,119 @@ export default function AdminCortesiasCatalogPage() {
   }
 
   function openConfirmState(row) {
+    stateGenerationRef.current += 1;
+    stateOperationRef.current = null;
+    setStateLoading(false);
     setStateTarget({ ...row, _nextActiva: !row.activa });
     setConfirmOpen(true);
   }
 
-  async function handleGuardar() {
-    const validationError = validateForm(formValues);
+  function buildEditBranchChanges() {
+    const initial = new Map((editTarget?.sucursales || []).map((item) => [item.id_sucursal, Boolean(item.activa)]));
+    const current = new Map(formValues.sucursales.map((item) => [item.id_sucursal, Boolean(item.activa)]));
+    const branchIdsToCompare = new Set([...initial.keys(), ...current.keys()]);
+
+    return [...branchIdsToCompare]
+      .filter((branchId) => initial.get(branchId) !== current.get(branchId))
+      .map((branchId) => ({ id_sucursal: branchId, activa: current.get(branchId) ?? false }));
+  }
+
+  function hasGlobalFieldChanges() {
+    if (!editTarget) return false;
+    return normalizeFormText(formValues.nombre) !== normalizeFormText(editTarget.nombre)
+      || normalizeFormText(formValues.descripcion) !== normalizeFormText(editTarget.descripcion);
+  }
+
+  async function saveForm() {
+    if (actionsLockedByBranch || !mountedRef.current || saveOperationRef.current) return;
+    const validationError = validateForm(formValues, { requireBranch: !editTarget });
     if (validationError) {
       setFormError(validationError);
       return;
     }
 
+    const normalizedNombre = normalizeFormText(formValues.nombre);
+    const normalizedDescripcion = normalizeFormText(formValues.descripcion);
+    const payload = {};
+
+    if (editTarget) {
+      if (normalizedNombre !== normalizeFormText(editTarget.nombre)) payload.nombre = normalizedNombre;
+      if (normalizedDescripcion !== normalizeFormText(editTarget.descripcion)) {
+        payload.descripcion = normalizedDescripcion || null;
+      }
+      const branchChanges = buildEditBranchChanges();
+      if (branchChanges.length > 0) payload.sucursales = branchChanges;
+      if (Object.keys(payload).length === 0) {
+        setDialogOpen(false);
+        return;
+      }
+    } else {
+      payload.nombre = normalizedNombre;
+      payload.descripcion = normalizedDescripcion || null;
+      payload.sucursales = formValues.sucursales.map((item) => ({
+        id_sucursal: item.id_sucursal,
+        activa: Boolean(item.activa),
+      }));
+    }
+
+    const operation = {};
+    const formGeneration = formGenerationRef.current;
+    saveOperationRef.current = operation;
+    const isCurrent = () => mountedRef.current && saveOperationRef.current === operation
+      && formGenerationRef.current === formGeneration && scopeRef.current === scopeContext;
     setFormLoading(true);
     setFormError("");
 
     try {
-      const payload = {
-        nombre: normalizeFormText(formValues.nombre),
-        descripcion: normalizeFormText(formValues.descripcion) || null,
-        sucursales: formValues.sucursales.map((item) => ({
-          id_sucursal: item.id_sucursal,
-          activa: Boolean(item.activa),
-        })),
-      };
-
       if (editTarget) {
         await updateAdminCortesia(editTarget.id, payload);
-        notifications.success("Cortesía actualizada");
       } else {
         await createAdminCortesia(payload);
-        notifications.success("Cortesía creada");
       }
 
-      setDialogOpen(false);
+      // AM: Una mutación confirmada debe sincronizarse incluso si su formulario ya no está vigente.
       emitCatalogSync("admin-cortesias");
+      if (!isCurrent()) return;
+      notifications.success(editTarget ? "Cortesía actualizada" : "Cortesía creada");
+      setDialogOpen(false);
       await fetchCortesias();
     } catch (error) {
+      if (!isCurrent()) return;
       setFormError(extractMessage(error));
     } finally {
-      setFormLoading(false);
+      if (isCurrent()) {
+        saveOperationRef.current = null;
+        setFormLoading(false);
+      }
     }
   }
 
+  function handleGuardar() {
+    const validationError = validateForm(formValues, { requireBranch: !editTarget });
+    if (validationError) {
+      setFormError(validationError);
+      return;
+    }
+    if (hasGlobalFieldChanges()) {
+      setGlobalEditConfirmOpen(true);
+      return;
+    }
+    void saveForm();
+  }
+
+  function handleConfirmGlobalEdit() {
+    setGlobalEditConfirmOpen(false);
+    void saveForm();
+  }
+
   async function handleConfirmState() {
-    if (!stateTarget) return;
+    if (!stateTarget || actionsLockedByBranch || !mountedRef.current || stateOperationRef.current) return;
+
+    const operation = {};
+    const generation = stateGenerationRef.current;
+    stateOperationRef.current = operation;
+    const isCurrent = () => mountedRef.current && stateOperationRef.current === operation
+      && stateGenerationRef.current === generation && scopeRef.current === scopeContext;
 
     setStateLoading(true);
     try {
@@ -482,15 +629,19 @@ export default function AdminCortesiasCatalogPage() {
         activa: stateTarget._nextActiva,
       });
 
+      emitCatalogSync("admin-cortesias");
+      if (!isCurrent()) return;
       notifications.success(stateTarget._nextActiva ? "Cortesía activada" : "Cortesía inactivada");
       setConfirmOpen(false);
       setStateTarget(null);
-      emitCatalogSync("admin-cortesias");
       await fetchCortesias();
     } catch (error) {
-      notifications.error(extractMessage(error));
+      if (isCurrent()) notifications.error(extractMessage(error));
     } finally {
-      setStateLoading(false);
+      if (isCurrent()) {
+        stateOperationRef.current = null;
+        setStateLoading(false);
+      }
     }
   }
 
@@ -535,11 +686,11 @@ export default function AdminCortesiasCatalogPage() {
               <p className="text-sm text-[var(--mf-text-2)]">Gestiona cortesías maestras y su disponibilidad por sucursal.</p>
             </div>
             <SucursalSelector
-              branchIds={branchIds}
-              allBranches={allBranches}
+              allBranches={availableBranches}
               selected={sucursal}
               onChange={setSucursal}
               loading={loadingBranches}
+              allowAll={isSuperAdmin}
             />
             {branchLoadError ? <ErrorBanner message={branchLoadError} /> : null}
           </div>
@@ -547,7 +698,24 @@ export default function AdminCortesiasCatalogPage() {
           <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[560px]">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-[var(--mf-text-2)]">{visibleCortesias.length} de {cortesias.length} cortesía(s)</p>
-              <ViewToggle defaultView={view} onViewChange={setView} storageKey="cortesias" />
+              <div className="inline-flex items-center rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-1" role="group" aria-label="Vista del catálogo">
+                <button
+                  type="button"
+                  aria-pressed={view === "list"}
+                  onClick={() => setView("list")}
+                  className={`inline-flex min-h-10 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors sm:min-h-9 ${view === "list" ? "bg-[var(--mf-accent)] text-[var(--mf-accent-text)]" : "text-[var(--mf-text-2)] hover:text-[var(--mf-text)]"}`}
+                >
+                  <List size={14} /> Lista
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={view === "cards"}
+                  onClick={() => setView("cards")}
+                  className={`inline-flex min-h-10 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors sm:min-h-9 ${view === "cards" ? "bg-[var(--mf-accent)] text-[var(--mf-accent-text)]" : "text-[var(--mf-text-2)] hover:text-[var(--mf-text)]"}`}
+                >
+                  <LayoutGrid size={14} /> Tarjetas
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -569,104 +737,111 @@ export default function AdminCortesiasCatalogPage() {
         </div>
       </header>
 
+      {actionsLockedByBranch ? <EmptyState icon={Building2} title="Selecciona una sucursal autorizada" description="Selecciona una sucursal de tu alcance para consultar y gestionar cortesías." /> : null}
       {listError ? <ErrorBanner message={listError} onRetry={fetchCortesias} /> : null}
       {loading ? <LoadingSpinner label="Cargando cortesías..." /> : null}
 
-      {!loading && !listError && cortesias.length === 0 ? (
+      {!actionsLockedByBranch && !loading && !listError && cortesias.length === 0 ? (
         <EmptyState icon={Gift} title="Sin cortesías" description="No hay cortesías maestras registradas para el alcance actual." actionLabel="Crear cortesía maestra" onAction={openNuevo} />
       ) : null}
 
-      {!loading && !listError && cortesias.length > 0 && visibleCortesias.length === 0 ? (
+      {!actionsLockedByBranch && !loading && !listError && cortesias.length > 0 && visibleCortesias.length === 0 ? (
         <EmptyState icon={Search} title="Sin resultados" description="No hay coincidencias con la búsqueda o filtros." />
       ) : null}
 
-      {!loading && !listError && visibleCortesias.length > 0 && view === "cards" ? (
-        <CardsCarousel
-          items={visibleCortesias}
-          getItemKey={(item) => item.id}
-          renderItem={(item) => (
-            <article
-              key={item.id}
-              className="overflow-hidden rounded-[18px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-3 shadow-[var(--mf-shadow-soft)]"
-            >
-              <header className="flex items-start justify-between gap-3">
-                <div className="flex min-w-0 items-start gap-2.5">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]">
-                    <Gift size={15} />
-                  </div>
+      {!actionsLockedByBranch && !loading && !listError && paginatedCortesias.length > 0 && view === "list" ? (
+        <section aria-label="Lista de cortesías" className="@container overflow-visible rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)]">
+          <div role="row" className="hidden grid-cols-[minmax(180px,1fr)_minmax(220px,1.35fr)_minmax(210px,1fr)_auto] gap-4 border-b border-[var(--mf-nav-border)] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)] @[58rem]:grid">
+            <span>Nombre</span><span>Descripción</span><span>{isGlobalView ? "Cobertura" : "Estado en sucursal"}</span><span className="text-right">Acciones</span>
+          </div>
+          <div className="divide-y divide-[var(--mf-nav-border)]">
+            {paginatedCortesias.map((item) => {
+              const scopes = Array.isArray(item.sucursales) ? item.sucursales : [];
+              const activeCount = scopes.filter((scope) => Boolean(scope.activa)).length;
+              return (
+                <article key={item.id} role="row" className="grid min-w-0 gap-3 px-3 py-3 transition-colors hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_40%,transparent)] sm:px-4 @[58rem]:grid-cols-[minmax(180px,1fr)_minmax(220px,1.35fr)_minmax(210px,1fr)_auto] @[58rem]:items-center @[58rem]:gap-4">
                   <div className="min-w-0">
-                    <p className="text-[22px] leading-none font-semibold text-[var(--mf-text)] truncate">{item.nombre || "Cortesía"}</p>
-                    <p className="mt-1 text-sm text-[var(--mf-text-2)] line-clamp-1">{item.descripcion || "Sin descripción"}</p>
+                    <p className="break-words text-sm font-semibold text-[var(--mf-text)]">{item.nombre || "Cortesía"}</p>
+                    <p className="mt-0.5 text-[11px] text-[var(--mf-text-2)] @[58rem]:hidden">Cortesía maestra</p>
                   </div>
-                </div>
-                <span className="mf-badge mf-badge-muted shrink-0">
-                  {isGlobalView ? `${(item.sucursales || []).length} sucursal(es)` : "Vista sucursal"}
-                </span>
-              </header>
-
-              <div className="mt-3 space-y-2 border-t border-[var(--mf-nav-border)] pt-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-accent)]">
-                  {isGlobalView ? "Sucursales asociadas" : "Estado en esta sucursal"}
-                </p>
-                {(Array.isArray(item.sucursales) ? item.sucursales : []).map((scope) => (
-                  <div key={scope.id} className="rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_50%,transparent)] px-2.5 py-2">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="text-sm leading-snug text-[var(--mf-text)]">
-                        {scope.nombre_sucursal || branchNameById[scope.id_sucursal] || scope.id_sucursal}
-                      </p>
-                      <div className="flex items-center gap-2 self-end sm:self-auto">
-                        <StatusBadge active={Boolean(scope.activa)} />
-                        {renderScopeActions(item, scope)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <footer className="mt-3 flex items-center justify-end border-t border-[var(--mf-nav-border)] pt-2.5">
-                {renderMainActions(item)}
-              </footer>
-            </article>
-          )}
-        />
-      ) : null}
-
-      {!loading && !listError && visibleCortesias.length > 0 && view === "table" ? (
-        <div className="mf-table-wrap">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-[var(--mf-nav-border)]">
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Nombre</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Descripción</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">{isGlobalView ? "Sucursales asociadas" : "Estado en sucursal"}</TableHead>
-                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visibleCortesias.map((item) => (
-                <TableRow key={item.id} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">
-                  <TableCell className="font-medium text-[var(--mf-text)]">{item.nombre}</TableCell>
-                  <TableCell className="text-[var(--mf-text-2)]">{item.descripcion || "-"}</TableCell>
-                  <TableCell className="space-y-2">
-                    {(Array.isArray(item.sucursales) ? item.sucursales : []).map((scope) => (
-                      <div key={scope.id} className="flex items-center justify-between gap-2 rounded-lg border border-[var(--mf-nav-border)] px-2 py-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-[var(--mf-text)]">{scope.nombre_sucursal || branchNameById[scope.id_sucursal] || scope.id_sucursal}</span>
-                          <StatusBadge active={Boolean(scope.activa)} />
+                  <p className="min-w-0 break-words text-sm leading-5 text-[var(--mf-text-2)] line-clamp-2">{item.descripcion || "Sin descripción"}</p>
+                  <div className="min-w-0">
+                    {isGlobalView ? (
+                      <details className="group">
+                        <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[var(--mf-accent)]/40">
+                          <span className="mf-badge mf-badge-muted">{scopes.length} asociada(s)</span>
+                          <span className="text-xs text-[var(--mf-text-2)]">{activeCount} activa(s)</span>
+                        </summary>
+                        <div className="mt-2 space-y-1.5">
+                          {scopes.map((scope) => (
+                            <div key={scope.id || scope.id_sucursal} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-2 py-1.5">
+                              <span className="min-w-0 truncate text-xs text-[var(--mf-text)]">{scope.nombre_sucursal || branchNameById[scope.id_sucursal] || scope.id_sucursal}</span>
+                              <div className="flex shrink-0 items-center gap-1.5"><StatusBadge active={Boolean(scope.activa)} />{renderScopeActions(item, scope)}</div>
+                            </div>
+                          ))}
                         </div>
-                        {renderScopeActions(item, scope)}
+                      </details>
+                    ) : scopes[0] ? (
+                      <div className="flex items-center justify-between gap-2">
+                        <StatusBadge active={Boolean(scopes[0].activa)} />
+                        {renderScopeActions(item, scopes[0])}
                       </div>
-                    ))}
-                  </TableCell>
-                  <TableCell className="text-right"><div className="flex items-center justify-end gap-1.5">{renderMainActions(item)}</div></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+                    ) : <span className="text-xs text-[var(--mf-text-2)]">No asociada</span>}
+                  </div>
+                  <div className="flex items-center justify-end gap-1.5">{renderMainActions(item)}</div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
       ) : null}
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading) setDialogOpen(open); }}>
+      {!actionsLockedByBranch && !loading && !listError && paginatedCortesias.length > 0 && view === "cards" ? (
+        <section aria-label="Tarjetas de cortesías" className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+          {paginatedCortesias.map((item) => {
+            const scopes = Array.isArray(item.sucursales) ? item.sucursales : [];
+            const activeCount = scopes.filter((scope) => Boolean(scope.activa)).length;
+            return (
+              <article key={item.id} className="flex min-w-0 flex-col rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)] p-4">
+                <header className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Gift size={15} /></div>
+                  <div className="min-w-0 flex-1">
+                    <h2 className="break-words text-base font-semibold leading-5 text-[var(--mf-text)]">{item.nombre || "Cortesía"}</h2>
+                    <p className="mt-1 break-words text-sm leading-5 text-[var(--mf-text-2)] line-clamp-2">{item.descripcion || "Sin descripción"}</p>
+                  </div>
+                </header>
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[var(--mf-nav-border)] pt-3">
+                  {isGlobalView ? <><span className="mf-badge mf-badge-muted">{scopes.length} asociada(s)</span><span className="text-xs text-[var(--mf-text-2)]">{activeCount} activa(s)</span></> : scopes[0] ? <StatusBadge active={Boolean(scopes[0].activa)} /> : <span className="text-xs text-[var(--mf-text-2)]">No asociada</span>}
+                </div>
+                {isGlobalView && scopes.length > 0 ? (
+                  <details className="mt-2">
+                    <summary className="min-h-9 cursor-pointer list-none rounded-lg py-2 text-xs font-medium text-[var(--mf-accent)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--mf-accent)]/40">Ver estados por sucursal</summary>
+                    <div className="space-y-1.5">
+                      {scopes.map((scope) => <div key={scope.id || scope.id_sucursal} className="flex items-center justify-between gap-2 rounded-lg border border-[var(--mf-nav-border)] px-2 py-1.5"><span className="min-w-0 truncate text-xs">{scope.nombre_sucursal || branchNameById[scope.id_sucursal] || scope.id_sucursal}</span><div className="flex shrink-0 items-center gap-1.5"><StatusBadge active={Boolean(scope.activa)} />{renderScopeActions(item, scope)}</div></div>)}
+                    </div>
+                  </details>
+                ) : null}
+                <footer className="mt-auto flex items-center justify-between gap-2 pt-3">
+                  {!isGlobalView && scopes[0] ? renderScopeActions(item, scopes[0]) : <span />}
+                  <div className="flex items-center gap-1.5">{renderMainActions(item)}</div>
+                </footer>
+              </article>
+            );
+          })}
+        </section>
+      ) : null}
+
+      {!actionsLockedByBranch && !loading && !listError && visibleCortesias.length > PAGE_SIZE ? (
+        <nav aria-label="Paginación de cortesías" className="flex flex-col items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] px-3 py-2 sm:flex-row">
+          <p className="text-xs text-[var(--mf-text-2)]">Página {page} de {pageCount} · {visibleCortesias.length} resultados</p>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="min-h-9 gap-1" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={14} /> Anterior</Button>
+            <Button variant="outline" size="sm" className="min-h-9 gap-1" disabled={page === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}>Siguiente <ChevronRight size={14} /></Button>
+          </div>
+        </nav>
+      ) : null}
+
+      <UnsavedChangesDialog values={formValues} saving={formLoading} open={dialogOpen} onOpenChange={(open) => { if (!formLoading) setDialogOpen(open); }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editTarget ? "Editar cortesía maestra" : "Nueva cortesía maestra"}</DialogTitle>
@@ -677,21 +852,20 @@ export default function AdminCortesiasCatalogPage() {
             values={formValues}
             onChange={handleFormChange}
             branches={availableBranches}
-            branchIds={branchIds}
-            lockBranchSelection={branchIds.length === 1}
+            lockBranchSelection={availableBranches.length === 1}
           />
 
           {formError ? <ErrorBanner message={formError} /> : null}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>Cancelar</Button>
+            <DialogClose asChild><Button variant="outline" disabled={formLoading}>Cancelar</Button></DialogClose>
             <Button onClick={handleGuardar} disabled={formLoading} className="gap-2 min-w-[120px]">
               {formLoading ? <Loader2 size={15} className="animate-spin" /> : null}
               {editTarget ? "Guardar cambios" : "Crear cortesía maestra"}
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl">
@@ -767,7 +941,7 @@ export default function AdminCortesiasCatalogPage() {
               </select>
             </div>
 
-            {!sucursal ? (
+            {isSuperAdmin && !sucursal ? (
               <div>
                 <Label className="mf-label">Sucursal</Label>
                 <select className="mf-select mt-1" value={filters.idSucursal} onChange={(event) => setFilters((prev) => ({ ...prev, idSucursal: event.target.value }))}>
@@ -778,7 +952,7 @@ export default function AdminCortesiasCatalogPage() {
                 </select>
               </div>
             ) : (
-              <p className="sm:col-span-2 text-xs text-[var(--mf-text-2)]">La vista operativa ya está fijada por la sucursal superior.</p>
+              <p className="sm:col-span-2 text-xs text-[var(--mf-text-2)]">{sucursal ? "La vista operativa ya está fijada por la sucursal superior." : "Selecciona una sucursal autorizada en el selector superior."}</p>
             )}
           </div>
 
@@ -788,6 +962,18 @@ export default function AdminCortesiasCatalogPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ActionConfirmDialog
+        open={globalEditConfirmOpen}
+        onOpenChange={(open) => { if (!formLoading) setGlobalEditConfirmOpen(open); }}
+        tone="warning"
+        title="Modificar información global"
+        description="Estás modificando el nombre o la descripción de una cortesía compartida. Este cambio se reflejará en todas las sucursales donde esté asociada. ¿Deseas continuar?"
+        confirmLabel="Confirmar cambios"
+        cancelLabel="Cancelar"
+        loading={formLoading}
+        onConfirm={handleConfirmGlobalEdit}
+      />
 
       <ActionConfirmDialog
         open={confirmOpen}

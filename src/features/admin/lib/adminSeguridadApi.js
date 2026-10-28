@@ -17,13 +17,6 @@ const USER_SORT_SET = new Set(['updated_at', 'failed_login_count', 'last_login_a
 const ALERT_STATE_SET = new Set(['abierta', 'en_revision', 'resuelta', 'descartada']);
 const ALERT_UPDATE_STATE_SET = new Set(['resuelta', 'descartada']);
 const ALERT_SEVERITY_SET = new Set(['baja', 'media', 'alta', 'critica']);
-const ALERT_TYPE_SET = new Set([
-  'muchos_fallos_misma_ip',
-  'muchos_fallos_mismo_usuario',
-  'usuario_bloqueado',
-  'intentos_contra_super_admin',
-  'cliente_intenta_nueva_sesion',
-]);
 const ALERT_SORT_SET = new Set(['detectada_at', 'severidad', 'estado']);
 
 function toSafePage(value, fallback = PAGE_DEFAULT) {
@@ -125,7 +118,8 @@ function sanitizeAlertParams(params = {}) {
 
   if (ALERT_STATE_SET.has(params.estado)) query.estado = params.estado;
   if (ALERT_SEVERITY_SET.has(params.severidad)) query.severidad = params.severidad;
-  if (ALERT_TYPE_SET.has(params.tipo)) query.tipo = params.tipo;
+  const tipo = normalizeText(params.tipo, 80);
+  if (tipo && tipo !== 'all') query.tipo = tipo;
   if (ALERT_SORT_SET.has(params.sortBy)) query.sort_by = params.sortBy;
 
   const fromAt = normalizeIsoDateTime(params.fromAt);
@@ -140,8 +134,8 @@ export async function listAdminSecurityLoginLogs(params = {}) {
   return http.get(`/v1/admin/seguridad/login-logs${toQueryString(query)}`);
 }
 
-export async function getAdminSecurityLoginLogDetail(idLoginLog) {
-  return http.get(`/v1/admin/seguridad/login-logs/${encodeURIComponent(String(idLoginLog || ''))}`);
+export async function getAdminSecurityLoginLogDetail(idLoginLog, { signal } = {}) {
+  return http.get(`/v1/admin/seguridad/login-logs/${encodeURIComponent(String(idLoginLog || ''))}`, { signal });
 }
 
 export async function listAdminSecuritySessions(params = {}) {
@@ -149,12 +143,16 @@ export async function listAdminSecuritySessions(params = {}) {
   return http.get(`/v1/admin/seguridad/sesiones${toQueryString(query)}`);
 }
 
-export async function getAdminSecuritySessionDetail(idSesion) {
-  return http.get(`/v1/admin/seguridad/sesiones/${encodeURIComponent(String(idSesion || ''))}`);
+export async function getAdminSecuritySessionDetail(idSesion, { signal } = {}) {
+  return http.get(`/v1/admin/seguridad/sesiones/${encodeURIComponent(String(idSesion || ''))}`, { signal });
 }
 
 export async function revokeAdminSecuritySession(idSesion) {
   return http.post(`/v1/admin/seguridad/sesiones/${encodeURIComponent(String(idSesion || ''))}/revocar`, {});
+}
+
+export async function revokeAllAdminSecuritySessions() {
+  return http.post('/v1/admin/seguridad/sesiones/revocar-todas', {});
 }
 
 export async function listAdminSecurityUsers(params = {}) {
@@ -163,8 +161,11 @@ export async function listAdminSecurityUsers(params = {}) {
 }
 
 export async function updateAdminSecurityUserAccessState(idUsuario, estadoAcceso) {
+  if (!USER_STATE_SET.has(estadoAcceso)) {
+    throw new Error('USER_ACCESS_STATE_NOT_ALLOWED');
+  }
   const payload = {
-    estado_acceso: USER_STATE_SET.has(estadoAcceso) ? estadoAcceso : 'activo',
+    estado_acceso: estadoAcceso,
   };
   return http.patch(`/v1/admin/seguridad/usuarios/${encodeURIComponent(String(idUsuario || ''))}/estado-acceso`, payload);
 }
@@ -174,8 +175,8 @@ export async function listAdminSecurityAlerts(params = {}) {
   return http.get(`/v1/admin/seguridad/alertas${toQueryString(query)}`);
 }
 
-export async function getAdminSecurityAlertDetail(idAlerta) {
-  return http.get(`/v1/admin/seguridad/alertas/${encodeURIComponent(String(idAlerta || ''))}`);
+export async function getAdminSecurityAlertDetail(idAlerta, { signal } = {}) {
+  return http.get(`/v1/admin/seguridad/alertas/${encodeURIComponent(String(idAlerta || ''))}`, { signal });
 }
 
 export async function updateAdminSecurityAlertState(idAlerta, estado, comentario = '') {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FileDown, FileSpreadsheet, Loader2, Printer } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Button } from '../../../components/ui/button.jsx';
@@ -902,6 +902,21 @@ export default function ReportesCustomReportModal({
 }) {
   const notifications = useNotifications();
   const { user } = useAuth();
+  const generationRef = useRef(0);
+  const actionRef = useRef(null);
+  const dismiss = notifications.dismiss;
+  useEffect(() => {
+    if (defaultModuleType !== 'ingresos' && defaultModuleType !== 'membresias' && defaultModuleType !== 'barberos' && defaultModuleType !== 'concurrencia' && defaultModuleType !== 'sucursales') return;
+    generationRef.current += 1;
+    setRunningAction('');
+    setIsGeneratingReport(false);
+    return () => {
+      generationRef.current += 1;
+      actionRef.current?.controller?.abort();
+      if (actionRef.current?.loadingId) dismiss(actionRef.current.loadingId);
+      actionRef.current = null;
+    };
+  }, [defaultModuleType, open, user?.id_usuario, dismiss]);
   const [dateFrom, setDateFrom] = useState(null);
   const [dateTo, setDateTo] = useState(null);
   const [selectedKpiIds, setSelectedKpiIds] = useState([]);
@@ -934,6 +949,8 @@ export default function ReportesCustomReportModal({
   }
 
   async function handleGenerate(actionType) {
+    const incomeOnly = defaultModuleType === 'ingresos' || defaultModuleType === 'membresias' || defaultModuleType === 'barberos' || defaultModuleType === 'concurrencia' || defaultModuleType === 'sucursales';
+    if (incomeOnly && actionRef.current) return;
     if (!dateFrom || !dateTo) {
       notifications.warning('Selecciona fecha desde y fecha hasta para crear el reporte.');
       return;
@@ -947,12 +964,20 @@ export default function ReportesCustomReportModal({
       return;
     }
 
+    const operation = { generation: generationRef.current, loadingId: null, controller: incomeOnly ? new AbortController() : null };
+    if (incomeOnly) actionRef.current = operation;
+    const isCurrent = () => !incomeOnly || (
+      generationRef.current === operation.generation && actionRef.current === operation
+    );
     setRunningAction(actionType);
     // JK: Activa loading UX compartido para todas las salidas del modal.
     setIsGeneratingReport(true);
     const loadingId = notifications.loading('Generando reporte...');
+    operation.loadingId = loadingId;
     try {
-      const snapshot = await onRequestSnapshot({ fecha_desde: dateFrom, fecha_hasta: dateTo });
+      const range = { fecha_desde: dateFrom, fecha_hasta: dateTo };
+      const snapshot = await onRequestSnapshot(incomeOnly ? { ...range, signal: operation.controller.signal } : range);
+      if (!isCurrent()) return;
       const tabularSections = buildSelectedSections(snapshot, selectedKpiIds);
       const baseReportPayload = {
         title: 'Reporte Personalizado · MasterFade',
@@ -996,6 +1021,7 @@ export default function ReportesCustomReportModal({
         });
       }
 
+      if (!isCurrent()) return;
       notifications.update(loadingId, {
         type: 'success',
         message: 'Reporte personalizado generado correctamente.',
@@ -1004,16 +1030,24 @@ export default function ReportesCustomReportModal({
         duration: 4000,
       });
     } catch (error) {
+      if (!isCurrent()) return;
       notifications.update(loadingId, {
         type: 'error',
-        message: extractMessage(error),
+        message: defaultModuleType === 'ingresos' ? 'No se pudo generar el reporte de ingresos.'
+          : defaultModuleType === 'membresias' ? 'No se pudo generar el reporte de membresías.'
+            : defaultModuleType === 'barberos' ? 'No se pudo generar el reporte de barberos.'
+              : defaultModuleType === 'concurrencia' ? 'No se pudo generar el reporte de concurrencia.'
+                : defaultModuleType === 'sucursales' ? 'No se pudo generar el reporte de sucursales.' : extractMessage(error),
         persist: false,
         // JK: Restituye duración estándar de error al salir de estado loading persistente.
         duration: 7000,
       });
     } finally {
-      setRunningAction('');
-      setIsGeneratingReport(false);
+      if (isCurrent()) {
+        if (incomeOnly) actionRef.current = null;
+        setRunningAction('');
+        setIsGeneratingReport(false);
+      }
     }
   }
 

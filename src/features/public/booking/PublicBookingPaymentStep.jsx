@@ -5,7 +5,11 @@ import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import { formatCurrencyHnl, normalizeBookingPaymentUiState } from './bookingUtils.js';
 import BookingActions from './components/BookingActions.jsx';
 import BookingStepHeader from './components/BookingStepHeader.jsx';
+import TodoPagoHostedModal, {
+  createTodoPagoLaunchKey,
+} from './components/TodoPagoHostedModal.jsx';
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
+import { getPixelPayPresentation } from '../../payments/pixelPayPresentation.js';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
 const TODO_PAGO_SIMULATION_SCENARIOS = [
@@ -17,19 +21,32 @@ const TODO_PAGO_SIMULATION_SCENARIOS = [
 ];
 const INITIAL_PAYMENT_FORM = {
   cardholderName: '',
-  receiptEmail: '',
   phone: '',
   cardNumber: '',
   expiry: '',
   cvv: '',
+  billingAddress: '',
+  billingCity: '',
+  billingState: 'HN-FM',
+  billingCountry: 'HN',
 };
+const HONDURAS_DEPARTMENTS = [
+  ['HN-AT', 'Atlantida'], ['HN-CH', 'Choluteca'], ['HN-CL', 'Colon'], ['HN-CM', 'Comayagua'],
+  ['HN-CP', 'Copan'], ['HN-CR', 'Cortes'], ['HN-EP', 'El Paraiso'], ['HN-FM', 'Francisco Morazan'],
+  ['HN-GD', 'Gracias a Dios'], ['HN-IB', 'Islas de la Bahia'], ['HN-IN', 'Intibuca'], ['HN-LE', 'Lempira'],
+  ['HN-LP', 'La Paz'], ['HN-OC', 'Ocotepeque'], ['HN-OL', 'Olancho'], ['HN-SB', 'Santa Barbara'],
+  ['HN-VA', 'Valle'], ['HN-YO', 'Yoro'],
+];
+const PIXELPAY_BILLING_ADDRESS_PLACEHOLDERS = new Set([
+  'QA', 'TEST', 'PRUEBA', 'N/A', 'NA', 'NONE', 'NULL',
+]);
 
 function normalizeDigits(value) {
   return String(value || '').replace(/\D+/g, '');
 }
 
-function formatCardNumber(value) {
-  return normalizeDigits(value).slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
+export function formatCardNumber(value) {
+  return normalizeDigits(value).slice(0, 19).replace(/(.{4})/g, '$1 ').trim();
 }
 
 function maskCardNumber(value) {
@@ -45,37 +62,183 @@ function formatExpiry(value) {
   return `${digits.slice(0, 2)}/${digits.slice(2)}`;
 }
 
+export function toPixelPayCardExpire(value) {
+  const match = String(value || '').trim().match(/^(0[1-9]|1[0-2])\/([0-9]{2})$/);
+  if (!match) throw new Error('La expiracion debe tener formato MM/AA.');
+  return `${match[2]}${match[1]}`;
+}
+
+export function isPixelPayBillingAddressPlaceholder(value) {
+  return PIXELPAY_BILLING_ADDRESS_PLACEHOLDERS.has(String(value || '').trim().toUpperCase());
+}
+
+export function isPixelPayCardExpireCurrentOrFuture(value, referenceDate = new Date()) {
+  const match = String(value || '').trim().match(/^(0[1-9]|1[0-2])\/([0-9]{2})$/);
+  if (!match) return false;
+  const expireMonth = Number(match[1]);
+  const expireYear = 2000 + Number(match[2]);
+  const currentYear = referenceDate.getUTCFullYear();
+  const currentMonth = referenceDate.getUTCMonth() + 1;
+  return expireYear > currentYear || (expireYear === currentYear && expireMonth >= currentMonth);
+}
+
+export function buildPaymentCardProviderLabel({ providerType, cardBrand, cardBrandLabel, pixelPayEnvironment }) {
+  const providerLabel = providerType === 'pixelpay'
+    ? getPixelPayPresentation(pixelPayEnvironment).providerLabel
+    : 'TodoPago test';
+  return cardBrand === 'unknown' ? providerLabel : `${cardBrandLabel} · ${providerLabel}`;
+}
+
+export function shouldQueryPixelPayProviderOnManualVerify({
+  providerType,
+  paymentIntent,
+  paymentResult,
+} = {}) {
+  if (String(providerType || '').trim().toLowerCase() !== 'pixelpay') return false;
+  if (paymentResult?.manual_reconciliation_required === true) return true;
+  if (paymentResult?.pending_confirmation === true) return true;
+  return String(paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || '')
+    .trim()
+    .toLowerCase() === 'pendiente_confirmacion';
+}
+
+export function getPixelPayReconciliationNotice(paymentResult) {
+  const intentState = String(paymentResult?.estado_intent_codigo || '')
+    .trim()
+    .toLowerCase();
+  if (
+    paymentResult?.manual_reconciliation_required === true
+    || paymentResult?.pending_confirmation === true
+    || intentState === 'pendiente_confirmacion'
+  ) {
+    return 'Tu pago requiere verificación. No vuelvas a realizar el pago.';
+  }
+  return '';
+}
+
+function toCanonicalPaymentAmount(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+}
+
+export function resolvePaymentAmount({
+  paymentResult,
+  paymentIntent,
+  holdPricing,
+  holdTotalToPay,
+  fallbackTotal,
+} = {}) {
+  const candidates = [
+    paymentResult?.monto_hnl,
+    paymentIntent?.monto_hnl,
+    holdPricing?.total_pagar_hnl,
+    holdTotalToPay,
+    fallbackTotal,
+  ];
+  for (const candidate of candidates) {
+    const amount = toCanonicalPaymentAmount(candidate);
+    if (amount !== null) return amount;
+  }
+  return 0;
+}
+
+function isCanonicalPaymentAmount(value) {
+  return toCanonicalPaymentAmount(value) !== null;
+}
+
+function hasRealBookingSelection(block) {
+  const selectedServices = Array.isArray(block?.selectedServices) ? block.selectedServices : [];
+  const selectedServiceIds = Array.isArray(block?.selectedServiceIdsEffective)
+    ? block.selectedServiceIdsEffective
+    : [];
+  return Boolean(block?.selectedPackage)
+    || selectedServices.length > 0
+    || selectedServiceIds.length > 0;
+}
+
+export function isCanonicalBookingBlock(block) {
+  return Boolean(
+    block
+    && block.isComplete === true
+    && hasRealBookingSelection(block)
+    && isCanonicalPaymentAmount(block.total_hnl)
+  );
+}
+
+export function resolveCanonicalBookingBlocks(bookingBlocksSummary) {
+  const blocks = Array.isArray(bookingBlocksSummary) ? bookingBlocksSummary : [];
+  return blocks.filter(isCanonicalBookingBlock);
+}
+
+function hasCanonicalOptionalAmount(source, field) {
+  const value = source?.[field];
+  return value === null || value === undefined || value === '' || isCanonicalPaymentAmount(value);
+}
+
+export function resolvePaymentBreakdown({
+  holdPricing,
+  bookingBlocksSummary,
+} = {}) {
+  const hasAggregateFromHoldPricing = Boolean(
+    holdPricing
+    && typeof holdPricing === 'object'
+    && isCanonicalPaymentAmount(holdPricing.subtotal_hnl)
+    && isCanonicalPaymentAmount(holdPricing.total_pagar_hnl)
+    && hasCanonicalOptionalAmount(holdPricing, 'cubierto_por_plan_hnl')
+    && hasCanonicalOptionalAmount(holdPricing, 'extras_a_pagar_hnl')
+  );
+  const blocks = Array.isArray(bookingBlocksSummary) ? bookingBlocksSummary : [];
+  const canonicalBlocks = resolveCanonicalBookingBlocks(blocks);
+  const hasAggregateFromBlocks = blocks.length > 0 && canonicalBlocks.length === blocks.length;
+
+  return {
+    canonicalBlocks,
+    hasAggregateBreakdown: hasAggregateFromHoldPricing || hasAggregateFromBlocks,
+    hasBlockBreakdown: canonicalBlocks.length > 0,
+    source: hasAggregateFromHoldPricing
+      ? 'hold_pricing'
+      : hasAggregateFromBlocks ? 'booking_blocks' : 'none',
+  };
+}
+
 function formatPhone(value) {
   return normalizeDigits(value).slice(0, 15);
 }
 
-function isValidEmail(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
-}
-
-function validatePaymentForm(form) {
+export function validatePaymentForm(form, referenceDate = new Date(), pixelPayEnvironment = 'sandbox') {
   const errors = {};
   const expiryDigits = normalizeDigits(form.expiry);
-  const expiryMonth = Number(expiryDigits.slice(0, 2));
+  const expiryFormatValid = /^(0[1-9]|1[0-2])\/[0-9]{2}$/.test(String(form.expiry || '').trim());
 
   if (!String(form.cardholderName || '').trim()) {
     errors.cardholderName = 'Ingresa el nombre del titular.';
   }
-  if (!isValidEmail(form.receiptEmail)) {
-    errors.receiptEmail = 'Ingresa un correo valido para el comprobante.';
-  }
   if (normalizeDigits(form.phone).length < 8) {
     errors.phone = 'Ingresa un telefono valido.';
   }
-  if (normalizeDigits(form.cardNumber).length < 13) {
-    errors.cardNumber = 'Ingresa un numero de tarjeta de prueba valido.';
+  const cardNumberLength = normalizeDigits(form.cardNumber).length;
+  if (cardNumberLength < 13 || cardNumberLength > 19) {
+    errors.cardNumber = String(pixelPayEnvironment || '').trim().toLowerCase() === 'live'
+      ? 'Ingresa un numero de tarjeta valido.'
+      : 'Ingresa un numero de tarjeta de prueba valido.';
   }
-  if (expiryDigits.length !== 4 || Number.isNaN(expiryMonth) || expiryMonth < 1 || expiryMonth > 12) {
+  if (expiryDigits.length !== 4 || !expiryFormatValid) {
     errors.expiry = 'Ingresa una fecha MM/AA valida.';
+  } else if (!isPixelPayCardExpireCurrentOrFuture(form.expiry, referenceDate)) {
+    errors.expiry = 'La tarjeta se encuentra vencida.';
   }
   if (![3, 4].includes(normalizeDigits(form.cvv).length)) {
     errors.cvv = 'Ingresa un CVV de 3 o 4 digitos.';
   }
+  if (!String(form.billingAddress || '').trim() || isPixelPayBillingAddressPlaceholder(form.billingAddress)) {
+    errors.billingAddress = 'Ingresa una dirección de facturación válida.';
+  }
+  if (!String(form.billingCity || '').trim()) errors.billingCity = 'Ingresa la ciudad.';
+  if (!HONDURAS_DEPARTMENTS.some(([code]) => code === form.billingState)) {
+    errors.billingState = 'Selecciona un departamento valido.';
+  }
+  if (form.billingCountry !== 'HN') errors.billingCountry = 'El pais de facturacion debe ser Honduras.';
 
   return errors;
 }
@@ -83,17 +246,6 @@ function validatePaymentForm(form) {
 function isLocalHostname(value) {
   const hostname = String(value || '').trim().toLowerCase();
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
-}
-
-function isQaHostname(value) {
-  return String(value || '').trim().toLowerCase() === 'qa.masterfadeapp.com';
-}
-
-function isProductionHostname(value) {
-  const hostname = String(value || '').trim().toLowerCase();
-  return hostname === 'masterfadeapp.com'
-    || hostname === 'www.masterfadeapp.com'
-    || hostname === 'api.masterfadeapp.com';
 }
 
 function readEnvFlag(value) {
@@ -105,38 +257,39 @@ function normalizePaymentProvider(value) {
   return provider === 'payment-simulator' ? 'simulator' : provider;
 }
 
-function resolvePaymentSimulationAction() {
-  const hostname = typeof window !== 'undefined' ? window.location?.hostname : '';
+export function resolvePaymentSimulationAction({
+  hostname = typeof window !== 'undefined' ? window.location?.hostname : '',
+  provider = import.meta.env.VITE_PAYMENT_PROVIDER || import.meta.env.VITE_PAYMENT_PROVIDER_CODE || '',
+  mockEnabled = import.meta.env.VITE_ENABLE_MOCK_PAYMENT,
+  simulatorEnabled = import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR,
+} = {}) {
   const localHost = isLocalHostname(hostname);
-  const provider = normalizePaymentProvider(
-    import.meta.env.VITE_PAYMENT_PROVIDER
-    || import.meta.env.VITE_PAYMENT_PROVIDER_CODE
-    || ''
-  );
-  const mockEnabled = readEnvFlag(import.meta.env.VITE_ENABLE_MOCK_PAYMENT);
-  const simulatorEnabled = readEnvFlag(import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR);
-  const qaSimulationEnabled = readEnvFlag(import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION);
+  const normalizedProvider = normalizePaymentProvider(provider);
+  const canUseMock = readEnvFlag(mockEnabled);
+  const canUseSimulator = readEnvFlag(simulatorEnabled);
 
-  let action = { canShow: false, type: null, provider, reason: 'host_not_allowed' };
-  if (!provider) {
-    action = { canShow: false, type: null, provider, reason: 'provider_missing' };
-  } else if (isProductionHostname(hostname)) {
-    action = { canShow: false, type: null, provider, reason: 'production_blocked' };
+  let action = { canShow: false, type: null, provider: normalizedProvider, reason: 'host_not_allowed' };
+  if (!normalizedProvider) {
+    action = { canShow: false, type: null, provider: normalizedProvider, reason: 'provider_missing' };
+  } else if (normalizedProvider === 'pixelpay') {
+    action = { canShow: true, type: 'pixelpay', provider: normalizedProvider, reason: 'pixelpay_direct' };
   } else if (localHost) {
-    if (provider === 'mock' && mockEnabled) {
-      action = { canShow: true, type: 'mock', provider, reason: 'local_mock_enabled' };
-    } else if ((provider === 'todopago' || provider === 'simulator') && simulatorEnabled && qaSimulationEnabled) {
-      action = { canShow: true, type: 'simulator', provider, reason: 'local_todopago_simulator_enabled' };
+    if (normalizedProvider === 'mock' && canUseMock) {
+      action = { canShow: true, type: 'mock', provider: normalizedProvider, reason: 'local_mock_enabled' };
+    } else if ((normalizedProvider === 'todopago' || normalizedProvider === 'simulator') && canUseSimulator) {
+      action = { canShow: true, type: 'simulator', provider: normalizedProvider, reason: 'local_todopago_simulator_enabled' };
     } else {
-      action = { canShow: false, type: null, provider, reason: 'local_payment_simulation_not_configured' };
+      action = { canShow: false, type: null, provider: normalizedProvider, reason: 'local_payment_simulation_not_configured' };
     }
-  } else if (isQaHostname(hostname)) {
-    action = (provider === 'simulator' || provider === 'todopago') && simulatorEnabled && qaSimulationEnabled
-      ? { canShow: true, type: 'simulator', provider, reason: 'qa_simulator_enabled' }
-      : { canShow: false, type: null, provider, reason: 'qa_simulator_not_configured' };
   }
 
   return action;
+}
+
+function launchIsExpired(launch) {
+  if (!launch?.expiresAt) return false;
+  const expiresAtMs = new Date(launch.expiresAt).getTime();
+  return Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now();
 }
 
 export default function PublicBookingPaymentStep() {
@@ -154,16 +307,25 @@ export default function PublicBookingPaymentStep() {
     refreshPaymentStatus,
     checkingPaymentStatus,
     completePaymentSimulation,
+    completePixelPayPayment,
     holdPricing,
     holdTotalToPay,
     membershipHasContext,
     membershipUxMessage,
     membershipCompanionNotice,
+    paymentTitularEmail,
+    paymentRestoring = false,
+    paymentCanExecuteSale = true,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [hostedModalOpen, setHostedModalOpen] = useState(false);
+  const [hostedResultReceived, setHostedResultReceived] = useState(false);
+  const [hostedModalError, setHostedModalError] = useState(null);
+  const [hostedLaunchConsumed, setHostedLaunchConsumed] = useState(false);
   const [paymentForm, setPaymentForm] = useState(INITIAL_PAYMENT_FORM);
   const [fieldErrors, setFieldErrors] = useState({});
+  const reconciliationNotice = getPixelPayReconciliationNotice(paymentResult);
   const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(() => {
     if (typeof window === 'undefined') return TODO_PAGO_SIMULATION_SCENARIOS[0].value;
     try {
@@ -176,49 +338,70 @@ export default function PublicBookingPaymentStep() {
     }
   });
   const paymentSimulationAction = resolvePaymentSimulationAction();
+  const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
+  const pixelPayPresentation = getPixelPayPresentation();
   const paymentUiState = normalizeBookingPaymentUiState({
     paymentIntent,
     paymentResult,
     holdTotalToPay,
   });
+  const pixelPayPendingConfirmation = shouldQueryPixelPayProviderOnManualVerify({
+    providerType: paymentSimulationAction.type,
+    paymentIntent,
+    paymentResult,
+  });
+  const paymentLaunch = paymentIntent?.launch;
+  const paymentLaunchKey = createTodoPagoLaunchKey(paymentLaunch);
+  const hasHostedLaunch = paymentLaunch?.type === 'iframe_post';
+  const hostedSessionExpired = holdExpired || launchIsExpired(paymentLaunch);
   const maskedCardLabel = useMemo(() => maskCardNumber(paymentForm.cardNumber), [paymentForm.cardNumber]);
   const cardBrand = useMemo(() => detectCardBrand(paymentForm.cardNumber), [paymentForm.cardNumber]);
   const cardBrandLabel = CARD_BRAND_LABELS[cardBrand];
 
+  const paymentBreakdown = useMemo(
+    () => resolvePaymentBreakdown({ holdPricing, bookingBlocksSummary }),
+    [bookingBlocksSummary, holdPricing]
+  );
+  const { canonicalBlocks, hasAggregateBreakdown, source: breakdownSource } = paymentBreakdown;
+
   const fallbackSubtotal = useMemo(
-    () => bookingBlocksSummary.reduce((total, block) => total + Number(block?.total_hnl || 0), 0),
-    [bookingBlocksSummary]
+    () => canonicalBlocks.reduce((total, block) => total + Number(block.total_hnl), 0),
+    [canonicalBlocks]
   );
 
   const fallbackCoveredByPlan = useMemo(
     () =>
-      bookingBlocksSummary.reduce((total, block) => {
+      canonicalBlocks.reduce((total, block) => {
         const services = Array.isArray(block?.selectedServices) ? block.selectedServices : [];
         return total + services.reduce((lineTotal, service) => {
           if (!service?.coveredByPlan) return lineTotal;
           return lineTotal + Number(service?.precio_hnl || 0);
         }, 0);
       }, 0),
-    [bookingBlocksSummary]
+    [canonicalBlocks]
   );
 
-  const effectiveSubtotal = Number(holdPricing?.subtotal_hnl ?? fallbackSubtotal ?? 0);
+  const effectiveSubtotal = Number(
+    breakdownSource === 'hold_pricing' ? holdPricing.subtotal_hnl : fallbackSubtotal
+  );
   const effectiveCoveredByPlan = Number(holdPricing?.cubierto_por_plan_hnl ?? fallbackCoveredByPlan ?? 0);
   const effectiveExtras = Number(
     holdPricing?.extras_a_pagar_hnl
     ?? Math.max(0, effectiveSubtotal - effectiveCoveredByPlan)
   );
-  const effectiveTotalToPay = Number(
-    holdPricing?.total_pagar_hnl
-    ?? holdTotalToPay
-    ?? 0
-  );
+  const effectiveTotalToPay = resolvePaymentAmount({
+    paymentResult,
+    paymentIntent,
+    holdPricing,
+    holdTotalToPay,
+    fallbackTotal: breakdownSource === 'booking_blocks' ? fallbackSubtotal : null,
+  });
   const safeCoveredByPlan = Math.max(0, Number(effectiveCoveredByPlan || 0));
   const safeExtras = Math.max(0, Number(effectiveExtras || 0));
   const hasPlanCoverage = safeCoveredByPlan > 0;
   const hasSaldoToPay = hasPlanCoverage && safeExtras > 0;
   const isFullyCoveredByPlan = hasPlanCoverage && safeExtras <= 0;
-  const hasPackageSelection = bookingBlocksSummary.some((block) => (
+  const hasPackageSelection = canonicalBlocks.some((block) => (
     block?.selection_type === 'package'
     || block?.selection_type === 'mixed'
     || block?.selectedPackage
@@ -265,6 +448,18 @@ export default function PublicBookingPaymentStep() {
     }
   }, [paymentResult?.booking_confirmed]);
 
+  useEffect(() => () => {
+    setPaymentForm(INITIAL_PAYMENT_FORM);
+    setFieldErrors({});
+  }, []);
+
+  useEffect(() => {
+    setHostedModalOpen(false);
+    setHostedResultReceived(false);
+    setHostedModalError(null);
+    setHostedLaunchConsumed(false);
+  }, [paymentLaunchKey]);
+
   const handleFieldChange = (field) => (event) => {
     const rawValue = event.target.value;
     let nextValue = rawValue;
@@ -293,12 +488,30 @@ export default function PublicBookingPaymentStep() {
 
   const handleVerifyPaymentStatus = async () => {
     if (checkingPaymentStatus) return;
-    await refreshPaymentStatus();
+    await refreshPaymentStatus({ queryPixelPayProvider: pixelPayPendingConfirmation });
+  };
+
+  const handleOpenHostedModal = () => {
+    if (!hasHostedLaunch || hostedSessionExpired || hostedLaunchConsumed) {
+      setHostedModalError(hostedSessionExpired ? 'session_expired' : 'launch_unavailable');
+      return;
+    }
+    setHostedModalError(null);
+    setHostedModalOpen(true);
+  };
+
+  const handleHostedResult = () => {
+    setHostedResultReceived(true);
+    setHostedModalError(null);
+  };
+
+  const handleHostedError = (error) => {
+    setHostedModalError(error?.code === 'TODOPAGO_SESSION_EXPIRED' ? 'session_expired' : 'load_error');
   };
 
   const handleMockPay = async () => {
-    if (processingPayment) return;
-    const validationErrors = validatePaymentForm(paymentForm);
+    if (processingPayment || paymentRestoring || !paymentCanExecuteSale) return;
+    const validationErrors = validatePaymentForm(paymentForm, new Date(), pixelPayPresentation.environment);
     if (Object.keys(validationErrors).length > 0) {
       setFieldErrors(validationErrors);
       return;
@@ -313,9 +526,27 @@ export default function PublicBookingPaymentStep() {
           window.sessionStorage.removeItem(TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY);
         }
       }
-      await completePaymentSimulation({ provider: paymentSimulationAction.type });
-      resetSensitiveFields();
+      if (paymentSimulationAction.type === 'pixelpay') {
+        await completePixelPayPayment({
+          card: {
+            number: paymentForm.cardNumber,
+            holder: paymentForm.cardholderName,
+            expire: toPixelPayCardExpire(paymentForm.expiry),
+            cvv: paymentForm.cvv,
+          },
+          billing: {
+            address: paymentForm.billingAddress,
+            city: paymentForm.billingCity,
+            state: paymentForm.billingState,
+            country: paymentForm.billingCountry,
+            phone: paymentForm.phone,
+          },
+        });
+      } else {
+        await completePaymentSimulation({ provider: paymentSimulationAction.type });
+      }
     } finally {
+      resetSensitiveFields();
       setProcessingPayment(false);
     }
   };
@@ -331,12 +562,27 @@ export default function PublicBookingPaymentStep() {
     await cancelBookingFlow('payment_step');
   };
 
+  const hostedStatusText = (() => {
+    if (paymentRestoring || checkingPaymentStatus) return 'Verificando pago';
+    if (hostedModalError === 'session_expired' || hostedSessionExpired) return 'Sesión expirada';
+    if (hostedModalError) return 'Error de carga';
+    if (hostedResultReceived) return 'Resultado recibido. Verifica el estado con MasterFade.';
+    if (hostedModalOpen) return 'Portal abierto';
+    if (hostedLaunchConsumed) return 'Portal iniciado. Verifica el estado del pago con MasterFade.';
+    if (loadingIntent || creatingPaymentIntent) return 'Preparando pago';
+    return paymentIntent?.id_intent ? paymentUiState.text : 'Preparando pago';
+  })();
+
   return (
     <div className="citas-confirm-wrap public-booking-payment-wrap">
       <div className="citas-surface p-3 sm:p-5">
         <BookingStepHeader
           title="Pasarela de pago segura"
-          subtitle="Simula la experiencia MasterFade/TodoPago en entorno de prueba sin ejecutar un cobro real."
+          subtitle={paymentSimulationAction.type === 'pixelpay'
+            ? pixelPayPresentation.intro
+            : paymentSimulationAction.canShow
+            ? 'Simula la experiencia MasterFade/TodoPago localmente sin ejecutar un cobro real.'
+            : 'Continúa el pago en el portal alojado de TodoPago y verifica después el estado con MasterFade.'}
           headingLevel="h3"
           titleClassName="citas-confirm-title"
           subtitleClassName="citas-selected-date mt-2"
@@ -344,11 +590,19 @@ export default function PublicBookingPaymentStep() {
         <div className="mt-3 grid gap-2 sm:gap-3">
           <div className="public-booking-payment-note">
             <ShieldCheck size={14} />
-            <span>Entorno de prueba: esta pantalla solo simula la pasarela y no procesa cargos reales.</span>
+            <span>{paymentSimulationAction.type === 'pixelpay'
+              ? pixelPayPresentation.cardNotice
+              : paymentSimulationAction.canShow
+              ? 'Simulador local: esta pantalla no procesa cargos reales.'
+              : 'El portal de TodoPago se abre aislado dentro de una ventana segura.'}</span>
           </div>
           <div className="public-booking-payment-note">
             <ShieldCheck size={14} />
-            <span>MasterFade no guarda PAN ni CVV. Esos datos viven solo en este formulario local y se limpian al salir.</span>
+            <span>{paymentSimulationAction.type === 'pixelpay'
+              ? 'PAN y CVV permanecen solo en memoria y se limpian al terminar el intento.'
+              : paymentSimulationAction.canShow
+              ? 'Los datos ficticios viven solo en el simulador local y se limpian al salir.'
+              : 'MasterFade no solicita ni muestra datos de tarjeta en este flujo.'}</span>
           </div>
         </div>
         {holdCountdownLabel ? (
@@ -376,11 +630,17 @@ export default function PublicBookingPaymentStep() {
         ) : null}
 
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
-          <div className="public-booking-contact-card public-booking-payment-gateway-card">
+          {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
+            <div className="public-booking-contact-card public-booking-payment-gateway-card">
             <div className="w-full overflow-hidden rounded-2xl border border-[var(--mf-border)] bg-[linear-gradient(135deg,rgba(16,24,40,0.96),rgba(31,41,55,0.92))] p-3 text-white shadow-[0_14px_40px_rgba(15,23,42,0.28)] sm:p-4">
               <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] text-white/70 sm:text-[11px] sm:tracking-[0.28em]">
                 <span>MasterFade Pay</span>
-                <span>{cardBrand === 'unknown' ? 'TodoPago test' : `${cardBrandLabel} · TodoPago test`}</span>
+                <span>{buildPaymentCardProviderLabel({
+                  providerType: paymentSimulationAction.type,
+                  cardBrand,
+                  cardBrandLabel,
+                  pixelPayEnvironment: pixelPayPresentation.environment,
+                })}</span>
               </div>
               <div className="mt-6 break-words text-base font-semibold tracking-[0.16em] sm:mt-8 sm:text-xl sm:tracking-[0.28em]">
                 {maskedCardLabel}
@@ -399,7 +659,9 @@ export default function PublicBookingPaymentStep() {
               </div>
             </div>
 
-            <h4 className="citas-confirm-subtitle mt-4">Datos para la simulacion</h4>
+            <h4 className="citas-confirm-subtitle mt-4">
+              {paymentSimulationAction.type === 'pixelpay' ? 'Datos de pago de prueba' : 'Datos para la simulacion'}
+            </h4>
             <div className="public-booking-form-row mt-2">
               <label className="mf-label" htmlFor="pay-cardholder-name">Nombre del titular</label>
               <input
@@ -420,6 +682,7 @@ export default function PublicBookingPaymentStep() {
                 placeholder="4242 4242 4242 4242"
                 autoComplete="cc-number"
                 inputMode="numeric"
+                maxLength={23}
                 value={paymentForm.cardNumber}
                 onChange={handleFieldChange('cardNumber')}
               />
@@ -459,17 +722,16 @@ export default function PublicBookingPaymentStep() {
               </div>
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-receipt-email">Correo para comprobante</label>
+              <label className="mf-label" htmlFor="pay-receipt-email">Correo del titular para comprobante</label>
               <input
                 id="pay-receipt-email"
                 className="mf-input"
-                placeholder="cliente@correo.com"
                 autoComplete="email"
                 inputMode="email"
-                value={paymentForm.receiptEmail}
-                onChange={handleFieldChange('receiptEmail')}
+                value={paymentTitularEmail || ''}
+                readOnly
               />
-              {fieldErrors.receiptEmail ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.receiptEmail}</p> : null}
+              <p className="mt-1 text-xs text-[var(--mf-text-2)]">Se usa el correo ya validado del titular de la reserva.</p>
             </div>
             <div className="public-booking-form-row mt-2">
               <label className="mf-label" htmlFor="pay-phone">Telefono de contacto</label>
@@ -484,16 +746,67 @@ export default function PublicBookingPaymentStep() {
               />
               {fieldErrors.phone ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.phone}</p> : null}
             </div>
+            {paymentSimulationAction.type === 'pixelpay' ? (
+              <>
+                <div className="public-booking-form-row mt-2">
+                  <label className="mf-label" htmlFor="pay-billing-address">Direccion de facturacion</label>
+                  <input id="pay-billing-address" className="mf-input" autoComplete="street-address" value={paymentForm.billingAddress} onChange={handleFieldChange('billingAddress')} />
+                  {fieldErrors.billingAddress ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingAddress}</p> : null}
+                </div>
+                <div className="mt-2 grid gap-3 md:grid-cols-3">
+                  <div className="public-booking-form-row">
+                    <label className="mf-label" htmlFor="pay-billing-city">Ciudad</label>
+                    <input id="pay-billing-city" className="mf-input" autoComplete="address-level2" value={paymentForm.billingCity} onChange={handleFieldChange('billingCity')} />
+                    {fieldErrors.billingCity ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingCity}</p> : null}
+                  </div>
+                  <div className="public-booking-form-row">
+                    <label className="mf-label" htmlFor="pay-billing-state">Departamento</label>
+                    <select id="pay-billing-state" className="mf-select" autoComplete="address-level1" value={paymentForm.billingState} onChange={handleFieldChange('billingState')}>
+                      {HONDURAS_DEPARTMENTS.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
+                    </select>
+                    {fieldErrors.billingState ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingState}</p> : null}
+                  </div>
+                  <div className="public-booking-form-row">
+                    <label className="mf-label" htmlFor="pay-billing-country">Pais</label>
+                    <input id="pay-billing-country" className="mf-input" autoComplete="country" value="HN" readOnly />
+                    {fieldErrors.billingCountry ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingCountry}</p> : null}
+                  </div>
+                </div>
+              </>
+            ) : null}
             <div className="mt-3 rounded-xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-3 text-xs leading-relaxed text-[var(--mf-text-2)]">
-              Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.
+              {paymentSimulationAction.type === 'pixelpay'
+                ? pixelPayPresentation.privacyNotice
+                : 'Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.'}
             </div>
-          </div>
+            </div>
+          ) : isPixelPayProvider ? (
+            <div className="public-booking-contact-card public-booking-payment-gateway-card">
+              <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
+                <ShieldCheck size={30} className="text-[var(--mf-accent)]" />
+                <h4 className="citas-confirm-subtitle">{pixelPayPresentation.paymentTitle}</h4>
+                <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
+                  Estamos verificando el resultado del pago con PixelPay. No vuelvas a realizar el pago.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="public-booking-contact-card public-booking-payment-gateway-card">
+              <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
+                <ShieldCheck size={30} className="text-[var(--mf-accent)]" />
+                <h4 className="citas-confirm-subtitle">Pago alojado por TodoPago</h4>
+                <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
+                  Los datos sensibles se ingresan únicamente en el portal del proveedor. La reserva solo cambia cuando el backend verifica el pago.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="public-booking-contact-card">
             <h4 className="citas-confirm-subtitle">Estado de la pasarela</h4>
             <div className="public-booking-payment-note mt-2">
               <ShieldCheck size={14} />
-              <span>{paymentIntent?.id_intent ? paymentUiState.text : 'Primero crea el intento para habilitar la simulacion del checkout.'}</span>
+              <span>{hostedStatusText}</span>
             </div>
             {!paymentIntent?.id_intent ? (
               <Button className="mt-3 w-full gap-2 sm:w-auto" onClick={handleCreateIntent} disabled={loadingIntent || creatingPaymentIntent}>
@@ -503,12 +816,19 @@ export default function PublicBookingPaymentStep() {
             ) : (
               <div className="mt-3 space-y-2 break-words text-sm leading-relaxed text-[var(--mf-text-2)] public-booking-payment-meta">
                 <p>Estado: {paymentUiState.text}</p>
-                <p>Monto: {formatCurrencyHnl(paymentIntent.monto_hnl || effectiveTotalToPay)}</p>
+                <p>Monto: {paymentRestoring ? 'Verificando...' : formatCurrencyHnl(effectiveTotalToPay)}</p>
                 <p>Intent: {paymentIntent.id_intent}</p>
                 <p>Proveedor: {paymentSimulationAction.provider || 'no_configurado'}</p>
-                {paymentIntent.payment_url ? (
+                {reconciliationNotice ? (
+                  <p role="status" className="rounded-lg border border-[var(--mf-warning)]/40 bg-[var(--mf-warning)]/10 p-3 font-medium text-[var(--mf-text-1)]">
+                    {reconciliationNotice}
+                  </p>
+                ) : null}
+                {paymentSimulationAction.canShow
+                  && paymentIntent.launch?.type === 'redirect'
+                  && paymentIntent.launch?.action ? (
                   <a
-                    href={paymentIntent.payment_url}
+                    href={paymentIntent.launch.action}
                     className="inline-flex items-center gap-2 text-[var(--mf-accent)]"
                   >
                     Abrir checkout del proveedor
@@ -518,6 +838,15 @@ export default function PublicBookingPaymentStep() {
               </div>
             )}
             <BookingActions inline className="public-booking-payment-actions mt-4 flex-col items-stretch gap-3 sm:flex-row sm:items-end">
+              {!paymentSimulationAction.canShow && hasHostedLaunch && !hostedLaunchConsumed ? (
+                <Button
+                  className="w-full sm:w-auto"
+                  onClick={handleOpenHostedModal}
+                  disabled={hostedSessionExpired || checkingPaymentStatus}
+                >
+                  Continuar con TodoPago
+                </Button>
+              ) : null}
               <Button
                 className="w-full sm:w-auto"
                 variant="outline"
@@ -545,10 +874,16 @@ export default function PublicBookingPaymentStep() {
                   </select>
                 </div>
               ) : null}
-              {paymentSimulationAction.canShow ? (
-                <Button className="w-full sm:w-auto" onClick={handleMockPay} disabled={!paymentIntent?.id_intent || processingPayment}>
+              {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
+                <Button
+                  className="w-full sm:w-auto"
+                  onClick={handleMockPay}
+                  disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation || !paymentCanExecuteSale}
+                >
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
-                  {paymentSimulationAction.type === 'simulator' ? 'Ejecutar simulator' : 'Simular pago exitoso'}
+                  {paymentSimulationAction.type === 'pixelpay'
+                    ? pixelPayPresentation.payButton
+                    : paymentSimulationAction.type === 'simulator' ? 'Ejecutar simulator' : 'Simular pago exitoso'}
                 </Button>
               ) : null}
             </BookingActions>
@@ -565,38 +900,50 @@ export default function PublicBookingPaymentStep() {
 
         <div className="citas-confirm-services mt-4">
           <h4 className="citas-confirm-subtitle">Resumen para cobro</h4>
-          {bookingBlocksSummary.map((block) => (
+          {canonicalBlocks.map((block) => (
             <div key={block.id} className="citas-confirm-service-item">
               <span>{block.alias}</span>
               <span>{formatCurrencyHnl(block.total_hnl)}</span>
             </div>
           ))}
-          <div className="citas-confirm-row mt-3">
-            <span>{subtotalLabel}</span>
-            <span>{formatCurrencyHnl(effectiveSubtotal)}</span>
-          </div>
-          {hasPlanCoverage ? (
+          {hasAggregateBreakdown ? (
+            <div className="citas-confirm-row mt-3">
+              <span>{subtotalLabel}</span>
+              <span>{formatCurrencyHnl(effectiveSubtotal)}</span>
+            </div>
+          ) : null}
+          {hasAggregateBreakdown && hasPlanCoverage ? (
             <div className="citas-confirm-row">
               <span>{membershipHasContext ? 'Cubierto por tu membresia' : 'Cubierto por tu plan'}</span>
               <span>-{formatCurrencyHnl(safeCoveredByPlan)}</span>
             </div>
           ) : null}
-          {hasSaldoToPay ? (
+          {hasAggregateBreakdown && hasSaldoToPay ? (
             <div className="citas-confirm-row">
               <span>{membershipHasContext ? 'Extras y acompanantes' : 'Saldo a pagar'}</span>
               <span>{formatCurrencyHnl(safeExtras)}</span>
             </div>
           ) : null}
-          {isFullyCoveredByPlan ? (
+          {hasAggregateBreakdown && isFullyCoveredByPlan ? (
             <div className="public-booking-payment-note mt-2">
               <span>Cubierto completamente por tu plan.</span>
             </div>
           ) : null}
           <div className="citas-confirm-row">
             <span>{membershipHasContext ? 'Total a pagar hoy' : 'Total a pagar'}</span>
-            <span>{formatCurrencyHnl(effectiveTotalToPay)}</span>
+            <span>{paymentRestoring ? 'Verificando...' : formatCurrencyHnl(effectiveTotalToPay)}</span>
           </div>
         </div>
+        {!isPixelPayProvider ? (
+          <TodoPagoHostedModal
+            open={hostedModalOpen}
+            launch={paymentLaunch}
+            onResult={handleHostedResult}
+            onClose={() => setHostedModalOpen(false)}
+            onError={handleHostedError}
+            onSubmitted={() => setHostedLaunchConsumed(true)}
+          />
+        ) : null}
       </div>
     </div>
   );

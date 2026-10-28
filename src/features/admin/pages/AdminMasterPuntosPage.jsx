@@ -73,9 +73,9 @@ function resolveApiErrorMessage(error, fallbackMessage) {
     return 'No hay puntos suficientes para completar la resta solicitada.';
   }
   if (status === 409) {
-    return error?.data?.error?.message || error?.message || 'La operacion fue rechazada porque dejaria el saldo en negativo.';
+    return 'No fue posible completar la operacion por un conflicto. Actualiza los datos e intenta nuevamente.';
   }
-  return error?.data?.error?.message || error?.message || fallbackMessage;
+  return fallbackMessage;
 }
 
 function resolveClienteSecondaryLabel(cliente = {}) {
@@ -169,6 +169,17 @@ function normalizeSummary(payload) {
 }
 
 export default function AdminMasterPuntosPage() {
+  const { user, roles = [], branchIds = [], empresaId } = useAuth();
+  const readScope = JSON.stringify({
+    userId: user?.id_usuario || user?.id || null,
+    roles: roles.map((role) => normalizeText(role).toLowerCase()).sort(),
+    branchIds: [...branchIds].sort(),
+    empresaId: empresaId || null,
+  });
+  return <AdminMasterPuntosContent key={readScope} />;
+}
+
+function AdminMasterPuntosContent() {
   const navigate = useNavigate();
   const notifications = useNotifications();
   const { roles } = useAuth();
@@ -178,11 +189,18 @@ export default function AdminMasterPuntosPage() {
   const [clientePickerOpen, setClientePickerOpen] = useState(false);
   const [searchDraft, setSearchDraft] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [debouncedSearchSeq, setDebouncedSearchSeq] = useState(0);
   const [searchingClientes, setSearchingClientes] = useState(false);
   const [selectedClienteId, setSelectedClienteId] = useState('');
   const [selectedClienteData, setSelectedClienteData] = useState(null);
   const summaryRequestSeqRef = useRef(0);
   const searchRequestSeqRef = useRef(0);
+  const mountedRef = useRef(false);
+  const selectionSeqRef = useRef(0);
+  const rewardRequestSeqRef = useRef(0);
+  const readControllersRef = useRef({});
+  const adjustmentLockRef = useRef(false);
+  const rewardSaveLockRef = useRef(false);
 
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -201,6 +219,7 @@ export default function AdminMasterPuntosPage() {
     con_membresia: new Set(),
   });
   const [rewardConfigLoading, setRewardConfigLoading] = useState(false);
+  const [rewardConfigLoaded, setRewardConfigLoaded] = useState(false);
   const [rewardConfigSaving, setRewardConfigSaving] = useState(false);
   const [rewardConfigError, setRewardConfigError] = useState('');
 
@@ -208,6 +227,19 @@ export default function AdminMasterPuntosPage() {
     const roleList = Array.isArray(roles) ? roles.map((role) => normalizeText(role).toLowerCase()) : [];
     return roleList.includes('admin') || roleList.includes('super_admin');
   }, [roles]);
+
+  useEffect(() => {
+    const readControllers = readControllersRef.current;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      summaryRequestSeqRef.current += 1;
+      searchRequestSeqRef.current += 1;
+      selectionSeqRef.current += 1;
+      rewardRequestSeqRef.current += 1;
+      Object.values(readControllers).forEach((controller) => controller.abort());
+    };
+  }, [canManagePoints]);
 
   const addTrimmed = normalizeText(ajustePointsAdd);
   const subtractTrimmed = normalizeText(ajustePointsSubtract);
@@ -249,15 +281,24 @@ export default function AdminMasterPuntosPage() {
   const hasHistoryPagination = history.length > HISTORY_PAGE_SIZE;
 
   const loadRewardConfig = useCallback(async () => {
+    const requestSeq = ++rewardRequestSeqRef.current;
+    readControllersRef.current.reward?.abort();
+    const controller = new AbortController();
+    readControllersRef.current.reward = controller;
+    const isCurrent = () => mountedRef.current && rewardRequestSeqRef.current === requestSeq;
     setRewardConfigLoading(true);
+    setRewardConfigLoaded(false);
     setRewardConfigError('');
     try {
-      const response = await getAdminMasterPuntosRegalias();
+      const response = await getAdminMasterPuntosRegalias({ signal: controller.signal });
+      if (!isCurrent()) return;
       const normalized = normalizeRewardConfigPayload(response?.data || response);
       setRewardRule(normalized.regla);
       setRewardServices(normalized.serviciosCatalogo);
       setRewardSelection(normalized.seleccion);
+      setRewardConfigLoaded(true);
     } catch (error) {
+      if (!isCurrent()) return;
       const status = Number(error?.status || 0);
       if (status === 401) {
         navigate('/login', { replace: true });
@@ -269,13 +310,14 @@ export default function AdminMasterPuntosPage() {
       }
       setRewardConfigError(resolveApiErrorMessage(error, 'No se pudo cargar la configuracion de servicios canjeables.'));
     } finally {
-      setRewardConfigLoading(false);
+      if (isCurrent()) setRewardConfigLoading(false);
     }
   }, [navigate]);
 
   const loadSummary = useCallback(async (idCliente, options = {}) => {
     const safeId = normalizeText(idCliente);
     const keepCurrent = Boolean(options?.keepCurrent);
+    readControllersRef.current.summary?.abort();
     if (!safeId) {
       summaryRequestSeqRef.current += 1;
       setSummary(null);
@@ -285,14 +327,16 @@ export default function AdminMasterPuntosPage() {
     }
     const requestSeq = summaryRequestSeqRef.current + 1;
     summaryRequestSeqRef.current = requestSeq;
+    const controller = new AbortController();
+    readControllersRef.current.summary = controller;
     setSummaryLoading(true);
     setSummaryError('');
     if (!keepCurrent) {
       setSummary(null);
     }
     try {
-      const response = await getAdminClientePuntosResumen(safeId);
-      if (summaryRequestSeqRef.current !== requestSeq) return;
+      const response = await getAdminClientePuntosResumen(safeId, { signal: controller.signal });
+      if (!mountedRef.current || summaryRequestSeqRef.current !== requestSeq) return;
       const nextSummary = normalizeSummary(response?.data || response);
       setSummary(nextSummary);
       setSelectedClienteData((current) => {
@@ -311,7 +355,7 @@ export default function AdminMasterPuntosPage() {
         };
       });
     } catch (error) {
-      if (summaryRequestSeqRef.current !== requestSeq) return;
+      if (!mountedRef.current || summaryRequestSeqRef.current !== requestSeq) return;
       const status = Number(error?.status || 0);
       if (status === 401) {
         navigate('/login', { replace: true });
@@ -324,7 +368,7 @@ export default function AdminMasterPuntosPage() {
       setSummaryError(resolveApiErrorMessage(error, 'No se pudo cargar el resumen de puntos del cliente.'));
       setSummary(null);
     } finally {
-      if (summaryRequestSeqRef.current === requestSeq) {
+      if (mountedRef.current && summaryRequestSeqRef.current === requestSeq) {
         setSummaryLoading(false);
       }
     }
@@ -340,6 +384,7 @@ export default function AdminMasterPuntosPage() {
   }, [canManagePoints, loadRewardConfig, navigate]);
 
   useEffect(() => {
+    if (!canManagePoints) return;
     if (!selectedClienteId) {
       summaryRequestSeqRef.current += 1;
       setSummary(null);
@@ -347,21 +392,19 @@ export default function AdminMasterPuntosPage() {
       return;
     }
     void loadSummary(selectedClienteId);
-  }, [selectedClienteId, loadSummary]);
+  }, [canManagePoints, selectedClienteId, loadSummary]);
 
   useEffect(() => {
     const normalized = normalizeText(searchDraft);
-    if (normalized === debouncedSearch) {
-      return undefined;
-    }
     const timer = window.setTimeout(() => {
       setDebouncedSearch(normalized);
+      setDebouncedSearchSeq((current) => current + 1);
     }, SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [debouncedSearch, searchDraft]);
+  }, [searchDraft]);
 
   useEffect(() => {
-    if (!clientePickerOpen) return;
+    if (!canManagePoints || !clientePickerOpen) return;
 
     const query = normalizeText(debouncedSearch);
     if (query.length < CLIENT_SEARCH_MIN_LENGTH) {
@@ -374,20 +417,23 @@ export default function AdminMasterPuntosPage() {
 
     const requestSeq = searchRequestSeqRef.current + 1;
     searchRequestSeqRef.current = requestSeq;
+    const controller = new AbortController();
+    readControllersRef.current.search?.abort();
+    readControllersRef.current.search = controller;
     setSearchingClientes(true);
     setClientesError('');
 
     void (async () => {
       try {
-        const response = await searchAdminClientesActivos(query, { limit: CLIENT_SEARCH_LIMIT });
-        if (searchRequestSeqRef.current !== requestSeq) return;
+        const response = await searchAdminClientesActivos(query, { limit: CLIENT_SEARCH_LIMIT, signal: controller.signal });
+        if (!mountedRef.current || searchRequestSeqRef.current !== requestSeq) return;
         const payload = response?.data || response || {};
         const nextResults = Array.isArray(payload?.clientes)
           ? payload.clientes.map((item, index) => normalizeClienteRecord(item, index)).filter(Boolean)
           : [];
         setSearchResults(nextResults);
       } catch (error) {
-        if (searchRequestSeqRef.current !== requestSeq) return;
+        if (!mountedRef.current || searchRequestSeqRef.current !== requestSeq) return;
         const status = Number(error?.status || 0);
         if (status === 401) {
           navigate('/login', { replace: true });
@@ -400,12 +446,13 @@ export default function AdminMasterPuntosPage() {
         setClientesError(resolveApiErrorMessage(error, 'No se pudo buscar clientes activos.'));
         setSearchResults([]);
       } finally {
-        if (searchRequestSeqRef.current === requestSeq) {
+        if (mountedRef.current && searchRequestSeqRef.current === requestSeq) {
           setSearchingClientes(false);
         }
       }
     })();
-  }, [clientePickerOpen, debouncedSearch, navigate]);
+    return () => { searchRequestSeqRef.current += 1; controller.abort(); };
+  }, [canManagePoints, clientePickerOpen, debouncedSearch, debouncedSearchSeq, navigate]);
 
   useEffect(() => {
     setHistoryPage(0);
@@ -427,7 +474,10 @@ export default function AdminMasterPuntosPage() {
   }, [selectedClienteData, selectedClienteId, summary]);
 
   async function applyAdjustment() {
-    if (!canSubmitAdjustment) return;
+    if (!canSubmitAdjustment || adjustmentLockRef.current) return;
+    adjustmentLockRef.current = true;
+    const selectionSeq = selectionSeqRef.current;
+    const isCurrent = () => mountedRef.current && selectionSeqRef.current === selectionSeq;
     setSavingAdjustment(true);
     setSummaryError('');
     try {
@@ -436,12 +486,14 @@ export default function AdminMasterPuntosPage() {
         puntos: adjustmentPoints,
         motivo: reasonTrimmed,
       });
+      if (!isCurrent()) return;
       notifications.success('Ajuste aplicado correctamente.');
       setAjustePointsAdd('');
       setAjustePointsSubtract('');
       setAjusteReason('');
       await loadSummary(selectedClienteId, { keepCurrent: true });
     } catch (error) {
+      if (!isCurrent()) return;
       const status = Number(error?.status || 0);
       if (status === 401) {
         navigate('/login', { replace: true });
@@ -453,7 +505,8 @@ export default function AdminMasterPuntosPage() {
       }
       setSummaryError(resolveApiErrorMessage(error, 'No fue posible aplicar el ajuste.'));
     } finally {
-      setSavingAdjustment(false);
+      adjustmentLockRef.current = false;
+      if (mountedRef.current) setSavingAdjustment(false);
     }
   }
 
@@ -470,6 +523,21 @@ export default function AdminMasterPuntosPage() {
   function handleSelectCliente(cliente) {
     const safeId = normalizeText(cliente?.id_cliente);
     if (!safeId) return;
+    searchRequestSeqRef.current += 1;
+    readControllersRef.current.search?.abort();
+    if (safeId !== selectedClienteId) {
+      selectionSeqRef.current += 1;
+      summaryRequestSeqRef.current += 1;
+      readControllersRef.current.summary?.abort();
+      setSummary(null);
+      setSummaryError('');
+      setAjustePointsAdd('');
+      setAjustePointsSubtract('');
+      setAjusteReason('');
+      setNegativeConfirmOpen(false);
+    } else if (summaryError && !summaryLoading) {
+      void loadSummary(safeId);
+    }
     setSelectedClienteId(safeId);
     setSelectedClienteData(normalizeClienteRecord(cliente, 0));
     setClientePickerOpen(false);
@@ -499,7 +567,10 @@ export default function AdminMasterPuntosPage() {
   }
 
   async function handleSaveRewardConfig() {
-    if (rewardConfigSaving) return;
+    if (!canManagePoints || !rewardConfigLoaded || rewardConfigSaving || rewardSaveLockRef.current) return;
+    rewardSaveLockRef.current = true;
+    const requestSeq = ++rewardRequestSeqRef.current;
+    const isCurrent = () => mountedRef.current && rewardRequestSeqRef.current === requestSeq;
     setRewardConfigSaving(true);
     setRewardConfigError('');
     try {
@@ -507,12 +578,14 @@ export default function AdminMasterPuntosPage() {
         sin_membresia: Array.from(rewardSelection.sin_membresia || []),
         con_membresia: Array.from(rewardSelection.con_membresia || []),
       });
+      if (!isCurrent()) return;
       const normalized = normalizeRewardConfigPayload(response?.data || response);
       setRewardRule(normalized.regla);
       setRewardServices(normalized.serviciosCatalogo);
       setRewardSelection(normalized.seleccion);
       notifications.success('Configuracion de servicios canjeables guardada.');
     } catch (error) {
+      if (!isCurrent()) return;
       const status = Number(error?.status || 0);
       if (status === 401) {
         navigate('/login', { replace: true });
@@ -524,9 +597,12 @@ export default function AdminMasterPuntosPage() {
       }
       setRewardConfigError(resolveApiErrorMessage(error, 'No se pudo guardar la configuracion de servicios canjeables.'));
     } finally {
-      setRewardConfigSaving(false);
+      rewardSaveLockRef.current = false;
+      if (mountedRef.current) setRewardConfigSaving(false);
     }
   }
+
+  if (!canManagePoints) return null;
 
   return (
     <div className="space-y-4 overflow-x-hidden px-2 pb-4 sm:px-4 sm:pb-6">
@@ -556,7 +632,7 @@ export default function AdminMasterPuntosPage() {
           <Button
             type="button"
             onClick={handleSaveRewardConfig}
-            disabled={rewardConfigLoading || rewardConfigSaving}
+            disabled={!rewardConfigLoaded || rewardConfigLoading || rewardConfigSaving}
             className="w-full lg:w-auto"
           >
             {rewardConfigSaving ? (
@@ -866,6 +942,7 @@ export default function AdminMasterPuntosPage() {
           setClientePickerOpen(nextOpen);
           if (!nextOpen) {
             searchRequestSeqRef.current += 1;
+            readControllersRef.current.search?.abort();
             setSearchDraft('');
             setDebouncedSearch('');
             setSearchResults([]);
@@ -887,7 +964,14 @@ export default function AdminMasterPuntosPage() {
             <Input
               autoFocus
               value={searchDraft}
-              onChange={(event) => setSearchDraft(event.target.value)}
+              onChange={(event) => {
+                searchRequestSeqRef.current += 1;
+                readControllersRef.current.search?.abort();
+                setSearchResults([]);
+                setClientesError('');
+                setSearchingClientes(normalizeText(event.target.value).length >= CLIENT_SEARCH_MIN_LENGTH);
+                setSearchDraft(event.target.value);
+              }}
               className="pl-9"
               placeholder="Nombre, telefono o correo"
               aria-label="Buscar cliente activo"

@@ -66,6 +66,12 @@ const CONTAINER_META = {
   en_atencion: { title: 'En atención', subtitle: 'Servicio iniciado por el barbero', accent: 'text-indigo-300', border: 'border-indigo-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(99,102,241,0.11))]' },
 };
 
+const VISIBLE_OPERATIONAL_STATES = ['confirmada', 'en_salon', 'en_atencion'];
+
+function sortCitasByStart(a, b) {
+  return new Date(a?.inicio_at || '').getTime() - new Date(b?.inicio_at || '').getTime();
+}
+
 function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
 }
@@ -520,7 +526,7 @@ export default function AdminAgendamientoCitasPage() {
     }
   }, [handleAuthError, isAuthenticated]);
 
-  const fetchCitas = useCallback(async ({ silent = false } = {}) => {
+  const fetchCitas = useCallback(async ({ silent = false, force = false } = {}) => {
     if (!isAuthenticated) return;
     if (!canOperateWithSucursal) return;
     if (fetchInFlightRef.current) {
@@ -533,13 +539,16 @@ export default function AdminAgendamientoCitasPage() {
     try {
       const params = buildFilterParams(filters, search);
       params.id_sucursal = selectedSucursalId;
-      const operativasResponse = await listAdminCitasOperativas(params);
+      const operativasResponse = await listAdminCitasOperativas(params, {
+        cache: false,
+        dedupe: !force,
+      });
       const operativas = Array.isArray((operativasResponse?.data ?? operativasResponse)?.citas) ? (operativasResponse?.data ?? operativasResponse).citas : [];
       const byId = new Map();
       operativas.forEach((item) => {
         if (item?.id_cita) byId.set(item.id_cita, item);
       });
-      setCitas(Array.from(byId.values()).sort((a, b) => new Date(a?.inicio_at || '').getTime() - new Date(b?.inicio_at || '').getTime()));
+      setCitas(Array.from(byId.values()).sort(sortCitasByStart));
     } catch (err) {
       if (isAbortError(err)) return;
       if (handleAuthError(err)) return;
@@ -551,7 +560,7 @@ export default function AdminAgendamientoCitasPage() {
         pendingRefreshRef.current = false;
         const refresh = fetchCitasRef.current;
         if (typeof refresh === 'function') {
-          void refresh({ silent: true });
+          void refresh({ silent: true, force: true });
         }
       }
     }
@@ -566,7 +575,7 @@ export default function AdminAgendamientoCitasPage() {
       liveRefreshTimeoutRef.current = null;
     }
     const runRefresh = () => {
-      void fetchCitas({ silent: true });
+      void fetchCitas({ silent: true, force: true });
     };
     if (immediate) {
       runRefresh();
@@ -575,7 +584,7 @@ export default function AdminAgendamientoCitasPage() {
     liveRefreshTimeoutRef.current = window.setTimeout(runRefresh, LIVE_REFRESH_DEBOUNCE_MS);
   }, [canOperateWithSucursal, fetchCitas, isAuthenticated]);
   const handleManualRefresh = useCallback(() => {
-    void fetchCitas({ silent: false });
+    void fetchCitas({ silent: false, force: true });
   }, [fetchCitas]);
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -688,11 +697,25 @@ export default function AdminAgendamientoCitasPage() {
       const payload = response?.data ?? response;
       const updated = payload?.cita;
       if (updated?.id_cita) {
-        setCitas((prev) => prev.map((item) => (item.id_cita === updated.id_cita ? updated : item)));
+        setCitas((prev) => {
+          const nextState = String(updated.estado_cita_codigo || '').toLowerCase();
+          const shouldRemainVisible = VISIBLE_OPERATIONAL_STATES.includes(nextState);
+
+          if (!shouldRemainVisible) {
+            return prev.filter((item) => item.id_cita !== updated.id_cita);
+          }
+
+          const exists = prev.some((item) => item.id_cita === updated.id_cita);
+          const next = exists
+            ? prev.map((item) => (item.id_cita === updated.id_cita ? updated : item))
+            : [...prev, updated];
+
+          return next.sort(sortCitasByStart);
+        });
       }
-      notifications.success('Estado operativo actualizado.', { dedupeKey: 'agendamiento-citas-estado-ok' });
       setStateDialog({ open: false, cita: null, estadoDestino: '' });
-      void fetchCitas();
+      notifications.success('Estado operativo actualizado.', { dedupeKey: 'agendamiento-citas-estado-ok' });
+      await fetchCitas({ silent: true, force: true });
     } catch (err) {
       notifications.error(extractSafeEstadoMessage(err), { dedupeKey: 'agendamiento-citas-estado-error' });
     } finally {
@@ -754,7 +777,7 @@ export default function AdminAgendamientoCitasPage() {
       notifications.success('Cita reagendada por emergencia sin cobro adicional.', { dedupeKey: 'agendamiento-citas-single-ok' });
       setSingleDialogOpen(false);
       setSingleTarget(null);
-      void fetchCitas();
+      await fetchCitas({ silent: true, force: true });
     } catch (err) {
       notifications.error(mapAdminCitasErrorMessage(err, 'No fue posible reagendar la cita.'), { dedupeKey: 'agendamiento-citas-single-error' });
     } finally {
@@ -884,7 +907,7 @@ export default function AdminAgendamientoCitasPage() {
       });
       notifications.success('Reagendación masiva completada sin cobro adicional.', { dedupeKey: 'agendamiento-citas-batch-ok' });
       setBatchItems((prev) => prev.filter((item) => !item.selected));
-      void fetchCitas();
+      await fetchCitas({ silent: true, force: true });
     } catch (err) {
       notifications.error(mapAdminCitasErrorMessage(err, 'No fue posible completar la reagendación masiva.'), { dedupeKey: 'agendamiento-citas-batch-error' });
     } finally {
@@ -895,7 +918,7 @@ export default function AdminAgendamientoCitasPage() {
   function renderItemActions(cita, options = {}) {
     const { compact = false } = options;
     const state = String(cita?.estado_cita_codigo || '').toLowerCase();
-    if (!['confirmada', 'en_salon', 'en_atencion'].includes(state)) return null;
+    if (!VISIBLE_OPERATIONAL_STATES.includes(state)) return null;
     const fitClass = compact ? 'w-full justify-center' : '';
     const operationCode = state === 'confirmada' ? 'registrar_llegada' : state === 'en_salon' ? 'iniciar_atencion' : 'finalizar_atencion';
     const actionLabel = state === 'confirmada' ? 'Registrar llegada' : state === 'en_salon' ? 'Iniciar atención' : 'Finalizar atención';

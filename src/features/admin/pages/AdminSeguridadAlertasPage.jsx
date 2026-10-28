@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Filter, RotateCcw, Search, Siren } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
@@ -101,6 +101,16 @@ function normalizeDisplayText(value, fallback = '-') {
   return normalized || fallback;
 }
 
+function humanizeCode(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return 'Alerta de seguridad';
+  return normalized
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
 function formatDateTime(value) {
   if (!value) return '-';
   const parsed = new Date(value);
@@ -117,6 +127,7 @@ function toDatetimeLocal(value) {
 }
 
 function formatAlertType(value) {
+  const code = String(value || '').trim();
   const map = {
     muchos_fallos_misma_ip: 'Muchos fallos misma IP',
     muchos_fallos_mismo_usuario: 'Muchos fallos mismo usuario',
@@ -124,7 +135,7 @@ function formatAlertType(value) {
     intentos_contra_super_admin: 'Intentos contra super admin',
     cliente_intenta_nueva_sesion: 'Nueva sesion cliente',
   };
-  return map[String(value || '').trim()] || 'Alerta de seguridad';
+  return map[code] || humanizeCode(code);
 }
 
 function formatImpactLevel(value) {
@@ -180,13 +191,11 @@ function safeStringify(value) {
 export default function AdminSeguridadAlertasPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
-  const { roles } = useAuth();
+  const { roles, user } = useAuth();
   const realtimeChannels = useMemo(() => ['security.alerts.changed'], []);
+  const isRoot = useMemo(() => roles.includes('root'), [roles]);
 
-  const canWrite = useMemo(
-    () => roles.includes('super_admin') || roles.includes('security_admin'),
-    [roles]
-  );
+  const canWrite = isRoot;
 
   const [rows, setRows] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: DEFAULT_FILTERS.limit, total: 0, total_pages: 1 });
@@ -203,6 +212,33 @@ export default function AdminSeguridadAlertasPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [detailData, setDetailData] = useState(null);
+  const identityContext = JSON.stringify([roles, user?.id_usuario]);
+  const actionGenerationRef = useRef(0);
+  const actionOperationRef = useRef(null);
+  const detailGenerationRef = useRef(0);
+  const detailControllerRef = useRef(null);
+
+  useLayoutEffect(() => {
+    actionGenerationRef.current += 1;
+    actionOperationRef.current = null;
+    detailGenerationRef.current += 1;
+    detailControllerRef.current?.abort();
+    detailControllerRef.current = null;
+    setConfirmTarget(null);
+    setResolutionComment('');
+    setActionLoadingId('');
+    setDetailOpen(false);
+    setDetailData(null);
+    setDetailError('');
+    setDetailLoading(false);
+    return () => {
+      actionGenerationRef.current += 1;
+      actionOperationRef.current = null;
+      detailGenerationRef.current += 1;
+      detailControllerRef.current?.abort();
+      detailControllerRef.current = null;
+    };
+  }, [identityContext]);
 
   const hasActiveFilters = useMemo(() => (
     filters.estado !== DEFAULT_FILTERS.estado
@@ -215,7 +251,47 @@ export default function AdminSeguridadAlertasPage() {
     || Number(filters.limit) !== Number(DEFAULT_FILTERS.limit)
   ), [filters]);
 
+  const alertTypeOptions = useMemo(() => {
+    const options = [...ALERT_TYPE_OPTIONS];
+    const known = new Set(options.map((option) => option.value));
+    rows.forEach((row) => {
+      const tipo = String(row?.tipo || '').trim();
+      if (!tipo || known.has(tipo)) return;
+      known.add(tipo);
+      options.push({ value: tipo, label: formatAlertType(tipo) });
+    });
+    const draftType = String(draftFilters.tipo || '').trim();
+    if (draftType && draftType !== 'all' && !known.has(draftType)) {
+      options.push({ value: draftType, label: formatAlertType(draftType) });
+    }
+    return options;
+  }, [draftFilters.tipo, rows]);
+
+  const listContext = JSON.stringify([filters, page, roles, user?.id_usuario]);
+  const listContextRef = useRef(listContext);
+  const listGenerationRef = useRef(0);
+  const listMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    listMountedRef.current = true;
+    listContextRef.current = listContext;
+    listGenerationRef.current += 1;
+    setRows([]);
+    setPagination({ page: 1, limit: DEFAULT_FILTERS.limit, total: 0, total_pages: 1 });
+    setError('');
+    setLoading(false);
+    return () => { listMountedRef.current = false; listGenerationRef.current += 1; };
+  }, [listContext]);
+
   const fetchRows = useCallback(async () => {
+    if (!listMountedRef.current || listContextRef.current !== listContext) return;
+    const generation = ++listGenerationRef.current;
+    const isCurrent = () => listMountedRef.current && listGenerationRef.current === generation && listContextRef.current === listContext;
+    if (!isRoot) return;
+    if (!isRoot) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError('');
     try {
@@ -231,9 +307,11 @@ export default function AdminSeguridadAlertasPage() {
         toAt: filters.toAt,
       });
       const parsed = unwrapCollectionResponse(response);
+      if (!isCurrent()) return;
       setRows(parsed.items);
       setPagination(parsed.pagination);
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -246,12 +324,12 @@ export default function AdminSeguridadAlertasPage() {
       setRows([]);
       setPagination({ page: 1, limit: filters.limit, total: 0, total_pages: 1 });
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [filters, navigate, page]);
+  }, [filters, isRoot, navigate, page, listContext]);
 
   const realtime = useSecurityRealtime({
-    enabled: true,
+    enabled: isRoot,
     channels: realtimeChannels,
     signalDebounceMs: 500,
     maxReconnectAttempts: 5,
@@ -261,8 +339,13 @@ export default function AdminSeguridadAlertasPage() {
   });
 
   useEffect(() => {
+    if (!isRoot) {
+      navigate('/unauthorized', { replace: true });
+      return;
+    }
+
     void fetchRows();
-  }, [fetchRows]);
+  }, [fetchRows, isRoot, navigate]);
 
   function applyFilters() {
     setPage(1);
@@ -289,15 +372,23 @@ export default function AdminSeguridadAlertasPage() {
   }
 
   async function openDetail(idAlerta) {
-    if (!idAlerta) return;
+    if (!idAlerta || !isRoot || !listMountedRef.current) return;
+    const generation = ++detailGenerationRef.current;
+    detailControllerRef.current?.abort();
+    const controller = new AbortController();
+    detailControllerRef.current = controller;
+    const isCurrent = () => listMountedRef.current && detailGenerationRef.current === generation
+      && detailControllerRef.current === controller && !controller.signal.aborted;
     setDetailOpen(true);
     setDetailLoading(true);
     setDetailError('');
     setDetailData(null);
     try {
-      const response = await getAdminSecurityAlertDetail(idAlerta);
+      const response = await getAdminSecurityAlertDetail(idAlerta, { signal: controller.signal });
+      if (!isCurrent()) return;
       setDetailData(unwrapSingleResponse(response));
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -308,12 +399,21 @@ export default function AdminSeguridadAlertasPage() {
       }
       setDetailError('No fue posible cargar el detalle de la alerta.');
     } finally {
-      setDetailLoading(false);
+      if (isCurrent()) {
+        detailControllerRef.current = null;
+        setDetailLoading(false);
+      }
     }
   }
 
   async function confirmStateUpdate() {
-    if (!confirmTarget?.id_alerta || !confirmTarget?.nextState || actionLoadingId) return;
+    if (!canWrite || !listMountedRef.current || !confirmTarget?.id_alerta || !confirmTarget?.nextState
+      || actionOperationRef.current || !String(resolutionComment || '').trim()) return;
+    const operation = {};
+    const generation = actionGenerationRef.current;
+    actionOperationRef.current = operation;
+    const isCurrent = () => listMountedRef.current && actionGenerationRef.current === generation
+      && actionOperationRef.current === operation;
     setActionLoadingId(confirmTarget.id_alerta);
     try {
       await updateAdminSecurityAlertState(
@@ -321,6 +421,7 @@ export default function AdminSeguridadAlertasPage() {
         confirmTarget.nextState,
         resolutionComment
       );
+      if (!isCurrent()) return;
       notifications.success('Estado de alerta actualizado correctamente.', {
         dedupeKey: 'security-alerts-state-updated',
       });
@@ -328,6 +429,7 @@ export default function AdminSeguridadAlertasPage() {
       setResolutionComment('');
       await fetchRows();
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -340,12 +442,17 @@ export default function AdminSeguridadAlertasPage() {
         dedupeKey: 'security-alerts-state-update-error',
       });
     } finally {
-      setActionLoadingId('');
+      if (isCurrent()) {
+        actionOperationRef.current = null;
+        setActionLoadingId('');
+      }
     }
   }
 
   const safePage = Math.max(1, Number(pagination?.page || page));
   const totalPages = Math.max(1, Number(pagination?.total_pages || 1));
+
+  if (!isRoot) return null;
 
   return (
     <div className="space-y-4 px-2 pb-4 sm:px-4 sm:pb-6">
@@ -353,9 +460,12 @@ export default function AdminSeguridadAlertasPage() {
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div className="space-y-1">
             <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Seguridad</p>
-            <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Alertas</h1>
+            <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Auditoria de Seguridad</h1>
             <p className="text-sm text-[var(--mf-text-2)]">
-              Vista resumida por riesgo y flujo de resolucion con comentario obligatorio.
+              Registro tecnico de eventos de seguridad. Solo requiere accion en casos revisados por root.
+            </p>
+            <p className="text-xs text-[var(--mf-text-2)]">
+              Eventos generados por intentos fallidos, limites de sesion, bloqueos y actividad anomala.
             </p>
             <p className="text-xs text-[var(--mf-text-2)]">
               {realtime.freshnessLabel}
@@ -416,7 +526,7 @@ export default function AdminSeguridadAlertasPage() {
                 value={draftFilters.tipo}
                 onChange={(event) => setDraftFilters((prev) => ({ ...prev, tipo: event.target.value }))}
               >
-                {ALERT_TYPE_OPTIONS.map((option) => (
+                {alertTypeOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
@@ -483,12 +593,12 @@ export default function AdminSeguridadAlertasPage() {
       </section>
 
       {error ? <ErrorBanner message={error} onRetry={() => void fetchRows()} /> : null}
-      {loading && !error ? <LoadingSpinner label="Consultando alertas de seguridad..." /> : null}
+      {loading && !error ? <LoadingSpinner label="Consultando auditoria de seguridad..." /> : null}
 
       {!loading && !error && rows.length === 0 ? (
         <EmptyState
           icon={Siren}
-          title="No hay alertas para los filtros aplicados"
+          title="No hay eventos para los filtros aplicados"
           description="Ajusta los criterios para ver la actividad relevante."
         />
       ) : null}
@@ -627,13 +737,16 @@ export default function AdminSeguridadAlertasPage() {
         onOpenChange={(open) => {
           setDetailOpen(open);
           if (!open) {
+            detailGenerationRef.current += 1;
+            detailControllerRef.current?.abort();
+            detailControllerRef.current = null;
             setDetailData(null);
             setDetailError('');
             setDetailLoading(false);
           }
         }}
-        title="Detalle de alerta"
-        description="Vista ampliada de la alerta seleccionada."
+        title="Detalle de evento"
+        description="Vista ampliada del evento seleccionado."
       >
         {detailLoading ? <LoadingSpinner label="Cargando detalle..." /> : null}
         {!detailLoading && detailError ? <ErrorBanner message={detailError} /> : null}

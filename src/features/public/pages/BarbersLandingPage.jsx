@@ -133,11 +133,13 @@ function mergeBarbersById(barbers) {
 export default function BarbersLandingPage() {
   const [status, setStatus] = useState('loading');
   const [errorMessage, setErrorMessage] = useState('');
+  const [partialLoad, setPartialLoad] = useState(false);
   const [barbers, setBarbers] = useState([]);
 
   const loadBarbers = useCallback(async () => {
     setStatus('loading');
     setErrorMessage('');
+    setPartialLoad(false);
     try {
       const branchPayload = await listPublicCatalogBranches();
       const branchIds = Array.isArray(branchPayload?.branches)
@@ -153,6 +155,14 @@ export default function BarbersLandingPage() {
       const settled = await Promise.allSettled(
         branchIds.map((idSucursal) => listPublicAgendaBarberos({ id_sucursal: idSucursal }))
       );
+      const failedCount = settled.filter((result) => result.status === 'rejected').length;
+      if (failedCount === settled.length) {
+        setBarbers([]);
+        setErrorMessage('No se pudo cargar el listado de barberos en este momento.');
+        setStatus('error');
+        return;
+      }
+      setPartialLoad(failedCount > 0);
 
       const merged = mergeBarbersById(
         settled
@@ -203,6 +213,9 @@ export default function BarbersLandingPage() {
         </header>
 
         {status === 'error' ? <ErrorBanner message={errorMessage} onRetry={loadBarbers} /> : null}
+        {status === 'success' && partialLoad ? (
+          <ErrorBanner message="Algunas sucursales no pudieron cargarse. El listado puede estar incompleto." onRetry={loadBarbers} />
+        ) : null}
         {status === 'loading' ? (
           <section className="space-y-4">
             <LoadingSpinner />
@@ -218,7 +231,7 @@ export default function BarbersLandingPage() {
           </section>
         ) : null}
 
-        {status === 'success' && !barbers.length ? (
+        {status === 'success' && !partialLoad && !barbers.length ? (
           <EmptyState
             icon={Scissors}
             title="Sin barberos visibles"

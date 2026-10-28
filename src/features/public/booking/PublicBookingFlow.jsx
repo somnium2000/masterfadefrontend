@@ -1,4 +1,4 @@
-﻿import {
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from '../../../components/ui/dialog.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import { useAuth } from '../../../context/AuthContext.jsx';
 import {
   validatePublicBookingContacts,
 } from './publicBookingApi.js';
@@ -93,6 +94,7 @@ import useBookingHold from './hooks/useBookingHold.js';
 import useBookingPayment from './hooks/useBookingPayment.js';
 import usePublicAgendaEvents, { parseAgendaSseEnabled } from './hooks/usePublicAgendaEvents.js';
 import useBookingWizardNavigation from './hooks/useBookingWizardNavigation.js';
+import { resolvePaymentResumeContext } from './paymentResumeContext.js';
 import BookingLayout from './components/BookingLayout.jsx';
 import BookingErrorState from './components/BookingErrorState.jsx';
 import { PublicBookingProvider } from './BookingFlowContext.jsx';
@@ -106,6 +108,72 @@ const PROFILE_FIELD_LABELS = Object.freeze({
   telefono_principal: 'Teléfono',
   correo_principal: 'Correo',
 });
+
+export function claimExpiredHoldPaymentStatusCheck(checkRef, { groupId, intentId } = {}) {
+  const normalizedGroupId = String(groupId || '').trim();
+  const normalizedIntentId = String(intentId || '').trim();
+  if (!checkRef || !normalizedGroupId || !normalizedIntentId) return false;
+
+  const checkKey = `${normalizedGroupId}|${normalizedIntentId}`;
+  if (checkRef.current === checkKey) return false;
+  checkRef.current = checkKey;
+  return true;
+}
+
+export function hasUnresolvedPaymentEvidence(paymentState = {}) {
+  if (paymentState?.manual_reconciliation_required === true) return true;
+  if (paymentState?.pending_confirmation === true) return true;
+  return String(paymentState?.estado_intent_codigo || '')
+    .trim()
+    .toLowerCase() === 'pendiente_confirmacion';
+}
+
+export function shouldPreserveUnresolvedPaymentState({
+  currentResult,
+  nextResult,
+  paymentIntent,
+} = {}) {
+  if (nextResult?.booking_confirmed === true) return false;
+  const nextState = String(nextResult?.estado_intent_codigo || '').trim().toLowerCase();
+  if (nextState === 'fallido') return false;
+  return hasUnresolvedPaymentEvidence(nextResult)
+    || hasUnresolvedPaymentEvidence(currentResult)
+    || hasUnresolvedPaymentEvidence(paymentIntent);
+}
+
+export function resolvePaymentExecutionContext({
+  holdResult,
+  paymentIntent,
+  pendingResumeContext,
+  currentEmail,
+} = {}) {
+  const groupId = String(
+    holdResult?.id_grupo_cita
+    || paymentIntent?.id_grupo_cita
+    || pendingResumeContext?.id_grupo_cita
+    || ''
+  ).trim();
+  const intentId = String(
+    (String(paymentIntent?.id_grupo_cita || '').trim() === groupId ? paymentIntent?.id_intent : '')
+    || (String(pendingResumeContext?.id_grupo_cita || '').trim() === groupId ? pendingResumeContext?.id_intent : '')
+    || ''
+  ).trim();
+  const resumeMatches = Boolean(
+    groupId
+    && intentId
+    && pendingResumeContext?.id_grupo_cita === groupId
+    && pendingResumeContext?.id_intent === intentId
+  );
+  const normalizedCurrentEmail = String(currentEmail || '').trim().toLowerCase();
+  const restoredEmail = resumeMatches
+    ? String(pendingResumeContext?.titular_email || '').trim().toLowerCase()
+    : '';
+  return {
+    groupId,
+    intentId,
+    titularEmail: isValidEmail(normalizedCurrentEmail) ? normalizedCurrentEmail : restoredEmail,
+  };
+}
 
 function getContactValidationFeedback(contactState, blockIndex) {
   const errors = contactState?.errors || {};
@@ -224,8 +292,18 @@ function readRewardBookingContext() {
     ).trim();
     const idServicioCanje = String(parsed?.id_servicio_canje || '').trim();
     const idSucursal = String(parsed?.id_sucursal || '').trim();
-    if (!canjeContextToken || !idServicioCanje || !idSucursal) return null;
+    const ownerUserId = typeof parsed?.owner_id_usuario === 'string' ? parsed.owner_id_usuario.trim() : '';
+    const ownerClienteId = typeof parsed?.owner_id_cliente === 'string' ? parsed.owner_id_cliente.trim() : '';
+    if (!canjeContextToken || !idServicioCanje || !idSucursal || !ownerUserId || !ownerClienteId) return null;
+    const [prefix, encoded, signature, extra] = canjeContextToken.split('.');
+    if (prefix !== 'mf_reward_ctx_v1' || !encoded || !/^[A-Za-z0-9_-]{43}$/.test(signature || '') || extra !== undefined) return null;
+    const decoded = JSON.parse(window.atob(encoded.replace(/-/g, '+').replace(/_/g, '/')));
+    // AM: Coherencia local, no validación criptográfica: la firma sigue siendo autoridad del backend.
+    if (decoded?.v !== 1 || decoded?.id_cliente !== ownerClienteId
+      || decoded?.id_servicio_canje !== idServicioCanje || decoded?.id_sucursal !== idSucursal) return null;
     return {
+      owner_id_usuario: ownerUserId,
+      owner_id_cliente: ownerClienteId,
       canje_context_token: canjeContextToken,
       id_points_tx_canje: canjeContextToken,
       id_servicio_canje: idServicioCanje,
@@ -247,28 +325,8 @@ function persistRewardBookingContext(context) {
   window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, JSON.stringify(context));
 }
 
-function readPendingPaymentResumeContext() {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.sessionStorage.getItem('mf_pending_payment_context_v1');
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
-    const groupId = String(parsed?.id_grupo_cita || '').trim();
-    const intentId = String(parsed?.id_intent || parsed?.payment_intent?.id_intent || '').trim();
-    const titularEmail = String(parsed?.titular_email || '').trim().toLowerCase();
-    if (!groupId || !intentId) return null;
-    return {
-      id_grupo_cita: groupId,
-      id_intent: intentId,
-      titular_email: titularEmail,
-    };
-  } catch {
-    return null;
-  }
-}
-
 export default function PublicBookingFlow() {
+  const { user: rewardUser } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const notifications = useNotifications();
@@ -340,6 +398,7 @@ const holdSelectionFingerprintRef = useRef('');
 const holderProfileHydratedRef = useRef(false);
 const paymentAutoBootstrapAttemptRef = useRef('');
 const paymentReturnStatusCheckRef = useRef('');
+const expiredHoldPaymentStatusCheckRef = useRef('');
 const invalidHoldSelectionFingerprintRef = useRef('');
 const agendaAutoLoadKeyRef = useRef('');
   const [servicesCanScroll, setServicesCanScroll] = useState(false);
@@ -378,21 +437,6 @@ const agendaAutoLoadKeyRef = useRef('');
     selectedTime,
     titularSelectedDate,
   } = activeBookingBlockState;
-  const pendingResumeContext = useMemo(() => {
-    const searchParams = new URLSearchParams(location.search || '');
-    const queryGroupId = String(searchParams.get('id_grupo_cita') || '').trim();
-    const queryIntentId = String(searchParams.get('id_intent') || '').trim();
-    const stored = readPendingPaymentResumeContext();
-    const groupId = queryGroupId || String(stored?.id_grupo_cita || '').trim();
-    const intentId = queryIntentId || String(stored?.id_intent || '').trim();
-    if (!groupId || !intentId) return null;
-    return {
-      id_grupo_cita: groupId,
-      id_intent: intentId,
-      titular_email: String(stored?.titular_email || '').trim().toLowerCase(),
-    };
-  }, [location.search]);
-  const isPendingPaymentResumeRoute = location.pathname.startsWith(BOOKING_ROUTES.payment) && Boolean(pendingResumeContext?.id_grupo_cita && pendingResumeContext?.id_intent);
   const {
     contextLoading,
     contextError,
@@ -600,8 +644,14 @@ const agendaAutoLoadKeyRef = useRef('');
     ? (String(selectedBranch?.nombre_sucursal || '').trim() || 'esta sucursal')
     : 'esta sucursal';
 
+  const rewardOwnerMatches = Boolean(
+    rewardUser?.id_usuario && rewardUser?.cliente_id
+    && rewardBookingContext?.owner_id_usuario === rewardUser.id_usuario
+    && rewardBookingContext?.owner_id_cliente === rewardUser.cliente_id
+  );
   const rewardModeActive = Boolean(
     canUseClienteHold
+    && rewardOwnerMatches
     && rewardBookingContext
     && String(rewardBookingContext?.canje_context_token || rewardBookingContext?.id_points_tx_canje || '').trim()
     && String(rewardBookingContext?.id_servicio_canje || '').trim()
@@ -840,6 +890,13 @@ const agendaAutoLoadKeyRef = useRef('');
     selectionFingerprint: bookingHoldFingerprint,
   });
 
+  const pendingResumeContext = useMemo(() => {
+    const context = resolvePaymentResumeContext({ search: location.search });
+    const groupId = String(holdResult?.id_grupo_cita || '').trim();
+    return groupId && context?.id_grupo_cita !== groupId ? null : context;
+  }, [holdResult?.id_grupo_cita, location.search]);
+  const isPendingPaymentResumeRoute = location.pathname.startsWith(BOOKING_ROUTES.payment) && Boolean(pendingResumeContext?.id_grupo_cita && pendingResumeContext?.id_intent);
+
   const {
     paymentIntent,
     paymentResult,
@@ -854,9 +911,12 @@ const agendaAutoLoadKeyRef = useRef('');
     fetchPaymentStatusOnce,
     completeMockPaymentOnce,
     completeSimulatorPaymentOnce,
+    salePixelPayOnce,
+    queryPixelPayStatusOnce,
     isCurrentPaymentGroup,
   } = useBookingPayment({
     currentGroupId: holdResult?.id_grupo_cita || '',
+    authenticated: canUseClienteHold,
   });
 
   const handleSelectedSlotUnavailable = useCallback(() => {
@@ -1676,7 +1736,9 @@ const agendaAutoLoadKeyRef = useRef('');
   }, [canUseClienteHold]);
 
   useEffect(() => {
+    if (bookingMode === 'loading') return;
     if (!rewardModeActive) {
+      setRewardBookingContext(null);
       persistRewardBookingContext(null);
       rewardPreparedShownRef.current = false;
       rewardUnavailableShownRef.current = false;
@@ -1684,7 +1746,7 @@ const agendaAutoLoadKeyRef = useRef('');
       return;
     }
     persistRewardBookingContext(rewardBookingContext);
-  }, [rewardBookingContext, rewardModeActive]);
+  }, [bookingMode, rewardBookingContext, rewardModeActive]);
 
   useEffect(() => {
     if (!rewardModeActive) return;
@@ -3305,11 +3367,11 @@ const agendaAutoLoadKeyRef = useRef('');
       ?? holdResult?.total_hnl
       ?? 0
     );
-    const rewardContextToken = String(
+    const rewardContextToken = rewardModeActive ? String(
       rewardBookingContext?.canje_context_token
       || rewardBookingContext?.id_points_tx_canje
       || ''
-    ).trim();
+    ).trim() : '';
     const requestTimeoutMs = 20000;
     const requestController = typeof AbortController !== 'undefined'
       ? new AbortController()
@@ -3447,6 +3509,7 @@ const agendaAutoLoadKeyRef = useRef('');
     navigate,
     notifications,
     rewardBookingContext,
+    rewardModeActive,
     setBookingSuccessResult,
     setPaymentResult,
   ]);
@@ -3457,27 +3520,33 @@ const agendaAutoLoadKeyRef = useRef('');
     if (!canCheckOnRoute) return null;
     const searchParams = new URLSearchParams(location.search || '');
     const groupIdFromUrl = String(searchParams.get('id_grupo_cita') || '').trim();
-    const storedContext = restorePaymentContext(groupIdFromUrl || holdResult?.id_grupo_cita || '');
-    const groupId = String(
+    const storedContext = restorePaymentContext(
       holdResult?.id_grupo_cita
-      || storedContext?.id_grupo_cita
+      || pendingResumeContext?.id_grupo_cita
       || groupIdFromUrl
-      || ''
-    ).trim();
-    const intentId = String(paymentIntent?.id_intent || storedContext?.id_intent || '').trim();
+      || '',
+      pendingResumeContext
+    );
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
-    const titularEmail = String(titularContact.email || storedContext?.titular_email || '').trim().toLowerCase();
+    const { groupId, intentId, titularEmail } = resolvePaymentExecutionContext({
+      holdResult: holdResult || { id_grupo_cita: groupIdFromUrl },
+      paymentIntent,
+      pendingResumeContext: storedContext || pendingResumeContext,
+      currentEmail: titularContact.email,
+    });
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
 
     try {
-      const payload = await fetchPaymentStatusOnce({
-        groupId,
-        intentId,
-        titularEmail,
-        retries: options?.retries ?? 0,
-        retryDelayMs: options?.retryDelayMs ?? 1200,
-        shouldRetry: shouldRetryPaymentStatus,
-      });
+      const payload = options?.queryPixelPayProvider === true
+        ? await queryPixelPayStatusOnce({ groupId, intentId, titularEmail })
+        : await fetchPaymentStatusOnce({
+            groupId,
+            intentId,
+            titularEmail,
+            retries: options?.retries ?? 0,
+            retryDelayMs: options?.retryDelayMs ?? 1200,
+            shouldRetry: shouldRetryPaymentStatus,
+          });
       if (!payload || !isCurrentPaymentGroup(groupId)) return null;
       let rewardFinalization = null;
       if (payload?.booking_confirmed && rewardModeActive) {
@@ -3522,7 +3591,20 @@ const agendaAutoLoadKeyRef = useRef('');
           }
         }
       }
-      setPaymentResult(payload);
+      const preserveUnresolvedPayment = shouldPreserveUnresolvedPaymentState({
+        currentResult: paymentResult,
+        nextResult: payload,
+        paymentIntent,
+      });
+      const resolvedPayload = preserveUnresolvedPayment
+        ? {
+            ...payload,
+            pending_confirmation: true,
+            manual_reconciliation_required: payload?.manual_reconciliation_required === true
+              || paymentResult?.manual_reconciliation_required === true,
+          }
+        : payload;
+      setPaymentResult(resolvedPayload);
       if (payload?.booking_confirmed) {
         const citasConfirmadas = extractConfirmedAppointments(payload);
         const codigoCita = extractBookingCode(payload);
@@ -3551,22 +3633,48 @@ const agendaAutoLoadKeyRef = useRef('');
           created_at: new Date().toISOString(),
         });
       }
-      const intentState = String(payload?.estado_intent_codigo || '').trim().toLowerCase();
-      if (!payload?.booking_confirmed && (intentState === 'expirado' || intentState === 'fallido')) {
+      const intentState = String(resolvedPayload?.estado_intent_codigo || '').trim().toLowerCase();
+      if (!resolvedPayload?.booking_confirmed
+        && !preserveUnresolvedPayment
+        && (intentState === 'expirado' || intentState === 'fallido')) {
         recoverToAgendaForReselection(
           'No fue posible completar el pago con el horario reservado. Elige una nueva hora para continuar.',
           { dedupeKey: 'public-booking-payment-recover-status-terminal' }
         );
         return null;
       }
-      return payload;
+      return resolvedPayload;
     } catch (err) {
       if (err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('aborted')) {
         return null;
       }
       const apiError = err?.data?.error || err?.error || {};
       const errorCode = String(apiError?.code || '').trim().toUpperCase();
+      if (errorCode === 'PIXELPAY_PAYMENT_UUID_MISSING') {
+        setPaymentResult((current) => ({
+          ...(current && typeof current === 'object' ? current : {}),
+          pending_confirmation: true,
+          estado_intent_codigo: 'pendiente_confirmacion',
+        }));
+        notifications.warning(
+          'PixelPay todavía no entregó un identificador consultable. El pago requiere confirmación; no vuelvas a pagarlo.',
+          { dedupeKey: 'public-booking-pixelpay-uuid-missing' }
+        );
+        return null;
+      }
       if (shouldRecoverFromPaymentError(errorCode)) {
+        if (hasUnresolvedPaymentEvidence(paymentResult)
+          || hasUnresolvedPaymentEvidence(paymentIntent)) {
+          setPaymentResult((current) => ({
+            ...(current && typeof current === 'object' ? current : {}),
+            pending_confirmation: true,
+          }));
+          notifications.warning(
+            'El horario temporal ya no esta reservado, pero el pago sigue pendiente de verificacion.',
+            { dedupeKey: 'public-booking-payment-expired-unresolved' }
+          );
+          return null;
+        }
         recoverToAgendaForReselection(
           'Tu reserva temporal ya no está disponible. Selecciona un nuevo horario para continuar.',
           { dedupeKey: 'public-booking-payment-recover-status-error' }
@@ -3580,14 +3688,15 @@ const agendaAutoLoadKeyRef = useRef('');
     bookingBlocks,
     confirmHoldWithoutPaymentRequest,
     fetchPaymentStatusOnce,
-    holdResult?.id_grupo_cita,
-    holdResult?.total_hnl,
-    holdResult?.total_pagar_hnl,
+    holdResult,
     isCurrentPaymentGroup,
     location.pathname,
     location.search,
     notifications,
-    paymentIntent?.id_intent,
+    pendingResumeContext,
+    paymentIntent,
+    paymentResult,
+    queryPixelPayStatusOnce,
     rewardBookingContext,
     rewardModeActive,
     resolveBlockContactState,
@@ -3600,8 +3709,7 @@ const agendaAutoLoadKeyRef = useRef('');
   ]);
 
   const completeMockPayment = useCallback(async () => {
-    const groupId = String(holdResult?.id_grupo_cita || '').trim();
-    const intentId = String(paymentIntent?.id_intent || '').trim();
+    const { groupId, intentId } = resolvePaymentExecutionContext({ holdResult, paymentIntent });
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
     const titularEmail = String(titularContact.email || '').trim().toLowerCase();
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return false;
@@ -3613,11 +3721,10 @@ const agendaAutoLoadKeyRef = useRef('');
       notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-complete-error' });
       return false;
     }
-  }, [bookingBlocks, completeMockPaymentOnce, holdResult?.id_grupo_cita, notifications, paymentIntent?.id_intent, refreshPaymentStatus, resolveBlockContactState]);
+  }, [bookingBlocks, completeMockPaymentOnce, holdResult, notifications, paymentIntent, refreshPaymentStatus, resolveBlockContactState]);
 
   const completeSimulatorPayment = useCallback(async () => {
-    const groupId = String(holdResult?.id_grupo_cita || '').trim();
-    const intentId = String(paymentIntent?.id_intent || '').trim();
+    const { groupId, intentId } = resolvePaymentExecutionContext({ holdResult, paymentIntent });
     const titularContact = resolveBlockContactState(bookingBlocks[0], 0);
     const titularEmail = String(titularContact.email || '').trim().toLowerCase();
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return false;
@@ -3629,7 +3736,7 @@ const agendaAutoLoadKeyRef = useRef('');
       notifications.error(extractMessage(err), { dedupeKey: 'public-booking-payment-simulator-error' });
       return false;
     }
-  }, [bookingBlocks, completeSimulatorPaymentOnce, holdResult?.id_grupo_cita, notifications, paymentIntent?.id_intent, refreshPaymentStatus, resolveBlockContactState]);
+  }, [bookingBlocks, completeSimulatorPaymentOnce, holdResult, notifications, paymentIntent, refreshPaymentStatus, resolveBlockContactState]);
 
   const completePaymentSimulation = useCallback(async ({ provider } = {}) => {
     const normalizedProvider = String(provider || '').trim().toLowerCase();
@@ -3638,6 +3745,73 @@ const agendaAutoLoadKeyRef = useRef('');
     }
     return completeMockPayment();
   }, [completeMockPayment, completeSimulatorPayment]);
+
+  const paymentExecutionContext = useMemo(() => {
+    const currentEmail = String(resolveBlockContactState(bookingBlocks[0], 0).email || '')
+      .trim()
+      .toLowerCase();
+    return resolvePaymentExecutionContext({
+      holdResult,
+      paymentIntent,
+      pendingResumeContext,
+      currentEmail,
+    });
+  }, [bookingBlocks, holdResult, paymentIntent, pendingResumeContext, resolveBlockContactState]);
+
+  const restoredPaymentMatches = Boolean(
+    paymentResult
+    && String(paymentResult?.id_grupo_cita || '').trim() === paymentExecutionContext.groupId
+    && String(paymentResult?.id_intent || '').trim() === paymentExecutionContext.intentId
+  );
+  const paymentRestoring = isPendingPaymentResumeRoute && !restoredPaymentMatches;
+  const backendPaymentState = String(
+    paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || ''
+  ).trim().toLowerCase();
+  const backendPaymentAmount = Number(paymentResult?.monto_hnl ?? paymentIntent?.monto_hnl);
+  const paymentCanExecuteSale = Boolean(
+    !paymentRestoring
+    && backendPaymentState === 'link_generado'
+    && Number.isFinite(backendPaymentAmount)
+    && backendPaymentAmount > 0
+    && paymentExecutionContext.groupId
+    && paymentExecutionContext.intentId
+    && isValidEmail(paymentExecutionContext.titularEmail)
+  );
+
+  const completePixelPayPayment = useCallback(async ({ card, billing }) => {
+    const { groupId, intentId, titularEmail } = paymentExecutionContext;
+    if (!paymentCanExecuteSale) return null;
+    if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
+    try {
+      const result = await salePixelPayOnce({ groupId, intentId, titularEmail, card, billing });
+      if (result?.booking_confirmed) {
+        await refreshPaymentStatus();
+      }
+      return result;
+    } catch (err) {
+      const errorCode = String(err?.data?.error?.code || err?.error?.code || '').trim().toUpperCase();
+      if (errorCode === 'PIXELPAY_REQUEST_REJECTED') {
+        setPaymentResult({
+          pending_confirmation: false,
+          estado_intent_codigo: 'fallido',
+        });
+      } else if (!errorCode || errorCode === 'PIXELPAY_SALE_ERROR') {
+        setPaymentResult({
+          pending_confirmation: true,
+          estado_intent_codigo: 'pendiente_confirmacion',
+        });
+      }
+      notifications.error(extractMessage(err), { dedupeKey: 'public-booking-pixelpay-error' });
+      throw err;
+    }
+  }, [
+    notifications,
+    paymentCanExecuteSale,
+    paymentExecutionContext,
+    refreshPaymentStatus,
+    salePixelPayOnce,
+    setPaymentResult,
+  ]);
 
   const startCheckout = useCallback(async () => {
     if (paymentResult?.booking_confirmed) return true;
@@ -3729,6 +3903,21 @@ const agendaAutoLoadKeyRef = useRef('');
     if (paymentResult?.booking_confirmed) return;
     if (!holdResult || !holdExpired) return;
     if (paymentIntent?.id_intent) {
+      if (hasUnresolvedPaymentEvidence(paymentResult)
+        || hasUnresolvedPaymentEvidence(paymentIntent)) {
+        notifications.info('La reserva temporal vencio, pero el pago sigue pendiente de verificacion.', {
+          dedupeKey: 'public-booking-payment-hold-expired-unresolved',
+        });
+        return;
+      }
+      const shouldCheckStatus = claimExpiredHoldPaymentStatusCheck(
+        expiredHoldPaymentStatusCheckRef,
+        {
+          groupId: holdResult?.id_grupo_cita,
+          intentId: paymentIntent.id_intent,
+        }
+      );
+      if (!shouldCheckStatus) return;
       notifications.info('La reserva temporal vencio, pero ya hay un pago iniciado. Verifica el estado antes de cambiar de horario.', {
         dedupeKey: 'public-booking-payment-hold-expired-status-check',
       });
@@ -3744,8 +3933,8 @@ const agendaAutoLoadKeyRef = useRef('');
     holdResult,
     location.pathname,
     notifications,
-    paymentIntent?.id_intent,
-    paymentResult?.booking_confirmed,
+    paymentIntent,
+    paymentResult,
     recoverToAgendaForReselection,
     refreshPaymentStatus,
   ]);
@@ -3761,14 +3950,18 @@ const agendaAutoLoadKeyRef = useRef('');
 
     const searchParams = new URLSearchParams(location.search || '');
     const groupIdFromUrl = String(searchParams.get('id_grupo_cita') || '').trim();
-    const restoredContext = restorePaymentContext(groupIdFromUrl || holdResult?.id_grupo_cita || '');
-    const groupId = String(
+    const restoredContext = restorePaymentContext(
       holdResult?.id_grupo_cita
-      || restoredContext?.id_grupo_cita
+      || pendingResumeContext?.id_grupo_cita
       || groupIdFromUrl
-      || ''
-    ).trim();
-    const intentId = String(paymentIntent?.id_intent || restoredContext?.id_intent || '').trim();
+      || '',
+      pendingResumeContext
+    );
+    const { groupId, intentId } = resolvePaymentExecutionContext({
+      holdResult: holdResult || { id_grupo_cita: groupIdFromUrl },
+      paymentIntent,
+      pendingResumeContext: restoredContext || pendingResumeContext,
+    });
     if (!groupId || !intentId) return;
 
     const checkKey = `${location.pathname}|${location.search}|${groupId}|${intentId}`;
@@ -3784,14 +3977,17 @@ const agendaAutoLoadKeyRef = useRef('');
       retryDelayMs: 1500,
     });
   }, [
-    holdResult?.id_grupo_cita,
+    holdResult,
     location.pathname,
     location.search,
-    paymentIntent?.id_intent,
+    paymentIntent,
     paymentResult?.booking_confirmed,
+    pendingResumeContext,
     refreshPaymentStatus,
     restorePaymentContext,
   ]);
+
+  const paymentTitularEmail = paymentExecutionContext.titularEmail;
 
   const contextValue = useMemo(
     () => ({
@@ -3857,6 +4053,7 @@ const agendaAutoLoadKeyRef = useRef('');
       checkingPaymentStatus,
       completeMockPayment,
       completePaymentSimulation,
+      completePixelPayPayment,
       startCheckout,
       holdDurationMin,
       holdExpiresAtIso,
@@ -3867,6 +4064,9 @@ const agendaAutoLoadKeyRef = useRef('');
       holdTotalToPay,
       paymentIntent,
       paymentResult,
+      paymentTitularEmail,
+      paymentRestoring,
+      paymentCanExecuteSale,
       bookingSuccessResult,
       pendingCompanionFocusId,
       pendingFieldFocus,
@@ -4002,6 +4202,7 @@ const agendaAutoLoadKeyRef = useRef('');
       checkingPaymentStatus,
       completeMockPayment,
       completePaymentSimulation,
+      completePixelPayPayment,
       startCheckout,
       holdDurationMin,
       holdExpiresAtIso,
@@ -4012,6 +4213,9 @@ const agendaAutoLoadKeyRef = useRef('');
       holdTotalToPay,
       paymentIntent,
       paymentResult,
+      paymentTitularEmail,
+      paymentRestoring,
+      paymentCanExecuteSale,
       bookingSuccessResult,
       pendingCompanionFocusId,
       pendingFieldFocus,

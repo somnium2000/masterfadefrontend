@@ -106,6 +106,10 @@ export async function getPublicCatalog({ id_sucursal } = {}) {
   return {
     services: servicesResult.status === 'fulfilled' ? servicesResult.value?.data?.servicios || [] : [],
     packages: packagesResult.status === 'fulfilled' ? packagesResult.value?.data?.paquetes || [] : [],
+    errors: {
+      services: servicesResult.status === 'rejected',
+      packages: packagesResult.status === 'rejected',
+    },
   };
 }
 

@@ -21,7 +21,7 @@
   --mf-nav-border: rgba(201, 169, 110, 0.15);
   --mf-btn-border: rgba(201, 169, 110, 0.3);
   --mf-btn-bg: rgba(201, 169, 110, 0.08);
-  --mf-nav-inactive: #6b6560;
+  --mf-nav-inactive: #a09a8e;
   --mf-overlay: rgba(0, 0, 0, 0.6);
   --mf-shadow-soft: 0 14px 38px rgba(0, 0, 0, 0.32);
   --mf-shadow-card: 0 24px 54px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -85,7 +85,7 @@
   --mf-nav-border: rgba(0, 0, 0, 0.08);
   --mf-btn-border: rgba(114, 47, 55, 0.2);
   --mf-btn-bg: rgba(114, 47, 55, 0.06);
-  --mf-nav-inactive: #a09a8e;
+  --mf-nav-inactive: #6b6560;
   --mf-overlay: rgba(255, 255, 255, 0.7);
   --mf-shadow-soft: 0 12px 34px rgba(114, 47, 55, 0.12);
   --mf-shadow-card: 0 24px 56px rgba(114, 47, 55, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.88);
@@ -337,6 +337,25 @@ select {
 .mf-focus-ring:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--mf-accent) 24%, transparent);
+}
+
+/* Landing only: preserve shared palette and focus styles in other modules. */
+.mf-landing {
+  --mf-landing-muted: var(--mf-text-2);
+}
+
+.mf-landing .mf-landing-muted {
+  color: var(--mf-landing-muted);
+}
+
+:root[data-theme="light"] .mf-landing {
+  --mf-landing-muted: #514b46;
+}
+
+.mf-landing button:focus-visible {
+  outline: 3px solid var(--mf-accent);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px var(--mf-bg);
 }
 
 @media (prefers-reduced-motion: reduce) {

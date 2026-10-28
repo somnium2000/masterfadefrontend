@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Building2, CheckCircle2, Eye, KeyRound, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Users, X } from 'lucide-react';
 import {
@@ -12,8 +13,9 @@ import {
 } from '../lib/adminPersonasApi.js';
 import { Button } from '../../../components/ui/button.jsx';
 import {
-  Dialog,
+  Dialog, DialogClose,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -38,6 +40,7 @@ import {
   TableRow,
 } from '../../../components/ui/table.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import { useAuth } from '../../../context/AuthContext.jsx';
 import ActionConfirmDialog from '../../../components/feedback/ActionConfirmDialog.jsx';
 import { replaceItemById } from '../../../lib/collectionState.js';
 
@@ -104,7 +107,26 @@ function quickFilterButtonClass(isActive) {
 }
 
 function extractMessage(err) {
-  return err?.data?.error?.message || 'No se pudo completar la operación. Intenta nuevamente.';
+  const messages = {
+    PERSONAS_EMAIL_ALREADY_EXISTS: 'El correo ya esta vinculado a otra persona.',
+    PERSONAS_AUTH_EMAIL_ALREADY_EXISTS: 'El correo ya pertenece a una cuenta registrada.',
+    PERSONAS_DNI_ALREADY_EXISTS: 'El DNI ya esta vinculado a otra persona.',
+    PERSONAS_RTN_ALREADY_EXISTS: 'El RTN ya esta vinculado a otra persona.',
+    PERSONAS_BRANCH_NOT_FOUND: 'La sucursal no esta disponible.',
+    PERSONAS_EMPLOYEE_NOT_FOUND: 'El empleado ya no esta disponible.',
+    PERSONAS_SUPER_ADMIN_ROLE_FORBIDDEN: 'No tienes permiso para asignar Super Admin.',
+    PERSONAS_SUPER_ADMIN_TARGET_FORBIDDEN: 'No tienes permiso para gestionar esta cuenta.',
+    PERSONAS_AUTH_IDENTITY_INCOMPLETE: 'El correo ya existe en Auth sin una vinculacion interna valida. Requiere revision.',
+    PERSONAS_EXISTING_USER_EMAIL: 'El correo ya pertenece a un usuario o perfil existente.',
+    PERSONAS_EMAIL_IDENTITY_CONFLICT: 'El correo tiene un conflicto de identidad que requiere revision.',
+    PERSONAS_GUEST_LINK_MISMATCH: 'La Persona seleccionada ya no corresponde al correo indicado.',
+    PERSONAS_EMPLOYEE_ACTIVATE_ROLES_REQUIRED: 'Revisa los roles del empleado antes de activarlo.',
+  };
+  const code = err?.data?.error?.code;
+  if (Object.hasOwn(messages, code)) return messages[code];
+  if (Number(err?.status) === 401) return 'Tu sesion ya no esta disponible. Inicia sesion nuevamente.';
+  if (Number(err?.status) === 403) return 'No tienes permiso para realizar esta operacion.';
+  return 'No se pudo completar la operacion de empleados. Intenta nuevamente.';
 }
 
 function toDateTimeIso(dateValue) {
@@ -150,6 +172,15 @@ function formatRoleLabels(roles, labelByCode) {
 
 function hasRole(roles, roleCode) {
   return normalizeRoleCodes(roles).includes(roleCode);
+}
+
+export function isPrivilegedEmployee(empleado) {
+  return hasRole(empleado?.roles, 'super_admin');
+}
+
+export function getAssignableEmployeeRoles(roleCodes, isAdminOnly) {
+  const normalized = normalizeRoleCodes(roleCodes);
+  return isAdminOnly ? normalized.filter((role) => role !== 'super_admin') : normalized;
 }
 
 function toggleRoleSelection(currentRoles, roleCode, enabled) {
@@ -276,6 +307,18 @@ function EstadoAccesoBadge({ estado }) {
 
 export default function AdminEmpleadosPage() {
   const navigate = useNavigate();
+  const mountedRef = useRef(true);
+  const listRequestRef = useRef(0);
+  const selectionRequestRef = useRef(0);
+  const selectionPendingRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const lifecycleLockRef = useRef(false);
+  const invalidateRequests = useCallback(() => {
+    ++listRequestRef.current;
+    ++selectionRequestRef.current;
+  }, []);
+  const { roles: actorRoles = [] } = useAuth();
+  const isAdminOnly = actorRoles.includes('admin') && !actorRoles.includes('super_admin');
   const [empleados, setEmpleados] = useState([]);
   const [sucursales, setSucursales] = useState([]);
   const [rolesCatalog, setRolesCatalog] = useState([]);
@@ -299,6 +342,8 @@ export default function AdminEmpleadosPage() {
   const [formError, setFormError] = useState('');
   const [selectedEmpleado, setSelectedEmpleado] = useState(null);
   const [confirmTarget, setConfirmTarget] = useState(null);
+  const [guestLinkCandidate, setGuestLinkCandidate] = useState(null);
+  const [guestLinkError, setGuestLinkError] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -318,9 +363,9 @@ export default function AdminEmpleadosPage() {
         .filter((role) => ACTIVE_ROLE_CODES.includes(role))
       : [];
     const unique = [...new Set(catalogRoles)];
-    if (!unique.length) return ACTIVE_ROLE_CODES.map((role) => ({ value: role, label: DEFAULT_ROLE_LABELS[role] || role }));
-    return unique.map((role) => ({ value: role, label: DEFAULT_ROLE_LABELS[role] || role }));
-  }, [rolesCatalog]);
+    const availableRoles = getAssignableEmployeeRoles(unique.length ? unique : ACTIVE_ROLE_CODES, isAdminOnly);
+    return availableRoles.map((role) => ({ value: role, label: DEFAULT_ROLE_LABELS[role] || role }));
+  }, [isAdminOnly, rolesCatalog]);
 
   const roleLabelByCode = useMemo(() => {
     const map = { ...DEFAULT_ROLE_LABELS };
@@ -425,22 +470,27 @@ export default function AdminEmpleadosPage() {
   }, [search, filters, view]);
 
   const fetchEmpleados = useCallback(async ({ silent = false } = {}) => {
+    if (!mountedRef.current) return;
+    const requestId = ++listRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === listRequestRef.current;
     if (!silent) {
       setLoading(true);
       setListError('');
     }
     try {
       const response = await listAdminPersonasEmpleados();
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       setEmpleados(Array.isArray(payload?.empleados) ? payload.empleados : []);
     } catch (err) {
+      if (!isCurrent()) return;
       if (err.status === 401) return navigate('/login');
       if (err.status === 403) return navigate('/unauthorized');
       if (!silent) {
         setListError(extractMessage(err));
       }
     } finally {
-      if (!silent) {
+      if (isCurrent()) {
         setLoading(false);
       }
     }
@@ -459,61 +509,131 @@ export default function AdminEmpleadosPage() {
   }, []);
 
   useEffect(() => {
-    void fetchEmpleados();
-    void fetchCatalogos();
-  }, [fetchCatalogos, fetchEmpleados]);
+    mountedRef.current = true;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      void fetchEmpleados();
+      void fetchCatalogos();
+    });
+    return () => {
+      active = false;
+      mountedRef.current = false;
+      invalidateRequests();
+    };
+  }, [fetchCatalogos, fetchEmpleados, invalidateRequests]);
+
+  function handleFormOpenChange(open) {
+    if (!open) {
+      ++selectionRequestRef.current;
+      if (selectionPendingRef.current) setFormLoading(false);
+      selectionPendingRef.current = false;
+      setGuestLinkCandidate(null);
+      setGuestLinkError('');
+      setFormError('');
+    }
+    setFormOpen(open);
+  }
+
+  function handleDetailOpenChange(open) {
+    if (!open) {
+      ++selectionRequestRef.current;
+      if (selectionPendingRef.current) setFormLoading(false);
+      selectionPendingRef.current = false;
+    }
+    setDetailOpen(open);
+  }
 
   function openCreate() {
+    ++selectionRequestRef.current;
+    if (selectionPendingRef.current) setFormLoading(false);
+    selectionPendingRef.current = false;
+    setDetailOpen(false);
     setEditingId('');
     setFormValues(FORM_DEFAULTS);
     setFormError('');
+    setGuestLinkCandidate(null);
+    setGuestLinkError('');
     setFormOpen(true);
   }
 
   async function openEdit(idEmpleado) {
+    const requestId = ++selectionRequestRef.current;
+    selectionPendingRef.current = true;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
+    setDetailOpen(false);
     setFormError('');
     setFormLoading(true);
     try {
       const response = await getAdminPersonaEmpleado(idEmpleado);
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
+      if (isAdminOnly && isPrivilegedEmployee(payload?.empleado)) {
+        notifications.error('No puedes modificar una cuenta Super Admin.', { dedupeKey: 'personas-empleados-privileged' });
+        return;
+      }
       setEditingId(idEmpleado);
       setFormValues(mapEmpleadoToForm(payload?.empleado));
       setFormOpen(true);
     } catch (err) {
+      if (!isCurrent()) return;
       notifications.error(extractMessage(err), { dedupeKey: 'personas-empleados-open-edit-error' });
     } finally {
-      setFormLoading(false);
+      if (isCurrent()) {
+        selectionPendingRef.current = false;
+        setFormLoading(false);
+      }
     }
   }
 
   async function openDetail(idEmpleado) {
+    const requestId = ++selectionRequestRef.current;
+    selectionPendingRef.current = true;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
+    setFormOpen(false);
+    setSelectedEmpleado(null);
     setFormLoading(true);
     try {
       const response = await getAdminPersonaEmpleado(idEmpleado);
+      if (!isCurrent()) return;
       const payload = response?.data ?? response;
       setSelectedEmpleado(payload?.empleado || null);
       setDetailOpen(true);
     } catch (err) {
+      if (!isCurrent()) return;
       notifications.error(extractMessage(err), { dedupeKey: 'personas-empleados-open-detail-error' });
     } finally {
-      setFormLoading(false);
+      if (isCurrent()) {
+        selectionPendingRef.current = false;
+        setFormLoading(false);
+      }
     }
   }
 
-  async function handleSubmit() {
-    const error = validateForm(formValues);
+  async function handleSubmit(personaLink = null) {
+    if (formLoading || saveLockRef.current) return;
+    const safeFormValues = isAdminOnly
+      ? { ...formValues, roles: getAssignableEmployeeRoles(formValues.roles, true) }
+      : formValues;
+    const error = validateForm(safeFormValues);
     if (error) {
       setFormError(error);
       return;
     }
 
     setFormError('');
+    if (personaLink) setGuestLinkError('');
+    saveLockRef.current = true;
+    const requestId = selectionRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
     setFormLoading(true);
     try {
-      const payload = buildPayload(formValues);
+      const payload = buildPayload(safeFormValues);
+      if (!editingId && personaLink) payload.vinculacion_persona = personaLink;
       const response = editingId
         ? await updateAdminPersonaEmpleado(editingId, payload)
         : await createAdminPersonaEmpleado(payload);
+      if (!isCurrent()) return;
       const data = response?.data ?? response;
       const baseMessage = editingId ? 'Empleado actualizado.' : 'Empleado creado.';
       notifications.success(baseMessage, { dedupeKey: 'personas-empleados-save-ok' });
@@ -523,6 +643,8 @@ export default function AdminEmpleadosPage() {
         notifications[tone](data.setup_password.mensaje, { dedupeKey: 'personas-empleados-setup-message' });
       }
       setFormOpen(false);
+      setGuestLinkCandidate(null);
+      setGuestLinkError('');
       setEditingId('');
       setFormValues(FORM_DEFAULTS);
       if (data?.empleado) {
@@ -533,24 +655,62 @@ export default function AdminEmpleadosPage() {
       // AM: Revalidacion silenciosa para evitar parpadeo de cards/lista y mantener consistencia.
       void fetchEmpleados({ silent: true });
     } catch (err) {
+      if (!isCurrent()) return;
+      if (!editingId && err?.data?.error?.code === 'PERSONAS_GUEST_LINK_REQUIRED') {
+        const details = err?.data?.error?.details;
+        if (details?.id_persona && details?.requiere_confirmacion === true) {
+          setGuestLinkCandidate(details);
+          setGuestLinkError('');
+          setFormError('');
+          return;
+        }
+      }
+      if (personaLink) {
+        const code = err?.data?.error?.code;
+        const nonRetryableLinkCodes = new Set([
+          'PERSONAS_GUEST_LINK_MISMATCH',
+          'PERSONAS_AUTH_IDENTITY_INCOMPLETE',
+          'PERSONAS_EXISTING_USER_EMAIL',
+          'PERSONAS_EMAIL_IDENTITY_CONFLICT',
+        ]);
+        if (nonRetryableLinkCodes.has(code)) {
+          setGuestLinkCandidate(null);
+          setGuestLinkError('');
+          setFormError(extractMessage(err));
+          return;
+        }
+        setGuestLinkError(extractMessage(err));
+        setFormError('');
+        return;
+      }
       setFormError(extractMessage(err));
     } finally {
-      setFormLoading(false);
+      saveLockRef.current = false;
+      if (mountedRef.current && !selectionPendingRef.current) setFormLoading(false);
     }
   }
 
   function requestToggleLifecycle(empleado) {
+    if (isAdminOnly && isPrivilegedEmployee(empleado)) return;
     setConfirmTarget(empleado || null);
   }
 
   async function handleToggleLifecycle() {
     const empleado = confirmTarget;
-    if (!empleado) return;
+    if (!empleado || actionLoadingId || lifecycleLockRef.current) return;
+    if (isAdminOnly && isPrivilegedEmployee(empleado)) {
+      setConfirmTarget(null);
+      return;
+    }
     const isActive = Boolean(empleado?.estado_laboral);
+    lifecycleLockRef.current = true;
+    const requestId = selectionRequestRef.current;
+    const isCurrent = () => mountedRef.current && requestId === selectionRequestRef.current;
     setActionLoadingId(empleado.id_empleado);
     try {
       if (isActive) {
         const response = await inactivateAdminPersonaEmpleado(empleado.id_empleado);
+        if (!isCurrent()) return;
         const payload = response?.data ?? response;
         if (payload?.empleado) {
           setEmpleados((prev) =>
@@ -560,6 +720,7 @@ export default function AdminEmpleadosPage() {
         notifications.warning('Empleado inactivado y acceso bloqueado.', { dedupeKey: 'personas-empleados-toggle-ok' });
       } else {
         const response = await activateAdminPersonaEmpleado(empleado.id_empleado);
+        if (!isCurrent()) return;
         const payload = response?.data ?? response;
         if (payload?.empleado) {
           setEmpleados((prev) =>
@@ -571,15 +732,18 @@ export default function AdminEmpleadosPage() {
       setConfirmTarget(null);
       void fetchEmpleados({ silent: true });
     } catch (err) {
+      if (!isCurrent()) return;
       notifications.error(extractMessage(err), { dedupeKey: 'personas-empleados-toggle-error' });
     } finally {
-      setActionLoadingId('');
+      lifecycleLockRef.current = false;
+      if (mountedRef.current) setActionLoadingId('');
     }
   }
 
   function renderActions(empleado) {
     const loadingActions = actionLoadingId === empleado.id_empleado;
     const isActive = Boolean(empleado.estado_laboral);
+    const privilegedForAdmin = isAdminOnly && isPrivilegedEmployee(empleado);
     return (
       <div className="flex w-full flex-wrap items-center justify-start gap-2">
         <HoverActionButton
@@ -589,21 +753,25 @@ export default function AdminEmpleadosPage() {
           disabled={loadingActions}
           onClick={() => openDetail(empleado.id_empleado)}
         />
-        <HoverActionButton
-          icon={<Pencil size={14} strokeWidth={2} />}
-          label="Editar"
-          title="Editar empleado"
-          disabled={loadingActions}
-          onClick={() => openEdit(empleado.id_empleado)}
-        />
-        <HoverActionButton
-          icon={isActive ? <Ban size={14} strokeWidth={2} /> : <CheckCircle2 size={14} strokeWidth={2} />}
-          label={loadingActions ? (isActive ? 'Inactivando...' : 'Activando...') : (isActive ? 'Inactivar' : 'Activar')}
-          title={isActive ? 'Inactivar empleado' : 'Activar empleado'}
-          tone={isActive ? 'danger' : 'success'}
-          disabled={loadingActions}
-          onClick={() => requestToggleLifecycle(empleado)}
-        />
+        {!privilegedForAdmin ? (
+          <>
+            <HoverActionButton
+              icon={<Pencil size={14} strokeWidth={2} />}
+              label="Editar"
+              title="Editar empleado"
+              disabled={loadingActions}
+              onClick={() => openEdit(empleado.id_empleado)}
+            />
+            <HoverActionButton
+              icon={isActive ? <Ban size={14} strokeWidth={2} /> : <CheckCircle2 size={14} strokeWidth={2} />}
+              label={loadingActions ? (isActive ? 'Inactivando...' : 'Activando...') : (isActive ? 'Inactivar' : 'Activar')}
+              title={isActive ? 'Inactivar empleado' : 'Activar empleado'}
+              tone={isActive ? 'danger' : 'success'}
+              disabled={loadingActions}
+              onClick={() => requestToggleLifecycle(empleado)}
+            />
+          </>
+        ) : null}
       </div>
     );
   }
@@ -784,36 +952,36 @@ export default function AdminEmpleadosPage() {
         </div>
       ) : null}
 
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+      <UnsavedChangesDialog values={formValues} saving={formLoading} open={formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editingId ? 'Editar Empleado' : 'Nuevo Empleado'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? 'Editar Empleado' : 'Nuevo Empleado'}</DialogTitle><DialogDescription className="sr-only">Datos personales, roles y sucursal. Los campos con asterisco son obligatorios.</DialogDescription></DialogHeader>
 
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <Label className="mf-label">Nombres *</Label>
-              <Input className="mf-input mt-1" value={formValues.nombres} onChange={(e) => setFormValues((p) => ({ ...p, nombres: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-nombres">Nombres *</Label>
+              <Input id="empleado-nombres" className="mf-input mt-1" value={formValues.nombres} onChange={(e) => setFormValues((p) => ({ ...p, nombres: e.target.value }))} />
             </div>
             <div>
-              <Label className="mf-label">Apellidos *</Label>
-              <Input className="mf-input mt-1" value={formValues.apellidos} onChange={(e) => setFormValues((p) => ({ ...p, apellidos: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-apellidos">Apellidos *</Label>
+              <Input id="empleado-apellidos" className="mf-input mt-1" value={formValues.apellidos} onChange={(e) => setFormValues((p) => ({ ...p, apellidos: e.target.value }))} />
             </div>
 
             <div>
-              <Label className="mf-label">Fecha nacimiento</Label>
-              <Input type="date" className="mf-input mt-1" value={formValues.fecha_nacimiento} onChange={(e) => setFormValues((p) => ({ ...p, fecha_nacimiento: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-fecha_nacimiento">Fecha nacimiento</Label>
+              <Input id="empleado-fecha_nacimiento" type="date" className="mf-input mt-1" value={formValues.fecha_nacimiento} onChange={(e) => setFormValues((p) => ({ ...p, fecha_nacimiento: e.target.value }))} />
             </div>
             <div>
-              <Label className="mf-label">DNI *</Label>
-              <Input className="mf-input mt-1" value={formValues.dni} onChange={(e) => setFormValues((p) => ({ ...p, dni: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-dni">DNI *</Label>
+              <Input id="empleado-dni" className="mf-input mt-1" value={formValues.dni} onChange={(e) => setFormValues((p) => ({ ...p, dni: e.target.value }))} />
             </div>
             <div>
-              <Label className="mf-label">RTN (opcional)</Label>
-              <Input className="mf-input mt-1" value={formValues.rtn} onChange={(e) => setFormValues((p) => ({ ...p, rtn: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-rtn">RTN (opcional)</Label>
+              <Input id="empleado-rtn" className="mf-input mt-1" value={formValues.rtn} onChange={(e) => setFormValues((p) => ({ ...p, rtn: e.target.value }))} />
             </div>
 
             <div className="sm:col-span-2">
-              <Label className="mf-label">Correo de acceso *</Label>
-              <Input className="mf-input mt-1" type="email" value={formValues.correo_principal} onChange={(e) => setFormValues((p) => ({ ...p, correo_principal: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-correo_principal">Correo de acceso *</Label>
+              <Input id="empleado-correo_principal" className="mf-input mt-1" type="email" value={formValues.correo_principal} onChange={(e) => setFormValues((p) => ({ ...p, correo_principal: e.target.value }))} />
             </div>
 
             <div className="sm:col-span-2">
@@ -840,36 +1008,38 @@ export default function AdminEmpleadosPage() {
                   );
                 })}
               </div>
-              <p className="mt-1 text-xs text-[var(--mf-text-2)]">Puedes asignar varios roles, incluyendo Super Admin + Barbero.</p>
+              {!isAdminOnly ? (
+                <p className="mt-1 text-xs text-[var(--mf-text-2)]">Puedes asignar varios roles, incluyendo Super Admin + Barbero.</p>
+              ) : null}
             </div>
             <div>
-              <Label className="mf-label">Sucursal *</Label>
-              <select className="mf-select mt-1" value={formValues.id_sucursal} onChange={(e) => setFormValues((p) => ({ ...p, id_sucursal: e.target.value }))}>
+              <Label className="mf-label" htmlFor="empleado-id_sucursal">Sucursal *</Label>
+              <select id="empleado-id_sucursal" className="mf-select mt-1" value={formValues.id_sucursal} onChange={(e) => setFormValues((p) => ({ ...p, id_sucursal: e.target.value }))}>
                 <option value="">Selecciona sucursal</option>
                 {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
               </select>
             </div>
 
             <div>
-              <Label className="mf-label">Telefono *</Label>
-              <Input className="mf-input mt-1" value={formValues.telefono_principal} onChange={(e) => setFormValues((p) => ({ ...p, telefono_principal: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-telefono_principal">Telefono *</Label>
+              <Input id="empleado-telefono_principal" className="mf-input mt-1" value={formValues.telefono_principal} onChange={(e) => setFormValues((p) => ({ ...p, telefono_principal: e.target.value }))} />
             </div>
             <div>
-              <Label className="mf-label">Fecha ingreso</Label>
-              <Input className="mf-input mt-1" type="date" value={formValues.fecha_ingreso} onChange={(e) => setFormValues((p) => ({ ...p, fecha_ingreso: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-fecha_ingreso">Fecha ingreso</Label>
+              <Input id="empleado-fecha_ingreso" className="mf-input mt-1" type="date" value={formValues.fecha_ingreso} onChange={(e) => setFormValues((p) => ({ ...p, fecha_ingreso: e.target.value }))} />
             </div>
 
             <div>
-              <Label className="mf-label">Salario base HNL</Label>
-              <Input className="mf-input mt-1" type="number" min="0" step="0.01" value={formValues.salario_base} onChange={(e) => setFormValues((p) => ({ ...p, salario_base: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-salario_base">Salario base HNL</Label>
+              <Input id="empleado-salario_base" className="mf-input mt-1" type="number" min="0" step="0.01" value={formValues.salario_base} onChange={(e) => setFormValues((p) => ({ ...p, salario_base: e.target.value }))} />
             </div>
             <div className="sm:col-span-2">
-              <Label className="mf-label">Direccion</Label>
-              <Input className="mf-input mt-1" value={formValues.direccion_texto} onChange={(e) => setFormValues((p) => ({ ...p, direccion_texto: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-direccion_texto">Direccion</Label>
+              <Input id="empleado-direccion_texto" className="mf-input mt-1" value={formValues.direccion_texto} onChange={(e) => setFormValues((p) => ({ ...p, direccion_texto: e.target.value }))} />
             </div>
             <div className="sm:col-span-2">
-              <Label className="mf-label">Observaciones</Label>
-              <Input className="mf-input mt-1" value={formValues.observaciones} onChange={(e) => setFormValues((p) => ({ ...p, observaciones: e.target.value }))} />
+              <Label className="mf-label" htmlFor="empleado-observaciones">Observaciones</Label>
+              <Input id="empleado-observaciones" className="mf-input mt-1" value={formValues.observaciones} onChange={(e) => setFormValues((p) => ({ ...p, observaciones: e.target.value }))} />
             </div>
 
             {isBarberForm ? (
@@ -905,8 +1075,8 @@ export default function AdminEmpleadosPage() {
                   </div>
 
                   <div className="sm:col-span-2">
-                    <Label className="mf-label">Alias publico</Label>
-                    <Input
+                    <Label className="mf-label" htmlFor="empleado-alias_publico">Alias publico</Label>
+                    <Input id="empleado-alias_publico"
                       className="mf-input mt-1"
                       maxLength={BARBER_PUBLIC_ALIAS_MAX}
                       value={formValues.alias_publico}
@@ -916,12 +1086,12 @@ export default function AdminEmpleadosPage() {
 
                   <div className="sm:col-span-2">
                     <div className="flex items-center justify-between gap-2">
-                      <Label className="mf-label">Resumen publico</Label>
+                      <Label className="mf-label" htmlFor="empleado-resumen_publico">Resumen publico</Label>
                       <span className="text-[11px] text-[var(--mf-text-2)]">
                         {normalizeUnicodeText(formValues.resumen_publico).length}/{BARBER_PUBLIC_SUMMARY_MAX}
                       </span>
                     </div>
-                    <textarea
+                    <textarea id="empleado-resumen_publico"
                       className="mf-input mt-1 min-h-[110px] w-full resize-y"
                       maxLength={BARBER_PUBLIC_SUMMARY_MAX}
                       value={formValues.resumen_publico}
@@ -1002,13 +1172,13 @@ export default function AdminEmpleadosPage() {
           {formError && <p className="mt-3 rounded-[12px] bg-red-500/10 px-3 py-2 text-sm text-red-400">{formError}</p>}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFormOpen(false)} disabled={formLoading}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={formLoading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar' : 'Crear empleado'}</Button>
+            <DialogClose asChild><Button variant="outline" disabled={formLoading}>Cancelar</Button></DialogClose>
+            <Button onClick={() => handleSubmit()} disabled={formLoading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar' : 'Crear empleado'}</Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-5xl">
           <DialogHeader><DialogTitle>Detalle Empleado</DialogTitle></DialogHeader>
           {selectedEmpleado && (
@@ -1083,6 +1253,23 @@ export default function AdminEmpleadosPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      <ActionConfirmDialog
+        open={Boolean(guestLinkCandidate)}
+        onOpenChange={(open) => {
+          if (!open && !formLoading) {
+            setGuestLinkCandidate(null);
+            setGuestLinkError('');
+          }
+        }}
+        tone="warning"
+        title="Vincular Persona invitada"
+        description={guestLinkCandidate ? `El correo pertenece a ${guestLinkCandidate.nombre_completo || 'una Persona invitada'} con historial existente. Confirma que verificaste su identidad. La vinculacion conservara su historial y no se realizara solo por coincidencia de correo.${guestLinkError ? ` ${guestLinkError} Puedes reintentar sin cerrar el formulario.` : ''}` : ''}
+        confirmLabel="Confirmar vinculacion"
+        cancelLabel="Cancelar"
+        loading={formLoading}
+        onConfirm={() => handleSubmit({ id_persona: guestLinkCandidate.id_persona, confirmar_vinculacion: true })}
+      />
 
       <ActionConfirmDialog
         open={Boolean(confirmTarget)}

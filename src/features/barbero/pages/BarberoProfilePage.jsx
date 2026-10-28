@@ -1,4 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { BadgeCheck, BriefcaseBusiness, Mail, MapPin, Phone, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
@@ -7,8 +8,8 @@ import { getUserDisplayName, useAuth } from '../../../context/AuthContext.jsx';
 import { getBarberoPerfil } from '../lib/barberoApi.js';
 import { withImageVersion } from '../../../lib/imageCache.js';
 
-function extractMessage(error) {
-  return error?.data?.error?.message || error?.message || 'No se pudo cargar el perfil del barbero.';
+function extractMessage() {
+  return 'No se pudo cargar el perfil del barbero.';
 }
 
 function toSafeText(value, fallback = 'No registrado') {
@@ -25,7 +26,11 @@ function formatDate(value) {
   if (!value) return null;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
-  return new Intl.DateTimeFormat('es-HN', { dateStyle: 'medium' }).format(parsed);
+  // AM: Una fecha calendario no representa un instante que deba desplazarse por zona horaria.
+  return new Intl.DateTimeFormat('es-HN', {
+    dateStyle: 'medium',
+    ...(/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? { timeZone: 'UTC' } : {}),
+  }).format(parsed);
 }
 
 function formatDateTime(value) {
@@ -122,6 +127,7 @@ function normalizeFieldValue(key, value) {
     if (!normalized) return null;
 
     if (key.includes('fecha') || key.endsWith('_at')) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return formatDate(normalized) || normalized;
       return formatDateTime(normalized) || formatDate(normalized) || normalized;
     }
 
@@ -190,12 +196,31 @@ function InfoSection({ title, items }) {
 }
 
 export default function BarberoProfilePage() {
+  const { user, empleadoId, isAuthenticated, isHydrated, isHydrating } = useAuth();
+  const identity = JSON.stringify([user?.id_usuario || '', empleadoId || user?.empleado_id || '']);
+  if (!isAuthenticated || !user?.id_usuario || !isHydrated || isHydrating) {
+    return <div role="status" aria-label="Esperando sesión de barbero" className="mf-skeleton h-64 rounded-2xl" />;
+  }
+  return <BarberoProfileContent key={identity} />;
+}
+
+function BarberoProfileContent() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
   const [failedPhotoUrl, setFailedPhotoUrl] = useState('');
+  const mountedRef = useRef(false);
+  const requestGenerationRef = useRef(0);
+
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestGenerationRef.current += 1;
+    };
+  }, []);
 
   const profile = data?.perfil || null;
 
@@ -212,16 +237,20 @@ export default function BarberoProfilePage() {
   }, [navigate]);
 
   const loadProfile = useCallback(async () => {
+    const generation = ++requestGenerationRef.current;
+    const isCurrent = () => mountedRef.current && generation === requestGenerationRef.current;
     setLoading(true);
     setError('');
     try {
       const payload = await getBarberoPerfil();
+      if (!isCurrent()) return;
       setData(payload);
     } catch (err) {
+      if (!isCurrent()) return;
       if (handleAuthError(err)) return;
       setError(extractMessage(err));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [handleAuthError]);
 
@@ -344,6 +373,7 @@ export default function BarberoProfilePage() {
           </section>
 
           <InfoSection title="Informacion personal" items={groupedFields.personal} />
+          <InfoSection title="Información laboral" items={groupedFields.laboral} />
           {hasPublicProfileData ? (
             <section className="rounded-[24px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)] p-4 shadow-[var(--mf-shadow-soft)] sm:p-5">
               <h2 className="text-lg font-semibold text-[var(--mf-text)]">Perfil publico</h2>

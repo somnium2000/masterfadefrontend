@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   abortInFlightRequests,
   http,
@@ -6,8 +7,33 @@ import {
   resetSessionInvalidation,
 } from '../services/httpClient.js';
 import { supabase } from '../config/supabaseClient.js';
+import { setAdminReportesSessionScope } from '../features/admin/lib/adminReportesApi.js';
 
 const AuthContext = createContext(null);
+const IDLE_SESSION_TIMEOUT_MS = 20 * 60 * 1000;
+const IDLE_MOUSEMOVE_THROTTLE_MS = 5000;
+const IDLE_BACKEND_TOUCH_THROTTLE_MS = 60 * 1000;
+const IDLE_SESSION_MESSAGE = 'Sesión expirada por inactividad. Vuelve a iniciar sesión.';
+const IDLE_SESSION_MESSAGE_KEY = 'mf_idle_session_message';
+const SESSION_LAST_ACTIVITY_KEY = 'mf_session_last_activity_at';
+const SESSION_LAST_BACKEND_TOUCH_KEY = 'mf_session_last_backend_touch_at';
+const SESSION_IDLE_EXPIRED_KEY = 'mf_session_idle_expired_at';
+const SESSION_MANUAL_LOGOUT_KEY = 'mf_session_manual_logout_at';
+const SESSION_ACTIVITY_EVENTS = ['click', 'keydown', 'touchstart', 'scroll'];
+const REWARD_BOOKING_CONTEXT_STORAGE_KEY = 'mf_reward_redeem_context_v1';
+
+function restrictRewardContextToUser(user = null) {
+  try {
+    const raw = window.sessionStorage.getItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY);
+    if (!raw) return;
+    const context = JSON.parse(raw);
+    if (user?.id_usuario && user?.cliente_id
+      && context?.owner_id_usuario === user.id_usuario && context?.owner_id_cliente === user.cliente_id) return;
+    window.sessionStorage.removeItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY);
+  } catch {
+    try { window.sessionStorage.removeItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY); } catch { /* AM: Storage puede estar bloqueado. */ }
+  }
+}
 
 function normalizeRoles(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
@@ -85,7 +111,69 @@ function isPublicBookingPath(pathname) {
   return path === '/agendar' || path.startsWith('/agendar/');
 }
 
+function shouldTrackIdleSession(pathname) {
+  const path = String(pathname || '').trim();
+  if (!path) return false;
+  if (path === '/') return false;
+  if (path === '/login' || path === '/register') return false;
+  if (path === '/forgot-password' || path === '/reset-password') return false;
+  if (path.startsWith('/auth/callback')) return false;
+  if (path === '/servicios' || path === '/promociones' || path === '/barberos') return false;
+  if (isPublicBookingPath(path)) return false;
+  return true;
+}
+
+function persistIdleSessionMessage(message = IDLE_SESSION_MESSAGE) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(IDLE_SESSION_MESSAGE_KEY, message);
+  } catch {
+    // no-op
+  }
+}
+
+function readSharedTimestamp(key) {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const value = Number(window.localStorage.getItem(key) || 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeSharedTimestamp(key, value = Date.now()) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, String(value));
+  } catch {
+    // no-op
+  }
+}
+
+function removeSharedTimestamp(key) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // no-op
+  }
+}
+
+export function consumeIdleSessionMessage() {
+  if (typeof window === 'undefined') return '';
+  try {
+    const message = String(window.sessionStorage.getItem(IDLE_SESSION_MESSAGE_KEY) || '').trim();
+    if (message) window.sessionStorage.removeItem(IDLE_SESSION_MESSAGE_KEY);
+    return message;
+  } catch {
+    return '';
+  }
+}
+
 export function AuthProvider({ children }) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const initialPathname = typeof window !== 'undefined' ? String(window.location?.pathname || '').trim() : '';
   const shouldHydrateOnBoot = shouldHydrateForPath(initialPathname);
   const [token, setToken] = useState('');
@@ -97,8 +185,43 @@ export function AuthProvider({ children }) {
   const [clienteId, setClienteId] = useState(null);
   const [isHydrating, setIsHydrating] = useState(shouldHydrateOnBoot);
   const [isHydrated, setIsHydrated] = useState(!shouldHydrateOnBoot);
+  const [logoutError, setLogoutError] = useState('');
+  const logoutRequestRef = useRef(null);
+  const sessionGenerationRef = useRef(0);
+  const idleTimerRef = useRef(null);
+  const lastMouseMoveAtRef = useRef(0);
+  const idleExpirationHandledRef = useRef(false);
+  const backendTouchInFlightRef = useRef(false);
+
+  const profileSyncGeneration = sessionGenerationRef.current;
+  const syncClienteProfile = useCallback((cliente, expectedUserId) => {
+    if (!expectedUserId || !cliente?.id_cliente
+      || typeof cliente.telefono_principal !== 'string' || !cliente.telefono_principal.trim()
+      || (cliente.id_usuario && cliente.id_usuario !== expectedUserId)
+      || profileSyncGeneration !== sessionGenerationRef.current) return;
+    // AM: Solo el telefono confirmado de la misma identidad y epoca puede actualizar Auth.
+    setUser((current) => {
+      if (profileSyncGeneration !== sessionGenerationRef.current
+        || current?.id_usuario !== expectedUserId
+        || current?.cliente_id !== cliente.id_cliente) return current;
+      return { ...current, telefono_principal: cliente.telefono_principal };
+    });
+  }, [profileSyncGeneration]);
 
   const applyUserState = useCallback((nextUser) => {
+    if (nextUser?.id_usuario) restrictRewardContextToUser(nextUser);
+    setAdminReportesSessionScope({
+      userId: nextUser?.id_usuario,
+      roles: normalizeRoles(nextUser?.roles),
+      branchIds: normalizeBranchIds(nextUser?.branch_ids),
+      empresaId: nextUser?.empresa_id ?? null,
+    });
+    if (nextUser?.id_usuario) {
+      idleExpirationHandledRef.current = false;
+      const now = Date.now();
+      writeSharedTimestamp(SESSION_LAST_ACTIVITY_KEY, now);
+      removeSharedTimestamp(SESSION_IDLE_EXPIRED_KEY);
+    }
     setUser(nextUser);
     setRoles(normalizeRoles(nextUser?.roles));
     setBranchIds(normalizeBranchIds(nextUser?.branch_ids));
@@ -115,7 +238,9 @@ export function AuthProvider({ children }) {
   }, [applyUserState]);
 
   const invalidateSession = useCallback((reason = 'session_invalidated') => {
+    sessionGenerationRef.current += 1;
     abortInFlightRequests(reason);
+    restrictRewardContextToUser();
     clearSessionState();
     if (supabase) {
       void supabase.auth.signOut({ scope: 'local' }).catch(() => {});
@@ -123,6 +248,8 @@ export function AuthProvider({ children }) {
   }, [clearSessionState]);
 
   const hydrateSession = useCallback(async () => {
+    const generation = ++sessionGenerationRef.current;
+    resetSessionInvalidation();
     setIsHydrating(true);
     setIsHydrated(false);
 
@@ -132,6 +259,7 @@ export function AuthProvider({ children }) {
         skipAuthInvalidation: isPublicBookingPath(currentPathname),
       });
       const payload = response?.data || response;
+      if (generation !== sessionGenerationRef.current) return { ok: false, message: '' };
 
       if (!response?.ok || !payload?.user) {
         clearSessionState();
@@ -140,13 +268,14 @@ export function AuthProvider({ children }) {
 
       const enrichedUser = buildEnrichedUser(payload);
       applyUserState(enrichedUser);
-      resetSessionInvalidation();
       setIsHydrating(false);
       setIsHydrated(true);
       return { ok: true };
     } catch (err) {
+      if (generation !== sessionGenerationRef.current) return { ok: false, message: '' };
       clearSessionState();
       if (Number(err?.status) === 401) {
+        restrictRewardContextToUser();
         return {
           ok: false,
           expectedUnauthenticated: true,
@@ -173,6 +302,7 @@ export function AuthProvider({ children }) {
       return { ok: false, message: 'Ingresa un correo valido para iniciar sesion.' };
     }
 
+    const generation = ++sessionGenerationRef.current;
     try {
       const response = await http.post('/v1/auth/login', {
         identifier: normalizedIdentifier,
@@ -184,6 +314,7 @@ export function AuthProvider({ children }) {
         skipCsrf: true,
       });
 
+      if (generation !== sessionGenerationRef.current) return { ok: false, message: '' };
       if (!response?.ok) {
         return {
           ok: false,
@@ -199,6 +330,7 @@ export function AuthProvider({ children }) {
 
       return { ok: true, message: 'Login exitoso' };
     } catch (err) {
+      if (generation !== sessionGenerationRef.current) return { ok: false, message: '' };
       clearSessionState();
       return {
         ok: false,
@@ -216,21 +348,200 @@ export function AuthProvider({ children }) {
     return { ok: true };
   }, [hydrateSession]);
 
-  const logout = useCallback(async () => {
-    invalidateSession('logout');
-    try {
-      await http.post('/v1/auth/logout', {}, { skipAuthInvalidation: true });
-    } catch {
-      // noop: de todas formas limpiamos estado local.
-    }
+  const logout = useCallback(() => {
+    if (logoutRequestRef.current) return logoutRequestRef.current;
+    const request = (async () => {
+      try {
+        const response = await http.post('/v1/auth/logout', {}, { skipAuthInvalidation: true });
+        const payload = response?.data || response;
+        if (response?.ok !== true || payload?.logged_out !== true) throw new Error('LOGOUT_UNCONFIRMED');
+        setLogoutError('');
+        writeSharedTimestamp(SESSION_MANUAL_LOGOUT_KEY);
+        removeSharedTimestamp(SESSION_IDLE_EXPIRED_KEY);
+        invalidateSession('logout');
+        return { ok: true, logged_out: true };
+      } catch {
+        const message = 'No se confirmó el cierre de sesión en el servidor. Intenta nuevamente.';
+        setLogoutError(message);
+        return { ok: false, logged_out: false, message };
+      } finally {
+        logoutRequestRef.current = null;
+      }
+    })();
+    logoutRequestRef.current = request;
+    return request;
   }, [invalidateSession]);
 
+  const expireIdleSession = useCallback(async ({ broadcast = true } = {}) => {
+    if (idleExpirationHandledRef.current) return;
+    idleExpirationHandledRef.current = true;
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+    if (broadcast) {
+      writeSharedTimestamp(SESSION_IDLE_EXPIRED_KEY);
+    }
+    persistIdleSessionMessage();
+    sessionGenerationRef.current += 1;
+    abortInFlightRequests('AUTH_SESSION_IDLE_EXPIRED');
+    restrictRewardContextToUser();
+    clearSessionState();
+    if (supabase) {
+      void supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+    }
+    try {
+      const response = await http.post('/v1/auth/logout', {}, {
+        skipAuthInvalidation: true,
+      });
+      if (response?.ok !== true || (response?.data || response)?.logged_out !== true) throw new Error('LOGOUT_UNCONFIRMED');
+      setLogoutError('');
+    } catch {
+      const message = 'Se ocultó la sesión local por inactividad, pero no se confirmó su cierre en el servidor.';
+      setLogoutError(message);
+      persistIdleSessionMessage(message);
+    }
+    navigate('/login', { replace: true });
+  }, [clearSessionState, navigate]);
+
+  const touchBackendSession = useCallback(async () => {
+    if (backendTouchInFlightRef.current) return;
+    const now = Date.now();
+    const lastSharedTouchAt = readSharedTimestamp(SESSION_LAST_BACKEND_TOUCH_KEY);
+    if (now - lastSharedTouchAt < IDLE_BACKEND_TOUCH_THROTTLE_MS) return;
+
+    backendTouchInFlightRef.current = true;
+    writeSharedTimestamp(SESSION_LAST_BACKEND_TOUCH_KEY, now);
+    try {
+      await http.post('/v1/auth/session/touch', {}, {
+        cache: false,
+        dedupe: false,
+      });
+    } catch (error) {
+      if (String(error?.code || error?.data?.error?.code || '').trim().toUpperCase() === 'AUTH_SESSION_IDLE_EXPIRED') {
+        void expireIdleSession();
+      }
+    } finally {
+      backendTouchInFlightRef.current = false;
+    }
+  }, [expireIdleSession]);
+
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+    }
+    const now = Date.now();
+    const lastActivityAt = readSharedTimestamp(SESSION_LAST_ACTIVITY_KEY) || now;
+    const expiresInMs = Math.max(0, IDLE_SESSION_TIMEOUT_MS - (now - lastActivityAt));
+    idleTimerRef.current = setTimeout(() => {
+      const latestActivityAt = readSharedTimestamp(SESSION_LAST_ACTIVITY_KEY) || lastActivityAt;
+      if (Date.now() - latestActivityAt >= IDLE_SESSION_TIMEOUT_MS) {
+        void expireIdleSession();
+        return;
+      }
+      resetIdleTimer();
+    }, expiresInMs);
+  }, [expireIdleSession]);
+
+  const recordSessionActivity = useCallback(({ touchBackend = true } = {}) => {
+    if (!user?.id_usuario || !shouldTrackIdleSession(location.pathname)) return;
+    writeSharedTimestamp(SESSION_LAST_ACTIVITY_KEY);
+    removeSharedTimestamp(SESSION_IDLE_EXPIRED_KEY);
+    resetIdleTimer();
+    if (touchBackend) {
+      void touchBackendSession();
+    }
+  }, [location.pathname, resetIdleTimer, touchBackendSession, user?.id_usuario]);
+
   useEffect(() => {
-    const unsubscribe = registerSessionInvalidationHandler(() => {
+    const unsubscribe = registerSessionInvalidationHandler((event) => {
+      const reason = String(event?.reason || event?.code || '').trim().toUpperCase();
+      if (reason === 'AUTH_SESSION_IDLE_EXPIRED') {
+        void expireIdleSession();
+        return;
+      }
       invalidateSession('private_endpoint_401');
     });
     return unsubscribe;
-  }, [invalidateSession]);
+  }, [expireIdleSession, invalidateSession]);
+
+  useEffect(() => {
+    if (!user?.id_usuario || !shouldTrackIdleSession(location.pathname)) {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+      return undefined;
+    }
+
+    const resetFromActivity = () => {
+      recordSessionActivity();
+    };
+    const resetFromMouseMove = () => {
+      const now = Date.now();
+      if (now - lastMouseMoveAtRef.current < IDLE_MOUSEMOVE_THROTTLE_MS) return;
+      lastMouseMoveAtRef.current = now;
+      recordSessionActivity();
+    };
+
+    recordSessionActivity();
+
+    SESSION_ACTIVITY_EVENTS.forEach((eventName) => {
+      window.addEventListener(eventName, resetFromActivity, { passive: true });
+    });
+    window.addEventListener('mousemove', resetFromMouseMove, { passive: true });
+
+    return () => {
+      SESSION_ACTIVITY_EVENTS.forEach((eventName) => {
+        window.removeEventListener(eventName, resetFromActivity);
+      });
+      window.removeEventListener('mousemove', resetFromMouseMove);
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+    };
+  }, [location.pathname, location.search, recordSessionActivity, user?.id_usuario]);
+
+  useEffect(() => {
+    if (!user?.id_usuario || !shouldTrackIdleSession(location.pathname)) return undefined;
+
+    const handleStorage = (event) => {
+      if (event.key === SESSION_LAST_ACTIVITY_KEY && event.newValue) {
+        resetIdleTimer();
+        return;
+      }
+      if (event.key === SESSION_IDLE_EXPIRED_KEY && event.newValue) {
+        void expireIdleSession({ broadcast: false });
+        return;
+      }
+      if (event.key === SESSION_MANUAL_LOGOUT_KEY && event.newValue) {
+        if (idleTimerRef.current) {
+          clearTimeout(idleTimerRef.current);
+          idleTimerRef.current = null;
+        }
+        invalidateSession('manual_logout_other_tab');
+        navigate('/login', { replace: true });
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [expireIdleSession, invalidateSession, location.pathname, navigate, resetIdleTimer, user?.id_usuario]);
+
+  useEffect(() => {
+    recordSessionActivity();
+  }, [location.key, recordSessionActivity]);
+
+  useEffect(() => {
+    return () => {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const currentPathname = window.location?.pathname || '';
@@ -263,7 +574,9 @@ export function AuthProvider({ children }) {
       completeExchangeLogin,
       hydrateSession,
       logout,
+      logoutError,
       invalidateSession,
+      syncClienteProfile,
     }),
     [
       token,
@@ -279,11 +592,19 @@ export function AuthProvider({ children }) {
       completeExchangeLogin,
       hydrateSession,
       logout,
+      logoutError,
       invalidateSession,
+      syncClienteProfile,
     ]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={value}>
+    {logoutError ? <div role="alert" className="p-3 text-sm text-[var(--mf-text)]">
+      <p>{logoutError}</p>
+      <button type="button" className="mt-2 underline" onClick={() => void logout()}>Reintentar cierre</button>
+    </div> : null}
+    {children}
+  </AuthContext.Provider>;
 }
 
 export function useAuth() {

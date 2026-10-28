@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Coins, Gift, Loader2, RefreshCw, Sparkles, Users, UserRound } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import { useAuth } from '../../../context/AuthContext.jsx';
 import { Button } from '../../../components/ui/button.jsx';
 import {
   Dialog,
@@ -67,8 +68,22 @@ function resolveErrorMessage(error, fallbackMessage) {
   const status = Number(error?.status || 0);
   if (status === 401) return 'Tu sesión expiró. Inicia sesión nuevamente.';
   if (status === 403) return 'No tienes permisos para realizar esta acción.';
-  if (status === 409) return error?.data?.error?.message || error?.message || 'No fue posible completar la operación por un conflicto de saldo.';
-  return error?.data?.error?.message || error?.message || fallbackMessage;
+  const code = normalizeText(error?.data?.error?.code).toUpperCase();
+  const functionalMessages = {
+    POINTS_REDEEM_INSUFFICIENT_BALANCE: 'No tienes puntos suficientes para canjear esta recompensa.',
+    POINTS_REDEEM_INSUFFICIENT_BALANCE_CONFIRM: 'No tienes puntos suficientes para confirmar esta recompensa.',
+    POINTS_REDEEM_SERVICE_FORBIDDEN: 'El servicio no está permitido para tu tipo de cliente.',
+    POINTS_REDEEM_SERVICE_BRANCH_UNAVAILABLE: 'El servicio no está disponible para canje en esta sucursal.',
+    POINTS_REDEEM_SERVICE_NOT_FOUND: 'El servicio no está disponible para canje.',
+    POINTS_BRANCH_NOT_FOUND: 'La sucursal no está disponible.',
+    CLIENTE_CONTEXT_REQUIRED: 'No tienes un perfil de cliente activo.',
+    POINTS_CLIENT_NOT_FOUND: 'Tu perfil de cliente no está disponible.',
+    POINTS_CLIENT_NOT_REGISTERED: 'Necesitas un perfil de cliente registrado para continuar.',
+    POINTS_REDEEM_CONTEXT_EXPIRED: 'Tu recompensa preparada expiró. Prepárala nuevamente.',
+  };
+  if (status >= 400 && status < 500 && Object.hasOwn(functionalMessages, code)) return functionalMessages[code];
+  if (status === 409) return 'No fue posible completar la operación por un conflicto. Actualiza tus puntos e intenta nuevamente.';
+  return fallbackMessage;
 }
 
 function normalizeBranchRecord(branch = {}) {
@@ -102,10 +117,15 @@ function uniqueServices(records = []) {
   return Array.from(map.values());
 }
 
-function persistRewardBookingContext(payload) {
+function persistRewardBookingContext(payload, owner) {
   if (typeof window === 'undefined') return;
+  const ownerUserId = normalizeText(owner?.id_usuario);
+  const ownerClienteId = normalizeText(owner?.cliente_id);
+  if (!ownerUserId || !ownerClienteId) throw new Error('REWARD_OWNER_REQUIRED');
   const canjeContextToken = normalizeText(payload?.canje_context_token || payload?.id_points_tx_canje || payload?.id_points_tx);
   const context = {
+    owner_id_usuario: ownerUserId,
+    owner_id_cliente: ownerClienteId,
     canje_context_token: canjeContextToken,
     id_points_tx_canje: canjeContextToken,
     id_servicio_canje: normalizeText(payload?.id_servicio_canje),
@@ -114,7 +134,9 @@ function persistRewardBookingContext(payload) {
     created_at: new Date().toISOString(),
   };
   if (!context.id_points_tx_canje || !context.id_servicio_canje || !context.id_sucursal) return;
-  window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, JSON.stringify(context));
+  const serialized = JSON.stringify(context);
+  window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, serialized);
+  return serialized;
 }
 
 function normalizeMovementRecord(record = {}, index = 0) {
@@ -213,6 +235,15 @@ export default function ClienteCourtesyRouteSection() {
   const location = useLocation();
   const navigate = useNavigate();
   const notifications = useNotifications();
+  const { user, isAuthenticated, isHydrated, isHydrating } = useAuth();
+  const identity = JSON.stringify([user?.id_usuario || '', user?.cliente_id || '']);
+  const ready = Boolean(user?.id_usuario && isAuthenticated && isHydrated && !isHydrating);
+  const contextRef = useRef({ mounted: false, generation: 0, identity: '', ready: false });
+  const summarySeqRef = useRef(0);
+  const redeemSeqRef = useRef(0);
+  const dialogOpenRef = useRef(false);
+  const redeemRequestLockRef = useRef(new Map());
+  const persistedContextRef = useRef(null);
   const redeemNavigationLockRef = useRef(false);
   const autoRedeemHandledRef = useRef(false);
   const rewardPreparedShownRef = useRef(false);
@@ -230,27 +261,72 @@ export default function ClienteCourtesyRouteSection() {
   const [serviceOptions, setServiceOptions] = useState([]);
   const [selectedServiceId, setSelectedServiceId] = useState('');
 
+  useLayoutEffect(() => {
+    const context = contextRef.current;
+    if (context.identity && (context.identity !== identity || !isAuthenticated) && persistedContextRef.current) {
+      try {
+        if (window.sessionStorage.getItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY) === persistedContextRef.current) {
+          window.sessionStorage.removeItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY);
+        }
+      } catch { /* AM: Storage puede estar bloqueado; el contexto React se invalida igualmente. */ }
+      persistedContextRef.current = null;
+    }
+    context.mounted = true;
+    context.ready = ready;
+    context.identity = identity;
+    context.generation += 1;
+    summarySeqRef.current += 1;
+    redeemSeqRef.current += 1;
+    dialogOpenRef.current = false;
+    redeemNavigationLockRef.current = false;
+    autoRedeemHandledRef.current = false;
+    rewardPreparedShownRef.current = false;
+    rewardDiscountInfoShownRef.current = false;
+    setSummary(null);
+    setSummaryError('');
+    setLoadingSummary(ready);
+    setRedeemModalOpen(false);
+    setRedeemLoading(false);
+    setRedeemSubmitting(redeemRequestLockRef.current.has(identity));
+    setRedeemError('');
+    setBranchOptions([]);
+    setSelectedBranchId('');
+    setServiceOptions([]);
+    setSelectedServiceId('');
+    return () => {
+      context.mounted = false;
+      context.generation += 1;
+      summarySeqRef.current += 1;
+      redeemSeqRef.current += 1;
+    };
+  }, [identity, ready, isAuthenticated]);
+
   const loadSummary = useCallback(async ({ silent = false } = {}) => {
+    const generation = contextRef.current.generation;
+    if (!contextRef.current.mounted || !contextRef.current.ready) return;
+    const requestSeq = ++summarySeqRef.current;
+    const isCurrent = () => contextRef.current.mounted && contextRef.current.ready
+      && contextRef.current.generation === generation && summarySeqRef.current === requestSeq;
     if (!silent) {
       setLoadingSummary(true);
     }
     setSummaryError('');
     try {
       const payload = await getClientePuntosResumen();
+      if (!isCurrent()) return;
       setSummary(normalizeSummary(payload));
     } catch (error) {
+      if (!isCurrent()) return;
       const message = resolveErrorMessage(error, 'No se pudo cargar tu resumen de superpuntos.');
       setSummaryError(message);
     } finally {
-      if (!silent) {
-        setLoadingSummary(false);
-      }
+      if (isCurrent()) setLoadingSummary(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadSummary();
-  }, [loadSummary]);
+    if (ready) void loadSummary();
+  }, [identity, ready, loadSummary]);
 
   const contributionWidths = useMemo(
     () => resolveContributionWidths(summary),
@@ -263,6 +339,10 @@ export default function ClienteCourtesyRouteSection() {
 
   const loadRedeemContext = useCallback(async () => {
     if (!summary?.canRedeem) return;
+    const generation = contextRef.current.generation;
+    const requestSeq = ++redeemSeqRef.current;
+    const isCurrent = () => contextRef.current.mounted && contextRef.current.ready
+      && contextRef.current.generation === generation && redeemSeqRef.current === requestSeq;
 
     setRedeemError('');
     setRedeemLoading(true);
@@ -274,6 +354,9 @@ export default function ClienteCourtesyRouteSection() {
         listPublicCatalogBranches(),
         getClienteMe(),
       ]);
+      if (!isCurrent()) return;
+      if (branchesResult.status === 'rejected') throw branchesResult.reason;
+      if (meResult.status === 'rejected' && [401, 403].includes(Number(meResult.reason?.status))) throw meResult.reason;
 
       const branches = branchesResult.status === 'fulfilled'
         ? (Array.isArray(branchesResult.value?.branches) ? branchesResult.value.branches : [])
@@ -284,30 +367,53 @@ export default function ClienteCourtesyRouteSection() {
 
       const mePayload = meResult.status === 'fulfilled' ? (meResult.value?.data || meResult.value || {}) : {};
       const mePreferredBranch = normalizeText(mePayload?.cliente?.id_sucursal_preferida || mePayload?.id_sucursal_preferida);
-      const preferredBranchId = normalizeText(summary?.preferredBranchId || mePreferredBranch || branches[0]?.id_sucursal);
+      const candidateBranchId = normalizeText(summary?.preferredBranchId || mePreferredBranch);
+      const preferredBranchId = branches.some(branch => branch.id_sucursal === candidateBranchId)
+        ? candidateBranchId : normalizeText(branches[0]?.id_sucursal);
       setSelectedBranchId(preferredBranchId);
 
       const resolvedServices = await resolveRedeemServices({
         summaryServices: Array.isArray(summary?.serviceCandidates) ? summary.serviceCandidates : [],
       });
+      if (!isCurrent()) return;
       setServiceOptions(resolvedServices);
       setSelectedServiceId(normalizeText(resolvedServices[0]?.id_servicio));
     } catch (error) {
+      if (!isCurrent()) return;
       redeemNavigationLockRef.current = false;
       setRedeemError(resolveErrorMessage(error, 'No se pudo cargar la configuracion de canje.'));
     } finally {
-      setRedeemLoading(false);
+      if (isCurrent()) setRedeemLoading(false);
     }
   }, [resolveRedeemServices, summary]);
 
   const handleOpenRedeemModal = useCallback(async () => {
+    if (!contextRef.current.ready || dialogOpenRef.current || redeemRequestLockRef.current.has(contextRef.current.identity)) return;
+    dialogOpenRef.current = true;
+    redeemNavigationLockRef.current = false;
     rewardPreparedShownRef.current = false;
     rewardDiscountInfoShownRef.current = false;
     setRedeemModalOpen(true);
     await loadRedeemContext();
   }, [loadRedeemContext]);
 
+  function handleRedeemModalChange(open) {
+    if (!open) {
+      dialogOpenRef.current = false;
+      redeemSeqRef.current += 1;
+      redeemNavigationLockRef.current = false;
+      setRedeemLoading(false);
+      setRedeemError('');
+      setBranchOptions([]);
+      setSelectedBranchId('');
+      setServiceOptions([]);
+      setSelectedServiceId('');
+    }
+    setRedeemModalOpen(open);
+  }
+
   useEffect(() => {
+    if (!ready) return;
     if (autoRedeemHandledRef.current) return;
     const searchParams = new URLSearchParams(location.search || '');
     const shouldAutoRedeem = normalizeText(searchParams.get('accion')).toLowerCase() === 'canjear';
@@ -326,9 +432,13 @@ export default function ClienteCourtesyRouteSection() {
     searchParams.delete('accion');
     const nextSearch = searchParams.toString();
     navigate(`/home/cliente${nextSearch ? `?${nextSearch}` : ''}`, { replace: true });
-  }, [handleOpenRedeemModal, location.search, loadingSummary, navigate, notifications, summary?.canRedeem]);
+  }, [ready, handleOpenRedeemModal, location.search, loadingSummary, navigate, notifications, summary?.canRedeem]);
 
   async function handleBranchChange(nextBranchId) {
+    const generation = contextRef.current.generation;
+    const requestSeq = ++redeemSeqRef.current;
+    const isCurrent = () => contextRef.current.mounted && contextRef.current.ready
+      && contextRef.current.generation === generation && redeemSeqRef.current === requestSeq;
     const safeBranchId = normalizeText(nextBranchId);
     setSelectedBranchId(safeBranchId);
     setRedeemError('');
@@ -337,24 +447,35 @@ export default function ClienteCourtesyRouteSection() {
       const resolvedServices = await resolveRedeemServices({
         summaryServices: Array.isArray(summary?.serviceCandidates) ? summary.serviceCandidates : [],
       });
+      if (!isCurrent()) return;
       setServiceOptions(resolvedServices);
       setSelectedServiceId(normalizeText(resolvedServices[0]?.id_servicio));
     } catch (error) {
+      if (!isCurrent()) return;
       redeemNavigationLockRef.current = false;
       setRedeemError(resolveErrorMessage(error, 'No se pudieron cargar servicios para esta sucursal.'));
       setServiceOptions([]);
       setSelectedServiceId('');
     } finally {
-      setRedeemLoading(false);
+      if (isCurrent()) setRedeemLoading(false);
     }
   }
 
   async function handleRedeemReward() {
-    if (!selectedServiceId || !selectedBranchId || redeemSubmitting || redeemNavigationLockRef.current) return;
+    if (!contextRef.current.ready || !dialogOpenRef.current || !selectedServiceId || !selectedBranchId
+      || redeemLoading || redeemSubmitting || redeemNavigationLockRef.current
+      || redeemRequestLockRef.current.has(contextRef.current.identity)) return;
     if (!CLIENT_BOOKING_ENABLED) {
       notifications.info('El agendamiento estara disponible proximamente.', { dedupeKey: 'cliente-booking-disabled' });
       return;
     }
+    const owner = contextRef.current.identity;
+    const operation = Symbol('reward-request');
+    redeemRequestLockRef.current.set(owner, operation);
+    const generation = contextRef.current.generation;
+    const requestSeq = ++redeemSeqRef.current;
+    const isCurrent = () => contextRef.current.mounted && contextRef.current.ready
+      && contextRef.current.generation === generation && redeemSeqRef.current === requestSeq;
     setRedeemSubmitting(true);
     setRedeemError('');
     try {
@@ -362,9 +483,10 @@ export default function ClienteCourtesyRouteSection() {
         id_servicio: selectedServiceId,
         id_sucursal: selectedBranchId,
       });
+      if (!isCurrent()) return;
       const response = payload?.data || payload || {};
       redeemNavigationLockRef.current = true;
-      persistRewardBookingContext(response);
+      persistedContextRef.current = persistRewardBookingContext(response, user);
 
       if (!rewardPreparedShownRef.current) {
         notifications.success('Recompensa preparada. Agenda tu cita para usarla.', {
@@ -381,12 +503,20 @@ export default function ClienteCourtesyRouteSection() {
 
       setRedeemModalOpen(false);
       await loadSummary({ silent: true });
+      if (!isCurrent()) return;
+      dialogOpenRef.current = false;
       navigate('/agendar?modo=canje');
     } catch (error) {
+      if (!isCurrent()) return;
       redeemNavigationLockRef.current = false;
       setRedeemError(resolveErrorMessage(error, 'No fue posible registrar tu canje.'));
     } finally {
-      setRedeemSubmitting(false);
+      if (redeemRequestLockRef.current.get(owner) === operation) {
+        redeemRequestLockRef.current.delete(owner);
+      }
+      if (contextRef.current.mounted && contextRef.current.identity === owner) {
+        setRedeemSubmitting(redeemRequestLockRef.current.has(owner));
+      }
     }
   }
 
@@ -400,6 +530,8 @@ export default function ClienteCourtesyRouteSection() {
       .sort((left, right) => new Date(right?.created_at || 0).getTime() - new Date(left?.created_at || 0).getTime())
       .slice(0, 5);
   }, [summary?.history]);
+
+  if (!ready) return null;
 
   return (
     <section className="mf-glass-surface relative overflow-hidden rounded-[24px] border border-[var(--mf-nav-border)] p-4 sm:p-5">
@@ -555,7 +687,7 @@ export default function ClienteCourtesyRouteSection() {
         ) : null}
       </div>
 
-      <Dialog open={redeemModalOpen} onOpenChange={setRedeemModalOpen}>
+      <Dialog open={redeemModalOpen} onOpenChange={handleRedeemModalChange}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Canjear recompensa</DialogTitle>
@@ -635,7 +767,7 @@ export default function ClienteCourtesyRouteSection() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => setRedeemModalOpen(false)}
+              onClick={() => handleRedeemModalChange(false)}
               disabled={redeemSubmitting}
             >
               Cerrar

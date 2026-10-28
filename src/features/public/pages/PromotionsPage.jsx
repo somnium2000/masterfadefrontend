@@ -116,6 +116,9 @@ export default function PromotionsPage() {
   const { isAuthenticated } = useAuth();
   const isMountedRef = useRef(true);
   const selectedBranchRef = useRef('');
+  const catalogRequestRef = useRef(0);
+  const branchRequestRef = useRef(0);
+  const branchesLoadedRef = useRef(false);
   const carouselRef = useRef(null);
 
   const [status, setStatus] = useState('loading');
@@ -126,49 +129,66 @@ export default function PromotionsPage() {
 
   const showCarouselControls = promotions.length > 3;
 
+  const invalidatePendingRequests = useCallback(() => {
+    ++catalogRequestRef.current;
+    ++branchRequestRef.current;
+  }, []);
+
   const loadPromotions = useCallback(async ({ silent = false, branchId = selectedBranchRef.current } = {}) => {
+    if (!isMountedRef.current || !branchesLoadedRef.current || branchId !== selectedBranchRef.current) return;
+    const requestId = ++catalogRequestRef.current;
+    const isCurrent = () => isMountedRef.current
+      && requestId === catalogRequestRef.current
+      && branchId === selectedBranchRef.current;
     if (!silent) setStatus('loading');
     setErrorMessage('');
 
     try {
       const result = await listPublicCatalogPromotions({ id_sucursal: branchId || undefined });
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       const nextPromotions = Array.isArray(result?.promotions) ? result.promotions : [];
       setPromotions(nextPromotions);
       setStatus('success');
-    } catch (error) {
-      if (!isMountedRef.current) return;
-      setErrorMessage(error?.data?.error?.message || error?.message || 'No se pudo cargar promociones.');
+    } catch {
+      if (!isCurrent()) return;
+      setErrorMessage('No se pudieron cargar las promociones. Inténtalo nuevamente.');
       setStatus('error');
     }
   }, []);
 
+  const loadBranches = useCallback(async () => {
+    const requestId = ++branchRequestRef.current;
+    ++catalogRequestRef.current;
+    branchesLoadedRef.current = false;
+    setStatus('loading');
+    setErrorMessage('');
+    try {
+      const branchResult = await listPublicCatalogBranches();
+      if (!isMountedRef.current || requestId !== branchRequestRef.current) return;
+
+      const nextBranches = Array.isArray(branchResult?.branches)
+        ? branchResult.branches.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
+        : [];
+      setBranches(nextBranches);
+
+      const initialBranchId = nextBranches[0]?.id_sucursal || '';
+      selectedBranchRef.current = initialBranchId;
+      setSelectedBranchId(initialBranchId);
+      branchesLoadedRef.current = true;
+
+      await loadPromotions({ branchId: initialBranchId });
+    } catch {
+      if (!isMountedRef.current || requestId !== branchRequestRef.current) return;
+      setErrorMessage('No se pudieron cargar las sucursales. Inténtalo nuevamente.');
+      setStatus('error');
+    }
+  }, [loadPromotions]);
+
   useEffect(() => {
     isMountedRef.current = true;
-
+    let active = true;
     queueMicrotask(() => {
-      if (!isMountedRef.current) return;
-      void (async () => {
-        try {
-          const branchResult = await listPublicCatalogBranches();
-          if (!isMountedRef.current) return;
-
-          const nextBranches = Array.isArray(branchResult?.branches)
-            ? branchResult.branches.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
-            : [];
-          setBranches(nextBranches);
-
-          const initialBranchId = nextBranches[0]?.id_sucursal || '';
-          selectedBranchRef.current = initialBranchId;
-          setSelectedBranchId(initialBranchId);
-
-          await loadPromotions({ branchId: initialBranchId });
-        } catch (error) {
-          if (!isMountedRef.current) return;
-          setErrorMessage(error?.data?.error?.message || error?.message || 'No se pudo cargar promociones.');
-          setStatus('error');
-        }
-      })();
+      if (active) void loadBranches();
     });
 
     const unsubscribe = subscribeCatalogSync(() => {
@@ -178,15 +198,18 @@ export default function PromotionsPage() {
 
     return () => {
       isMountedRef.current = false;
+      active = false;
+      invalidatePendingRequests();
       unsubscribe();
     };
-  }, [loadPromotions]);
+  }, [invalidatePendingRequests, loadBranches, loadPromotions]);
 
   function handleBranchChange(nextBranchId) {
     if (!nextBranchId || nextBranchId === selectedBranchRef.current) return;
     selectedBranchRef.current = nextBranchId;
     setSelectedBranchId(nextBranchId);
-    void loadPromotions({ branchId: nextBranchId, silent: true });
+    setPromotions([]);
+    void loadPromotions({ branchId: nextBranchId });
   }
 
   function handleScroll(direction) {
@@ -322,7 +345,7 @@ export default function PromotionsPage() {
               <p className="mt-4 text-sm leading-6 text-[var(--mf-text-2)]">{errorMessage}</p>
               <button
                 type="button"
-                onClick={() => void loadPromotions()}
+                onClick={() => void (branchesLoadedRef.current ? loadPromotions() : loadBranches())}
                 className="mf-accent-gradient mt-6 inline-flex h-11 items-center justify-center rounded-2xl px-5 text-sm font-semibold shadow-[var(--mf-shadow-accent)]"
               >
                 Reintentar

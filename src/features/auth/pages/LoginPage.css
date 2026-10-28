@@ -44,6 +44,13 @@
   transition: color 0.2s ease;
 }
 
+/* Auth-only secondary text: contrast against the composed light surfaces. */
+:root[data-theme="light"] .mf-login-page .mf-login-back,
+:root[data-theme="light"] .mf-login-page .mf-login-trust-copy,
+:root[data-theme="light"] .mf-login-page .mf-register-help {
+  color: #514b46;
+}
+
 .mf-login-back:hover {
   color: var(--mf-accent);
 }
@@ -252,6 +259,10 @@
   border: 1px solid rgba(251, 113, 133, 0.22);
 }
 
+:root[data-theme="light"] .mf-login-page .mf-error {
+  color: #721c1c;
+}
+
 .mf-help {
   margin-top: 10px;
   font-size: 12px;
@@ -427,6 +438,16 @@
   width: 18px;
   height: 18px;
   display: block;
+}
+
+/* AM: fallback robusto para SVG inline de proveedores sociales en builds desplegados. */
+.mf-social-icon-wrap > svg {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  display: block;
+  flex: 0 0 18px;
 }
 
 .mf-social-text {

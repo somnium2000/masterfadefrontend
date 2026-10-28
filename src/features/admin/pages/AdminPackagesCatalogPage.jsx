@@ -1,7 +1,8 @@
 // src/features/admin/pages/AdminPackagesCatalogPage.jsx
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 // AM: Catalogo administrativo de paquetes alineado al patron operativo de SERVICIOS.
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Loader2,
@@ -18,6 +19,10 @@ import {
     RotateCcw,
     X,
     Scissors,
+    List,
+    LayoutGrid,
+    ChevronLeft,
+    ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import {
@@ -30,7 +35,7 @@ import { listAdminServicios } from '../lib/adminCatalogApi.js';
 import { listAdminSucursales } from '../lib/adminSucursalesApi.js';
 import { Button } from '../../../components/ui/button.jsx';
 import {
-    Dialog,
+    Dialog, DialogClose,
     DialogContent,
     DialogHeader,
     DialogTitle,
@@ -39,17 +44,6 @@ import {
 } from '../../../components/ui/dialog.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from '../../../components/ui/table.jsx';
-import ViewToggle from '../../../components/data/ViewToggle.jsx';
-import DataCard from '../../../components/data/DataCard.jsx';
-import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import HoverActionButton from '../../../components/data/HoverActionButton.jsx';
 import DetailInfoModalContent from '../../../components/data/DetailInfoModalContent.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
@@ -66,7 +60,13 @@ function extractMessage(err) {
     if (extractErrorCode(err) === 'CATALOG_PACKAGE_SERVICE_OUT_OF_SCOPE') {
         return 'Uno o más servicios del paquete no están disponibles en la sucursal seleccionada.';
     }
-    return err?.data?.error?.message || err?.message || 'Error desconocido.';
+    if (extractErrorCode(err) === 'CATALOG_PACKAGE_COMPOSITION_BRANCH_CONFLICT') {
+        return 'La composición no está disponible en todas las sucursales.';
+    }
+    if (extractErrorCode(err) === 'CATALOG_PACKAGE_PENDING_APPOINTMENTS_CONFIRMATION_REQUIRED') {
+        return 'La oferta tiene citas futuras. Confirma la inactivación para continuar.';
+    }
+    return 'No se pudo completar la operación de paquetes.';
 }
 
 function extractErrorCode(err) {
@@ -90,6 +90,8 @@ const PACKAGE_FILTER_DEFAULTS = {
     idSucursal: 'all',
 };
 
+const PACKAGES_PAGE_SIZE = 10;
+
 const PACKAGE_STATE_FILTER_LABELS = {
     activo: 'Estado: Activo',
     inactivo: 'Estado: Inactivo',
@@ -112,11 +114,9 @@ function quickFilterButtonClass(isActive) {
         : 'rounded-full border-[var(--mf-btn-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_54%,transparent)] text-[var(--mf-text)] hover:border-[var(--mf-accent)]/60';
 }
 
-function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingBranches }) {
+function SucursalSelector({ allBranches, selected, onChange, loadingBranches, allowAll }) {
     // AM: Selector reutilizado del patron de SERVICIOS para operar catalogo por sucursal sin bloqueos silenciosos.
-    const availableBranches = branchIds.length > 0
-        ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-        : allBranches;
+    const availableBranches = allBranches;
     const validBranchIds = new Set(availableBranches.map((branch) => branch.id_sucursal));
     const selectedBranch = availableBranches.find((branch) => branch.id_sucursal === selected);
 
@@ -154,7 +154,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loadingB
                     onChange(validBranchIds.has(nextValue) ? nextValue : '');
                 }}
             >
-                <option value="">Todas las sucursales</option>
+                <option value="">{allowAll ? 'Todas las sucursales' : 'Selecciona una sucursal'}</option>
                 {availableBranches.map((branch) => (
                     <option key={branch.id_sucursal} value={branch.id_sucursal}>
                         {branch.nombre_sucursal}
@@ -201,6 +201,11 @@ function getItemsSearchText(paquete) {
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
+}
+
+function getPackageCompositionSummary(paquete) {
+    if (!Array.isArray(paquete?.items) || paquete.items.length === 0) return 'Sin servicios incluidos';
+    return paquete.items.map((item) => `${item?.nombre_servicio || item?.id_servicio}${Number(item?.cantidad) > 1 ? ` ×${Number(item.cantidad)}` : ''}`).join(' · ');
 }
 
 function groupPaquetesByMaster(list = []) {
@@ -322,6 +327,31 @@ function normalizeItemsForPayload(items = []) {
     }));
 }
 
+function packageItemsAreEquivalent(currentItems = [], nextItems = []) {
+    const canonicalize = (items) => normalizeItemsForPayload(items)
+        .map((item) => `${item.id_servicio}:${item.cantidad}`)
+        .sort();
+    const current = canonicalize(currentItems);
+    const next = canonicalize(nextItems);
+    return current.length === next.length && current.every((value, index) => value === next[index]);
+}
+
+function buildPackageMasterPatch(formValues, editTarget, mutationBranchId) {
+    const payload = {};
+    const nextName = formValues.nombre_paquete.trim();
+    const currentName = String(editTarget?.nombre_paquete ?? '').trim();
+    const nextDescription = formValues.descripcion.trim();
+    const currentDescription = String(editTarget?.descripcion ?? '').trim();
+    const nextItems = normalizeItemsForPayload(formValues.items);
+
+    if (nextName !== currentName) payload.nombre_paquete = nextName;
+    if (nextDescription !== currentDescription) payload.descripcion = nextDescription || null;
+    if (!packageItemsAreEquivalent(editTarget?.items, nextItems)) payload.items = nextItems;
+
+    if (Object.keys(payload).length === 0) return null;
+    return { ...payload, id_sucursal: mutationBranchId };
+}
+
 function validateForm(values, mode = 'create') {
     const isOfferOnly = mode === 'editOffer' || mode === 'addOffer';
     if (!isOfferOnly && !values.nombre_paquete.trim()) return 'El nombre del paquete es requerido.';
@@ -400,7 +430,7 @@ function PackageItemsEditor({ items, onChange, serviciosList }) {
                 const currentId = String(item?.id_servicio || '').trim();
 
                 return (
-                    <div key={`${index}-${currentId || 'new'}`} className="grid grid-cols-[1fr_auto_auto] items-center gap-2">
+                    <div key={`${index}-${currentId || 'new'}`} className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto_auto]">
                         <select
                             value={currentId}
                             onChange={(event) => updateItem(index, 'id_servicio', event.target.value)}
@@ -423,7 +453,7 @@ function PackageItemsEditor({ items, onChange, serviciosList }) {
                             min="1"
                             value={item.cantidad}
                             onChange={(event) => updateItem(index, 'cantidad', event.target.value)}
-                            className="w-[86px] text-center"
+                            className="w-full text-center sm:w-[86px]"
                             placeholder="1"
                         />
 
@@ -555,7 +585,8 @@ function PaqueteForm({
             ) : null}
 
             {isOfferOnly ? null : (
-                <>
+                <section className="space-y-3 rounded-[14px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_72%,transparent)] p-3" aria-labelledby="package-master-fields">
+                    <div><h3 id="package-master-fields" className="text-xs font-semibold uppercase tracking-widest text-[var(--mf-accent)]">Información maestra</h3><p className="mt-1 text-xs text-[var(--mf-text-2)]">Identidad compartida por todas las ofertas del paquete.</p></div>
                     <div className="flex flex-col gap-1">
                         <Label htmlFor="fp-nombre">Nombre del paquete maestro *</Label>
                         <Input
@@ -575,11 +606,12 @@ function PaqueteForm({
                             placeholder="Descripcion opcional"
                         />
                     </div>
-                </>
+                </section>
             )}
 
             {isEditMaster || isCreate ? null : (
-                <>
+                <section className="space-y-3 rounded-[14px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_72%,transparent)] p-3" aria-labelledby="package-offer-fields">
+                    <div><h3 id="package-offer-fields" className="text-xs font-semibold uppercase tracking-widest text-[var(--mf-accent)]">Oferta de sucursal</h3><p className="mt-1 text-xs text-[var(--mf-text-2)]">Precio, visibilidad y orden aplicados únicamente a esta sucursal.</p></div>
                     <div className="flex flex-col gap-1">
                         <Label htmlFor="fp-precio">Precio HNL de la oferta *</Label>
                         <Input
@@ -615,7 +647,7 @@ function PaqueteForm({
                             placeholder="100"
                         />
                     </div>
-                </>
+                </section>
             )}
 
             {isOfferOnly ? null : (
@@ -631,30 +663,26 @@ function PaqueteForm({
 
 export default function AdminPackagesCatalogPage() {
     const navigate = useNavigate();
-    const { branchIds, roles = [] } = useAuth();
+    const { branchIds, roles = [], user } = useAuth();
     const notifications = useNotifications();
+    const notifyBranchError = notifications.error;
     const isSuperAdmin = roles.includes('super_admin');
 
     const [allBranches, setAllBranches] = useState([]);
+    const [branchesContext, setBranchesContext] = useState('');
+    const permissionsKey = JSON.stringify([user?.id_usuario ?? null, roles, [...branchIds].sort()]);
     const [loadingBranches, setLoadingBranches] = useState(false);
-    const [sucursal, setSucursal] = useState(branchIds.length === 1 ? branchIds[0] : '');
+    const [sucursal, setSucursal] = useState('');
 
     const [paquetes, setPaquetes] = useState([]);
     const [serviciosList, setServiciosList] = useState([]);
-    const [serviciosByBranch, setServiciosByBranch] = useState({});
+    const serviciosByBranchRef = useRef({});
+    const createOffersRef = useRef([]);
     const [loading, setLoading] = useState(false);
     const [listError, setListError] = useState('');
 
-    const [view, setView] = useState(
-        () => {
-            try {
-                const stored = localStorage.getItem('mf-view-paquetes');
-                return stored === 'table' || stored === 'cards' ? stored : 'cards';
-            } catch {
-                return 'cards';
-            }
-        }
-    );
+    const [view, setView] = useState('list');
+    const [page, setPage] = useState(1);
 
     const [search, setSearch] = useState('');
     const [filtersOpen, setFiltersOpen] = useState(false);
@@ -676,6 +704,64 @@ export default function AdminPackagesCatalogPage() {
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [stateTarget, setStateTarget] = useState(null);
     const [stateLoading, setStateLoading] = useState(false);
+    const actionsLockedByBranch = branchesContext !== permissionsKey || allBranches.length === 0
+        || (!isSuperAdmin && (!roles.includes('admin') || !sucursal
+            || !allBranches.some((branch) => branch.id_sucursal === sucursal)));
+    const scopeContext = JSON.stringify([permissionsKey, sucursal, actionsLockedByBranch]);
+    const scopeRef = useRef(scopeContext);
+    const scopeEpochRef = useRef(0);
+    const mountedRef = useRef(false);
+    const packagesGenerationRef = useRef(0);
+    const servicesGenerationRef = useRef(0);
+    const branchesGenerationRef = useRef(0);
+    const dialogGenerationRef = useRef(0);
+    const saveOperationRef = useRef(null);
+    const stateOperationRef = useRef(null);
+
+    // AM: Descarta datos y formularios del alcance anterior antes de mostrarlos.
+    useLayoutEffect(() => {
+        mountedRef.current = true;
+        scopeRef.current = scopeContext;
+        scopeEpochRef.current += 1;
+        packagesGenerationRef.current += 1;
+        servicesGenerationRef.current += 1;
+        dialogGenerationRef.current += 1;
+        saveOperationRef.current = null;
+        stateOperationRef.current = null;
+        serviciosByBranchRef.current = {};
+        createOffersRef.current = [];
+        setPaquetes([]);
+        setServiciosList([]);
+        setListError('');
+        setLoading(false);
+        setDialogOpen(false);
+        setEditTarget(null);
+        setFormLoading(false);
+        setStateLoading(false);
+        setDetailOpen(false);
+        setDetailTarget(null);
+        setOffersOpen(false);
+        setOffersTarget(null);
+        setConfirmOpen(false);
+        setStateTarget(null);
+        return () => {
+            mountedRef.current = false;
+            packagesGenerationRef.current += 1;
+            servicesGenerationRef.current += 1;
+            scopeEpochRef.current += 1;
+        };
+    }, [scopeContext]);
+
+    useLayoutEffect(() => {
+        if (dialogOpen) return;
+        dialogGenerationRef.current += 1;
+        saveOperationRef.current = null;
+        servicesGenerationRef.current += 1;
+        serviciosByBranchRef.current = {};
+        createOffersRef.current = [];
+        setServiciosList([]);
+        setFormLoading(false);
+    }, [dialogOpen]);
 
     const branchNameById = useMemo(
         () => allBranches.reduce((acc, branch) => ({ ...acc, [branch.id_sucursal]: branch.nombre_sucursal }), {}),
@@ -683,11 +769,9 @@ export default function AdminPackagesCatalogPage() {
     );
 
     const availableBranches = useMemo(() => {
-        const scopedBranches = branchIds.length > 0
-            ? allBranches.filter((branch) => branchIds.includes(branch.id_sucursal))
-            : allBranches;
+        const scopedBranches = branchesContext === permissionsKey && (isSuperAdmin || roles.includes('admin')) ? allBranches : [];
         return scopedBranches.filter((branch) => branch?.id_sucursal);
-    }, [allBranches, branchIds]);
+    }, [allBranches, branchesContext, permissionsKey, isSuperAdmin, roles]);
     const titleSubtitle = !sucursal && availableBranches.length > 1
         ? 'Vista de paquetes maestros globales y sus ofertas por sucursal.'
         : 'Gestiona paquetes maestros y la oferta operativa de la sucursal seleccionada.';
@@ -740,6 +824,20 @@ export default function AdminPackagesCatalogPage() {
         });
     }, [branchNameById, displayPaquetes, filters, search, sucursal]);
 
+    const pageCount = Math.max(1, Math.ceil(filteredPaquetes.length / PACKAGES_PAGE_SIZE));
+    const paginatedPaquetes = useMemo(
+        () => filteredPaquetes.slice((page - 1) * PACKAGES_PAGE_SIZE, page * PACKAGES_PAGE_SIZE),
+        [filteredPaquetes, page]
+    );
+
+    useEffect(() => {
+        setPage(1);
+    }, [filters, search, sucursal, view]);
+
+    useEffect(() => {
+        setPage((current) => Math.min(current, pageCount));
+    }, [pageCount]);
+
     const activeFilterCount = useMemo(
         () => Object.values(filters).filter((value) => value !== 'all').length,
         [filters]
@@ -773,39 +871,40 @@ export default function AdminPackagesCatalogPage() {
     }
 
     const fetchBranches = useCallback(async () => {
+        const generation = ++branchesGenerationRef.current;
+        const isCurrent = () => mountedRef.current && branchesGenerationRef.current === generation;
+        setAllBranches([]);
+        setBranchesContext('');
         setLoadingBranches(true);
         try {
             const data = await listAdminSucursales({ soloActivas: true });
+            if (!isCurrent()) return;
             const payloadData = data?.data ?? data;
             const nextBranches = Array.isArray(payloadData?.sucursales)
                 ? payloadData.sucursales.filter((branch) => branch?.id_sucursal && branch?.estado !== false)
                 : [];
             setAllBranches(nextBranches);
+            setBranchesContext(permissionsKey);
         } catch {
+            if (!isCurrent()) return;
             setAllBranches([]);
-            notifications.error('No se pudieron cargar las sucursales para operar paquetes.', {
+            notifyBranchError('No se pudieron cargar las sucursales para operar paquetes.', {
                 dedupeKey: 'paquetes-branches-error',
             });
         } finally {
-            setLoadingBranches(false);
+            if (isCurrent()) setLoadingBranches(false);
         }
-    }, [notifications]);
+    }, [notifyBranchError, permissionsKey]);
 
     useEffect(() => {
         void fetchBranches();
     }, [fetchBranches]);
 
-    useEffect(() => {
-        if (sucursal) return;
-        if (branchIds.length === 1) {
-            setSucursal(branchIds[0]);
-            return;
-        }
-        if (isSuperAdmin && availableBranches.length === 1) {
-            // AM: Super admin con una sola sucursal activa queda operativo sin pasos extra.
-            setSucursal(availableBranches[0].id_sucursal);
-        }
-    }, [sucursal, branchIds, isSuperAdmin, availableBranches]);
+    useLayoutEffect(() => {
+        // AM: El catalogo administrativo vigente es la fuente de seleccion, no branchIds.
+        if (sucursal && availableBranches.some((branch) => branch.id_sucursal === sucursal)) return;
+        setSucursal(availableBranches.length === 1 ? availableBranches[0].id_sucursal : '');
+    }, [sucursal, availableBranches]);
 
     useEffect(() => {
         if (!sucursal) return;
@@ -813,6 +912,10 @@ export default function AdminPackagesCatalogPage() {
     }, [sucursal]);
 
     const fetchPaquetes = useCallback(async ({ silent = false } = {}) => {
+        if (!mountedRef.current || scopeRef.current !== scopeContext || actionsLockedByBranch) return;
+        const generation = ++packagesGenerationRef.current;
+        const isCurrent = () => mountedRef.current && scopeRef.current === scopeContext
+            && packagesGenerationRef.current === generation;
         if (!silent) {
             setLoading(true);
             setListError('');
@@ -820,10 +923,12 @@ export default function AdminPackagesCatalogPage() {
 
         try {
             const data = await listAdminPaquetes(sucursal ? { id_sucursal: sucursal } : {});
+            if (!isCurrent()) return;
             const payloadData = data?.data ?? data;
             const list = Array.isArray(payloadData?.paquetes) ? payloadData.paquetes : [];
             setPaquetes(sortPaquetes(list));
         } catch (err) {
+            if (!isCurrent()) return;
             if (err.status === 401) {
                 navigate('/login');
                 return;
@@ -837,9 +942,9 @@ export default function AdminPackagesCatalogPage() {
             setPaquetes([]);
             if (!silent) setListError(extractMessage(err));
         } finally {
-            if (!silent) setLoading(false);
+            if (isCurrent()) setLoading(false);
         }
-    }, [navigate, sucursal]);
+    }, [navigate, sucursal, scopeContext, actionsLockedByBranch]);
 
     const loadServiciosForBranch = useCallback(async (branchId) => {
         if (!branchId) return [];
@@ -849,26 +954,37 @@ export default function AdminPackagesCatalogPage() {
         // AM: Solo permite servicios realmente operativos en la sucursal seleccionada para evitar 409 al crear paquetes.
         return list
             .filter((servicio) => (
-                Boolean(servicio?.activo)
+                servicio?.activo === true
+                && servicio?.agendable === true
+                && servicio?.tarifa_activa === true
+                && servicio?.servicio_informativo !== true
                 && String(servicio?.id_sucursal || '') === String(branchId)
+                && (typeof servicio?.precio_hnl === 'number' || (typeof servicio?.precio_hnl === 'string' && servicio.precio_hnl.trim() !== ''))
                 && Number.isFinite(Number(servicio?.precio_hnl))
+                && Number(servicio.precio_hnl) >= 0
             ))
             .sort((left, right) => String(left?.nombre_servicio || '').localeCompare(String(right?.nombre_servicio || ''), 'es'));
     }, []);
 
     const fetchServicios = useCallback(async (branchId = sucursal) => {
+        if (!mountedRef.current || scopeRef.current !== scopeContext || actionsLockedByBranch) return;
+        const generation = ++servicesGenerationRef.current;
+        const epoch = scopeEpochRef.current;
+        const isCurrent = () => mountedRef.current && scopeEpochRef.current === epoch
+            && servicesGenerationRef.current === generation;
         if (!branchId) {
             setServiciosList([]);
             return;
         }
 
         try {
-            setServiciosList(await loadServiciosForBranch(branchId));
+            const loaded = await loadServiciosForBranch(branchId);
+            if (isCurrent()) setServiciosList(loaded);
         } catch {
             // AM: Evita bloquear la vista completa si falla solo el catalogo auxiliar de servicios.
-            setServiciosList([]);
+            if (isCurrent()) setServiciosList([]);
         }
-    }, [loadServiciosForBranch, sucursal]);
+    }, [loadServiciosForBranch, sucursal, scopeContext, actionsLockedByBranch]);
 
     const refreshCommonServicios = useCallback((branchIdsToUse, cache) => {
         if (!Array.isArray(branchIdsToUse) || branchIdsToUse.length === 0) {
@@ -888,12 +1004,11 @@ export default function AdminPackagesCatalogPage() {
         }, new Set(lists[0].map((servicio) => servicio.id_servicio)));
 
         setServiciosList(lists[0].filter((servicio) => commonIds.has(servicio.id_servicio)));
-    }, [sucursal]);
+    }, []);
 
     useEffect(() => {
-        if (!isSuperAdmin && !sucursal) return;
         void fetchPaquetes();
-    }, [fetchPaquetes, isSuperAdmin, sucursal]);
+    }, [fetchPaquetes]);
 
     useEffect(() => {
         void fetchServicios();
@@ -909,10 +1024,33 @@ export default function AdminPackagesCatalogPage() {
         void fetchServicios(value);
     }
 
-    async function handleCreateOfferToggle(branchId, checked) {
+    async function refreshCreateServicios(nextOffers) {
+        const generation = ++servicesGenerationRef.current;
+        const epoch = scopeEpochRef.current;
+        const dialog = dialogGenerationRef.current;
+        const nextBranchIds = nextOffers.map((offer) => offer.id_sucursal);
+        setServiciosList([]);
+        const lists = await Promise.all(nextBranchIds.map(async (branchId) => {
+            try { return serviciosByBranchRef.current[branchId] || await loadServiciosForBranch(branchId); }
+            catch { return []; }
+        }));
+        if (!mountedRef.current || scopeEpochRef.current !== epoch || dialogGenerationRef.current !== dialog
+            || servicesGenerationRef.current !== generation) return;
+        const nextCache = { ...serviciosByBranchRef.current };
+        nextBranchIds.forEach((branchId, index) => { nextCache[branchId] = lists[index]; });
+        serviciosByBranchRef.current = nextCache;
+        refreshCommonServicios(nextBranchIds, nextCache);
+        const commonIds = new Set((lists[0] || []).filter((service) =>
+            lists.every((list) => list.some((entry) => entry.id_servicio === service.id_servicio))
+        ).map((service) => service.id_servicio));
+        setFormValues((prev) => ({ ...prev, items: prev.items.filter((item) => commonIds.has(item.id_servicio)) }));
+    }
+
+    function handleCreateOfferToggle(branchId, checked) {
+        if (actionsLockedByBranch || !availableBranches.some((branch) => branch.id_sucursal === branchId)) return;
         const nextOffers = checked
             ? [
-                ...formValues.ofertas,
+                ...createOffersRef.current.filter((offer) => offer.id_sucursal !== branchId),
                 {
                     id_sucursal: branchId,
                     precio_hnl: '',
@@ -920,42 +1058,15 @@ export default function AdminPackagesCatalogPage() {
                     orden_visual: '100',
                 },
             ]
-            : formValues.ofertas.filter((offer) => offer.id_sucursal !== branchId);
-        const nextBranchIds = nextOffers.map((offer) => offer.id_sucursal);
-        let nextCache = serviciosByBranch;
-
-        if (checked && !serviciosByBranch[branchId]) {
-            try {
-                const loaded = await loadServiciosForBranch(branchId);
-                nextCache = { ...serviciosByBranch, [branchId]: loaded };
-                setServiciosByBranch(nextCache);
-            } catch {
-                nextCache = { ...serviciosByBranch, [branchId]: [] };
-                setServiciosByBranch(nextCache);
-            }
-        }
-
-        refreshCommonServicios(nextBranchIds, nextCache);
-        const commonIds = new Set(
-            nextBranchIds.length > 0
-                ? nextBranchIds
-                    .map((id) => nextCache[id] || [])
-                    .reduce((acc, list, index) => {
-                        const ids = new Set(list.map((servicio) => servicio.id_servicio));
-                        if (index === 0) return ids;
-                        return new Set([...acc].filter((id) => ids.has(id)));
-                    }, new Set())
-                : []
-        );
-
-        setFormValues((prev) => ({
-            ...prev,
-            ofertas: nextOffers,
-            items: prev.items.filter((item) => commonIds.has(item.id_servicio)),
-        }));
+            : createOffersRef.current.filter((offer) => offer.id_sucursal !== branchId);
+        // AM: La seleccion cambia antes de esperar servicios; ninguna respuesta puede restaurar ofertas antiguas.
+        createOffersRef.current = nextOffers;
+        setFormValues((prev) => ({ ...prev, ofertas: nextOffers }));
+        void refreshCreateServicios(nextOffers);
     }
 
     function handleCreateOfferChange(branchId, field, value) {
+        createOffersRef.current = createOffersRef.current.map((offer) => offer.id_sucursal === branchId ? { ...offer, [field]: value } : offer);
         setFormValues((prev) => ({
             ...prev,
             ofertas: prev.ofertas.map((offer) => (
@@ -969,38 +1080,26 @@ export default function AdminPackagesCatalogPage() {
     }
 
     function openCrear() {
+        if (actionsLockedByBranch) return;
+        dialogGenerationRef.current += 1;
+        serviciosByBranchRef.current = {};
+        const offers = sucursal ? [{ id_sucursal: sucursal, precio_hnl: '', visible_publico: true, orden_visual: '100' }] : [];
+        createOffersRef.current = offers;
         setDialogMode('create');
         setInitialOfferBranchId(sucursal || '');
         setEditTarget(null);
         setFormValues({
             ...FORM_DEFAULTS,
-            ofertas: sucursal
-                ? [{
-                    id_sucursal: sucursal,
-                    precio_hnl: '',
-                    visible_publico: true,
-                    orden_visual: '100',
-                }]
-                : [],
+            ofertas: offers,
         });
         setFormError('');
         setDialogOpen(true);
-        if (sucursal) {
-            void loadServiciosForBranch(sucursal)
-                .then((loaded) => {
-                    const nextCache = { ...serviciosByBranch, [sucursal]: loaded };
-                    setServiciosByBranch(nextCache);
-                    refreshCommonServicios([sucursal], nextCache);
-                })
-                .catch(() => {
-                    setServiciosList([]);
-                });
-        } else {
-            setServiciosList([]);
-        }
+        void refreshCreateServicios(offers);
     }
 
     function openEditarMaestro(paquete) {
+        if (actionsLockedByBranch) return;
+        dialogGenerationRef.current += 1;
         const mutationBranchId = resolveMutationBranchId(paquete);
         if (!mutationBranchId) {
             notifications.error('No se pudo determinar la sucursal del paquete para editarlo.', {
@@ -1033,6 +1132,9 @@ export default function AdminPackagesCatalogPage() {
     }
 
     function openEditarOferta(paquete, offer = null) {
+        if (actionsLockedByBranch) return;
+        dialogGenerationRef.current += 1;
+        servicesGenerationRef.current += 1;
         const offerData = offer || paquete;
         const mutationBranchId = String(offerData?.id_sucursal || sucursal || '').trim();
         if (!mutationBranchId) {
@@ -1058,6 +1160,9 @@ export default function AdminPackagesCatalogPage() {
     }
 
     function openAgregarOferta(paquete) {
+        if (actionsLockedByBranch) return;
+        dialogGenerationRef.current += 1;
+        servicesGenerationRef.current += 1;
         const nextBranches = getUnassociatedBranches(paquete, availableBranches);
         if (nextBranches.length === 0) {
             notifications.warning('Todas las sucursales disponibles ya tienen oferta para este paquete.', {
@@ -1081,6 +1186,12 @@ export default function AdminPackagesCatalogPage() {
     }
 
     async function handleGuardar() {
+        if (actionsLockedByBranch || !mountedRef.current || saveOperationRef.current) return;
+        const epoch = scopeEpochRef.current;
+        const dialog = dialogGenerationRef.current;
+        const operation = {};
+        const isCurrent = () => mountedRef.current && scopeEpochRef.current === epoch
+            && dialogGenerationRef.current === dialog && saveOperationRef.current === operation;
         const validationError = validateForm(formValues, dialogMode);
         if (validationError) {
             setFormError(validationError);
@@ -1103,12 +1214,6 @@ export default function AdminPackagesCatalogPage() {
             return;
         }
 
-        if (dialogMode !== 'create' && dialogMode !== 'editOffer' && dialogMode !== 'addOffer' && !serviciosList.length) {
-            setFormLoading(false);
-            setFormError('No hay servicios activos disponibles en esta sucursal para construir paquetes.');
-            return;
-        }
-
         const payload = dialogMode === 'editOffer' || dialogMode === 'addOffer'
             ? {
                 id_sucursal: mutationBranchId,
@@ -1117,12 +1222,7 @@ export default function AdminPackagesCatalogPage() {
                 orden_visual: Number(formValues.orden_visual),
             }
             : dialogMode === 'editMaster'
-                ? {
-                    nombre_paquete: formValues.nombre_paquete.trim(),
-                    descripcion: formValues.descripcion.trim() || undefined,
-                    items: normalizeItemsForPayload(formValues.items),
-                    id_sucursal: mutationBranchId,
-                }
+                ? buildPackageMasterPatch(formValues, editTarget, mutationBranchId)
                 : {
                     nombre_paquete: formValues.nombre_paquete.trim(),
                     descripcion: formValues.descripcion.trim() || undefined,
@@ -1135,10 +1235,24 @@ export default function AdminPackagesCatalogPage() {
                     })),
                 };
 
+        if (dialogMode === 'editMaster' && payload?.items && !serviciosList.length) {
+            setFormLoading(false);
+            setFormError('No hay servicios activos disponibles en esta sucursal para construir paquetes.');
+            return;
+        }
+
+        if (dialogMode === 'editMaster' && !payload) {
+            setFormLoading(false);
+            setDialogOpen(false);
+            return;
+        }
+
+        saveOperationRef.current = operation;
         try {
             const response = editTarget
                 ? await updateAdminPaquete(editTarget.id_paquete, payload)
                 : await createAdminPaquete(payload);
+            if (!isCurrent()) return;
             const result = response?.data ?? response;
 
             setPaquetes((prev) => upsertScopedPaquete(prev, result));
@@ -1159,6 +1273,7 @@ export default function AdminPackagesCatalogPage() {
             emitCatalogSync(editTarget ? 'paquete-updated' : 'paquete-created');
             setDialogOpen(false);
         } catch (err) {
+            if (!isCurrent()) return;
             if (err.status === 401) {
                 navigate('/login');
                 return;
@@ -1172,7 +1287,10 @@ export default function AdminPackagesCatalogPage() {
             setFormError(message);
             notifications.error(message, { dedupeKey: 'paquetes-save-error' });
         } finally {
-            setFormLoading(false);
+            if (isCurrent()) {
+                saveOperationRef.current = null;
+                setFormLoading(false);
+            }
         }
     }
 
@@ -1196,7 +1314,12 @@ export default function AdminPackagesCatalogPage() {
     }
 
     async function handleConfirmState() {
-        if (!stateTarget) return;
+        if (!stateTarget || actionsLockedByBranch || !mountedRef.current || stateOperationRef.current) return;
+        const epoch = scopeEpochRef.current;
+        const operation = {};
+        stateOperationRef.current = operation;
+        const isCurrent = () => mountedRef.current && scopeEpochRef.current === epoch
+            && stateOperationRef.current === operation;
 
         setStateLoading(true);
         try {
@@ -1213,6 +1336,7 @@ export default function AdminPackagesCatalogPage() {
                 id_sucursal: mutationBranchId,
                 confirmar_citas_pendientes: stateTarget._confirmPendingAppointments === true,
             });
+            if (!isCurrent()) return;
             const result = response?.data ?? response;
 
             setPaquetes((prev) => upsertScopedPaquete(prev, result));
@@ -1224,6 +1348,7 @@ export default function AdminPackagesCatalogPage() {
             setConfirmOpen(false);
             setStateTarget(null);
         } catch (err) {
+            if (!isCurrent()) return;
             if (err.status === 401) {
                 navigate('/login');
                 return;
@@ -1251,7 +1376,10 @@ export default function AdminPackagesCatalogPage() {
 
             notifications.error(extractMessage(err), { dedupeKey: 'paquetes-state-error' });
         } finally {
-            setStateLoading(false);
+            if (isCurrent()) {
+                stateOperationRef.current = null;
+                setStateLoading(false);
+            }
         }
     }
 
@@ -1340,11 +1468,11 @@ export default function AdminPackagesCatalogPage() {
                             <p className="text-sm text-[var(--mf-text-2)]">{titleSubtitle}</p>
                         </div>
                         <SucursalSelector
-                            branchIds={branchIds}
-                            allBranches={allBranches}
+                            allBranches={availableBranches}
                             selected={sucursal}
                             onChange={setSucursal}
                             loadingBranches={loadingBranches}
+                            allowAll={isSuperAdmin}
                         />
                     </div>
 
@@ -1353,7 +1481,14 @@ export default function AdminPackagesCatalogPage() {
                             <p className="text-sm text-[var(--mf-text-2)]">
                                 {loading ? 'Cargando...' : `${filteredPaquetes.length} de ${displayPaquetes.length} paquete(s)`}
                             </p>
-                            <ViewToggle defaultView={view} onViewChange={setView} storageKey="paquetes" />
+                            <div className="inline-flex rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-1" role="group" aria-label="Vista del catálogo">
+                                <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')} className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors ${view === 'list' ? 'bg-[var(--mf-accent)] text-[var(--mf-accent-text)]' : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]'}`}>
+                                    <List size={14} /> Lista
+                                </button>
+                                <button type="button" aria-pressed={view === 'cards'} onClick={() => setView('cards')} className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors ${view === 'cards' ? 'bg-[var(--mf-accent)] text-[var(--mf-accent-text)]' : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]'}`}>
+                                    <LayoutGrid size={14} /> Tarjetas
+                                </button>
+                            </div>
                         </div>
 
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -1393,7 +1528,7 @@ export default function AdminPackagesCatalogPage() {
                                 </Button>
                             ) : null}
 
-                            <Button onClick={openCrear} className="gap-2">
+                            <Button onClick={openCrear} className="gap-2" disabled={actionsLockedByBranch}>
                                 <Plus size={15} /> Nuevo maestro
                             </Button>
                         </div>
@@ -1418,10 +1553,11 @@ export default function AdminPackagesCatalogPage() {
                 </div>
             ) : null}
 
+            {actionsLockedByBranch && <EmptyState icon={Building2} title="Selecciona una sucursal autorizada" description="Selecciona una sucursal de tu alcance para consultar y gestionar paquetes." />}
             {listError && <ErrorBanner message={listError} onRetry={fetchPaquetes} />}
             {loading && !listError && <LoadingSpinner />}
 
-            {!loading && !listError && paquetes.length === 0 ? (
+            {!actionsLockedByBranch && !loading && !listError && paquetes.length === 0 ? (
                 <EmptyState
                     icon={Package}
                     title="Sin paquetes"
@@ -1430,7 +1566,7 @@ export default function AdminPackagesCatalogPage() {
                 />
             ) : null}
 
-            {!loading && !listError && displayPaquetes.length > 0 && filteredPaquetes.length === 0 ? (
+            {!actionsLockedByBranch && !loading && !listError && displayPaquetes.length > 0 && filteredPaquetes.length === 0 ? (
                 <EmptyState
                     icon={Search}
                     title="Sin resultados"
@@ -1438,112 +1574,54 @@ export default function AdminPackagesCatalogPage() {
                 />
             ) : null}
 
-            {!loading && !listError && filteredPaquetes.length > 0 && view === 'cards' ? (
-                <CardsCarousel
-                    items={filteredPaquetes}
-                    getItemKey={(paquete) => `${paquete?.id_paquete || 'pkg'}:${sucursal ? paquete?.id_sucursal || 'all' : 'master'}`}
-                    renderItem={(paquete, index, pageIndex) => (
-                        <DataCard
-                            key={`${paquete.id_paquete || 'pkg'}:${sucursal ? paquete.id_sucursal || 'all' : 'master'}`}
-                            animationDelay={(pageIndex * 0.02) + (index * 0.05)}
-                            avatar={<Package size={16} />}
-                            title={paquete.nombre_paquete || 'Paquete'}
-                            subtitle={paquete.descripcion || 'Sin descripcion'}
-                            badge={sucursal ? <PackageStatusBadge activo={Boolean(paquete.activo)} /> : <span className="mf-badge mf-badge-gold">Maestro</span>}
-                            fields={[
-                                ...(!sucursal ? [{
-                                    label: 'Sucursales asociadas',
-                                    value: getPackageBranchSummary(paquete, branchNameById),
-                                }] : []),
-                                {
-                                    label: sucursal ? 'Precio en esta sucursal' : 'Precio por sucursal',
-                                    value: <span className="font-mono font-bold text-[var(--mf-accent)]">{sucursal ? formatPrice(paquete.precio_hnl) : getPackagePriceSummary(paquete)}</span>,
-                                },
-                                ...(sucursal ? [{ label: 'Orden visual en esta sucursal', value: Number(paquete.orden_visual ?? 100) }] : []),
-                                { label: 'Servicios', value: getItemsCount(paquete) },
-                                { label: 'Composicion', value: <PackageCompositionBadge itemsCount={getItemsCount(paquete)} /> },
-                                ...(sucursal
-                                    ? [{ label: 'Publico en esta sucursal', value: <PackageVisibilityBadge visiblePublico={Boolean(paquete.visible_publico)} /> }]
-                                    : [{ label: 'Resumen de ofertas', value: getPackageOfferStateSummary(paquete) }]),
-                                ...(sucursal ? [{ label: 'Estado en esta sucursal', value: <PackageStatusBadge activo={Boolean(paquete.activo)} /> }] : []),
-                            ]}
-                            actions={renderActions(paquete)}
-                        />
-                    )}
-                />
+            {!actionsLockedByBranch && !loading && !listError && paginatedPaquetes.length > 0 && view === 'list' ? (
+                <section aria-label="Lista de paquetes" className="@container overflow-visible rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)]">
+                    <div role="row" className="hidden grid-cols-[minmax(230px,1.35fr)_minmax(240px,1.35fr)_minmax(190px,.85fr)_auto] gap-4 border-b border-[var(--mf-nav-border)] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)] @[62rem]:grid">
+                        <span>Paquete maestro</span><span>Composición</span><span>{sucursal ? 'Oferta local' : 'Resumen comercial'}</span><span className="text-right">Acciones</span>
+                    </div>
+                    <div className="divide-y divide-[var(--mf-nav-border)]">
+                        {paginatedPaquetes.map((paquete) => (
+                            <article key={`${paquete.id_paquete || 'pkg'}:${sucursal ? paquete.id_sucursal || 'all' : 'master'}`} role="row" className="grid min-w-0 gap-3 px-3 py-3 transition-colors hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_40%,transparent)] sm:px-4 @[62rem]:grid-cols-[minmax(230px,1.35fr)_minmax(240px,1.35fr)_minmax(190px,.85fr)_auto] @[62rem]:items-center @[62rem]:gap-4">
+                                <div className="flex min-w-0 items-start gap-3">
+                                    <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Package size={17} /></span>
+                                    <div className="min-w-0"><h2 className="break-words text-sm font-semibold leading-5 text-[var(--mf-text)]">{paquete.nombre_paquete || 'Paquete'}</h2><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-[var(--mf-text-2)]">{paquete.descripcion || 'Sin descripción'}</p></div>
+                                </div>
+                                <div className="min-w-0"><div className="mb-1 flex flex-wrap items-center gap-2"><PackageCompositionBadge itemsCount={getItemsCount(paquete)} /><span className="text-xs text-[var(--mf-text-2)]">{getItemsCount(paquete)} servicios</span></div><p className="line-clamp-2 break-words text-xs leading-5 text-[var(--mf-text)]">{getPackageCompositionSummary(paquete)}</p></div>
+                                <div className="min-w-0 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_42%,transparent)] px-3 py-2">
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--mf-text-2)]">{sucursal ? 'Precio en esta sucursal' : 'Rango por sucursal'}</p><p className="mt-1 font-mono text-sm font-bold text-[var(--mf-accent)]">{sucursal ? formatPrice(paquete.precio_hnl) : getPackagePriceSummary(paquete)}</p>
+                                    <div className="mt-2 flex flex-wrap gap-1.5">{sucursal ? <><PackageStatusBadge activo={Boolean(paquete.activo)} /><PackageVisibilityBadge visiblePublico={Boolean(paquete.visible_publico)} /><span className="mf-badge mf-badge-muted">Orden {Number(paquete.orden_visual ?? 100)}</span></> : <span className="text-xs text-[var(--mf-text-2)]">{getPackageOfferStateSummary(paquete)}</span>}</div>
+                                    {!sucursal ? <details className="mt-2"><summary className="cursor-pointer text-xs font-medium text-[var(--mf-accent)]">Ver {getPackageOffers(paquete).length} oferta(s)</summary><ul className="mt-2 space-y-1.5">{getPackageOffers(paquete).map((offer) => <li key={offer.id_sucursal} className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--mf-text-2)]"><span>{branchNameById[offer.id_sucursal] || offer.id_sucursal}</span><span className="font-mono text-[var(--mf-text)]">{formatPrice(offer.precio_hnl)}</span></li>)}</ul></details> : null}
+                                </div>
+                                <div className="min-w-0 @[62rem]:justify-self-end">{renderActions(paquete)}</div>
+                            </article>
+                        ))}
+                    </div>
+                </section>
             ) : null}
 
-            {!loading && !listError && filteredPaquetes.length > 0 && view === 'table' ? (
-                <div className="mf-table-wrap">
-                    <Table>
-                        <TableHeader>
-                            <TableRow className="border-[var(--mf-nav-border)]">
-                                {!sucursal ? (
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursales asociadas</TableHead>
-                                ) : null}
-                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Paquete maestro</TableHead>
-                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">{sucursal ? 'Precio sucursal' : 'Precio por sucursal'}</TableHead>
-                                {sucursal ? (
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead>
-                                ) : null}
-                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Servicios</TableHead>
-                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Composicion</TableHead>
-                                {sucursal ? (
-                                    <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Publico</TableHead>
-                                ) : null}
-                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">{sucursal ? 'Estado en esta sucursal' : 'Ofertas'}</TableHead>
-                                <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {filteredPaquetes.map((paquete) => (
-                                <TableRow key={`${paquete.id_paquete || 'pkg'}:${sucursal ? paquete.id_sucursal || 'all' : 'master'}`} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">
-                                    {!sucursal ? (
-                                        <TableCell className="text-[var(--mf-text-2)]">
-                                            {getPackageBranchSummary(paquete, branchNameById)}
-                                        </TableCell>
-                                    ) : null}
-                                    <TableCell className="font-medium text-[var(--mf-text)]">
-                                        <div>{paquete.nombre_paquete}</div>
-                                        {paquete.descripcion ? (
-                                            <div className="text-xs text-[var(--mf-text-2)] mt-0.5">{paquete.descripcion}</div>
-                                        ) : null}
-                                    </TableCell>
-                                    <TableCell className="text-right font-mono font-semibold text-[var(--mf-accent)]">
-                                        {sucursal ? formatPrice(paquete.precio_hnl) : getPackagePriceSummary(paquete)}
-                                    </TableCell>
-                                    {sucursal ? (
-                                        <TableCell className="text-center text-[var(--mf-text-2)]">
-                                            {Number(paquete.orden_visual ?? 100)}
-                                        </TableCell>
-                                    ) : null}
-                                    <TableCell className="text-center text-[var(--mf-text-2)]">
-                                        {getItemsCount(paquete)}
-                                    </TableCell>
-                                    <TableCell className="text-center hidden md:table-cell">
-                                        <PackageCompositionBadge itemsCount={getItemsCount(paquete)} />
-                                    </TableCell>
-                                    {sucursal ? (
-                                        <TableCell className="text-center hidden md:table-cell">
-                                            <PackageVisibilityBadge visiblePublico={Boolean(paquete.visible_publico)} />
-                                        </TableCell>
-                                    ) : null}
-                                    <TableCell className="text-center">
-                                        {sucursal ? <PackageStatusBadge activo={Boolean(paquete.activo)} /> : getPackageOfferStateSummary(paquete)}
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                        <div className="flex items-center justify-end gap-1.5">
-                                            {renderActions(paquete)}
-                                        </div>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                </div>
+            {!actionsLockedByBranch && !loading && !listError && paginatedPaquetes.length > 0 && view === 'cards' ? (
+                <section aria-label="Tarjetas de paquetes" className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                    {paginatedPaquetes.map((paquete) => (
+                        <article key={`${paquete.id_paquete || 'pkg'}:${sucursal ? paquete.id_sucursal || 'all' : 'master'}`} className="flex min-w-0 flex-col rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_88%,transparent)] p-4 shadow-[var(--mf-shadow-soft)]">
+                            <header className="flex min-w-0 items-start gap-3"><span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Package size={17} /></span><div className="min-w-0 flex-1"><h2 className="break-words text-base font-semibold leading-5 text-[var(--mf-text)]">{paquete.nombre_paquete || 'Paquete'}</h2><p className="mt-1 line-clamp-2 break-words text-xs leading-5 text-[var(--mf-text-2)]">{paquete.descripcion || 'Sin descripción'}</p></div>{sucursal ? <PackageStatusBadge activo={Boolean(paquete.activo)} /> : <span className="mf-badge mf-badge-gold">Maestro</span>}</header>
+                            <div className="mt-3 flex flex-wrap items-center gap-2"><PackageCompositionBadge itemsCount={getItemsCount(paquete)} /><span className="text-xs text-[var(--mf-text-2)]">{getItemsCount(paquete)} servicios</span></div>
+                            <p className="mt-2 line-clamp-2 min-h-10 break-words text-xs leading-5 text-[var(--mf-text)]">{getPackageCompositionSummary(paquete)}</p>
+                            <div className="mt-3 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2"><p className="text-[10px] uppercase tracking-[0.1em] text-[var(--mf-text-2)]">{sucursal ? 'Precio local' : 'Rango por sucursal'}</p><p className="mt-1 font-mono font-bold text-[var(--mf-accent)]">{sucursal ? formatPrice(paquete.precio_hnl) : getPackagePriceSummary(paquete)}</p><div className="mt-2 flex flex-wrap gap-1.5">{sucursal ? <><PackageVisibilityBadge visiblePublico={Boolean(paquete.visible_publico)} /><span className="mf-badge mf-badge-muted">Orden {Number(paquete.orden_visual ?? 100)}</span></> : <span className="text-xs text-[var(--mf-text-2)]">{getPackageOfferStateSummary(paquete)}</span>}</div></div>
+                            {!sucursal ? <details className="mt-3"><summary className="cursor-pointer text-xs font-medium text-[var(--mf-accent)]">Ofertas por sucursal</summary><p className="mt-2 break-words text-xs text-[var(--mf-text-2)]">{getPackageBranchSummary(paquete, branchNameById)}</p></details> : null}
+                            <div className="mt-auto pt-4">{renderActions(paquete)}</div>
+                        </article>
+                    ))}
+                </section>
             ) : null}
 
-            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            {!loading && !listError && filteredPaquetes.length > PACKAGES_PAGE_SIZE ? (
+                <nav aria-label="Paginación de paquetes" className="flex flex-col items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] px-3 py-2 sm:flex-row">
+                    <p className="text-xs text-[var(--mf-text-2)]">Página {page} de {pageCount} · {filteredPaquetes.length} resultados</p>
+                    <div className="flex items-center gap-2"><Button type="button" variant="outline" size="sm" className="min-h-9 gap-1" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="Página anterior"><ChevronLeft size={14} /> Anterior</Button><Button type="button" variant="outline" size="sm" className="min-h-9 gap-1" disabled={page === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))} aria-label="Página siguiente">Siguiente <ChevronRight size={14} /></Button></div>
+                </nav>
+            ) : null}
+
+            <UnsavedChangesDialog values={{ formValues, initialOfferBranchId }} saving={formLoading} open={dialogOpen} onOpenChange={setDialogOpen}>
                 <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>
@@ -1582,16 +1660,16 @@ export default function AdminPackagesCatalogPage() {
                     ) : null}
                     {formError ? <ErrorBanner message={formError} /> : null}
                     <DialogFooter className="mt-2">
-                        <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={formLoading}>
+                        <DialogClose asChild><Button variant="outline" disabled={formLoading}>
                             Cancelar
-                        </Button>
+                        </Button></DialogClose>
                         <Button onClick={handleGuardar} disabled={formLoading} className="gap-2 min-w-[120px]">
                             {formLoading ? <Loader2 size={15} className="animate-spin" /> : null}
                             {editTarget ? 'Guardar cambios' : 'Crear paquete maestro'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
-            </Dialog>
+            </UnsavedChangesDialog>
 
             <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
                 <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl">
@@ -1789,7 +1867,7 @@ export default function AdminPackagesCatalogPage() {
                             </select>
                         </div>
 
-                        {!sucursal ? (
+                        {isSuperAdmin && !sucursal ? (
                             <div className="sm:col-span-2">
                                 <Label className="mf-label">Sucursal</Label>
                                 <select
@@ -1807,7 +1885,7 @@ export default function AdminPackagesCatalogPage() {
                             </div>
                         ) : (
                             <p className="sm:col-span-2 text-xs text-[var(--mf-text-2)]">
-                                La sucursal ya esta fijada en el selector superior.
+                                {sucursal ? 'La sucursal ya esta fijada en el selector superior.' : 'Selecciona una sucursal autorizada en el selector superior.'}
                             </p>
                         )}
                     </div>

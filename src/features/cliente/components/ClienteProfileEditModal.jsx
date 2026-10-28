@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Camera, Loader2, Phone, Trash2, UserRound } from 'lucide-react';
 import {
   Dialog,
@@ -110,8 +110,22 @@ export default function ClienteProfileEditModal({
   profile,
   onSaved,
 }) {
+  const owner = JSON.stringify([profile?.id_usuario || '', profile?.id_cliente || '', profile?.id_persona || '']);
+  if (!open) return null;
+  return <ClienteProfileEditor key={owner} open={open} onOpenChange={onOpenChange} profile={profile} onSaved={onSaved} />;
+}
+
+function ClienteProfileEditor({ open, onOpenChange, profile, onSaved }) {
   const notifications = useNotifications();
   const fileInputRef = useRef(null);
+  const fieldId = useId();
+  const mountedRef = useRef(false);
+  const operationRef = useRef(null);
+  const generationRef = useRef(0);
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; generationRef.current += 1; operationRef.current = null; };
+  }, []);
 
   const [form, setForm] = useState(() => normalizeInitialForm(profile));
   const [saving, setSaving] = useState(false);
@@ -121,8 +135,12 @@ export default function ClienteProfileEditModal({
   const [photoChanged, setPhotoChanged] = useState(false);
   const [photoLoadError, setPhotoLoadError] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
+    generationRef.current += 1;
+    operationRef.current = null;
+    setSaving(false);
+    setUploading(false);
     const nextForm = normalizeInitialForm(profile);
     setForm(nextForm);
     setPreviewUrl(profile?.foto_perfil_signed_url || '');
@@ -143,14 +161,21 @@ export default function ClienteProfileEditModal({
 
   async function handleUploadPhoto(event) {
     const file = event.target?.files?.[0];
-    if (!file) return;
+    if (!file || !mountedRef.current || operationRef.current) return;
+
+    const operation = {};
+    const generation = generationRef.current;
+    operationRef.current = operation;
+    const isCurrent = () => mountedRef.current && operationRef.current === operation && generationRef.current === generation;
 
     setUploading(true);
     try {
       const prepared = await prepareClienteProfileImageUpload(file, {
         label: fullName || 'cliente',
       });
+      if (!isCurrent()) return;
       const read = await getClienteProfileImageReadUrl(prepared.asset_id, { expiresIn: 300 });
+      if (!isCurrent()) return;
 
       setUploadedAssetId(prepared.asset_id);
       setPreviewUrl(read?.url || prepared?.signed_read_url || '');
@@ -158,10 +183,20 @@ export default function ClienteProfileEditModal({
       setPhotoChanged(true);
       notifications.success('Imagen de perfil cargada. Guarda para confirmar cambios.');
     } catch (error) {
-      notifications.error(error?.message || 'No se pudo cargar la imagen de perfil.');
+      if (isCurrent()) {
+        const validationMessages = new Set([
+          'Debes seleccionar una imagen.',
+          'Formato no válido. Usa JPG, PNG o WEBP.',
+          'La imagen supera el máximo permitido de 5MB.',
+        ]);
+        notifications.error(validationMessages.has(error?.message) ? error.message : 'No se pudo cargar la imagen de perfil.');
+      }
     } finally {
-      setUploading(false);
-      if (event.target) event.target.value = '';
+      if (isCurrent()) {
+        operationRef.current = null;
+        setUploading(false);
+        if (event.target) event.target.value = '';
+      }
     }
   }
 
@@ -174,12 +209,17 @@ export default function ClienteProfileEditModal({
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (!mountedRef.current || operationRef.current) return;
     const telefonoPrincipal = extractSafeText(form.telefono_principal);
     if (!telefonoPrincipal) {
       notifications.warning('El teléfono principal es obligatorio para guardar tu perfil.');
       return;
     }
 
+    const operation = {};
+    const generation = generationRef.current;
+    operationRef.current = operation;
+    const isCurrent = () => mountedRef.current && operationRef.current === operation && generationRef.current === generation;
     setSaving(true);
 
     try {
@@ -196,13 +236,14 @@ export default function ClienteProfileEditModal({
       }
 
       const response = await updateClienteMe(payload);
+      if (!isCurrent()) return;
       notifications.success('Perfil actualizado correctamente.');
       onSaved?.(response);
       onOpenChange(false);
-    } catch (error) {
-      notifications.error(error?.data?.error?.message || error?.message || 'No se pudo actualizar tu perfil.');
+    } catch {
+      if (isCurrent()) notifications.error('No se pudo actualizar tu perfil.');
     } finally {
-      setSaving(false);
+      if (isCurrent()) { operationRef.current = null; setSaving(false); }
     }
   }
 
@@ -211,7 +252,7 @@ export default function ClienteProfileEditModal({
       <DialogContent className="!left-1/2 !top-1/2 !bottom-auto !right-auto !w-[calc(100vw-1rem)] !max-w-[680px] !-translate-x-1/2 !-translate-y-1/2 !rounded-[22px] max-h-[88vh] overflow-y-auto p-0">
         <DialogHeader className="border-b border-[var(--mf-nav-border)] px-5 pb-4 pt-5 sm:px-6">
           <DialogTitle>Perfil privado del cliente</DialogTitle>
-          <DialogDescription id="cliente-profile-edit-description">
+          <DialogDescription>
             Actualiza solo lo necesario. Tus datos sensibles se muestran con enfoque de privacidad.
           </DialogDescription>
         </DialogHeader>
@@ -262,16 +303,18 @@ export default function ClienteProfileEditModal({
 
             <input
               ref={fileInputRef}
+              id={`${fieldId}-photo`}
+              aria-label="Archivo de fotografía privada"
               type="file"
               accept={ALLOWED_PROFILE_IMAGE_TYPES.join(',')}
               className="hidden"
               onChange={(event) => void handleUploadPhoto(event)}
             />
             <p className="mt-2 text-xs leading-5 text-[var(--mf-text-2)]">
-              Formatos permitidos: {formatAllowedMimeTypes()}. Peso mÃ¡ximo: {(MAX_PROFILE_IMAGE_BYTES / (1024 * 1024)).toFixed(0)}MB.
+              Formatos permitidos: {formatAllowedMimeTypes()}. Peso máximo: {(MAX_PROFILE_IMAGE_BYTES / (1024 * 1024)).toFixed(0)}MB.
             </p>
             <p className="mt-1 text-xs leading-5 text-[var(--mf-text-2)]">
-              Esta imagen es privada y se usa para facilitar tu identificaciÃ³n en recepciÃ³n y por el barbero.
+              Esta imagen es privada y se usa para facilitar tu identificación en recepción y por el barbero.
             </p>
           </section>
 
@@ -279,10 +322,11 @@ export default function ClienteProfileEditModal({
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Identidad y contacto</p>
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className="mf-label">TelÃ©fono principal *</label>
+                <label className="mf-label" htmlFor={`${fieldId}-phone`}>Teléfono principal *</label>
                 <div className="relative">
                   <Phone size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
                   <input
+                    id={`${fieldId}-phone`}
                     className="mf-input pl-9"
                     value={form.telefono_principal}
                     onChange={(event) => setField('telefono_principal', event.target.value)}
@@ -294,8 +338,9 @@ export default function ClienteProfileEditModal({
                 </div>
               </div>
               <div>
-                <label className="mf-label">Fecha de nacimiento</label>
+                <label className="mf-label" htmlFor={`${fieldId}-birth`}>Fecha de nacimiento</label>
                 <input
+                  id={`${fieldId}-birth`}
                   type="date"
                   className="mf-input"
                   value={form.fecha_nacimiento}
@@ -303,21 +348,23 @@ export default function ClienteProfileEditModal({
                 />
               </div>
               <div>
-                <label className="mf-label">GÃ©nero (opcional)</label>
+                <label className="mf-label" htmlFor={`${fieldId}-gender`}>Género (opcional)</label>
                 <select
+                  id={`${fieldId}-gender`}
                   className="mf-select"
                   value={form.genero_codigo}
                   onChange={(event) => setField('genero_codigo', event.target.value)}
                 >
-                  <option value="">Selecciona gÃ©nero</option>
+                  <option value="">Selecciona género</option>
                   {GENERO_OPTIONS.map((option) => (
                     <option key={option.code} value={option.code}>{option.label}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="mf-label">DirecciÃ³n (opcional)</label>
+                <label className="mf-label" htmlFor={`${fieldId}-address`}>Dirección (opcional)</label>
                 <input
+                  id={`${fieldId}-address`}
                   className="mf-input"
                   value={form.direccion_texto}
                   onChange={(event) => setField('direccion_texto', event.target.value)}
@@ -332,8 +379,9 @@ export default function ClienteProfileEditModal({
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Preferencias</p>
             <div className="mt-3 space-y-3">
               <div>
-                <label className="mf-label">Preferencias para tu barbero</label>
+                <label className="mf-label" htmlFor={`${fieldId}-preferences`}>Preferencias para tu barbero</label>
                 <textarea
+                  id={`${fieldId}-preferences`}
                   className="mf-input min-h-[96px] resize-y px-3 py-2"
                   value={form.preferencias_corte}
                   onChange={(event) => setField('preferencias_corte', event.target.value)}
@@ -350,7 +398,7 @@ export default function ClienteProfileEditModal({
               Privacidad
             </p>
             <p className="mt-2 text-xs leading-5 text-[var(--mf-text-2)]">
-              Solo se enviarÃ¡n al sistema los campos que este formulario soporta actualmente. Los datos no incluidos aquÃ­ permanecen sin cambios.
+              Solo se enviarán al sistema los campos que este formulario soporta actualmente. Los datos no incluidos aquí permanecen sin cambios.
             </p>
           </section>
 

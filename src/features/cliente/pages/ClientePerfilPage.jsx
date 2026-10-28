@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Calendar, Camera, Coins, LockKeyhole, MapPin, Phone, Scissors, ShieldCheck, UserRound } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Calendar, Camera, Coins, LockKeyhole, MapPin, Phone, Scissors, ShieldCheck, Trash2, UserRound } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
+import ClienteAccountDeletionDialog from '../components/ClienteAccountDeletionDialog.jsx';
 import ClienteProfileCompletionBanner from '../components/ClienteProfileCompletionBanner.jsx';
 import ClienteProfileEditModal from '../components/ClienteProfileEditModal.jsx';
 import { getClienteMe } from '../lib/clienteApi.js';
@@ -55,38 +56,74 @@ function InfoRow({ icon: Icon, label, value, highlight = false }) {
 }
 
 export default function ClientePerfilPage() {
+  const { user, clienteId, isAuthenticated, isHydrated, isHydrating } = useAuth();
+  const identity = JSON.stringify([user?.id_usuario || '', clienteId || user?.cliente_id || '']);
+  // AM: La identidad forma parte del árbol; nunca renderiza datos del titular anterior.
+  if (!isAuthenticated || !user?.id_usuario || !isHydrated || isHydrating) {
+    return <div className="mf-skeleton h-72 rounded-3xl" role="status" aria-label="Esperando sesión de cliente" />;
+  }
+  return <ClientePerfilContent key={identity} identity={identity} />;
+}
+
+function ClientePerfilContent({ identity }) {
   const navigate = useNavigate();
   const { error: notifyError } = useNotifications();
-  const { isAuthenticated, isHydrated, isHydrating, logout } = useAuth();
+  const { isAuthenticated, isHydrated, isHydrating, logout, user, syncClienteProfile } = useAuth();
   const outletContext = useOutletContext() || {};
   const { refreshClienteProfile } = outletContext;
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [accountDeletionOpen, setAccountDeletionOpen] = useState(false);
   const [profilePhotoError, setProfilePhotoError] = useState(false);
+  const mountedRef = useRef(false);
+  const requestGenerationRef = useRef(0);
+  const activeProfileControllerRef = useRef(null);
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestGenerationRef.current += 1;
+      activeProfileControllerRef.current?.abort();
+      activeProfileControllerRef.current = null;
+    };
+  }, []);
 
   const canLoadProfile = Boolean(isAuthenticated && isHydrated && !isHydrating  );
 
   const loadProfile = useCallback(async ({ silent = false } = {}) => {
     if (!canLoadProfile) return;
+    activeProfileControllerRef.current?.abort();
+    const controller = new AbortController();
+    const generation = ++requestGenerationRef.current;
+    activeProfileControllerRef.current = controller;
+    const isCurrent = () => mountedRef.current
+      && requestGenerationRef.current === generation
+      && activeProfileControllerRef.current === controller
+      && !controller.signal.aborted;
     if (!silent) setLoading(true);
     try {
-      const payload = await getClienteMe();
+      const payload = await getClienteMe({ signal: controller.signal });
+      if (!isCurrent()) return;
       setData(payload);
       setProfilePhotoError(false);
       if (refreshClienteProfile) {
         void refreshClienteProfile({ silent: true });
       }
     } catch (error) {
+      if (!isCurrent()) return;
       if (Number(error?.status) === 401) {
         logout();
         navigate('/login', { replace: true });
         return;
       }
-      notifyError(error?.data?.error?.message || error?.message || 'No se pudo cargar tu perfil.');
+      notifyError('No se pudo cargar tu perfil.');
     } finally {
-      if (!silent) setLoading(false);
+      if (isCurrent() && !silent) setLoading(false);
+      if (activeProfileControllerRef.current === controller) {
+        activeProfileControllerRef.current = null;
+      }
     }
   }, [canLoadProfile, logout, navigate, notifyError, refreshClienteProfile]);
 
@@ -105,6 +142,11 @@ export default function ClientePerfilPage() {
   const profileIsComplete = Boolean(completion?.is_complete || profileCompletionPercent >= 100);
 
   function handleProfileSaved(payload) {
+    if (!mountedRef.current) return;
+    const [expectedUserId, expectedClienteId] = JSON.parse(identity);
+    if (!expectedUserId || !expectedClienteId || payload?.cliente?.id_cliente !== expectedClienteId
+      || (payload.cliente.id_usuario && payload.cliente.id_usuario !== expectedUserId)) return;
+    syncClienteProfile(payload.cliente, expectedUserId);
     setData(payload);
     if (refreshClienteProfile) {
       void refreshClienteProfile({ silent: true });
@@ -221,11 +263,40 @@ export default function ClientePerfilPage() {
         </article>
       </section>
 
+      <section className="mf-glass-surface rounded-[26px] border border-red-400/25 bg-red-500/5 p-5 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="max-w-3xl">
+            <div className="flex items-center gap-2">
+              <Trash2 size={18} className="text-red-200" />
+              <h2 className="mf-font-display text-lg text-[var(--mf-text)]">Eliminar cuenta</h2>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-[var(--mf-text-2)]">
+              La eliminacion desactiva tu acceso, cancela beneficios activos, elimina los MasterPuntos disponibles y anonimiza tu informacion operativa. La historia que deba conservarse por motivos financieros, fiscales o de auditoria permanecera registrada de forma protegida.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAccountDeletionOpen(true)}
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-red-400/40 bg-red-500/15 px-4 text-sm font-semibold text-red-100 transition-colors hover:bg-red-500/25"
+          >
+            <Trash2 size={16} />
+            Eliminar mi cuenta
+          </button>
+        </div>
+      </section>
+
       <ClienteProfileEditModal
+        key={identity}
         open={modalOpen}
         onOpenChange={setModalOpen}
         profile={profile}
         onSaved={handleProfileSaved}
+      />
+      <ClienteAccountDeletionDialog
+        open={accountDeletionOpen}
+        onOpenChange={setAccountDeletionOpen}
+        profile={profile}
+        expectedUserId={user?.id_usuario}
       />
     </div>
   );

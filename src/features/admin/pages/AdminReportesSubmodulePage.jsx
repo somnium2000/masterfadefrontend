@@ -821,6 +821,20 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
 
   // JK: Normaliza submodulo para evitar estados invalidos.
   const resolvedModuleType = REPORT_MODULE_META[moduleType] ? moduleType : 'ingresos';
+  const incomeRequestsRef = useRef({ mounted: true, dashboard: 0, context: 0, charts: 0, daily: 0, peak: 0, controllers: {} });
+  useEffect(() => {
+    const requests = incomeRequestsRef.current;
+    requests.mounted = true;
+    return () => {
+      requests.mounted = false;
+      requests.dashboard += 1;
+      requests.context += 1;
+      requests.charts += 1;
+      requests.daily += 1;
+      requests.peak += 1;
+      Object.values(requests.controllers).forEach((controller) => controller.abort());
+    };
+  }, [resolvedModuleType]);
   const moduleMeta = REPORT_MODULE_META[resolvedModuleType];
 
   const [contexto, setContexto] = useState({ sucursales: [], barberos: [], rango_default: null });
@@ -912,6 +926,11 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
   // JK: Carga data de graficos de Ingresos sin filtros globales para cumplir independencia visual.
   const fetchIndependentIncomeCharts = useCallback(async () => {
     if (resolvedModuleType !== 'ingresos') return;
+    const generation = ++incomeRequestsRef.current.charts;
+    incomeRequestsRef.current.controllers.charts?.abort();
+    const controller = new AbortController();
+    incomeRequestsRef.current.controllers.charts = controller;
+    const isCurrent = () => incomeRequestsRef.current.mounted && incomeRequestsRef.current.charts === generation;
 
     const range7 = buildUtcDateRange(7);
     const range30 = buildUtcDateRange(30);
@@ -928,13 +947,14 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
         getAdminReportesDashboard({
           fecha_desde: range7.fecha_desde,
           fecha_hasta: range7.fecha_hasta,
-        }),
+        }, { signal: controller.signal }),
         getAdminReportesDashboard({
           fecha_desde: range30.fecha_desde,
           fecha_hasta: range30.fecha_hasta,
-        }),
+        }, { signal: controller.signal }),
       ]);
 
+      if (!isCurrent()) return;
       setIndependentIncomeCharts({
         loading: false,
         error: '',
@@ -944,11 +964,12 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
         },
         rangesByDays: { 7: range7, 30: range30 },
       });
-    } catch (error) {
+    } catch {
+      if (!isCurrent()) return;
       setIndependentIncomeCharts((current) => ({
         ...current,
         loading: false,
-        error: extractMessage(error),
+        error: 'No se pudieron cargar los gráficos de ingresos.',
       }));
     }
   }, [resolvedModuleType]);
@@ -956,6 +977,11 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
   // JK: Carga 7 snapshots diarios (sin filtros) para la vista general de Barberos.
   const fetchIndependentBarbersOverview = useCallback(async () => {
     if (resolvedModuleType !== 'barberos') return;
+    const generation = ++incomeRequestsRef.current.charts;
+    incomeRequestsRef.current.controllers.charts?.abort();
+    const controller = new AbortController();
+    incomeRequestsRef.current.controllers.charts = controller;
+    const isCurrent = () => incomeRequestsRef.current.mounted && incomeRequestsRef.current.charts === generation;
 
     const range7 = buildUtcDateRange(7);
     const dayKeys = Array.from({ length: 7 }, (_, index) => {
@@ -973,9 +999,10 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
 
     try {
       const responses = await Promise.all(
-        dayKeys.map((dayKey) => getAdminReportesDashboard({ fecha_desde: dayKey, fecha_hasta: dayKey }))
+        dayKeys.map((dayKey) => getAdminReportesDashboard({ fecha_desde: dayKey, fecha_hasta: dayKey }, { signal: controller.signal }))
       );
 
+      if (!isCurrent()) return;
       const snapshotsByDate = {};
       dayKeys.forEach((dayKey, index) => {
         snapshotsByDate[dayKey] = responses[index]?.data || null;
@@ -987,10 +1014,11 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
         dayKeys,
         snapshotsByDate,
       });
-    } catch (error) {
+    } catch {
+      if (!isCurrent()) return;
       setIndependentBarbersOverview({
         loading: false,
-        error: extractMessage(error),
+        error: 'No se pudo cargar la vista de barberos.',
         dayKeys,
         snapshotsByDate: {},
       });
@@ -1029,10 +1057,20 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
   }, [showBarberoFilter]);
 
   const loadContexto = useCallback(async () => {
+    const generation = ++incomeRequestsRef.current.context;
+    const controller = (resolvedModuleType === 'ingresos' || resolvedModuleType === 'membresias' || resolvedModuleType === 'barberos' || resolvedModuleType === 'concurrencia' || resolvedModuleType === 'sucursales') ? new AbortController() : null;
+    if (controller) {
+      incomeRequestsRef.current.controllers.context?.abort();
+      incomeRequestsRef.current.controllers.context = controller;
+    }
+    const isCurrent = () => (resolvedModuleType !== 'ingresos' && resolvedModuleType !== 'membresias' && resolvedModuleType !== 'barberos' && resolvedModuleType !== 'concurrencia' && resolvedModuleType !== 'sucursales') || (
+      incomeRequestsRef.current.mounted && incomeRequestsRef.current.context === generation
+    );
     setLoadingContexto(true);
     setLoadError('');
     try {
-      const response = await getAdminReportesContext();
+      const response = await (controller ? getAdminReportesContext({}, { signal: controller.signal }) : getAdminReportesContext());
+      if (!isCurrent()) return;
       const payload = response?.data || {};
       // JK: Membresias y Concurrencia operan por defecto en ventana corta de 7 dias.
       const shortDefaultRange = buildUtcDateRange(CONCURRENCY_DEFAULT_DAYS);
@@ -1057,9 +1095,12 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
           (Array.isArray(payload?.sucursales) && payload.sucursales.length === 1 ? payload.sucursales[0].id_sucursal : ''),
       }));
     } catch (error) {
-      setLoadError(extractMessage(error));
+      if (!isCurrent()) return;
+      setLoadError(resolvedModuleType === 'ingresos' ? 'No se pudieron cargar los filtros de ingresos.'
+        : resolvedModuleType === 'membresias' ? 'No se pudieron cargar los filtros de membresías.'
+          : resolvedModuleType === 'barberos' ? 'No se pudieron cargar los filtros de barberos.' : resolvedModuleType === 'concurrencia' ? 'No se pudieron cargar los filtros de concurrencia.' : resolvedModuleType === 'sucursales' ? 'No se pudieron cargar los filtros de sucursales.' : extractMessage(error));
     } finally {
-      setLoadingContexto(false);
+      if (isCurrent()) setLoadingContexto(false);
     }
   }, [resolvedModuleType]);
 
@@ -1099,16 +1140,20 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
   }), [filters.commission_rate, filters.fecha_desde, filters.fecha_hasta, filters.id_barbero, filters.id_sucursal, showBarberoFilter]);
 
   // JK: Ejecuta consultas diarias en lotes para evitar sobrecargar la API en rangos amplios.
-  const fetchDailyTotalsForDateKeys = useCallback(async (dateKeys, buildParamsForDay) => {
+  const fetchDailyTotalsForDateKeys = useCallback(async (dateKeys, buildParamsForDay, { signal } = {}) => {
     const safeDateKeys = Array.isArray(dateKeys) ? dateKeys.filter(Boolean) : [];
     if (safeDateKeys.length === 0 || typeof buildParamsForDay !== 'function') return [];
 
     const rows = [];
     for (let offset = 0; offset < safeDateKeys.length; offset += CONCURRENCY_FETCH_BATCH_SIZE) {
+      if (signal?.aborted) throw new DOMException('Solicitud cancelada.', 'AbortError');
       const batchKeys = safeDateKeys.slice(offset, offset + CONCURRENCY_FETCH_BATCH_SIZE);
       const batchResponses = await Promise.all(
-        batchKeys.map((dayKey) => getAdminReportesDashboard(buildParamsForDay(dayKey)))
+        batchKeys.map((dayKey) => signal
+          ? getAdminReportesDashboard(buildParamsForDay(dayKey), { signal })
+          : getAdminReportesDashboard(buildParamsForDay(dayKey)))
       );
+      if (signal?.aborted) throw new DOMException('Solicitud cancelada.', 'AbortError');
 
       batchKeys.forEach((dayKey, index) => {
         rows.push({
@@ -1126,6 +1171,11 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
   // JK: Construye tendencia diaria filtrada (usa rango aplicado por usuario).
   const fetchFilteredConcurrencyDaily = useCallback(async (appliedFilters = {}) => {
     if (resolvedModuleType !== 'concurrencia') return;
+    const generation = ++incomeRequestsRef.current.daily;
+    incomeRequestsRef.current.controllers.daily?.abort();
+    const controller = new AbortController();
+    incomeRequestsRef.current.controllers.daily = controller;
+    const isCurrent = () => incomeRequestsRef.current.mounted && incomeRequestsRef.current.daily === generation;
 
     const fechaDesde = String(appliedFilters?.fecha_desde || '').trim();
     const fechaHasta = String(appliedFilters?.fecha_hasta || '').trim();
@@ -1152,18 +1202,20 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
         fecha_hasta: dayKey,
         id_sucursal: appliedFilters?.id_sucursal || '',
         commission_rate: appliedFilters?.commission_rate || '',
-      }));
+      }), { signal: controller.signal });
 
+      if (!isCurrent()) return;
       const hasData = rows.some((row) => toInt(row?.total_citas) > 0);
       setFilteredConcurrencyDaily({
         loading: false,
         error: '',
         rows: hasData ? rows : [],
       });
-    } catch (error) {
+    } catch {
+      if (!isCurrent()) return;
       setFilteredConcurrencyDaily({
         loading: false,
-        error: extractMessage(error),
+        error: 'No se pudo cargar la tendencia de concurrencia.',
         rows: [],
       });
     }
@@ -1172,6 +1224,11 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
   // JK: Calcula el día más concurrente del mes actual sin depender de filtros activos.
   const fetchIndependentConcurrencyPeakDay = useCallback(async () => {
     if (resolvedModuleType !== 'concurrencia') return;
+    const generation = ++incomeRequestsRef.current.peak;
+    incomeRequestsRef.current.controllers.peak?.abort();
+    const controller = new AbortController();
+    incomeRequestsRef.current.controllers.peak = controller;
+    const isCurrent = () => incomeRequestsRef.current.mounted && incomeRequestsRef.current.peak === generation;
 
     const monthRange = buildCurrentMonthDateRange();
     if (!monthRange.fecha_desde || !monthRange.fecha_hasta) {
@@ -1193,7 +1250,8 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
       const response = await getAdminReportesDashboard({
         fecha_desde: monthRange.fecha_desde,
         fecha_hasta: monthRange.fecha_hasta,
-      });
+      }, { signal: controller.signal });
+      if (!isCurrent()) return;
 
       const weekdayRows = (Array.isArray(response?.data?.concurrencia_clientes?.trafico_por_dia_semana)
         ? response.data.concurrencia_clientes.trafico_por_dia_semana
@@ -1217,10 +1275,11 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
         error: '',
         topDay: hasData ? topDay : null,
       });
-    } catch (error) {
+    } catch {
+      if (!isCurrent()) return;
       setIndependentConcurrencyPeakDay({
         loading: false,
-        error: extractMessage(error),
+        error: 'No se pudo cargar el día pico de concurrencia.',
         topDay: null,
       });
     }
@@ -1247,20 +1306,39 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
       return false;
     }
 
+    const generation = ++incomeRequestsRef.current.dashboard;
+    if (resolvedModuleType === 'concurrencia') {
+      incomeRequestsRef.current.daily += 1;
+      incomeRequestsRef.current.controllers.daily?.abort();
+      setFilteredConcurrencyDaily({ loading: true, error: '', rows: [] });
+    }
+    const controller = (resolvedModuleType === 'ingresos' || resolvedModuleType === 'membresias' || resolvedModuleType === 'barberos' || resolvedModuleType === 'concurrencia' || resolvedModuleType === 'sucursales') ? new AbortController() : null;
+    if (controller) {
+      incomeRequestsRef.current.controllers.dashboard?.abort();
+      incomeRequestsRef.current.controllers.dashboard = controller;
+    }
+    const isCurrent = () => (resolvedModuleType !== 'ingresos' && resolvedModuleType !== 'membresias' && resolvedModuleType !== 'barberos' && resolvedModuleType !== 'concurrencia' && resolvedModuleType !== 'sucursales') || (
+      incomeRequestsRef.current.mounted && incomeRequestsRef.current.dashboard === generation
+    );
     setLoadingDashboard(true);
     setLoadError('');
     try {
-      const response = await getAdminReportesDashboard(buildDashboardParams(activeFilters));
+      const params = buildDashboardParams(activeFilters);
+      const response = await (controller ? getAdminReportesDashboard(params, { signal: controller.signal }) : getAdminReportesDashboard(params));
+      if (!isCurrent()) return false;
       setSnapshot(response?.data || null);
       if (markAsAppliedFilter) {
         setCanClearKpiFilters(hasAppliedKpiFilterChanges(activeFilters));
       }
       return true;
     } catch (error) {
-      setLoadError(extractMessage(error));
+      if (!isCurrent()) return false;
+      setLoadError(resolvedModuleType === 'ingresos' ? 'No se pudo cargar el reporte de ingresos.'
+        : resolvedModuleType === 'membresias' ? 'No se pudo cargar el reporte de membresías.'
+          : resolvedModuleType === 'barberos' ? 'No se pudo cargar el reporte de barberos.' : resolvedModuleType === 'concurrencia' ? 'No se pudo cargar el reporte de concurrencia.' : resolvedModuleType === 'sucursales' ? 'No se pudo cargar el reporte de sucursales.' : extractMessage(error));
       return false;
     } finally {
-      setLoadingDashboard(false);
+      if (isCurrent()) setLoadingDashboard(false);
     }
   }, [
     buildDashboardParams,
@@ -1271,6 +1349,7 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
     filters.id_sucursal,
     hasAppliedKpiFilterChanges,
     notifications,
+    resolvedModuleType,
   ]);
 
   useEffect(() => {
@@ -1294,13 +1373,31 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
     }
 
     if (resolvedModuleType === 'barberos' && !independentFetchStartedRef.current.barberos) {
-      independentFetchStartedRef.current.barberos = true;
-      return scheduleDeferredModuleFetch(fetchIndependentBarbersOverview);
+      const startedRequests = independentFetchStartedRef.current;
+      startedRequests.barberos = true;
+      let started = false;
+      const cancel = scheduleDeferredModuleFetch(() => {
+        started = true;
+        return fetchIndependentBarbersOverview();
+      });
+      return () => {
+        cancel();
+        if (!started) startedRequests.barberos = false;
+      };
     }
 
     if (resolvedModuleType === 'concurrencia' && !independentFetchStartedRef.current.concurrenciaPeak) {
-      independentFetchStartedRef.current.concurrenciaPeak = true;
-      return scheduleDeferredModuleFetch(fetchIndependentConcurrencyPeakDay);
+      const startedRequests = independentFetchStartedRef.current;
+      startedRequests.concurrenciaPeak = true;
+      let started = false;
+      const cancel = scheduleDeferredModuleFetch(() => {
+        started = true;
+        return fetchIndependentConcurrencyPeakDay();
+      });
+      return () => {
+        cancel();
+        if (!started) startedRequests.concurrenciaPeak = false;
+      };
     }
 
     return undefined;
@@ -1383,10 +1480,13 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
   }, [contexto.barberos, filters.id_sucursal, filtersOpen, modalFilters?.id_sucursal]);
 
   // JK: Callback reutilizable para que el modal genere reporte con rango de fechas custom.
-  const fetchCustomReportSnapshot = useCallback(async ({ fecha_desde, fecha_hasta }) => {
-    const response = await getAdminReportesDashboard(buildDashboardParams({ fecha_desde, fecha_hasta }));
+  const fetchCustomReportSnapshot = useCallback(async ({ fecha_desde, fecha_hasta, signal }) => {
+    const params = buildDashboardParams({ fecha_desde, fecha_hasta });
+    const response = await ((resolvedModuleType === 'ingresos' || resolvedModuleType === 'membresias' || resolvedModuleType === 'barberos' || resolvedModuleType === 'concurrencia' || resolvedModuleType === 'sucursales') && signal
+      ? getAdminReportesDashboard(params, { signal })
+      : getAdminReportesDashboard(params));
     return response?.data || null;
-  }, [buildDashboardParams]);
+  }, [buildDashboardParams, resolvedModuleType]);
 
   const ventas = snapshot?.ventas_ingresos || {};
   const membresias = snapshot?.membresias || {};

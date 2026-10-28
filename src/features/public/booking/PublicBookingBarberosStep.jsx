@@ -64,6 +64,9 @@ export default function PublicBookingBarberosStep() {
               value={selectedBranchId}
               onChange={(event) => selectBranch(event.target.value)}
             >
+              {branchList.length > 1 ? (
+                <option value="" disabled>Selecciona una sucursal</option>
+              ) : null}
               {branchList.map((branch) => (
                 <option key={branch.id_sucursal} value={branch.id_sucursal}>
                   {branch.nombre_sucursal || 'Sucursal'}

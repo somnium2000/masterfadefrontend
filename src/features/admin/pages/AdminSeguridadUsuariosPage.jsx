@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Filter, RotateCcw, Search, ShieldAlert } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
@@ -85,6 +85,10 @@ function StateBadge({ value }) {
   return <span className={className}>{normalizeDisplayText(normalized, 'desconocido')}</span>;
 }
 
+function isProtectedSecurityUser(row) {
+  return row?.is_protected === true || row?.protected === true || row?.es_protegido === true;
+}
+
 function buildUserDisplayName(row) {
   const names = [row?.nombres, row?.apellidos].filter(Boolean).join(' ').trim();
   if (names) return names;
@@ -103,6 +107,9 @@ function resolveListErrorMessage(error) {
 }
 
 function resolveActionMessage(error) {
+  const code = String(error?.data?.error?.code || error?.code || '').trim().toUpperCase();
+  if (code === 'ROOT_USER_PROTECTED') return 'El usuario root protegido no puede ser bloqueado ni inactivado.';
+  if (code === 'ROOT_USER_PROTECTION_CHECK_FAILED') return 'No se pudo validar si el usuario esta protegido.';
   const status = Number(error?.status || 0);
   if (status === 409) return 'No fue posible completar la accion solicitada por politica de seguridad.';
   if (status === 404) return 'El usuario ya no se encuentra disponible para esta accion.';
@@ -112,10 +119,10 @@ function resolveActionMessage(error) {
 export default function AdminSeguridadUsuariosPage() {
   const navigate = useNavigate();
   const notifications = useNotifications();
-  const { roles } = useAuth();
+  const { roles, user } = useAuth();
 
   const canWrite = useMemo(
-    () => roles.includes('super_admin') || roles.includes('security_admin'),
+    () => roles.includes('super_admin') || roles.includes('security_admin') || roles.includes('root'),
     [roles]
   );
 
@@ -130,6 +137,20 @@ export default function AdminSeguridadUsuariosPage() {
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState('');
+  const actionOperationRef = useRef(null);
+  const actionGenerationRef = useRef(0);
+  const identityContext = JSON.stringify([roles, user?.id_usuario]);
+
+  useLayoutEffect(() => {
+    actionGenerationRef.current += 1;
+    actionOperationRef.current = null;
+    setConfirmTarget(null);
+    setActionLoadingId('');
+    return () => {
+      actionGenerationRef.current += 1;
+      actionOperationRef.current = null;
+    };
+  }, [identityContext]);
 
   const hasActiveFilters = useMemo(() => (
     filters.estadoAcceso !== DEFAULT_FILTERS.estadoAcceso
@@ -151,7 +172,27 @@ export default function AdminSeguridadUsuariosPage() {
     return () => clearTimeout(handler);
   }, [searchInput]);
 
+  const listContext = JSON.stringify([filters, page, searchInput, searchTerm, roles, user?.id_usuario]);
+  const listContextRef = useRef(listContext);
+  const listGenerationRef = useRef(0);
+  const listMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    listMountedRef.current = true;
+    listContextRef.current = listContext;
+    listGenerationRef.current += 1;
+    setRows([]);
+    setPagination({ page: 1, limit: DEFAULT_FILTERS.limit, total: 0, total_pages: 1 });
+    setError('');
+    setLoading(false);
+    return () => { listMountedRef.current = false; listGenerationRef.current += 1; };
+  }, [listContext]);
+
   const fetchRows = useCallback(async () => {
+    if (!listMountedRef.current || listContextRef.current !== listContext) return;
+    const generation = ++listGenerationRef.current;
+    const isCurrent = () => listMountedRef.current && listGenerationRef.current === generation && listContextRef.current === listContext;
+    if (searchInput.normalize('NFC').trim() !== searchTerm) return;
+    if (!roles.some(role => ['super_admin', 'security_admin', 'security_auditor', 'root'].includes(role))) return;
     setLoading(true);
     setError('');
     try {
@@ -164,9 +205,11 @@ export default function AdminSeguridadUsuariosPage() {
         q: searchTerm,
       });
       const parsed = unwrapCollectionResponse(response);
+      if (!isCurrent()) return;
       setRows(parsed.items);
       setPagination(parsed.pagination);
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -179,9 +222,9 @@ export default function AdminSeguridadUsuariosPage() {
       setRows([]);
       setPagination({ page: 1, limit: filters.limit, total: 0, total_pages: 1 });
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [filters, navigate, page, searchTerm]);
+  }, [filters, navigate, page, searchTerm, listContext, roles, searchInput]);
 
   useEffect(() => {
     void fetchRows();
@@ -200,16 +243,30 @@ export default function AdminSeguridadUsuariosPage() {
   }
 
   async function confirmAccessChange() {
-    if (!confirmTarget?.id_usuario || !confirmTarget?.nextState || actionLoadingId) return;
+    if (!canWrite || !listMountedRef.current || !confirmTarget?.id_usuario || !confirmTarget?.nextState || actionOperationRef.current) return;
+    if (confirmTarget.isProtected === true && confirmTarget.nextState !== 'activo') {
+      setConfirmTarget(null);
+      notifications.error('El usuario root protegido no puede ser bloqueado ni inactivado.', {
+        dedupeKey: 'security-users-root-protected',
+      });
+      return;
+    }
+    const operation = {};
+    const generation = actionGenerationRef.current;
+    actionOperationRef.current = operation;
+    const isCurrent = () => listMountedRef.current && actionGenerationRef.current === generation
+      && actionOperationRef.current === operation;
     setActionLoadingId(confirmTarget.id_usuario);
     try {
       await updateAdminSecurityUserAccessState(confirmTarget.id_usuario, confirmTarget.nextState);
+      if (!isCurrent()) return;
       notifications.success('Estado de acceso actualizado correctamente.', {
         dedupeKey: 'security-users-access-updated',
       });
       setConfirmTarget(null);
       await fetchRows();
     } catch (requestError) {
+      if (!isCurrent()) return;
       if (requestError?.status === 401) {
         navigate('/login', { replace: true });
         return;
@@ -222,7 +279,10 @@ export default function AdminSeguridadUsuariosPage() {
         dedupeKey: 'security-users-access-update-error',
       });
     } finally {
-      setActionLoadingId('');
+      if (isCurrent()) {
+        actionOperationRef.current = null;
+        setActionLoadingId('');
+      }
     }
   }
 
@@ -268,7 +328,7 @@ export default function AdminSeguridadUsuariosPage() {
               className="mt-1"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Buscar por nombre o correo enmascarado..."
+              placeholder="Buscar por nombre o correo..."
             />
           </div>
           <div>
@@ -381,6 +441,8 @@ export default function AdminSeguridadUsuariosPage() {
               {rows.map((row) => {
                 const nextState = resolveTargetState(row.estado_acceso);
                 const isActivating = nextState === 'activo';
+                const protectedUser = isProtectedSecurityUser(row);
+                const isProtectedBlockAction = protectedUser && nextState !== 'activo';
                 return (
                   <TableRow key={row.id_usuario} className="border-[var(--mf-nav-border)]">
                     <TableCell>{buildUserDisplayName(row)}</TableCell>
@@ -394,7 +456,9 @@ export default function AdminSeguridadUsuariosPage() {
                     </TableCell>
                     <TableCell>{formatDateTime(row.last_login_at)}</TableCell>
                     <TableCell className="text-center">
-                      {canWrite ? (
+                      {canWrite && isProtectedBlockAction ? (
+                        <span className="mf-badge mf-badge-gold">Root protegido</span>
+                      ) : canWrite ? (
                         <Button
                           type="button"
                           size="sm"
@@ -406,6 +470,7 @@ export default function AdminSeguridadUsuariosPage() {
                             nextState,
                             label: buildUserDisplayName(row),
                             actionLabel: isActivating ? 'Activar' : 'Bloquear',
+                            isProtected: protectedUser,
                           })}
                         >
                           {isActivating ? 'Activar' : 'Bloquear'}
@@ -424,6 +489,8 @@ export default function AdminSeguridadUsuariosPage() {
           {rows.map((row) => {
             const nextState = resolveTargetState(row.estado_acceso);
             const isActivating = nextState === 'activo';
+            const protectedUser = isProtectedSecurityUser(row);
+            const isProtectedBlockAction = protectedUser && nextState !== 'activo';
             return (
               <SecurityResponsiveCard
                 key={row.id_usuario}
@@ -437,7 +504,9 @@ export default function AdminSeguridadUsuariosPage() {
                   { key: 'forcePwd', label: 'Forzar cambio', value: row.force_password_change === true ? 'Si' : row.force_password_change === false ? 'No' : 'No disponible' },
                   { key: 'lastLogin', label: 'Ultimo login', value: formatDateTime(row.last_login_at) },
                 ]}
-                actions={canWrite ? (
+                actions={canWrite && isProtectedBlockAction ? (
+                  <span className="mf-badge mf-badge-gold">Root protegido</span>
+                ) : canWrite ? (
                   <Button
                     type="button"
                     size="sm"
@@ -449,6 +518,7 @@ export default function AdminSeguridadUsuariosPage() {
                       nextState,
                       label: buildUserDisplayName(row),
                       actionLabel: isActivating ? 'Activar' : 'Bloquear',
+                      isProtected: protectedUser,
                     })}
                   >
                     {isActivating ? 'Activar' : 'Bloquear'}
