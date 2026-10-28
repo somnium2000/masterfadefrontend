@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Search,
   SlidersHorizontal,
+  Ticket,
   X,
 } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
@@ -19,12 +20,14 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table.jsx';
 import ViewToggle from '../../../components/data/ViewToggle.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
+import AdminReservationCode from '../components/AdminReservationCode.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import {
   getAdminCitasOperativasContexto,
+  searchAdminReservation,
   listAdminCitasAfectadasReagendacion,
   listAdminCitasOperativas,
   listPublicAgendaHorarios,
@@ -34,7 +37,7 @@ import {
   postAdminCitaReagendarEmergencia,
   postAdminCitasReagendarEmergenciaLote,
 } from '../lib/adminCitasApi.js';
-import { buildTimeSlots } from '../../public/booking/bookingUtils.js';
+import { buildTimeSlots, buildBookingShortCode } from '../../public/booking/bookingUtils.js';
 import { isAbortError } from '../../../services/httpClient.js';
 
 const FILTER_DEFAULTS = {
@@ -307,6 +310,13 @@ function buildOperationalEventsUrl(idSucursal) {
 }
 
 export default function AdminAgendamientoCitasPage() {
+  const [reservationOpen, setReservationOpen] = useState(false);
+  const [reservationCode, setReservationCode] = useState('');
+  const [reservationResults, setReservationResults] = useState(null);
+  const [reservationError, setReservationError] = useState('');
+  const [reservationLoading, setReservationLoading] = useState(false);
+  const reservationRequest = useRef(null);
+  useEffect(() => () => reservationRequest.current?.abort(), []);
   const navigate = useNavigate();
   const notifications = useNotifications();
   const { roles, isAuthenticated, invalidateSession } = useAuth();
@@ -639,6 +649,8 @@ export default function AdminAgendamientoCitasPage() {
   }, [canOperateWithSucursal, isAuthenticated, scheduleLiveRefresh, selectedSucursalId]);
 
   function handleSucursalSelectionChange(nextId) {
+    reservationRequest.current?.abort();
+    setReservationOpen(false); setReservationResults(null); setReservationLoading(false);
     const safeId = String(nextId || '').trim();
     setSelectedSucursalId(safeId);
     setFilters((prev) => ({ ...prev, idSucursal: safeId || 'all' }));
@@ -925,7 +937,7 @@ export default function AdminAgendamientoCitasPage() {
 
     const actionBlocked = !selectedSucursalId || !canOperateOnCita(cita);
     return (
-      <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita || actionBlocked} onClick={() => openStatusDialog(cita, operationCode)}>
+      <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita || actionBlocked} onClick={() => { setReservationOpen(false); setReservationResults(null); openStatusDialog(cita, operationCode); }}>
         <CalendarCheck2 size={14} />
         {actionLabel}
       </Button>
@@ -945,7 +957,7 @@ export default function AdminAgendamientoCitasPage() {
     );
   }
 
-  function renderCitaDetail(cita) {
+  function renderCitaDetail(cita, showActions = true) {
     const viewInfo = getAppointmentDisplayInfo(cita);
     const serviciosLegibles = getServiciosLegibles(cita);
     const telefono = String(cita?.telefono_cliente || '').trim();
@@ -953,6 +965,7 @@ export default function AdminAgendamientoCitasPage() {
       <details className="mt-2 rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2">
         <summary className="cursor-pointer text-xs font-semibold text-[var(--mf-text)]">Ver detalle</summary>
         <div className="mt-2 space-y-1 text-xs text-[var(--mf-text-2)]">
+          <p>Código de reserva: <span className="text-[var(--mf-accent)]">{cita.id_grupo_cita ? buildBookingShortCode(cita.id_grupo_cita, 5) : 'Sin grupo de reserva'}</span></p>
           <p>Titular: <span className="text-[var(--mf-text)]">{viewInfo.titularNombre || 'Sin registrar'}</span></p>
           <p>Integrante: <span className="text-[var(--mf-text)]">{viewInfo.aliasIntegrante || 'Sin registrar'}</span></p>
           {telefono ? <p>Teléfono: <span className="text-[var(--mf-text)]">{telefono}</span></p> : null}
@@ -965,102 +978,52 @@ export default function AdminAgendamientoCitasPage() {
           {viewInfo.promocionesCount > 0 ? <p>Promoción: <span className="text-[var(--mf-text)]">{viewInfo.promocionesCount} aplicada(s)</span></p> : null}
           {viewInfo.comprobanteCodigo ? <p>Comprobante: <span className="text-[var(--mf-text)]">{viewInfo.comprobanteCodigo}</span></p> : null}
         </div>
-        {renderSecondaryActions(cita)}
+        {showActions ? renderSecondaryActions(cita) : null}
       </details>
     );
   }
 
+  function renderReservationCode(cita) {
+    return <AdminReservationCode groupId={cita.id_grupo_cita} />;
+  }
+
+  async function lookupReservation(event) {
+    event.preventDefault();
+    reservationRequest.current?.abort();
+    const controller = new AbortController();
+    reservationRequest.current = controller;
+    setReservationResults(null); setReservationError('');
+    const code = reservationCode.trim().toUpperCase();
+    if (!/^[A-Z0-9]{5}$/.test(code)) { setReservationError('Introduce un código de cinco letras o números.'); return; }
+    setReservationLoading(true);
+    try {
+      const response = await searchAdminReservation(code, selectedSucursalId, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      setReservationResults((response?.data ?? response)?.reservas || []);
+    } catch (error) {
+      if (!controller.signal.aborted && !handleAuthError(error)) setReservationError('No fue posible buscar la reserva. Intenta nuevamente.');
+    } finally { if (!controller.signal.aborted) setReservationLoading(false); }
+  }
+
   function renderMobileCardsList(items, emptyText) {
-    if (!items.length) return <p className="px-1 py-6 text-center text-sm text-[var(--mf-text-2)]">{emptyText}</p>;
-    return (
-      <div className="space-y-3">
-        {items.map((cita) => (
-          (() => {
-            const viewInfo = getAppointmentDisplayInfo(cita);
-            const servicioResumen = getServicioResumen(cita);
-            const telefono = String(cita?.telefono_cliente || '').trim();
-            return (
-          <article key={`mobile-${cita.id_cita}`} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_92%,transparent)] p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 space-y-1">
-                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Integrante</p>
-                <p className="truncate text-[15px] font-semibold text-[var(--mf-text)]">{viewInfo.aliasIntegrante}</p>
-                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Titular: <span className="text-[var(--mf-text)]">{viewInfo.titularNombre}</span></p>
-                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Barbero: <span className="text-[var(--mf-text)]">{cita.nombre_barbero || '-'}</span></p>
-                <p className="text-[13px] text-[var(--mf-text-2)]">Cita: <span className="text-[var(--mf-text)]">{formatDateTime(cita.inicio_at)}</span></p>
-                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Servicio: <span className="text-[var(--mf-text)]">{servicioResumen}</span></p>
-              </div>
-              <div className="text-right">
-                <span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>
-                <p className="mt-2 text-[1.75rem] font-semibold leading-none text-[var(--mf-text)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p>
-              </div>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--mf-nav-border)] pt-2 text-xs text-[var(--mf-text-2)]">
-              <span className="inline-flex items-center gap-1">
-                <MapPin size={12} />
-                {cita.nombre_sucursal || 'Sin registrar'}
-              </span>
-              {telefono ? (
-                <span className="inline-flex items-center gap-1">
-                  <Phone size={12} />
-                  {telefono}
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              {renderItemActions(cita, { compact: true })}
-            </div>
-            {renderCitaDetail(cita)}
-          </article>
-            );
-          })()
-        ))}
-      </div>
-    );
+    return renderCardsList(items, emptyText);
   }
 
   function renderCardsList(items, emptyText) {
     if (!items.length) return <p className="text-sm text-[var(--mf-text-2)]">{emptyText}</p>;
-    return (
-      <div className="space-y-3">
-        {items.map((cita) => {
-          const viewInfo = getAppointmentDisplayInfo(cita);
-          const servicioResumen = getServicioResumen(cita);
-          const telefono = String(cita?.telefono_cliente || '').trim();
-          return (
-            <article key={cita.id_cita} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_92%,transparent)] p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 space-y-1">
-                  <p className="truncate text-[13px] text-[var(--mf-text-2)]">Integrante</p>
-                  <p className="truncate text-base font-semibold text-[var(--mf-text)]">{viewInfo.aliasIntegrante}</p>
-                  <p className="truncate text-[13px] text-[var(--mf-text-2)]">Barbero: <span className="text-[var(--mf-text)]">{cita.nombre_barbero || 'Sin registrar'}</span></p>
-                  <p className="text-[13px] text-[var(--mf-text-2)]">Fecha y hora: <span className="text-[var(--mf-text)]">{formatDateTime(cita.inicio_at)}</span></p>
-                  <p className="truncate text-[13px] text-[var(--mf-text-2)]">Servicio: <span className="text-[var(--mf-text)]">{servicioResumen}</span></p>
-                </div>
-                <div className="text-right">
-                  <span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>
-                  <p className="mt-2 text-xl font-semibold leading-none text-[var(--mf-text)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p>
-                </div>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--mf-nav-border)] pt-2 text-xs text-[var(--mf-text-2)]">
-                <span className="inline-flex items-center gap-1">
-                  <MapPin size={12} />
-                  {cita.nombre_sucursal || 'Sin registrar'}
-                </span>
-                {telefono ? (
-                  <span className="inline-flex items-center gap-1">
-                    <Phone size={12} />
-                    {telefono}
-                  </span>
-                ) : null}
-              </div>
-              <div className="mt-3">{renderItemActions(cita)}</div>
-              {renderCitaDetail(cita)}
-            </article>
-          );
-        })}
-      </div>
-    );
+    return <div className="space-y-3">{items.map((cita) => {
+      const info = getAppointmentDisplayInfo(cita);
+      return <article key={cita.id_cita} className="min-w-0 rounded-[22px] border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm text-[var(--mf-text-2)]">Integrante</span><span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span></div>
+        <h3 className="mt-4 break-words text-base font-semibold text-[var(--mf-text)]">{info.aliasIntegrante}</h3>
+        <p className="mt-1 text-base font-semibold text-[var(--mf-text)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p>
+        {renderReservationCode(cita)}
+        <div className="space-y-2 break-words text-sm text-[var(--mf-text-2)]"><p>Barbero: <strong className="text-[var(--mf-text)]">{cita.nombre_barbero || 'Sin registrar'}</strong></p><p>Fecha y hora: <span className="text-[var(--mf-text)]">{formatDateTime(cita.inicio_at)}</span></p><p>Servicio: <span className="text-[var(--mf-text)]">{getServicioResumen(cita)}</span></p></div>
+        <div className="mt-4 flex flex-wrap gap-x-2 gap-y-1 border-t border-[var(--mf-nav-border)] pt-4 text-sm text-[var(--mf-text-2)]"><span>{cita.nombre_sucursal || 'Sin registrar'}</span>{cita.telefono_cliente ? <span>· {cita.telefono_cliente}</span> : null}</div>
+        <div className="mt-2">{renderItemActions(cita, { compact: true })}</div>
+        {renderCitaDetail(cita)}
+      </article>;
+    })}</div>;
   }
 
   function renderTableList(items, emptyText) {
@@ -1082,6 +1045,7 @@ export default function AdminAgendamientoCitasPage() {
               return (
                 <TableRow key={cita.id_cita} className="border-[var(--mf-nav-border)]">
                   <TableCell className="font-medium">
+                    <p className="font-semibold text-[var(--mf-accent)]">{cita.id_grupo_cita ? buildBookingShortCode(cita.id_grupo_cita, 5) : 'Sin grupo de reserva'}</p>
                     {viewInfo.titularNombre}
                     <p className="text-xs text-[var(--mf-text-2)]">{viewInfo.aliasIntegrante}</p>
                     {cita.telefono_cliente ? <p className="text-xs text-[var(--mf-text-2)]">{cita.telefono_cliente}</p> : null}
@@ -1153,6 +1117,7 @@ export default function AdminAgendamientoCitasPage() {
               <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por cliente, barbero o ID" className="h-11 rounded-2xl pl-9 pr-3 text-[0.98rem] min-[390px]:text-[1.03rem]" />
             </div>
+            <Button type="button" variant="outline" aria-label="Buscar reserva por código" onClick={() => setReservationOpen(true)}><Ticket size={16} /></Button>
             <div className="relative shrink-0">
               <div className="origin-right scale-[0.94]">
                 <ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" />
@@ -1254,6 +1219,7 @@ export default function AdminAgendamientoCitasPage() {
                   </button>
                 ) : null}
               </div>
+              <Button type="button" variant="outline" className="gap-2" onClick={() => setReservationOpen(true)}><Ticket size={15} />Buscar reserva</Button>
               <Button type="button" variant="outline" className="gap-2" onClick={() => setFiltersOpen(true)}>
                 <SlidersHorizontal size={15} />
                 Filtros
@@ -1338,6 +1304,15 @@ export default function AdminAgendamientoCitasPage() {
         </div>
       ) : null}
 
+      <Dialog open={reservationOpen} onOpenChange={(open) => { setReservationOpen(open); if (!open) { reservationRequest.current?.abort(); setReservationLoading(false); setReservationResults(null); setReservationError(''); } }}>
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
+          <DialogHeader><DialogTitle>Buscar reserva</DialogTitle><DialogDescription>Consulta integrantes y horarios por código en la sucursal autorizada. Incluye citas finalizadas; cada cita conserva su estado.</DialogDescription></DialogHeader>
+          <form onSubmit={lookupReservation} className="flex flex-wrap gap-2"><Label htmlFor="reservation-code" className="w-full">Código de reserva</Label><Input id="reservation-code" value={reservationCode} onChange={(event) => { reservationRequest.current?.abort(); setReservationLoading(false); setReservationCode(event.target.value.toUpperCase()); setReservationResults(null); }} maxLength={5} autoCapitalize="characters" autoComplete="off" className="min-w-0 flex-1" /><Button type="submit" disabled={reservationLoading}>{reservationLoading ? 'Buscando…' : 'Buscar'}</Button></form>
+          <div role="status" aria-live="polite">{reservationError ? <p className="text-sm text-[var(--mf-text-2)]">{reservationError}</p> : null}{reservationResults?.length === 0 ? <p>No hay reservas coincidentes dentro de tu alcance.</p> : null}</div>
+          {reservationResults?.length > 1 ? <p className="text-sm text-[var(--mf-text-2)]">El código coincide con varias reservas. Verifica titular y fecha.</p> : null}
+          {reservationResults?.map((group) => <section key={group.id_grupo_cita} className="rounded-2xl border border-[var(--mf-nav-border)] p-3"><h3 className="font-semibold text-[var(--mf-accent)]">Reserva {group.codigo_reserva}</h3>{group.citas.map((cita) => <div key={cita.id_cita} className="border-b border-[var(--mf-nav-border)] py-3 last:border-0"><p className="break-words font-semibold">{getAppointmentDisplayInfo(cita).aliasIntegrante}</p><p className="text-sm">Titular: {getAppointmentDisplayInfo(cita).titularNombre}</p><p className="text-sm">{formatDateTime(cita.inicio_at)} · {cita.nombre_barbero}</p><p className="text-sm">{getServicioResumen(cita)} · {STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</p>{VISIBLE_OPERATIONAL_STATES.includes(cita.estado_cita_codigo) ? <div className="mt-2">{renderItemActions(cita, { compact: true })}</div> : null}{renderCitaDetail(cita, false)}</div>)}</section>)}
+        </DialogContent>
+      </Dialog>
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
