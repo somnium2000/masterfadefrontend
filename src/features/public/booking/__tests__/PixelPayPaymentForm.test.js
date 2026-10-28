@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildPaymentCardProviderLabel,
+  formatCardNumber,
   getPixelPayReconciliationNotice,
   isPixelPayBillingAddressPlaceholder,
   isPixelPayCardExpireCurrentOrFuture,
@@ -12,6 +13,34 @@ import {
   toPixelPayCardExpire,
   validatePaymentForm,
 } from '../PublicBookingPaymentStep.jsx';
+
+describe('PixelPay card number lengths', () => {
+  it.each([
+    '4222222222222',
+    '4111111111111111',
+    '42222222222222222',
+    '422222222222222222',
+    '4222222222222222222',
+  ])('conserva y valida una tarjeta ficticia de %s digitos', (number) => {
+    const formatted = formatCardNumber(number);
+    expect(formatted.replace(/\s/g, '')).toBe(number);
+    expect(validatePaymentForm({
+      cardholderName: 'Cliente QA',
+      phone: '99999999',
+      cardNumber: formatted,
+      expiry: '11/28',
+      cvv: '999',
+      billingAddress: 'Blvd Suyapa',
+      billingCity: 'Tegucigalpa',
+      billingState: 'HN-FM',
+      billingCountry: 'HN',
+    }, new Date('2026-10-10T16:51:50.000Z'), 'live')).not.toHaveProperty('cardNumber');
+  });
+
+  it('trunca entradas de mas de 19 digitos y conserva agrupacion visual', () => {
+    expect(formatCardNumber('422222222222222222299')).toBe('4222 2222 2222 2222 222');
+  });
+});
 
 describe('PixelPay card_expire', () => {
   it('convierte 01/27 a 2701', () => {

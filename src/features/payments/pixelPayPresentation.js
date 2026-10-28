@@ -4,7 +4,16 @@ const CUSTOMER_MESSAGES = Object.freeze({
   PIXELPAY_PRECONDITION_FAILED: "No fue posible iniciar el cobro porque la operación no cumple una condición requerida. No se realizó otro cargo.",
   PIXELPAY_PAYMENT_PENDING: "Existe un pago pendiente de conciliación. No realices otro cobro.",
   PIXELPAY_PAYMENT_PROCESSING_FAILED: "No fue posible procesar el pago. Intenta nuevamente o utiliza otra tarjeta.",
+  PIXELPAY_PAYMENT_UNCERTAIN: "No pudimos confirmar el resultado del pago. No vuelvas a pagar mientras verificamos la operación.",
 });
+
+export function isPixelPayUncertainError(source = {}) {
+  const code = String(source?.customer_error_code || source?.data?.error?.code || source?.code || "")
+    .trim()
+    .toUpperCase();
+  return ["NETWORK_UNAVAILABLE", "ETIMEDOUT"].includes(code)
+    || ["AbortError", "TimeoutError"].includes(source?.name);
+}
 
 export function getPixelPayPresentation(environment = import.meta.env.VITE_PIXELPAY_ENV) {
   const normalized = String(environment || "sandbox").trim().toLowerCase();
@@ -35,8 +44,6 @@ export function getPixelPayCustomerMessage(source = {}) {
   if (CUSTOMER_MESSAGES[code]) return CUSTOMER_MESSAGES[code];
   if (Number(source?.status) === 412) return CUSTOMER_MESSAGES.PIXELPAY_PRECONDITION_FAILED;
   if ([400, 422].includes(Number(source?.status))) return CUSTOMER_MESSAGES.PIXELPAY_PAYMENT_DATA_INVALID;
-  if (["AbortError", "TimeoutError"].includes(source?.name)) {
-    return "No pudimos confirmar el resultado del pago. No vuelvas a pagar mientras verificamos la operación.";
-  }
+  if (isPixelPayUncertainError(source)) return CUSTOMER_MESSAGES.PIXELPAY_PAYMENT_UNCERTAIN;
   return CUSTOMER_MESSAGES.PIXELPAY_PAYMENT_PROCESSING_FAILED;
 }

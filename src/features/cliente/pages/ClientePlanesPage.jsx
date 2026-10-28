@@ -39,7 +39,7 @@ import {
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
 import useMembershipPaymentPolling from "../../plans/hooks/useMembershipPaymentPolling.js";
 import { CLIENT_LOCK_MESSAGE, CLIENT_PLAN_PURCHASE_ENABLED } from "../lib/clientFeatureFlags.js";
-import { getPixelPayCustomerMessage } from "../../payments/pixelPayPresentation.js";
+import { getPixelPayCustomerMessage, isPixelPayUncertainError } from "../../payments/pixelPayPresentation.js";
 
 const PIXELPAY_PENDING_MESSAGE = getPixelPayCustomerMessage({ pending_confirmation: true });
 const PIXELPAY_DECLINED_MESSAGE = getPixelPayCustomerMessage({ customer_error_code: "PIXELPAY_PAYMENT_DECLINED" });
@@ -654,6 +654,12 @@ export default function ClientePlanesPage() {
       ]);
       notifySuccess("Pago confirmado. Tu suscripción ya está activa.");
     } catch (error) {
+      if (isPixelPayUncertainError(error)) {
+        setPurchasePendingConfirmation(true);
+        setPurchaseErrorMessage(getPixelPayCustomerMessage(error));
+        // AM: El polling existente consulta el estado persistido sin solapar otra solicitud.
+        return;
+      }
       setPurchaseErrorMessage(getPixelPayCustomerMessage(error));
     } finally {
       setPurchaseLoading(false);

@@ -45,8 +45,8 @@ function normalizeDigits(value) {
   return String(value || '').replace(/\D+/g, '');
 }
 
-function formatCardNumber(value) {
-  return normalizeDigits(value).slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
+export function formatCardNumber(value) {
+  return normalizeDigits(value).slice(0, 19).replace(/(.{4})/g, '$1 ').trim();
 }
 
 function maskCardNumber(value) {
@@ -217,7 +217,8 @@ export function validatePaymentForm(form, referenceDate = new Date(), pixelPayEn
   if (normalizeDigits(form.phone).length < 8) {
     errors.phone = 'Ingresa un telefono valido.';
   }
-  if (normalizeDigits(form.cardNumber).length < 13) {
+  const cardNumberLength = normalizeDigits(form.cardNumber).length;
+  if (cardNumberLength < 13 || cardNumberLength > 19) {
     errors.cardNumber = String(pixelPayEnvironment || '').trim().toLowerCase() === 'live'
       ? 'Ingresa un numero de tarjeta valido.'
       : 'Ingresa un numero de tarjeta de prueba valido.';
@@ -681,6 +682,7 @@ export default function PublicBookingPaymentStep() {
                 placeholder="4242 4242 4242 4242"
                 autoComplete="cc-number"
                 inputMode="numeric"
+                maxLength={23}
                 value={paymentForm.cardNumber}
                 onChange={handleFieldChange('cardNumber')}
               />

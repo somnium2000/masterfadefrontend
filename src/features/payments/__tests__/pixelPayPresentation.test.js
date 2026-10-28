@@ -24,6 +24,7 @@ describe("presentación segura de PixelPay", () => {
     [{ status: 422, data: { error: { code: "PIXELPAY_PAYMENT_DATA_INVALID" } } }, "Revisa los datos de la tarjeta y la información de facturación."],
     [{ status: 412 }, "No fue posible iniciar el cobro porque la operación no cumple una condición requerida. No se realizó otro cargo."],
     [{ name: "TimeoutError" }, "No pudimos confirmar el resultado del pago. No vuelvas a pagar mientras verificamos la operación."],
+    [{ code: "NETWORK_UNAVAILABLE" }, "No pudimos confirmar el resultado del pago. No vuelvas a pagar mientras verificamos la operación."],
     [{ pending_confirmation: true }, "Existe un pago pendiente de conciliación. No realices otro cobro."],
   ])("mapea resultados a mensajes productivos sin detalles técnicos", (source, expected) => {
     expect(getPixelPayCustomerMessage(source)).toBe(expected);

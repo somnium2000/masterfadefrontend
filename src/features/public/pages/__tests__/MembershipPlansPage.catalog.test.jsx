@@ -363,6 +363,24 @@ describe('persistencia aislada de intentos VIP', () => {
     expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
   });
 
+  test('perdida de respuesta despues de Sale bloquea otro cobro y recupera estado persistido', async () => {
+    payment.confirmMembershipPayment.mockRejectedValue({ code: 'NETWORK_UNAVAILABLE', status: 0 });
+    payment.queryMembershipPaymentStatus.mockResolvedValue({ normalized_status: 'PENDIENTE' });
+    await renderPurchase();
+    await act(async () => buy());
+    await act(async () => dialog.props.onContinueToPayment());
+    await act(async () => dialog.props.onConfirmPayment({ card: 'datos-no-persistidos' }));
+
+    expect(payment.confirmMembershipPayment).toHaveBeenCalledTimes(1);
+    expect(payment.queryMembershipPaymentStatus).toHaveBeenCalledExactlyOnceWith('intent-1');
+    expect(dialog.props.pendingConfirmation).toBe(true);
+    expect(dialog.props.disableClose).toBe(true);
+    expect(dialog.props.errorMessage).toBe('Existe un pago pendiente de conciliación. No realices otro cobro.');
+
+    await act(async () => dialog.props.onConfirmPayment({ card: 'segundo-intento-prohibido' }));
+    expect(payment.confirmMembershipPayment).toHaveBeenCalledTimes(1);
+  });
+
   test('otra oferta crea otro intento y volver a oferta abandonada no reactiva su clave', async () => {
     payment.createMembershipOrder.mockRejectedValue({ status: 0 });
     await renderPurchase();
