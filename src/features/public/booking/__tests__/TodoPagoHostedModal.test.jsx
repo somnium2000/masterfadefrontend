@@ -339,6 +339,7 @@ describe('TodoPagoHostedModal', () => {
 describe('integracion del shell TodoPago', () => {
   test('PixelPay normal muestra su formulario sin contenido TodoPago', () => {
     vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay');
+    vi.stubEnv('VITE_PIXELPAY_ENV', 'sandbox');
     vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'false');
     bookingFlowMock.current = createBookingFlow();
 
@@ -348,6 +349,23 @@ describe('integracion del shell TodoPago', () => {
     expect(screen.getByLabelText('Numero de tarjeta')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' })).not.toBeNull();
     expect(screen.queryByText(/TodoPago/i)).toBeNull();
+  });
+
+  test('PixelPay live elimina textos Sandbox y tarjetas de prueba', async () => {
+    vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay');
+    vi.stubEnv('VITE_PIXELPAY_ENV', 'live');
+    vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'false');
+    bookingFlowMock.current = createBookingFlow();
+
+    render(<PublicBookingPaymentStep />);
+
+    expect(screen.getByText('Ingresa los datos de tu tarjeta para procesar el pago de forma segura.')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Pagar con PixelPay' })).not.toBeNull();
+    expect(screen.queryByText(/Sandbox/i)).toBeNull();
+    expect(screen.queryByText(/tarjeta de prueba/i)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Pagar con PixelPay' }));
+    expect(await screen.findByText('Ingresa un numero de tarjeta valido.')).not.toBeNull();
+    expect(screen.queryByText(/tarjeta de prueba/i)).toBeNull();
   });
 
   test('PixelPay restaurado pendiente oculta cobro y conserva una verificacion manual', async () => {

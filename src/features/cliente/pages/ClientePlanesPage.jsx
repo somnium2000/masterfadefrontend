@@ -39,6 +39,10 @@ import {
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
 import useMembershipPaymentPolling from "../../plans/hooks/useMembershipPaymentPolling.js";
 import { CLIENT_LOCK_MESSAGE, CLIENT_PLAN_PURCHASE_ENABLED } from "../lib/clientFeatureFlags.js";
+import { getPixelPayCustomerMessage } from "../../payments/pixelPayPresentation.js";
+
+const PIXELPAY_PENDING_MESSAGE = getPixelPayCustomerMessage({ pending_confirmation: true });
+const PIXELPAY_DECLINED_MESSAGE = getPixelPayCustomerMessage({ customer_error_code: "PIXELPAY_PAYMENT_DECLINED" });
 
 const CATEGORY_ICONS = {
   1: Shield,
@@ -458,7 +462,7 @@ export default function ClientePlanesPage() {
     setPurchaseOrderSummary(stored.orderSummary);
     setMembershipPaymentIntent(stored.paymentIntent);
     setPurchasePendingConfirmation(true);
-    setPurchaseErrorMessage("Existe un pago pendiente de verificación. No realices otro cobro");
+    setPurchaseErrorMessage(PIXELPAY_PENDING_MESSAGE);
     setPurchaseStep("payment");
     setPurchaseModalOpen(true);
   }, [purchaseIdentity]);
@@ -539,7 +543,7 @@ export default function ClientePlanesPage() {
       setMembershipPaymentIntent(recoveredIntent);
       setPurchasePendingConfirmation(Boolean(recoveredIntent));
       setPurchaseErrorMessage(recoveredIntent
-        ? "Existe un pago pendiente de verificación. No realices otro cobro" : "");
+        ? PIXELPAY_PENDING_MESSAGE : "");
       setPurchaseStep(recoveredIntent ? "payment" : "summary");
       setPurchaseCompleted(false);
       setPurchaseModalOpen(true);
@@ -605,10 +609,10 @@ export default function ClientePlanesPage() {
       }
       const isPending = String(intentData?.estado_intent_codigo || "").trim().toLowerCase() === "pendiente_confirmacion";
       setPurchasePendingConfirmation(isPending);
-      if (isPending) setPurchaseErrorMessage("Existe un pago pendiente de verificación. No realices otro cobro");
+      if (isPending) setPurchaseErrorMessage(PIXELPAY_PENDING_MESSAGE);
       setPurchaseStep("payment");
     } catch (error) {
-      setPurchaseErrorMessage(error?.data?.error?.message || "No se pudo crear el intent de pago.");
+      setPurchaseErrorMessage(getPixelPayCustomerMessage(error));
     } finally {
       setPurchaseLoading(false);
     }
@@ -635,11 +639,11 @@ export default function ClientePlanesPage() {
       });
       if (paymentResult?.pending_confirmation) {
         setPurchasePendingConfirmation(true);
-        setPurchaseErrorMessage("Existe un pago pendiente de verificación. No realices otro cobro");
+        setPurchaseErrorMessage(PIXELPAY_PENDING_MESSAGE);
         return;
       }
       if (paymentResult?.estado_intent_codigo === "fallido") {
-        setPurchaseErrorMessage("PixelPay rechazó el pago. La membresía no fue activada.");
+        setPurchaseErrorMessage(getPixelPayCustomerMessage(paymentResult));
         return;
       }
       setPurchaseCompleted(true);
@@ -650,7 +654,7 @@ export default function ClientePlanesPage() {
       ]);
       notifySuccess("Pago confirmado. Tu suscripción ya está activa.");
     } catch (error) {
-      setPurchaseErrorMessage(error?.data?.error?.message || "No se pudo confirmar el pago.");
+      setPurchaseErrorMessage(getPixelPayCustomerMessage(error));
     } finally {
       setPurchaseLoading(false);
     }
@@ -671,10 +675,10 @@ export default function ClientePlanesPage() {
     }
     if (normalized === "RECHAZADO") {
       setPurchasePendingConfirmation(false);
-      setPurchaseErrorMessage("PixelPay rechazó el pago. La membresía no fue activada.");
+      setPurchaseErrorMessage(PIXELPAY_DECLINED_MESSAGE);
       return;
     }
-    setPurchaseErrorMessage("Existe un pago pendiente de verificación. No realices otro cobro");
+    setPurchaseErrorMessage(PIXELPAY_PENDING_MESSAGE);
   }, [branchId, fetchMembershipState, fetchPlans]);
 
   useMembershipPaymentPolling({

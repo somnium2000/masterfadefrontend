@@ -354,7 +354,7 @@ describe('persistencia aislada de intentos VIP', () => {
     await act(async () => buy());
     await act(async () => dialog.props.onContinueToPayment());
     await act(async () => dialog.props.onConfirmPayment({ card: 'datos-no-persistidos' }));
-    expect(dialog.props.errorMessage).toBe('Existe un pago pendiente de verificación. No realices otro cobro');
+    expect(dialog.props.errorMessage).toBe('Existe un pago pendiente de conciliación. No realices otro cobro.');
     expect(dialog.props.pendingConfirmation).toBe(true);
     expect(dialog.props.disableClose).toBe(true);
     act(() => dialog.props.onOpenChange(false));

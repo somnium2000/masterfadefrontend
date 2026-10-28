@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CheckCircle2, CreditCard, Loader2, LockKeyhole } from "lucide-react";
 import { Button } from "../../../components/ui/button.jsx";
+import { getPixelPayCustomerMessage } from "../../payments/pixelPayPresentation.js";
 import {
   Dialog,
   DialogContent,
@@ -226,7 +227,7 @@ export default function PlanPurchaseFlowDialog({
                     </p>
                     {pendingConfirmation ? (
                       <p role="status" className="mt-3 rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm font-medium text-[var(--mf-text)]">
-                        Existe un pago pendiente de verificación. No realices otro cobro
+                        {getPixelPayCustomerMessage({ pending_confirmation: true })}
                       </p>
                     ) : null}
                   </div>

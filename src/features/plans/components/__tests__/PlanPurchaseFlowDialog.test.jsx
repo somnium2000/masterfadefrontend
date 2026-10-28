@@ -60,7 +60,7 @@ describe("formulario PixelPay VIP", () => {
 
   it("bloquea otro cobro cuando la confirmación está pendiente", () => {
     render(<PlanPurchaseFlowDialog open step="payment" orderSummary={orderSummary} pendingConfirmation />);
-    expect(screen.getByText("Existe un pago pendiente de verificación. No realices otro cobro")).toBeInTheDocument();
+    expect(screen.getByText("Existe un pago pendiente de conciliación. No realices otro cobro.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pagar con PixelPay" })).toBeDisabled();
   });
 });

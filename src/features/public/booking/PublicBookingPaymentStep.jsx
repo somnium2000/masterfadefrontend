@@ -9,6 +9,7 @@ import TodoPagoHostedModal, {
   createTodoPagoLaunchKey,
 } from './components/TodoPagoHostedModal.jsx';
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
+import { getPixelPayPresentation } from '../../payments/pixelPayPresentation.js';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
 const TODO_PAGO_SIMULATION_SCENARIOS = [
@@ -81,8 +82,10 @@ export function isPixelPayCardExpireCurrentOrFuture(value, referenceDate = new D
   return expireYear > currentYear || (expireYear === currentYear && expireMonth >= currentMonth);
 }
 
-export function buildPaymentCardProviderLabel({ providerType, cardBrand, cardBrandLabel }) {
-  const providerLabel = providerType === 'pixelpay' ? 'PixelPay Sandbox' : 'TodoPago test';
+export function buildPaymentCardProviderLabel({ providerType, cardBrand, cardBrandLabel, pixelPayEnvironment }) {
+  const providerLabel = providerType === 'pixelpay'
+    ? getPixelPayPresentation(pixelPayEnvironment).providerLabel
+    : 'TodoPago test';
   return cardBrand === 'unknown' ? providerLabel : `${cardBrandLabel} · ${providerLabel}`;
 }
 
@@ -203,7 +206,7 @@ function formatPhone(value) {
   return normalizeDigits(value).slice(0, 15);
 }
 
-export function validatePaymentForm(form, referenceDate = new Date()) {
+export function validatePaymentForm(form, referenceDate = new Date(), pixelPayEnvironment = 'sandbox') {
   const errors = {};
   const expiryDigits = normalizeDigits(form.expiry);
   const expiryFormatValid = /^(0[1-9]|1[0-2])\/[0-9]{2}$/.test(String(form.expiry || '').trim());
@@ -215,7 +218,9 @@ export function validatePaymentForm(form, referenceDate = new Date()) {
     errors.phone = 'Ingresa un telefono valido.';
   }
   if (normalizeDigits(form.cardNumber).length < 13) {
-    errors.cardNumber = 'Ingresa un numero de tarjeta de prueba valido.';
+    errors.cardNumber = String(pixelPayEnvironment || '').trim().toLowerCase() === 'live'
+      ? 'Ingresa un numero de tarjeta valido.'
+      : 'Ingresa un numero de tarjeta de prueba valido.';
   }
   if (expiryDigits.length !== 4 || !expiryFormatValid) {
     errors.expiry = 'Ingresa una fecha MM/AA valida.';
@@ -333,6 +338,7 @@ export default function PublicBookingPaymentStep() {
   });
   const paymentSimulationAction = resolvePaymentSimulationAction();
   const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
+  const pixelPayPresentation = getPixelPayPresentation();
   const paymentUiState = normalizeBookingPaymentUiState({
     paymentIntent,
     paymentResult,
@@ -504,7 +510,7 @@ export default function PublicBookingPaymentStep() {
 
   const handleMockPay = async () => {
     if (processingPayment || paymentRestoring || !paymentCanExecuteSale) return;
-    const validationErrors = validatePaymentForm(paymentForm);
+    const validationErrors = validatePaymentForm(paymentForm, new Date(), pixelPayPresentation.environment);
     if (Object.keys(validationErrors).length > 0) {
       setFieldErrors(validationErrors);
       return;
@@ -572,7 +578,7 @@ export default function PublicBookingPaymentStep() {
         <BookingStepHeader
           title="Pasarela de pago segura"
           subtitle={paymentSimulationAction.type === 'pixelpay'
-            ? 'Procesa el pago directo mediante PixelPay Sandbox para el entorno QA.'
+            ? pixelPayPresentation.intro
             : paymentSimulationAction.canShow
             ? 'Simula la experiencia MasterFade/TodoPago localmente sin ejecutar un cobro real.'
             : 'Continúa el pago en el portal alojado de TodoPago y verifica después el estado con MasterFade.'}
@@ -584,7 +590,7 @@ export default function PublicBookingPaymentStep() {
           <div className="public-booking-payment-note">
             <ShieldCheck size={14} />
             <span>{paymentSimulationAction.type === 'pixelpay'
-              ? 'PixelPay Sandbox: usa exclusivamente una tarjeta de prueba.'
+              ? pixelPayPresentation.cardNotice
               : paymentSimulationAction.canShow
               ? 'Simulador local: esta pantalla no procesa cargos reales.'
               : 'El portal de TodoPago se abre aislado dentro de una ventana segura.'}</span>
@@ -632,6 +638,7 @@ export default function PublicBookingPaymentStep() {
                   providerType: paymentSimulationAction.type,
                   cardBrand,
                   cardBrandLabel,
+                  pixelPayEnvironment: pixelPayPresentation.environment,
                 })}</span>
               </div>
               <div className="mt-6 break-words text-base font-semibold tracking-[0.16em] sm:mt-8 sm:text-xl sm:tracking-[0.28em]">
@@ -767,7 +774,7 @@ export default function PublicBookingPaymentStep() {
             ) : null}
             <div className="mt-3 rounded-xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-3 text-xs leading-relaxed text-[var(--mf-text-2)]">
               {paymentSimulationAction.type === 'pixelpay'
-                ? 'Los datos se envian una sola vez al backend y de ahi a PixelPay Sandbox. No se almacenan en el navegador ni en MasterFade.'
+                ? pixelPayPresentation.privacyNotice
                 : 'Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.'}
             </div>
             </div>
@@ -775,7 +782,7 @@ export default function PublicBookingPaymentStep() {
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
               <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
                 <ShieldCheck size={30} className="text-[var(--mf-accent)]" />
-                <h4 className="citas-confirm-subtitle">Pago con PixelPay Sandbox</h4>
+                <h4 className="citas-confirm-subtitle">{pixelPayPresentation.paymentTitle}</h4>
                 <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
                   Estamos verificando el resultado del pago con PixelPay. No vuelvas a realizar el pago.
                 </p>
@@ -873,7 +880,7 @@ export default function PublicBookingPaymentStep() {
                 >
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
                   {paymentSimulationAction.type === 'pixelpay'
-                    ? 'Pagar con PixelPay Sandbox'
+                    ? pixelPayPresentation.payButton
                     : paymentSimulationAction.type === 'simulator' ? 'Ejecutar simulator' : 'Simular pago exitoso'}
                 </Button>
               ) : null}
