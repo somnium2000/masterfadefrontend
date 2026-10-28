@@ -21,15 +21,25 @@ function setup(state = 'running', reduced = false) {
   return { context, oscillators, AudioContext };
 }
 
-it('genera dos tonos suaves de 300 ms y libera los nodos al terminar', () => {
+it('genera campanilla de 400 ms con ganancia acotada y libera todos los nodos', () => {
   const { context, oscillators } = setup();
   playBookingConfirmationSound();
-  expect(oscillators).toHaveLength(2);
+  expect(oscillators).toHaveLength(3);
+  expect(oscillators.map((node) => node.frequency.value)).toEqual([1320, 2640, 3960]);
   expect(oscillators[0].start).toHaveBeenCalledWith(1);
-  expect(oscillators[0].stop).toHaveBeenCalledWith(1.3);
+  expect(oscillators[0].stop).toHaveBeenCalledWith(1.4);
+  const gains = context.createGain.mock.results.map(({ value }) => value);
+  expect(gains[0].gain.setValueAtTime).toHaveBeenCalledWith(0.16, 1);
+  const peaks = gains.slice(1).map((node) => node.gain.linearRampToValueAtTime.mock.calls[0][0]);
+  expect(peaks.reduce((sum, peak) => sum + peak, 0) * 0.16).toBeCloseTo(0.1712);
+  gains.slice(1).forEach((node) => {
+    expect(node.gain.exponentialRampToValueAtTime).toHaveBeenCalledWith(0.0001, 1.38);
+    expect(node.gain.linearRampToValueAtTime).toHaveBeenLastCalledWith(0, 1.4);
+  });
   oscillators.forEach((node) => node.onended());
   expect(context.close).toHaveBeenCalledOnce();
   expect(oscillators[0].disconnect).toHaveBeenCalledOnce();
+  gains.forEach((node) => expect(node.disconnect).toHaveBeenCalledOnce());
 });
 
 it('no intenta reanudar ni reproducir audio bloqueado', () => {
