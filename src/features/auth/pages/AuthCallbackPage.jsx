@@ -7,6 +7,7 @@ import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { http } from '../../../services/httpClient.js';
 
 const AUTH_SESSION_LIMIT_REACHED_CODE = 'AUTH_SESSION_LIMIT_REACHED';
+const AUTH_SOCIAL_CONSENT_REQUIRED_CODE = 'AUTH_SOCIAL_CONSENT_REQUIRED';
 
 function isInvalidUserForAuth(errorLike) {
   const code = String(errorLike?.data?.error?.code || errorLike?.code || '').trim();
@@ -85,9 +86,15 @@ export default function AuthCallbackPage() {
   const [showInvalidUserAuthBox, setShowInvalidUserAuthBox] = useState(false);
   const [pendingSocialConfirmation, setPendingSocialConfirmation] = useState(null);
   const [sessionReplacementPrompt, setSessionReplacementPrompt] = useState(false);
+  const [socialConsentRequired, setSocialConsentRequired] = useState(false);
+  const [acceptsTerms, setAcceptsTerms] = useState(false);
+  const [acceptsMarketing, setAcceptsMarketing] = useState(false);
+  const [submittingConsent, setSubmittingConsent] = useState(false);
   const [stepMessage, setStepMessage] = useState('Validando identidad con Google...');
   const exchangeStartedRef = useRef(false);
   const supabaseTokenRef = useRef('');
+  const socialConfirmTokenRef = useRef('');
+  const socialConsentSubmitRef = useRef(false);
   const callbackSignature = useMemo(
     () => `${window.location.pathname}|${window.location.search}|${window.location.hash}`,
     []
@@ -151,6 +158,48 @@ export default function AuthCallbackPage() {
     }
   };
 
+  const completeSocialConsent = async () => {
+    if (socialConsentSubmitRef.current || submittingConsent) return;
+    if (!acceptsTerms) {
+      setError('Debes aceptar los terminos y condiciones para crear la cuenta.');
+      return;
+    }
+    const socialConfirmToken = String(socialConfirmTokenRef.current || '').trim();
+    if (!socialConfirmToken) {
+      setError('La confirmacion social ya no esta disponible. Inicia nuevamente con Google.');
+      return;
+    }
+
+    socialConsentSubmitRef.current = true;
+    setSubmittingConsent(true);
+    setError('');
+    setStepMessage('Completando tu registro...');
+    try {
+      const confirmationResponse = await http.post('/v1/auth/social/confirm', {
+        social_confirm_token: socialConfirmToken,
+        acepta_terminos: true,
+        consentimiento_marketing: acceptsMarketing,
+      }, { skipCsrf: true });
+      const confirmationPayload = confirmationResponse?.data || confirmationResponse;
+      if (!confirmationResponse?.ok || !confirmationPayload?.session?.authenticated) {
+        throw new Error('No se pudo establecer la sesion tras completar el registro.');
+      }
+      if (window.location.hash || window.location.search) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+      const completed = await completeExchangeLogin();
+      if (!completed.ok) throw new Error(completed.message || 'No se pudo completar la sesion.');
+      notifications.success('Registro completado. Tu perfil ya esta activo.', { dedupeKey: 'auth-callback-social-consent-success' });
+      navigate(safeNextPath || '/home', { replace: true });
+    } catch (submitError) {
+      setError(resolveCallbackErrorMessage(submitError));
+      setStepMessage('Confirma tus decisiones para continuar.');
+    } finally {
+      socialConsentSubmitRef.current = false;
+      setSubmittingConsent(false);
+    }
+  };
+
   useEffect(() => {
     if (isAuthenticated) {
       navigate(safeNextPath || '/home', { replace: true });
@@ -179,6 +228,7 @@ export default function AuthCallbackPage() {
         // AM: Evita reintentos multiples del callback social por re-render.
         exchangeStartedRef.current = true;
         runStarted = true;
+        socialConfirmTokenRef.current = socialConfirmToken;
 
         try {
           setPendingSocialConfirmation(null);
@@ -213,6 +263,15 @@ export default function AuthCallbackPage() {
           return;
         } catch (confirmError) {
           if (cancelled) return;
+          const confirmCode = String(confirmError?.data?.error?.code || confirmError?.code || '').trim().toUpperCase();
+          if (confirmCode === AUTH_SOCIAL_CONSENT_REQUIRED_CODE) {
+            setSocialConsentRequired(true);
+            setPendingSocialConfirmation(null);
+            setShowInvalidUserAuthBox(false);
+            setError('');
+            setStepMessage('Confirma tus decisiones para completar el registro.');
+            return;
+          }
           const message =
             confirmError?.data?.error?.message ||
             confirmError?.message ||
@@ -374,7 +433,7 @@ export default function AuthCallbackPage() {
           <span>Regresar al inicio</span>
         </Link>
 
-        <div className="mf-glass-surface w-full rounded-[28px] p-8 text-center" aria-busy={!error && !showInvalidUserAuthBox && !pendingSocialConfirmation}>
+        <div className="mf-glass-surface w-full rounded-[28px] p-8 text-center" aria-busy={!error && !showInvalidUserAuthBox && !pendingSocialConfirmation && !socialConsentRequired}>
         <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--mf-accent)]">
           Autenticacion
         </p>
@@ -397,6 +456,44 @@ export default function AuthCallbackPage() {
               <p className="mt-2 text-xs text-[var(--mf-text-2)]">Correo de seguridad enviado a: {pendingSocialConfirmation.emailMasked}</p>
             ) : null}
           </div>
+        ) : null}
+        {!showInvalidUserAuthBox && socialConsentRequired ? (
+          <form
+            className="mt-5 space-y-4 rounded-[14px] border border-[color:var(--mf-btn-border)] bg-[color:var(--mf-btn-bg)] px-4 py-4 text-left text-[13px] text-[var(--mf-text)]"
+            onSubmit={(event) => { event.preventDefault(); void completeSocialConsent(); }}
+          >
+            <p className="font-semibold uppercase tracking-[0.08em] text-[var(--mf-accent)]">COMPLETAR REGISTRO</p>
+            <p className="text-xs leading-5 text-[var(--mf-text-2)]">
+              Confirma tus decisiones para crear tu perfil. Los documentos legales publicos aun estan pendientes de aprobacion.
+            </p>
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={acceptsTerms}
+                disabled={submittingConsent}
+                onChange={(event) => setAcceptsTerms(event.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-[var(--mf-accent)]"
+              />
+              <span>Acepto los terminos y condiciones para crear mi cuenta.</span>
+            </label>
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={acceptsMarketing}
+                disabled={submittingConsent}
+                onChange={(event) => setAcceptsMarketing(event.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-[var(--mf-accent)]"
+              />
+              <span>Acepto recibir comunicaciones comerciales.</span>
+            </label>
+            <button
+              type="submit"
+              disabled={submittingConsent}
+              className="inline-flex w-full items-center justify-center rounded-[10px] border border-[var(--mf-accent)] px-3 py-2 text-xs font-semibold tracking-[0.08em] text-[var(--mf-text)] transition hover:bg-[rgba(212,176,104,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {submittingConsent ? 'Completando...' : 'Completar registro'}
+            </button>
+          </form>
         ) : null}
         {!showInvalidUserAuthBox && !error && sessionReplacementPrompt ? (
           <div className="mt-5 rounded-[14px] border border-[color:var(--mf-btn-border)] bg-[color:var(--mf-btn-bg)] px-4 py-3 text-left text-[13px] text-[var(--mf-text)]" role="alert" aria-live="assertive">
