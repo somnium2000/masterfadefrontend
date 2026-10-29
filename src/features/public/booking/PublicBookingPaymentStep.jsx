@@ -715,7 +715,7 @@ export default function PublicBookingPaymentStep() {
                   <input id="pay-billing-address" className="mf-input" autoComplete="street-address" value={paymentForm.billingAddress} onChange={handleFieldChange('billingAddress')} />
                   {fieldErrors.billingAddress ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingAddress}</p> : null}
                 </div>
-                <div className="mt-2 grid gap-3 md:grid-cols-3">
+                <div className="mf-checkout-billing mt-2 grid gap-3">
                   <div className="public-booking-form-row">
                     <label className="mf-label" htmlFor="pay-billing-city">Ciudad</label>
                     <input id="pay-billing-city" className="mf-input" autoComplete="address-level2" value={paymentForm.billingCity} onChange={handleFieldChange('billingCity')} />
