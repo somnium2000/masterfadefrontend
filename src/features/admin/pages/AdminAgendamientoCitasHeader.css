@@ -1,4 +1,6 @@
 .admin-citas-header {
+  --citas-actions: 'view view refresh refresh refresh refresh';
+  --citas-emergency: ;
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   grid-template-areas:
@@ -7,10 +9,18 @@
     'branch branch branch branch branch branch'
     'search search search search search search'
     'lookup lookup lookup filters filters filters'
-    'view view refresh refresh clear clear'
-    'emergency emergency emergency emergency emergency emergency';
+    var(--citas-actions)
+    var(--citas-emergency);
   align-items: center;
   gap: 12px 8px;
+}
+
+.admin-citas-header:has(> .admin-citas-header__clear) {
+  --citas-actions: 'view view refresh refresh clear clear';
+}
+
+.admin-citas-header:has(> .admin-citas-header__emergency) {
+  --citas-emergency: 'emergency emergency emergency emergency emergency emergency';
 }
 
 .admin-citas-header > * { min-width: 0; }
@@ -33,13 +43,17 @@
 
 @media (min-width: 768px) {
   .admin-citas-header {
+    --citas-actions: 'lookup lookup filters filters refresh refresh';
     grid-template-areas:
       'context context context status status view'
       'branch branch branch branch branch branch'
       'search search search search search search'
-      'lookup lookup filters clear refresh refresh'
-      'emergency emergency emergency emergency emergency emergency';
+      var(--citas-actions)
+      var(--citas-emergency);
     gap: 16px 12px;
+  }
+  .admin-citas-header:has(> .admin-citas-header__clear) {
+    --citas-actions: 'lookup lookup filters clear refresh refresh';
   }
   .admin-citas-header__status { justify-content: flex-end; }
   .admin-citas-header__view { justify-self: end; }
@@ -57,5 +71,26 @@
   .admin-citas-header__emergency {
     margin-left: 8px;
     border-left-width: 2px;
+  }
+  .admin-citas-header:not(:has(> .admin-citas-header__clear)) {
+    grid-template-columns: minmax(240px, 1fr) repeat(4, auto);
+    grid-template-areas:
+      'context context status status view'
+      'branch branch branch branch branch'
+      'search lookup filters refresh emergency';
+  }
+  .admin-citas-header:not(:has(> .admin-citas-header__emergency)) {
+    grid-template-columns: minmax(240px, 1fr) repeat(4, auto);
+    grid-template-areas:
+      'context context status status view'
+      'branch branch branch branch branch'
+      'search lookup filters clear refresh';
+  }
+  .admin-citas-header:not(:has(> .admin-citas-header__clear, > .admin-citas-header__emergency)) {
+    grid-template-columns: minmax(240px, 1fr) repeat(3, auto);
+    grid-template-areas:
+      'context context status view'
+      'branch branch branch branch'
+      'search lookup filters refresh';
   }
 }
