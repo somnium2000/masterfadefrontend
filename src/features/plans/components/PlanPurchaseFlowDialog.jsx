@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CheckCircle2, CreditCard, Loader2, LockKeyhole } from "lucide-react";
 import { Button } from "../../../components/ui/button.jsx";
+import { PaymentCheckoutSteps } from "../../payments/PaymentCheckoutPresentation.jsx";
 import { getPixelPayCustomerMessage } from "../../payments/pixelPayPresentation.js";
 import {
   Dialog,
@@ -140,7 +141,6 @@ export default function PlanPurchaseFlowDialog({
     : (Array.isArray(plan?.beneficios) ? plan.beneficios : []);
   const serviceBenefits = benefits.filter((benefit) => String(benefit?.tipo || "").toLowerCase() !== "cortesia");
   const courtesyBenefits = benefits.filter((benefit) => String(benefit?.tipo || "").toLowerCase() === "cortesia");
-  const summaryText = `${plan?.nombre_plan || "Plan"} · ${branchLabel} · ${formatMoney(totals?.total_hnl)}`;
 
   return (
     <Dialog open={open} onOpenChange={(next) => {
@@ -152,7 +152,7 @@ export default function PlanPurchaseFlowDialog({
       onOpenChange?.(next);
     }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+      <DialogContent className={step === "payment" ? "mf-payment-dialog" : "max-h-[85vh] overflow-y-auto sm:max-w-xl"}>
         {step === "success" ? (
           <div className="pt-5">
             <div className="mx-auto inline-flex h-14 w-14 items-center justify-center rounded-full border border-emerald-400/35 bg-emerald-500/15 text-emerald-200">
@@ -182,27 +182,27 @@ export default function PlanPurchaseFlowDialog({
             <div className="space-y-4">
               {step === "payment" ? (
                 <>
-                  <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Resumen rapido</p>
-                    <p className="mt-2 text-sm text-[var(--mf-text)]">{summaryText}</p>
+                  <PaymentCheckoutSteps processing={loading || pendingConfirmation} />
+                  <div className="mf-payment-panel mf-payment-summary">
+                    <div><p className="mf-checkout-section-title">Tu membresía</p><h3>{plan?.nombre_plan || "Plan"}</h3><p>{branchLabel}</p></div>
+                    <div><p>Total a pagar · {totals?.moneda_codigo || "HNL"}</p><strong>{formatMoney(totals?.total_hnl)}</strong></div>
                   </div>
-
-                  <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 text-sm">
+                  <div className="mf-payment-panel text-sm">
                     <p className="flex items-center gap-2 font-semibold text-[var(--mf-text)]">
                       <LockKeyhole size={14} />
                       Pago seguro
                     </p>
                     <p className="mt-1 text-[var(--mf-text-2)]">Los datos se envían a PixelPay y no se guardan en este navegador.</p>
 
-                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="mf-payment-form">
                       <label className="text-xs text-[var(--mf-text-2)]">
                         Numero de tarjeta
-                        <input className="mf-input mt-1 w-full" type="text" inputMode="numeric" autoComplete="cc-number" maxLength={23} value={paymentForm.cardNumber} onChange={setPaymentField("cardNumber")} />
+                        <input className="mf-input mt-1 w-full" type="text" inputMode="numeric" autoComplete="cc-number" placeholder="0000 0000 0000 0000" maxLength={23} value={paymentForm.cardNumber} onChange={setPaymentField("cardNumber")} />
                         {fieldErrors.cardNumber ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.cardNumber}</span> : null}
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         Nombre del titular
-                        <input className="mf-input mt-1 w-full" type="text" autoComplete="cc-name" value={paymentForm.cardHolder} onChange={setPaymentField("cardHolder")} />
+                        <input className="mf-input mt-1 w-full" type="text" autoComplete="cc-name" placeholder="Como aparece en tu tarjeta" value={paymentForm.cardHolder} onChange={setPaymentField("cardHolder")} />
                         {fieldErrors.cardHolder ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.cardHolder}</span> : null}
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
@@ -212,7 +212,7 @@ export default function PlanPurchaseFlowDialog({
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         CVV
-                        <input className="mf-input mt-1 w-full" type="password" inputMode="numeric" autoComplete="cc-csc" maxLength={4} value={paymentForm.cvv} onChange={setPaymentField("cvv")} />
+                        <input className="mf-input mt-1 w-full" type="password" inputMode="numeric" autoComplete="cc-csc" placeholder="CVV" maxLength={4} value={paymentForm.cvv} onChange={setPaymentField("cvv")} />
                         {fieldErrors.cvv ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.cvv}</span> : null}
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">Dirección de facturación<input className="mf-input mt-1 w-full" autoComplete="street-address" value={paymentForm.address} onChange={setPaymentField("address")} />{fieldErrors.address ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.address}</span> : null}</label>
@@ -291,40 +291,29 @@ export default function PlanPurchaseFlowDialog({
               ) : null}
 
               {errorMessage ? (
-                <div className="rounded-xl border border-red-400/35 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                <div className="rounded-xl border border-red-400/35 bg-red-500/10 px-3 py-2 text-sm mf-payment-error">
                   {errorMessage}
                 </div>
               ) : null}
             </div>
 
-            <DialogFooter className="sticky bottom-0 bg-[var(--mf-bg)]/95 pt-3 backdrop-blur">
-              <Button type="button" variant="outline" onClick={onCancel} disabled={loading || disableClose}>
-                Cancelar
-              </Button>
-              {step === "payment" ? (
-                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      onBackToSummary?.();
-                    }}
-                    disabled={loading || disableClose}
-                  >
-                    Volver al resumen
-                  </Button>
-                  <Button type="button" onClick={submitPixelPay} disabled={loading || disableClose || pendingConfirmation}>
-                    {loading ? <Loader2 size={15} className="animate-spin" /> : null}
-                    Pagar con PixelPay
-                  </Button>
-                </div>
-              ) : (
-                <Button type="button" onClick={onContinueToPayment} disabled={loading || disableClose}>
-                  {loading ? <Loader2 size={15} className="animate-spin" /> : null}
-                  Continuar al pago
+            {step === "payment" ? (
+              <DialogFooter className="mf-payment-footer">
+                <Button type="button" className="mf-payment-submit" onClick={submitPixelPay} disabled={loading || disableClose || pendingConfirmation}>
+                  {loading ? <Loader2 size={15} className="animate-spin" /> : <LockKeyhole size={15} />}
+                  Pagar con PixelPay
                 </Button>
-              )}
-            </DialogFooter>
+                <Button type="button" variant="outline" className="mf-payment-back" onClick={() => { onBackToSummary?.(); }} disabled={loading || disableClose}>Volver al resumen</Button>
+                <Button type="button" variant="ghost" onClick={onCancel} disabled={loading || disableClose}>Cancelar</Button>
+              </DialogFooter>
+            ) : (
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={onCancel} disabled={loading || disableClose}>Cancelar</Button>
+                <Button type="button" onClick={onContinueToPayment} disabled={loading || disableClose}>
+                  {loading ? <Loader2 size={15} className="animate-spin" /> : null}Continuar al pago
+                </Button>
+              </DialogFooter>
+            )}
           </>
         )}
       </DialogContent>

@@ -201,7 +201,7 @@ function renderPaymentFlow(initialEntry = '/agendar/pagar', providerOverrides = 
 }
 
 function getPaymentSummary() {
-  return within(screen.getByText('Resumen para cobro').parentElement);
+  return within(screen.getByText('Resumen de tu reserva').parentElement);
 }
 
 function fillPixelPayForm() {
@@ -382,8 +382,8 @@ describe('PublicBookingFlow payment hard reload integration', () => {
     });
 
     expect(await screen.findByText('Monto: L 8.00')).toBeTruthy();
-    expect(getPaymentSummary().getByText('Titular').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 5.00');
-    expect(getPaymentSummary().getByText('Acompanante').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 3.00');
+    expect(getPaymentSummary().getByText('Titular').closest('.citas-confirm-service-item').lastElementChild.textContent.replace(/\s/g, ' ')).toBe('L 5.00');
+    expect(getPaymentSummary().getByText('Acompanante').closest('.citas-confirm-service-item').lastElementChild.textContent.replace(/\s/g, ' ')).toBe('L 3.00');
     expect(screen.getByText('Total servicios').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 8.00');
     expect(screen.getByText('Total a pagar').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 8.00');
   });
@@ -407,7 +407,7 @@ describe('PublicBookingFlow payment hard reload integration', () => {
     });
 
     expect(await screen.findByText('Monto: L 0.00')).toBeTruthy();
-    expect(getPaymentSummary().getByText('Titular').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 0.00');
+    expect(getPaymentSummary().getByText('Titular').closest('.citas-confirm-service-item').lastElementChild.textContent.replace(/\s/g, ' ')).toBe('L 0.00');
     expect(screen.getByText('Total servicios').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 0.00');
   });
 
@@ -427,7 +427,7 @@ describe('PublicBookingFlow payment hard reload integration', () => {
 
     expect(await screen.findByText('Monto: L 8.00')).toBeTruthy();
     expect(getPaymentSummary().getAllByText('Titular')).toHaveLength(1);
-    expect(getPaymentSummary().getByText('Titular').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 8.00');
+    expect(getPaymentSummary().getByText('Titular').closest('.citas-confirm-service-item').lastElementChild.textContent.replace(/\s/g, ' ')).toBe('L 8.00');
     expect(screen.queryByText('Total servicios')).toBeNull();
     expect(screen.queryByText('Subtotal')).toBeNull();
     expect(screen.getByText('Total a pagar').nextSibling.textContent.replace(/\s/g, ' ')).toBe('L 8.00');

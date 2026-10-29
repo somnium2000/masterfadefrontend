@@ -2,7 +2,7 @@ import { ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../../components/ui/button.jsx';
 import { usePublicBookingFlow } from './BookingFlowContext.jsx';
-import { formatCurrencyHnl, normalizeBookingPaymentUiState } from './bookingUtils.js';
+import { formatCurrencyHnl, formatDateOnly, formatTime12Hour, normalizeBookingPaymentUiState } from './bookingUtils.js';
 import BookingActions from './components/BookingActions.jsx';
 import BookingStepHeader from './components/BookingStepHeader.jsx';
 import TodoPagoHostedModal, {
@@ -10,6 +10,7 @@ import TodoPagoHostedModal, {
 } from './components/TodoPagoHostedModal.jsx';
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 import { getPixelPayPresentation } from '../../payments/pixelPayPresentation.js';
+import { PaymentCheckoutHero, PaymentCheckoutSteps } from '../../payments/PaymentCheckoutPresentation.jsx';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
 const TODO_PAGO_SIMULATION_SCENARIOS = [
@@ -47,13 +48,6 @@ function normalizeDigits(value) {
 
 export function formatCardNumber(value) {
   return normalizeDigits(value).slice(0, 19).replace(/(.{4})/g, '$1 ').trim();
-}
-
-function maskCardNumber(value) {
-  const digits = normalizeDigits(value);
-  if (!digits) return '**** **** **** ****';
-  const visibleDigits = digits.slice(-4).padStart(4, '*');
-  return `**** **** **** ${visibleDigits}`;
 }
 
 function formatExpiry(value) {
@@ -295,6 +289,7 @@ function launchIsExpired(launch) {
 export default function PublicBookingPaymentStep() {
   const {
     bookingBlocksSummary,
+    selectedBranch,
     cancelBookingFlow,
     createPaymentIntentForHold,
     creatingPaymentIntent,
@@ -354,7 +349,6 @@ export default function PublicBookingPaymentStep() {
   const paymentLaunchKey = createTodoPagoLaunchKey(paymentLaunch);
   const hasHostedLaunch = paymentLaunch?.type === 'iframe_post';
   const hostedSessionExpired = holdExpired || launchIsExpired(paymentLaunch);
-  const maskedCardLabel = useMemo(() => maskCardNumber(paymentForm.cardNumber), [paymentForm.cardNumber]);
   const cardBrand = useMemo(() => detectCardBrand(paymentForm.cardNumber), [paymentForm.cardNumber]);
   const cardBrandLabel = CARD_BRAND_LABELS[cardBrand];
 
@@ -574,8 +568,11 @@ export default function PublicBookingPaymentStep() {
   })();
 
   return (
-    <div className="citas-confirm-wrap public-booking-payment-wrap">
+    <div className={`citas-confirm-wrap public-booking-payment-wrap ${isPixelPayProvider ? 'mf-checkout' : ''}`}>
       <div className="citas-surface p-3 sm:p-5">
+        {isPixelPayProvider ? (
+          <><PaymentCheckoutHero /><PaymentCheckoutSteps processing={processingPayment || pixelPayPendingConfirmation || paymentRestoring} confirmed={paymentResult?.booking_confirmed === true} /></>
+        ) : (
         <BookingStepHeader
           title="Pasarela de pago segura"
           subtitle={paymentSimulationAction.type === 'pixelpay'
@@ -587,6 +584,8 @@ export default function PublicBookingPaymentStep() {
           titleClassName="citas-confirm-title"
           subtitleClassName="citas-selected-date mt-2"
         />
+        )}
+        {!isPixelPayProvider ? (
         <div className="mt-3 grid gap-2 sm:gap-3">
           <div className="public-booking-payment-note">
             <ShieldCheck size={14} />
@@ -605,16 +604,6 @@ export default function PublicBookingPaymentStep() {
               : 'MasterFade no solicita ni muestra datos de tarjeta en este flujo.'}</span>
           </div>
         </div>
-        {holdCountdownLabel ? (
-          <div className={`public-booking-payment-note mt-3 ${holdExpired ? 'is-expired' : ''}`.trim()}>
-            <ShieldCheck size={14} />
-            <span>
-              {holdExpired
-                ? 'La reserva temporal expiro. Regresaremos a agenda para que elijas una nueva hora.'
-                : `Reserva temporal activa: ${holdCountdownLabel} restantes`}
-              {holdExpiresAtIso ? ' (contador real del hold en backend).' : ''}
-            </span>
-          </div>
         ) : null}
         {membershipUxMessage ? (
           <div className="public-booking-payment-note mt-3">
@@ -632,35 +621,8 @@ export default function PublicBookingPaymentStep() {
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
           {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
-            <div className="w-full overflow-hidden rounded-2xl border border-[var(--mf-border)] bg-[linear-gradient(135deg,rgba(16,24,40,0.96),rgba(31,41,55,0.92))] p-3 text-white shadow-[0_14px_40px_rgba(15,23,42,0.28)] sm:p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] text-white/70 sm:text-[11px] sm:tracking-[0.28em]">
-                <span>MasterFade Pay</span>
-                <span>{buildPaymentCardProviderLabel({
-                  providerType: paymentSimulationAction.type,
-                  cardBrand,
-                  cardBrandLabel,
-                  pixelPayEnvironment: pixelPayPresentation.environment,
-                })}</span>
-              </div>
-              <div className="mt-6 break-words text-base font-semibold tracking-[0.16em] sm:mt-8 sm:text-xl sm:tracking-[0.28em]">
-                {maskedCardLabel}
-              </div>
-              <div className="mt-5 flex flex-col gap-3 sm:mt-6 sm:flex-row sm:items-end sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-[10px] uppercase tracking-[0.22em] text-white/60">Titular</p>
-                  <p className="mt-1 truncate text-sm font-medium text-white">
-                    {paymentForm.cardholderName.trim() || 'Nombre del titular'}
-                  </p>
-                </div>
-                <div className="text-left sm:text-right">
-                  <p className="text-[10px] uppercase tracking-[0.22em] text-white/60">Expira</p>
-                  <p className="mt-1 text-sm font-medium text-white">{paymentForm.expiry || 'MM/AA'}</p>
-                </div>
-              </div>
-            </div>
-
             <h4 className="citas-confirm-subtitle mt-4">
-              {paymentSimulationAction.type === 'pixelpay' ? 'Datos de pago de prueba' : 'Datos para la simulacion'}
+              {paymentSimulationAction.type === 'pixelpay' ? 'Información de pago' : 'Datos para la simulacion'}
             </h4>
             <div className="public-booking-form-row mt-2">
               <label className="mf-label" htmlFor="pay-cardholder-name">Nombre del titular</label>
@@ -679,7 +641,7 @@ export default function PublicBookingPaymentStep() {
               <input
                 id="pay-card-number"
                 className="mf-input"
-                placeholder="4242 4242 4242 4242"
+                placeholder="0000 0000 0000 0000"
                 autoComplete="cc-number"
                 inputMode="numeric"
                 maxLength={23}
@@ -803,7 +765,63 @@ export default function PublicBookingPaymentStep() {
           )}
 
           <div className="public-booking-contact-card">
-            <h4 className="citas-confirm-subtitle">Estado de la pasarela</h4>
+            <div className="citas-confirm-services mt-4">
+              <h4 className="citas-confirm-subtitle">Resumen de tu reserva</h4>
+              {selectedBranch?.nombre_sucursal ? <p className="mf-checkout-summary-details">{selectedBranch.nombre_sucursal}</p> : null}
+            {holdCountdownLabel ? (
+              <div className={`public-booking-payment-note mt-3 ${holdExpired ? 'is-expired' : ''}`.trim()}>
+                <ShieldCheck size={14} />
+                <span>
+                  {holdExpired
+                    ? 'La reserva temporal expiro. Regresaremos a agenda para que elijas una nueva hora.'
+                    : `Reserva temporal activa: ${holdCountdownLabel} restantes`}
+                  {holdExpiresAtIso ? <span className="sr-only"> Vencimiento: {holdExpiresAtIso}</span> : null}
+                </span>
+              </div>
+            ) : null}
+              {canonicalBlocks.map((block) => (
+                <div key={block.id} className="citas-confirm-service-item">
+                  <div>
+                    <span>{block.alias}</span>
+                    <div className="mf-checkout-summary-details">
+                      {block.selectedDate ? <p>{formatDateOnly(block.selectedDate)} {formatTime12Hour(block.selectedTime)}</p> : null}
+                      {block.barbero?.nombre_completo ? <p>Barbero: {block.barbero.nombre_completo}</p> : null}
+                      {block.selectedPackage?.nombre_paquete ? <p>{block.selectedPackage.nombre_paquete}</p> : null}
+                      {block.selectedServices?.length ? <p>{block.selectedServices.map((service) => service.nombre_servicio).filter(Boolean).join(', ')}</p> : null}
+                    </div>
+                  </div>
+                  <span>{formatCurrencyHnl(block.total_hnl)}</span>
+                </div>
+              ))}
+              {hasAggregateBreakdown ? (
+                <div className="citas-confirm-row mt-3">
+                  <span>{subtotalLabel}</span>
+                  <span>{formatCurrencyHnl(effectiveSubtotal)}</span>
+                </div>
+              ) : null}
+              {hasAggregateBreakdown && hasPlanCoverage ? (
+                <div className="citas-confirm-row">
+                  <span>{membershipHasContext ? 'Cubierto por tu membresia' : 'Cubierto por tu plan'}</span>
+                  <span>-{formatCurrencyHnl(safeCoveredByPlan)}</span>
+                </div>
+              ) : null}
+              {hasAggregateBreakdown && hasSaldoToPay ? (
+                <div className="citas-confirm-row">
+                  <span>{membershipHasContext ? 'Extras y acompanantes' : 'Saldo a pagar'}</span>
+                  <span>{formatCurrencyHnl(safeExtras)}</span>
+                </div>
+              ) : null}
+              {hasAggregateBreakdown && isFullyCoveredByPlan ? (
+                <div className="public-booking-payment-note mt-2">
+                  <span>Cubierto completamente por tu plan.</span>
+                </div>
+              ) : null}
+              <div className="citas-confirm-row">
+                <span>{membershipHasContext ? 'Total a pagar hoy' : 'Total a pagar'}</span>
+                <span>{paymentRestoring ? 'Verificando...' : formatCurrencyHnl(effectiveTotalToPay)}</span>
+              </div>
+            </div>
+            <h4 className="citas-confirm-subtitle">Estado del pago</h4>
             <div className="public-booking-payment-note mt-2">
               <ShieldCheck size={14} />
               <span>{hostedStatusText}</span>
@@ -837,7 +855,10 @@ export default function PublicBookingPaymentStep() {
                 ) : null}
               </div>
             )}
-            <BookingActions inline className="public-booking-payment-actions mt-4 flex-col items-stretch gap-3 sm:flex-row sm:items-end">
+          </div>
+        </div>
+
+            <BookingActions inline className="public-booking-payment-actions mf-checkout-primary-actions mt-4 flex-col items-stretch gap-3 sm:flex-row sm:items-end">
               {!paymentSimulationAction.canShow && hasHostedLaunch && !hostedLaunchConsumed ? (
                 <Button
                   className="w-full sm:w-auto"
@@ -876,7 +897,7 @@ export default function PublicBookingPaymentStep() {
               ) : null}
               {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
                 <Button
-                  className="w-full sm:w-auto"
+                  className="mf-checkout-submit w-full sm:w-auto"
                   onClick={handleMockPay}
                   disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation || !paymentCanExecuteSale}
                 >
@@ -895,45 +916,7 @@ export default function PublicBookingPaymentStep() {
                 Cancelar reserva
               </Button>
             </BookingActions>
-          </div>
-        </div>
 
-        <div className="citas-confirm-services mt-4">
-          <h4 className="citas-confirm-subtitle">Resumen para cobro</h4>
-          {canonicalBlocks.map((block) => (
-            <div key={block.id} className="citas-confirm-service-item">
-              <span>{block.alias}</span>
-              <span>{formatCurrencyHnl(block.total_hnl)}</span>
-            </div>
-          ))}
-          {hasAggregateBreakdown ? (
-            <div className="citas-confirm-row mt-3">
-              <span>{subtotalLabel}</span>
-              <span>{formatCurrencyHnl(effectiveSubtotal)}</span>
-            </div>
-          ) : null}
-          {hasAggregateBreakdown && hasPlanCoverage ? (
-            <div className="citas-confirm-row">
-              <span>{membershipHasContext ? 'Cubierto por tu membresia' : 'Cubierto por tu plan'}</span>
-              <span>-{formatCurrencyHnl(safeCoveredByPlan)}</span>
-            </div>
-          ) : null}
-          {hasAggregateBreakdown && hasSaldoToPay ? (
-            <div className="citas-confirm-row">
-              <span>{membershipHasContext ? 'Extras y acompanantes' : 'Saldo a pagar'}</span>
-              <span>{formatCurrencyHnl(safeExtras)}</span>
-            </div>
-          ) : null}
-          {hasAggregateBreakdown && isFullyCoveredByPlan ? (
-            <div className="public-booking-payment-note mt-2">
-              <span>Cubierto completamente por tu plan.</span>
-            </div>
-          ) : null}
-          <div className="citas-confirm-row">
-            <span>{membershipHasContext ? 'Total a pagar hoy' : 'Total a pagar'}</span>
-            <span>{paymentRestoring ? 'Verificando...' : formatCurrencyHnl(effectiveTotalToPay)}</span>
-          </div>
-        </div>
         {!isPixelPayProvider ? (
           <TodoPagoHostedModal
             open={hostedModalOpen}
