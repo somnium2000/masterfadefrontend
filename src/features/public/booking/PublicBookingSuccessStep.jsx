@@ -28,19 +28,28 @@ function collectCodesFromList(list) {
 }
 
 function resolveBookingCodes({ bookingSuccessResult, paymentResult, holdResult }) {
+  const groupCode = [
+    bookingSuccessResult?.codigo_cita,
+    bookingSuccessResult?.confirmation?.codigo_cita,
+    bookingSuccessResult?.paymentResult?.codigo_cita,
+    paymentResult?.codigo_cita,
+    paymentResult?.data?.codigo_cita,
+    paymentResult?.confirmation?.codigo_cita,
+    paymentResult?.confirmation?.data?.codigo_cita,
+    holdResult?.codigo_cita,
+    holdResult?.data?.codigo_cita,
+  ].map(toSafeCode).find(Boolean);
+  if (groupCode) return [groupCode];
+  const groupId = holdResult?.id_grupo_cita
+    || bookingSuccessResult?.id_grupo_cita
+    || bookingSuccessResult?.confirmation?.id_grupo_cita
+    || paymentResult?.id_grupo_cita
+    || paymentResult?.data?.id_grupo_cita;
+  if (groupId) return [buildBookingShortCode(groupId, 5)];
   const candidates = [
-    toSafeCode(bookingSuccessResult?.codigo_cita),
-    toSafeCode(bookingSuccessResult?.confirmation?.codigo_cita),
     ...collectCodesFromList(bookingSuccessResult?.citas_confirmadas),
     ...collectCodesFromList(bookingSuccessResult?.confirmation?.citas_confirmadas),
-    toSafeCode(bookingSuccessResult?.paymentResult?.codigo_cita),
     ...collectCodesFromList(bookingSuccessResult?.paymentResult?.citas_confirmadas),
-    toSafeCode(paymentResult?.codigo_cita),
-    toSafeCode(paymentResult?.data?.codigo_cita),
-    toSafeCode(paymentResult?.confirmation?.codigo_cita),
-    toSafeCode(paymentResult?.confirmation?.data?.codigo_cita),
-    toSafeCode(holdResult?.codigo_cita),
-    toSafeCode(holdResult?.data?.codigo_cita),
     ...collectCodesFromList(paymentResult?.citas_confirmadas),
     ...collectCodesFromList(paymentResult?.citas),
     ...collectCodesFromList(paymentResult?.confirmation?.citas_confirmadas),
