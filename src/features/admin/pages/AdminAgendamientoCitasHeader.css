@@ -1,0 +1,61 @@
+.admin-citas-header {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-areas:
+    'context context context context context context'
+    'status status status status status status'
+    'branch branch branch branch branch branch'
+    'search search search search search search'
+    'lookup lookup lookup filters filters filters'
+    'view view refresh refresh clear clear'
+    'emergency emergency emergency emergency emergency emergency';
+  align-items: center;
+  gap: 12px 8px;
+}
+
+.admin-citas-header > * { min-width: 0; }
+.admin-citas-header__context { grid-area: context; }
+.admin-citas-header__status { grid-area: status; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.admin-citas-header__branch { grid-area: branch; }
+.admin-citas-header__search { grid-area: search; }
+.admin-citas-header__lookup { grid-area: lookup; }
+.admin-citas-header__filters { grid-area: filters; }
+.admin-citas-header__clear { grid-area: clear; }
+.admin-citas-header__refresh { grid-area: refresh; }
+.admin-citas-header__emergency { grid-area: emergency; margin-top: 4px; }
+.admin-citas-header__view { grid-area: view; justify-self: start; }
+.admin-citas-header > button { min-height: 44px; height: auto; padding: 10px; white-space: normal; line-height: 1.25; }
+.admin-citas-header > button svg { flex-shrink: 0; }
+
+@media (max-width: 767px) {
+  .admin-citas-header__refresh { flex-wrap: wrap; gap: 4px; font-size: 12px; }
+}
+
+@media (min-width: 768px) {
+  .admin-citas-header {
+    grid-template-areas:
+      'context context context status status view'
+      'branch branch branch branch branch branch'
+      'search search search search search search'
+      'lookup lookup filters clear refresh refresh'
+      'emergency emergency emergency emergency emergency emergency';
+    gap: 16px 12px;
+  }
+  .admin-citas-header__status { justify-content: flex-end; }
+  .admin-citas-header__view { justify-self: end; }
+  .admin-citas-header__emergency { justify-self: end; margin-top: 0; }
+}
+
+@media (min-width: 1440px) {
+  .admin-citas-header {
+    grid-template-columns: minmax(240px, 1fr) repeat(5, auto);
+    grid-template-areas:
+      'context context context status status view'
+      'branch branch branch branch branch branch'
+      'search lookup filters clear refresh emergency';
+  }
+  .admin-citas-header__emergency {
+    margin-left: 8px;
+    border-left-width: 2px;
+  }
+}

@@ -15,6 +15,19 @@ function open() {
   return screen.getByRole('dialog');
 }
 
+it('mantiene un único encabezado accesible y conserva búsqueda y herramientas', () => {
+  render(<MemoryRouter><AdminAgendamientoCitasPage /></MemoryRouter>);
+  const header = screen.getByRole('banner', { name: 'Herramientas de citas' });
+  expect(within(header).getAllByRole('heading', { name: 'Citas' })).toHaveLength(1);
+  expect(within(header).getByLabelText('Sucursal operativa')).toBeTruthy();
+  const search = within(header).getByRole('textbox', { name: 'Buscar por cliente, barbero o ID' });
+  fireEvent.change(search, { target: { value: 'Cliente' } });
+  fireEvent.click(within(header).getByRole('button', { name: 'Borrar búsqueda' }));
+  expect(search.value).toBe('');
+  fireEvent.click(within(header).getByRole('button', { name: 'Buscar reserva' }));
+  expect(screen.getByRole('dialog')).toBeTruthy();
+});
+
 it('busca por codigo y muestra padre completado e hijo confirmado sin confundir grupos', async () => {
   mocks.search.mockResolvedValue({ data: { reservas: [{ id_grupo_cita: 'group-a', codigo_reserva: 'GOXBD', citas: [
     { id_cita: 'a', alias_integrante: 'Padre', nombre_cliente: 'Padre', inicio_at: '2026-10-28T14:00:00Z', estado_cita_codigo: 'completada' },

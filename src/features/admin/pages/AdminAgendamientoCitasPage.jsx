@@ -19,6 +19,7 @@ import { Label } from '../../../components/ui/label.jsx';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table.jsx';
 import ViewToggle from '../../../components/data/ViewToggle.jsx';
+import './AdminAgendamientoCitasHeader.css';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import AdminReservationCode from '../components/AdminReservationCode.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
@@ -1093,70 +1094,41 @@ export default function AdminAgendamientoCitasPage() {
 
   return (
     <div className="space-y-4 overflow-x-hidden px-3 pb-24 sm:px-4 sm:pb-6">
-      <section className="space-y-4 pt-1 lg:hidden">
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
-            <h1 className="mf-font-display text-3xl text-[var(--mf-text)]">Citas</h1>
-          </div>
-
-          <div>
-            <Label className="mf-label">Sucursal operativa</Label>
-            <select
-              className="mf-select mt-1"
-              value={selectedSucursalId}
-              onChange={(event) => handleSucursalSelectionChange(event.target.value)}
-            >
-              {hasMultipleSucursales ? <option value="">Selecciona una sucursal</option> : null}
-              {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="relative min-w-0 flex-1">
-              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
-              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por cliente, barbero o ID" className="h-11 rounded-2xl pl-9 pr-3 text-[0.98rem] min-[390px]:text-[1.03rem]" />
-            </div>
-            <Button type="button" variant="outline" aria-label="Buscar reserva por código" onClick={() => setReservationOpen(true)}><Ticket size={16} /></Button>
-            <div className="relative shrink-0">
-              <div className="origin-right scale-[0.94]">
-                <ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" />
-              </div>
-              {activeFilterCount > 0 ? (
-                <span className="absolute -right-2 -top-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-card)] px-1 text-[10px] font-semibold text-[var(--mf-text)]">
-                  {activeFilterCount}
-                </span>
-              ) : null}
-            </div>
-          </div>
-
-          <div className={`grid gap-2 ${canManageEmergency ? 'grid-cols-2' : 'grid-cols-1'}`}>
-            <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-sm font-semibold min-[390px]:text-base" onClick={handleManualRefresh} disabled={loading || !canOperateWithSucursal}>
-              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-              Actualizar
-            </Button>
-            <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-sm font-semibold min-[390px]:text-base" onClick={() => setFiltersOpen(true)}>
-              <SlidersHorizontal size={15} />
-              Filtros
-            </Button>
-            {canManageEmergency ? (
-              <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-center text-sm font-semibold min-[390px]:text-base" onClick={() => setBatchDialogOpen(true)}>
-                <AlertTriangle size={14} />
-                Reagendación
-              </Button>
-            ) : null}
-          </div>
-          {liveStatusLabel ? (
-            <p className="text-xs text-[var(--mf-text-2)]">{liveStatusLabel}</p>
-          ) : null}
-
-          {hiddenOperationalCount > 0 ? (
-            <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-xs text-[var(--mf-text-2)]">
-              {hiddenOperationalCount} cita(s) en espera o pendiente de pago no se muestran.
-            </div>
-          ) : null}
+      <header className="admin-citas-header rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] p-4 sm:p-5" aria-label="Herramientas de citas">
+        <div className="admin-citas-header__context space-y-1">
+          <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
+          <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Citas</h1>
+          <p className="text-sm text-[var(--mf-text-2)]">Gestiona confirmadas, en salón y en atención sin salir de la operación.</p>
         </div>
-      </section>
+        <div className="admin-citas-header__status text-sm text-[var(--mf-text-2)]" role="status">
+          <span className="font-semibold">{loading ? 'Cargando...' : `${citas.length} cita(s)`}</span>
+          {liveStatusLabel ? <span>{liveStatusLabel}</span> : null}
+        </div>
+        <div className="admin-citas-header__branch rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+          <Label htmlFor="operational-branch" className="mf-label">Sucursal operativa</Label>
+          <select id="operational-branch" className="mf-select mt-1 w-full min-w-0" value={selectedSucursalId} onChange={(event) => handleSucursalSelectionChange(event.target.value)}>
+            {hasMultipleSucursales ? <option value="">Selecciona una sucursal</option> : null}
+            {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
+          </select>
+          {selectedSucursal ? <p className="mt-1 text-xs text-[var(--mf-text-2)]">Operando en: {selectedSucursal.nombre_sucursal}</p> : null}
+        </div>
+        <div className="admin-citas-header__search relative">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
+          <Input aria-label="Buscar por cliente, barbero o ID" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por cliente, barbero o ID" className="h-11 w-full pl-9 pr-9" />
+          {search.trim() ? <button type="button" aria-label="Borrar búsqueda" onClick={() => setSearch('')} className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-[var(--mf-text-2)] hover:bg-[var(--mf-btn-bg)]"><X size={12} /></button> : null}
+        </div>
+        <Button type="button" variant="outline" className="admin-citas-header__lookup gap-2" onClick={() => setReservationOpen(true)}><Ticket size={15} />Buscar reserva</Button>
+        <Button type="button" variant="outline" className="admin-citas-header__filters gap-2" onClick={() => setFiltersOpen(true)}>
+          <SlidersHorizontal size={15} />Filtros
+          {activeFilterCount > 0 ? <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-xs text-[var(--mf-accent-text)]">{activeFilterCount}</span> : null}
+        </Button>
+        {activeFilterCount > 0 ? <Button type="button" variant="ghost" size="sm" className="admin-citas-header__clear text-xs text-[var(--mf-text-2)]" onClick={clearAllFilters}>Limpiar</Button> : null}
+        <Button type="button" variant="outline" className="admin-citas-header__refresh gap-2" onClick={handleManualRefresh} disabled={loading || !canOperateWithSucursal}>
+          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />Actualizar
+        </Button>
+        {canManageEmergency ? <Button type="button" variant="outline" className="admin-citas-header__emergency gap-2" onClick={() => setBatchDialogOpen(true)}><AlertTriangle size={14} />Reagendación masiva</Button> : null}
+        <div className="admin-citas-header__view"><ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" /></div>
+      </header>
 
       <section className="border-b border-[var(--mf-nav-border)] pb-1 lg:hidden">
         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
@@ -1180,71 +1152,8 @@ export default function AdminAgendamientoCitasPage() {
         </div>
       </section>
 
-      <header className="hidden rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5 lg:block">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-          <div className="space-y-1">
-            <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
-            <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Citas</h1>
-            <p className="text-sm text-[var(--mf-text-2)]">Gestiona confirmadas, en salón y en atención sin salir de la operación.</p>
-          </div>
-          <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[640px]">
-            <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Label className="mf-label mb-0">Sucursal operativa</Label>
-                <select
-                  className="mf-select h-9 min-w-[260px]"
-                  value={selectedSucursalId}
-                  onChange={(event) => handleSucursalSelectionChange(event.target.value)}
-                >
-                  {hasMultipleSucursales ? <option value="">Selecciona una sucursal</option> : null}
-                  {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
-                </select>
-                {selectedSucursal ? <span className="text-xs text-[var(--mf-text-2)]">Operando en: {selectedSucursal.nombre_sucursal}</span> : null}
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm text-[var(--mf-text-2)]">
-                {loading ? 'Cargando...' : `${citas.length} cita(s)`}
-                {liveStatusLabel ? <span className="ml-2">{liveStatusLabel}</span> : null}
-              </span>
-              <ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" />
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-              <div className="relative w-full sm:max-w-[340px]">
-                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
-                <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por cliente, barbero o ID..." className="pl-9 pr-9" />
-                {search.trim() ? (
-                  <button type="button" onClick={() => setSearch('')} className="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-[var(--mf-text-2)] transition-colors hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-text)]">
-                    <X size={12} />
-                  </button>
-                ) : null}
-              </div>
-              <Button type="button" variant="outline" className="gap-2" onClick={() => setReservationOpen(true)}><Ticket size={15} />Buscar reserva</Button>
-              <Button type="button" variant="outline" className="gap-2" onClick={() => setFiltersOpen(true)}>
-                <SlidersHorizontal size={15} />
-                Filtros
-                {activeFilterCount > 0 ? <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-xs text-[var(--mf-accent-text)]">{activeFilterCount}</span> : null}
-              </Button>
-              {activeFilterCount > 0 ? (
-                <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={clearAllFilters}>Limpiar</Button>
-              ) : null}
-              <Button type="button" variant="outline" className="gap-2" onClick={handleManualRefresh} disabled={loading || !canOperateWithSucursal}>
-                <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-                Actualizar
-              </Button>
-              {canManageEmergency ? (
-                <Button type="button" variant="outline" className="gap-2" onClick={() => setBatchDialogOpen(true)}>
-                  <AlertTriangle size={14} />
-                  Reagendación masiva
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </header>
-
       {hiddenOperationalCount > 0 ? (
-        <div className="hidden rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-2 text-sm text-[var(--mf-text-2)] lg:block">
+        <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-2 text-sm text-[var(--mf-text-2)]">
           {hiddenOperationalCount} cita(s) en espera o pendiente de pago no se muestran en estos contenedores.
         </div>
       ) : null}
