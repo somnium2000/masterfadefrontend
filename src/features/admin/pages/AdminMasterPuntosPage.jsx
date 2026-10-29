@@ -227,6 +227,10 @@ function AdminMasterPuntosContent() {
     const roleList = Array.isArray(roles) ? roles.map((role) => normalizeText(role).toLowerCase()) : [];
     return roleList.includes('admin') || roleList.includes('super_admin');
   }, [roles]);
+  const canEditGlobalRewards = useMemo(() => {
+    const roleList = Array.isArray(roles) ? roles.map((role) => normalizeText(role).toLowerCase()) : [];
+    return roleList.includes('super_admin');
+  }, [roles]);
 
   useEffect(() => {
     const readControllers = readControllersRef.current;
@@ -549,6 +553,7 @@ function AdminMasterPuntosContent() {
   }
 
   function toggleRewardService(condition, serviceId) {
+    if (!canEditGlobalRewards) return;
     const safeCondition = normalizeText(condition);
     const safeServiceId = normalizeText(serviceId);
     if (!safeServiceId || !['sin_membresia', 'con_membresia'].includes(safeCondition)) return;
@@ -567,7 +572,7 @@ function AdminMasterPuntosContent() {
   }
 
   async function handleSaveRewardConfig() {
-    if (!canManagePoints || !rewardConfigLoaded || rewardConfigSaving || rewardSaveLockRef.current) return;
+    if (!canEditGlobalRewards || !rewardConfigLoaded || rewardConfigSaving || rewardSaveLockRef.current) return;
     rewardSaveLockRef.current = true;
     const requestSeq = ++rewardRequestSeqRef.current;
     const isCurrent = () => mountedRef.current && rewardRequestSeqRef.current === requestSeq;
@@ -629,21 +634,23 @@ function AdminMasterPuntosContent() {
               </p>
             ) : null}
           </div>
-          <Button
-            type="button"
-            onClick={handleSaveRewardConfig}
-            disabled={!rewardConfigLoaded || rewardConfigLoading || rewardConfigSaving}
-            className="w-full lg:w-auto"
-          >
-            {rewardConfigSaving ? (
-              <span className="inline-flex items-center gap-2">
-                <Loader2 size={14} className="animate-spin" />
-                Guardando...
-              </span>
-            ) : (
-              'Guardar configuracion'
-            )}
-          </Button>
+          {canEditGlobalRewards ? (
+            <Button
+              type="button"
+              onClick={handleSaveRewardConfig}
+              disabled={!rewardConfigLoaded || rewardConfigLoading || rewardConfigSaving}
+              className="w-full lg:w-auto"
+            >
+              {rewardConfigSaving ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin" />
+                  Guardando...
+                </span>
+              ) : (
+                'Guardar configuracion'
+              )}
+            </Button>
+          ) : null}
         </div>
 
         {rewardConfigError ? (
@@ -684,7 +691,7 @@ function AdminMasterPuntosContent() {
                           type="checkbox"
                           className="mt-1 h-4 w-4 accent-[var(--mf-accent)]"
                           checked={checked}
-                          disabled={rewardConfigSaving}
+                          disabled={!canEditGlobalRewards || rewardConfigSaving}
                           onChange={() => toggleRewardService(condition, service.id_servicio)}
                         />
                         <span className="min-w-0">
