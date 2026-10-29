@@ -8,7 +8,8 @@ import { listAdminServicios } from '../lib/adminCatalogApi.js';
 import { listAdminPaquetes } from '../lib/adminPackagesApi.js';
 import { emitCatalogSync } from '../../../lib/catalogSync.js';
 import { Button } from '../../../components/ui/button.jsx';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table.jsx';
@@ -1414,7 +1415,7 @@ export default function AdminConfiguracionPromocionesPage() {
         </div>
       ) : null}
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading && !open) closeEditor(); }}>
+      <UnsavedChangesDialog values={formValues} saving={formLoading} open={dialogOpen} onOpenChange={(open) => { if (!open) closeEditor(); }}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editTarget ? 'Editar promocion' : 'Nueva promocion'}</DialogTitle><DialogDescription className="sr-only">Configura contenido, publicacion y vigencia de la promocion por sucursal.</DialogDescription></DialogHeader>
           <PromotionForm
@@ -1427,9 +1428,9 @@ export default function AdminConfiguracionPromocionesPage() {
             loadingTargets={loadingTargetOptions}
             errorMessage={formError}
           />
-          <DialogFooter className="mt-2"><Button variant="outline" onClick={closeEditor} disabled={formLoading}>Cancelar</Button><Button onClick={() => void handleGuardar()} disabled={formLoading || actionsLockedByBranch} className="gap-2 min-w-[140px]">{formLoading ? <Loader2 size={15} className="animate-spin" /> : null}{editTarget ? 'Guardar cambios' : 'Crear promocion'}</Button></DialogFooter>
+          <DialogFooter className="mt-2"><DialogClose asChild><Button variant="outline" disabled={formLoading}>Cancelar</Button></DialogClose><Button onClick={() => void handleGuardar()} disabled={formLoading || actionsLockedByBranch} className="gap-2 min-w-[140px]">{formLoading ? <Loader2 size={15} className="animate-spin" /> : null}{editTarget ? 'Guardar cambios' : 'Crear promocion'}</Button></DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
 
       <Dialog open={detailOpen} onOpenChange={(open) => { if (!open) closeDetail(); }}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
