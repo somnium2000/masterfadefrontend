@@ -390,6 +390,7 @@ export default function ClientePlanesPage() {
   const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [purchaseErrorMessage, setPurchaseErrorMessage] = useState("");
   const [purchaseCompleted, setPurchaseCompleted] = useState(false);
+  const [purchaseConfirmation, setPurchaseConfirmation] = useState(null);
   const [purchasePendingConfirmation, setPurchasePendingConfirmation] = useState(false);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [confirmDialogMode, setConfirmDialogMode] = useState("");
@@ -483,6 +484,7 @@ export default function ClientePlanesPage() {
   }
 
   function resetPurchaseFlow() {
+    setPurchaseConfirmation(null);
     setPurchaseStep("summary");
     setPurchaseOrderSummary(null);
     setMembershipPaymentIntent(null);
@@ -646,13 +648,13 @@ export default function ClientePlanesPage() {
         setPurchaseErrorMessage(getPixelPayCustomerMessage(paymentResult));
         return;
       }
+      setPurchaseConfirmation(paymentResult);
       setPurchaseCompleted(true);
       setPurchaseStep("success");
       await Promise.all([
         fetchMembershipState(),
         fetchPlans(branchId),
       ]);
-      notifySuccess("Pago confirmado. Tu suscripción ya está activa.");
     } catch (error) {
       if (isPixelPayUncertainError(error)) {
         setPurchasePendingConfirmation(true);
@@ -670,6 +672,7 @@ export default function ClientePlanesPage() {
     const normalized = String(result?.normalized_status || "PENDIENTE").toUpperCase();
     if (normalized === "PAGADO") {
       setPurchasePendingConfirmation(false);
+      setPurchaseConfirmation(result);
       setPurchaseCompleted(true);
       setPurchaseStep("success");
       setPurchaseErrorMessage("");
@@ -1152,6 +1155,7 @@ export default function ClientePlanesPage() {
         errorMessage={purchaseErrorMessage}
         disableClose={purchaseLoading || purchasePendingConfirmation}
         pendingConfirmation={purchasePendingConfirmation}
+        paymentConfirmation={purchaseConfirmation}
         onCancel={membershipPaymentIntent ? resetPurchaseFlow : discardPurchaseFlow}
         onBackToSummary={() => setPurchaseStep("summary")}
         onContinueToPayment={handleContinueToPayment}

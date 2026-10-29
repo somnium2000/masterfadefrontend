@@ -285,6 +285,7 @@ export default function MembershipPlansPage() {
   const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [purchaseErrorMessage, setPurchaseErrorMessage] = useState("");
   const [purchaseCompleted, setPurchaseCompleted] = useState(false);
+  const [purchaseConfirmation, setPurchaseConfirmation] = useState(null);
   const [purchasePendingConfirmation, setPurchasePendingConfirmation] = useState(false);
 
   const scrollRef = useRef(null);
@@ -301,6 +302,7 @@ export default function MembershipPlansPage() {
       setPurchaseModalOpen(false);
       setPurchaseOrderSummary(null);
       setMembershipPaymentIntent(null);
+      setPurchaseConfirmation(null);
       setPurchaseStep("summary");
       setPurchaseLoading(false);
       setPurchaseErrorMessage("");
@@ -367,6 +369,7 @@ export default function MembershipPlansPage() {
   }
 
   const resetPurchaseFlow = useCallback(() => {
+    setPurchaseConfirmation(null);
     setPurchaseStep("summary");
     setPurchaseOrderSummary(null);
     setMembershipPaymentIntent(null);
@@ -665,11 +668,11 @@ export default function MembershipPlansPage() {
         return;
       }
       if (!isCurrent()) return;
+      setPurchaseConfirmation(paymentResult);
       setPurchaseCompleted(true);
       setPurchaseStep("success");
       await loadMembershipState();
       if (!isCurrent()) return;
-      notifications.success("Pago confirmado. Tu plan ya esta activo.");
     } catch (error) {
       if (!isCurrent()) return;
       if (isPixelPayUncertainError(error)) {
@@ -688,6 +691,7 @@ export default function MembershipPlansPage() {
     const normalized = String(result?.normalized_status || "PENDIENTE").toUpperCase();
     if (normalized === "PAGADO") {
       setPurchasePendingConfirmation(false);
+      setPurchaseConfirmation(result);
       setPurchaseCompleted(true);
       setPurchaseStep("success");
       setPurchaseErrorMessage("");
@@ -910,6 +914,7 @@ export default function MembershipPlansPage() {
         errorMessage={purchaseErrorMessage}
         disableClose={purchaseLoading || purchasePendingConfirmation}
         pendingConfirmation={purchasePendingConfirmation}
+        paymentConfirmation={purchaseConfirmation}
         onCancel={cancelPurchaseFlow}
         onContinueToPayment={handleContinueToPayment}
         onConfirmPayment={handleConfirmPayment}

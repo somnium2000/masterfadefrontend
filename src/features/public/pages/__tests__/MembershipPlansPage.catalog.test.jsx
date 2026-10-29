@@ -273,6 +273,37 @@ describe('persistencia aislada de intentos VIP', () => {
     return view;
   };
 
+  test('la aprobación directa conserva el recibo sin toast de éxito duplicado', async () => {
+    const result = { estado_intent_codigo: 'confirmado', confirmation: { estado: 'activa', id_suscripcion: 'subscription-a' } };
+    payment.confirmMembershipPayment.mockResolvedValue(result);
+    await renderPurchase();
+    await act(async () => buy());
+    await act(async () => dialog.props.onContinueToPayment());
+    await act(async () => dialog.props.onConfirmPayment({}));
+    expect(dialog.props.step).toBe('success');
+    expect(dialog.props.paymentConfirmation).toBe(result);
+    expect(notifications.success).not.toHaveBeenCalled();
+  });
+
+  test.each(['PAGADO', 'RECHAZADO'])('polling %s entrega el resultado sin toast ni segunda Sale', async (normalized_status) => {
+    const result = { normalized_status, estado_intent_codigo: normalized_status === 'PAGADO' ? 'confirmado' : 'fallido', id_suscripcion: 'subscription-a' };
+    payment.confirmMembershipPayment.mockResolvedValue({ pending_confirmation: true });
+    payment.queryMembershipPaymentStatus.mockResolvedValue(result);
+    await renderPurchase();
+    await act(async () => buy());
+    await act(async () => dialog.props.onContinueToPayment());
+    await act(async () => dialog.props.onConfirmPayment({}));
+    expect(payment.confirmMembershipPayment).toHaveBeenCalledTimes(1);
+    expect(notifications.success).not.toHaveBeenCalled();
+    if (normalized_status === 'PAGADO') {
+      expect(dialog.props.step).toBe('success');
+      expect(dialog.props.paymentConfirmation).toBe(result);
+    } else {
+      expect(dialog.props.step).toBe('payment');
+      expect(dialog.props.errorMessage).toMatch(/rechazado/);
+    }
+  });
+
   test('primera compra genera UUID una vez y almacena solo contexto mínimo antes de la respuesta', async () => {
     const pending = deferred();
     payment.createMembershipOrder.mockReturnValue(pending.promise);

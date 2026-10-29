@@ -61,9 +61,17 @@
 .mf-payment-footer .mf-payment-submit { order: -2; }
 .mf-payment-footer .mf-payment-back { order: -1; }
 .mf-payment-error { color: var(--mf-danger, var(--destructive)); }
+.membership-confirmation-dialog { width: calc(100% - 24px); max-width: 460px; max-height: 90dvh; padding: 0; overflow-y: auto; background: transparent; border: 0; }
+.payment-result-dialog { width: calc(100% - 24px); max-width: 440px; max-height: 90dvh; overflow-y: auto; }
+.membership-confirmation-dialog, .payment-result-dialog { left: 12px; right: 12px; }
+.payment-result-error { display: grid; justify-items: center; gap: 18px; padding-top: 20px; text-align: center; }
+.payment-result-error-icon { display: grid; place-items: center; width: 76px; height: 76px; border-radius: 50%; color: var(--destructive); background: color-mix(in srgb, var(--destructive) 10%, var(--mf-card)); border: 1px solid color-mix(in srgb, var(--destructive) 30%, transparent); }
+.payment-result-error > button { width: 100%; min-height: 48px; }
+.membership-confirmation-dialog .booking-confirmation-row strong { text-align: right; }
 @container (min-width: 450px) { .mf-checkout-billing { grid-template-columns: repeat(2, minmax(0, 1fr)); } .mf-checkout-billing > :last-child { grid-column: 1 / -1; } }
 @container (min-width: 520px) { .mf-payment-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } .mf-payment-form label:nth-child(5) { grid-column: 1 / -1; } }
 @media (min-width: 640px) { .mf-payment-dialog { left: 50%; right: auto; } }
+@media (min-width: 640px) { .membership-confirmation-dialog, .payment-result-dialog { left: 50%; right: auto; } }
 @media (min-width: 768px) {
   .mf-checkout-hero { grid-template-columns: 1.15fr 1fr; align-items: center; padding-bottom: 32px; }
   .mf-checkout-art { display: flex; }

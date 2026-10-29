@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { playBookingConfirmationSound } from './bookingConfirmationSound.js';
+import { useState } from 'react';
+import ConfirmationCard, { useConfirmationSound } from '../../../components/feedback/ConfirmationCard.jsx';
 import { CalendarDays, Copy, CreditCard, ReceiptText, UserRound, Loader2 } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import { usePublicBookingFlow } from './BookingFlowContext.jsx';
@@ -70,9 +70,6 @@ function resolveBookingCodes({ bookingSuccessResult, paymentResult, holdResult }
 
 export default function PublicBookingSuccessStep() {
   const [copyMessage, setCopyMessage] = useState('');
-  const soundPlayed = useRef(false);
-  const stopSound = useRef(null);
-  useEffect(() => () => stopSound.current?.(), []);
   const {
     bookingSuccessResult,
     bookingBlocksSummary,
@@ -113,24 +110,11 @@ export default function PublicBookingSuccessStep() {
     }
   }
 
-  function onCheckDrawn(event) {
-    if (event.animationName !== 'booking-check-draw' || !isConfirmedUi || soundPlayed.current) return;
-    soundPlayed.current = true;
-    stopSound.current = playBookingConfirmationSound();
-  }
+  const onCheckDrawn = useConfirmationSound(isConfirmedUi);
 
   if (isConfirmedUi) return (
     <div className="citas-confirm-wrap booking-confirmation-wrap">
-      <section className="booking-confirmation-card" aria-labelledby="booking-confirmation-title">
-        <div className="booking-confirmation-seal" aria-hidden="true">
-          <svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="33" /><path onAnimationEnd={onCheckDrawn} pathLength="1" d="m25 40 10 10 21-23" /></svg>
-          <span className="booking-confirmation-spark spark-one">✦</span><span className="booking-confirmation-spark spark-two">✦</span>
-        </div>
-        <header className="booking-confirmation-heading">
-          <h1 id="booking-confirmation-title">¡Reserva confirmada!</h1>
-          <p>Tu cita ha sido confirmada exitosamente.</p>
-        </header>
-        <div className="booking-confirmation-content">
+      <ConfirmationCard title="¡Reserva confirmada!" subtitle="Tu cita ha sido confirmada exitosamente." titleId="booking-confirmation-title" onCheckDrawn={onCheckDrawn} onDone={completeBookingFlow}>
           <div className="booking-confirmation-receipt">
             <div className="booking-confirmation-row"><CalendarDays aria-hidden="true" /><span>Código de cita</span><strong className="booking-confirmation-code">{displayCodes.length ? displayCodes.join(', ') : 'En proceso de asignación'}</strong>{displayCodes.length ? <button type="button" className="booking-confirmation-copy" onClick={copyCodes} aria-label="Copiar código de cita"><Copy size={16} /></button> : null}</div>
             <div className="booking-confirmation-row"><CreditCard aria-hidden="true" /><span>Estado de pago</span><span className={paymentLabelLower === 'pagado' ? 'booking-confirmation-paid' : 'booking-confirmation-payment'}>{paymentLabelLower === 'pagado' ? 'Pagado' : paymentUiState.paymentLabel}</span></div>
@@ -139,9 +123,7 @@ export default function PublicBookingSuccessStep() {
           </div>
           <p className="booking-confirmation-copy-status" role="status">{copyMessage}</p>
           <div className="booking-confirmation-appointments"><h2>CITAS CONFIRMADAS</h2>{bookingBlocksSummary.map((block) => <div key={block.id} className="booking-confirmation-appointment"><UserRound aria-hidden="true" /><div><span>{block.alias}</span><span>{block.barbero?.nombre_completo || 'Barbero'}</span></div></div>)}</div>
-          <Button className="booking-confirmation-done" onClick={completeBookingFlow}>Entendido</Button>
-        </div>
-      </section>
+      </ConfirmationCard>
     </div>
   );
 
