@@ -10,7 +10,7 @@ import {
   normalizeBookingPaymentUiState,
 } from './bookingUtils.js';
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function toSafeCode(value) {
   const normalized = String(value || '').trim();
@@ -28,6 +28,20 @@ function collectCodesFromList(list) {
 }
 
 function resolveBookingCodes({ bookingSuccessResult, paymentResult, holdResult }) {
+  const groupId = [
+    holdResult?.id_grupo_cita,
+    holdResult?.data?.id_grupo_cita,
+    bookingSuccessResult?.id_grupo_cita,
+    bookingSuccessResult?.confirmation?.id_grupo_cita,
+    bookingSuccessResult?.confirmation?.data?.id_grupo_cita,
+    bookingSuccessResult?.paymentResult?.id_grupo_cita,
+    bookingSuccessResult?.paymentResult?.data?.id_grupo_cita,
+    paymentResult?.id_grupo_cita,
+    paymentResult?.data?.id_grupo_cita,
+    paymentResult?.confirmation?.id_grupo_cita,
+    paymentResult?.confirmation?.data?.id_grupo_cita,
+  ].map((value) => String(value || '').trim()).find((value) => UUID_PATTERN.test(value));
+  if (groupId) return [buildBookingShortCode(groupId, 5)];
   const groupCode = [
     bookingSuccessResult?.codigo_cita,
     bookingSuccessResult?.confirmation?.codigo_cita,
@@ -40,12 +54,6 @@ function resolveBookingCodes({ bookingSuccessResult, paymentResult, holdResult }
     holdResult?.data?.codigo_cita,
   ].map(toSafeCode).find(Boolean);
   if (groupCode) return [groupCode];
-  const groupId = holdResult?.id_grupo_cita
-    || bookingSuccessResult?.id_grupo_cita
-    || bookingSuccessResult?.confirmation?.id_grupo_cita
-    || paymentResult?.id_grupo_cita
-    || paymentResult?.data?.id_grupo_cita;
-  if (groupId) return [buildBookingShortCode(groupId, 5)];
   const candidates = [
     ...collectCodesFromList(bookingSuccessResult?.citas_confirmadas),
     ...collectCodesFromList(bookingSuccessResult?.confirmation?.citas_confirmadas),
@@ -94,11 +102,7 @@ export default function PublicBookingSuccessStep() {
     ?? 0
   );
   const isCoveredByPlan = paymentLabelLower === 'cubierto_por_plan' || coveredByPlanHnl > 0;
-  const fallbackShortCode = buildBookingShortCode(holdResult?.id_grupo_cita || null, 5);
-  const hasRealCode = bookingCodes.length > 0;
-  const displayCodes = hasRealCode
-    ? bookingCodes
-    : (fallbackShortCode && fallbackShortCode !== 'N/A' ? [fallbackShortCode] : []);
+  const displayCodes = bookingCodes;
 
   async function copyCodes() {
     try {
