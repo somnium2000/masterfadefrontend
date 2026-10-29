@@ -29,6 +29,18 @@ function renderPayment(overrides) {
 beforeEach(() => { vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay'); vi.stubEnv('VITE_PIXELPAY_ENV', 'sandbox'); });
 afterEach(() => { cleanup(); vi.unstubAllEnvs(); });
 
+it('oculta el CVV y conserva la entrada numérica de hasta cuatro dígitos', () => {
+  const context = renderPayment();
+  const cvv = screen.getByLabelText('CVV');
+  expect(cvv.type).toBe('password');
+  expect(cvv.inputMode).toBe('numeric');
+  expect(cvv.autocomplete).toBe('cc-csc');
+  expect(cvv.maxLength).toBe(4);
+  fireEvent.change(cvv, { target: { value: '12a345' } });
+  expect(cvv.value).toBe('1234');
+  expect(context.completePixelPayPayment).not.toHaveBeenCalled();
+});
+
 it('presenta el resumen real, hold y CTA Sandbox sin ejecutar un pago', () => {
   const context = renderPayment();
   const summary = within(screen.getByText('Resumen de tu reserva').parentElement);

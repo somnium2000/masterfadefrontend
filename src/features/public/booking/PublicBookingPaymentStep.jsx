@@ -673,10 +673,12 @@ export default function PublicBookingPaymentStep() {
                 <label className="mf-label" htmlFor="pay-cvv">CVV</label>
                 <input
                   id="pay-cvv"
+                  type="password"
                   className="mf-input"
                   placeholder="123"
                   autoComplete="cc-csc"
                   inputMode="numeric"
+                  maxLength={4}
                   value={paymentForm.cvv}
                   onChange={handleFieldChange('cvv')}
                 />
