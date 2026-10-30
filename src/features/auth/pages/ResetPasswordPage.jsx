@@ -99,10 +99,15 @@ export default function ResetPasswordPage() {
     setLoading(true);
     try {
       if (!passwordUpdated) {
-        await http.post('/v1/auth/reset-password', { token_hash: hashData.token_hash, contrasena: newPass, confirmar_contrasena: confirm },
+        const resetResponse = await http.post('/v1/auth/reset-password', { token_hash: hashData.token_hash, contrasena: newPass, confirmar_contrasena: confirm },
           { skipCsrf: true, sensitiveBody: true, skipAuthInvalidation: true, signal: controller.signal });
         if (controller.signal.aborted) return;
         setPasswordUpdated(true); setNewPass(''); setConfirm('');
+        const resetData = resetResponse?.data || resetResponse;
+        if (resetData?.session_revocation_confirmed === false) {
+          setError('Contraseña actualizada, pero no se confirmó el cierre de todas las sesiones. Intenta finalizar el cierre antes de iniciar sesión.');
+          return;
+        }
       }
       const closed = await logout();
       if (controller.signal.aborted) return;

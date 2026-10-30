@@ -67,6 +67,21 @@ test('enlace expirado del servidor es seguro',async()=>{
  api.post.mockRejectedValue({status:401,data:{error:{code:'OTP_EXPIRED',message:'private diagnostic'}}});await mount();fill();
  fireEvent.click(screen.getByRole('button',{name:'Actualizar contraseña'}));await screen.findByRole('alert');expect(screen.getByRole('alert')).toHaveTextContent('expiró');expect(api.logout).not.toHaveBeenCalled();
 });
+test('sesión previa se cierra antes de reutilizar el mismo enlace no consumido',async()=>{
+ api.post.mockRejectedValue({status:409,data:{error:{code:'AUTH_RECOVERY_ACTIVE_SESSION'}}});await mount();fill();
+ fireEvent.click(screen.getByRole('button',{name:'Actualizar contraseña'}));await screen.findByRole('alert');
+ expect(screen.getByRole('alert')).toHaveTextContent('Cierra la sesión actual');expect(screen.getByRole('alert')).toHaveTextContent('mismo enlace');expect(api.logout).not.toHaveBeenCalled();
+});
+test('resultado incierto exige enlace nuevo y no invita a reutilizar el OTP',async()=>{
+ api.post.mockRejectedValue({status:503,data:{error:{code:'AUTH_RESET_UNCONFIRMED'}}});await mount();fill();
+ fireEvent.click(screen.getByRole('button',{name:'Actualizar contraseña'}));await screen.findByRole('alert');
+ expect(screen.getByRole('alert')).toHaveTextContent('No se pudo confirmar si la contraseña cambió');expect(screen.getByRole('alert')).toHaveTextContent('solicita uno nuevo');expect(api.logout).not.toHaveBeenCalled();
+});
+test('password actualizado con revocación global incierta se informa sin éxito falso',async()=>{
+ api.post.mockResolvedValue({ok:true,data:{password_updated:true,login_required:true,session_revocation_confirmed:false}});await mount();fill();
+ fireEvent.click(screen.getByRole('button',{name:'Actualizar contraseña'}));await screen.findByRole('alert');
+ expect(screen.getByRole('alert')).toHaveTextContent('Contraseña actualizada');expect(screen.getByRole('alert')).toHaveTextContent('no se confirmó el cierre');expect(api.logout).not.toHaveBeenCalled();expect(api.post).toHaveBeenCalledOnce();
+});
 test('doble submit y desmontaje: petición única y abortada, sin logout/navegación tardía',async()=>{
  let resolve;api.post.mockReturnValue(new Promise(r=>resolve=r));const m=await mount();fill();
  fireEvent.submit(screen.getByRole('button',{name:'Actualizar contraseña'}).closest('form'));fireEvent.submit(screen.getByRole('button',{name:'Guardando...'}).closest('form'));
