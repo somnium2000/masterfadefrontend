@@ -595,6 +595,7 @@ export default function ClienteCatalogoPage() {
               onRetry={() => void handleCatalogRetry()}
             />
           ) : null}
+          <div data-testid="cliente-catalog-sections" className="flex flex-col gap-5 sm:gap-6">
           <CatalogServicesTwoRowsSection
             sectionId="servicios"
             titleIcon={Scissors}
@@ -731,6 +732,7 @@ export default function ClienteCatalogoPage() {
               </>
             ) : null}
           </section>
+          </div>
         </>
       )}
     </div>

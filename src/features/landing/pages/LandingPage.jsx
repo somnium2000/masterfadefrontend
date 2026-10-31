@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { CalendarDays, Crown, House, LogIn, Plus, Scissors, Tag, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
@@ -42,25 +42,37 @@ function BrandBlock({ desktop = false }) {
   );
 }
 
-function PrimaryCta({ icon: Icon, label, onClick }) {
+function PrimaryCta({ icon: Icon, label, onClick, order = 0 }) {
+  const reducedMotion = useReducedMotion();
   return (
-    <button
+    <motion.button
       type="button"
       onClick={onClick}
+      initial={reducedMotion ? false : { opacity: 0.72, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={reducedMotion ? { duration: 0 } : { duration: 0.38, delay: order * 0.07, ease }}
+      whileHover={reducedMotion ? undefined : { scale: 1.015, y: -1 }}
+      whileTap={reducedMotion ? undefined : { scale: 0.975 }}
       className="mf-accent-gradient mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl px-5 text-[15px] font-semibold transition-transform duration-200 hover:-translate-y-px hover:scale-[1.015] active:scale-[0.975] motion-reduce:transform-none motion-reduce:transition-none"
     >
       <Icon size={18} strokeWidth={1.9} />
       <span>{label}</span>
-    </button>
+    </motion.button>
   );
 }
 
-function SecondaryCta({ icon: Icon, label, onClick, disabled = false }) {
+function SecondaryCta({ icon: Icon, label, onClick, disabled = false, order = 0 }) {
+  const reducedMotion = useReducedMotion();
   return (
-    <button
+    <motion.button
       type="button"
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
+      initial={reducedMotion ? false : { opacity: 0.72, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={reducedMotion ? { duration: 0 } : { duration: 0.38, delay: order * 0.07, ease }}
+      whileHover={disabled || reducedMotion ? undefined : { scale: 1.015, y: -1 }}
+      whileTap={disabled || reducedMotion ? undefined : { scale: 0.975 }}
       className={`mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl border border-[var(--mf-btn-border)] px-5 text-[15px] transition-all duration-200 motion-reduce:transform-none motion-reduce:transition-none ${
         disabled
           ? 'cursor-not-allowed bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)] opacity-70'
@@ -69,7 +81,7 @@ function SecondaryCta({ icon: Icon, label, onClick, disabled = false }) {
     >
       <Icon size={18} strokeWidth={1.9} className="text-[var(--mf-accent)]" />
       <span>{label}</span>
-    </button>
+    </motion.button>
   );
 }
 
@@ -144,8 +156,8 @@ export default function LandingPage() {
 
                 <div className="flex flex-col gap-3">
                   <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} />
-                  <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} />
-                  <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} />
+                  <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} order={1} />
+                  <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} order={2} />
                 </div>
               </div>
             </div>
@@ -193,8 +205,8 @@ export default function LandingPage() {
 
             <div className="w-full max-w-[380px] space-y-3">
               <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} />
-              <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} />
-              <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} />
+              <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} order={1} />
+              <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} order={2} />
             </div>
 
             <motion.div
