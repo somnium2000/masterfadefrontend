@@ -75,6 +75,15 @@ function mapCampaignToForm(campaign) {
   };
 }
 
+function snapshotEditableForm(values = {}) {
+  return JSON.stringify([
+    String(values.nombre_interno ?? ''),
+    String(values.asunto ?? ''),
+    String(values.contenido_texto ?? ''),
+    String(values.observaciones ?? ''),
+  ]);
+}
+
 function buildPayload(values) {
   return {
     tipo_campania: 'informativa',
@@ -234,6 +243,8 @@ function CommunicationContent() {
   const editorGenerationRef = useRef(0);
   const saveOperationRef = useRef(null);
   const campaignOperationRef = useRef(null);
+  const formSnapshotRef = useRef(snapshotEditableForm(FORM_DEFAULTS));
+  const pendingEditorTransitionRef = useRef(null);
   const listKey = JSON.stringify([searchQuery, filterOperationalState, showCancelledCampaigns, sortKey, campaignsOffset]);
   const listKeyRef = useRef(listKey);
 
@@ -260,6 +271,8 @@ function CommunicationContent() {
     campaignOperationRef.current = null;
     setScheduling(false); setSending(false); setRetryingFailed(false); setCancellingCampaign(false);
     setConfirmDialog(prev => ({ ...prev, open: false, action: '' }));
+    pendingEditorTransitionRef.current = null;
+    formSnapshotRef.current = snapshotEditableForm(FORM_DEFAULTS);
     campaignContextRef.current = { id, generation: campaignContextRef.current.generation + 1 };
     detailRequestRef.current += 1;
     eligibilityRequestRef.current += 1;
@@ -497,7 +510,9 @@ function CommunicationContent() {
           setPanelMode('view');
           notifications.warning('Solo se puede editar cuando la campaña está en borrador.', { dedupeKey: 'comm-campaign-edit-not-draft' });
         } else {
-          setFormValues(mapCampaignToForm(campaign));
+          const nextFormValues = mapCampaignToForm(campaign);
+          formSnapshotRef.current = snapshotEditableForm(nextFormValues);
+          setFormValues(nextFormValues);
           setFormError('');
           setPanelMode('edit');
         }
@@ -548,18 +563,19 @@ function CommunicationContent() {
     editorPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [panelMode]);
 
-  function openCreatePanel() {
+  function performOpenCreatePanel() {
     saveOperationRef.current = null;
     detailRequestRef.current += 1;
     editorGenerationRef.current += 1;
     setDetailLoading(false);
     setSaving(false);
     setPanelMode('create');
+    formSnapshotRef.current = snapshotEditableForm(FORM_DEFAULTS);
     setFormValues(FORM_DEFAULTS);
     setFormError('');
   }
 
-  function closeEditorPanel() {
+  function performCloseEditorPanel() {
     saveOperationRef.current = null;
     detailRequestRef.current += 1;
     editorGenerationRef.current += 1;
@@ -567,8 +583,46 @@ function CommunicationContent() {
     setSaving(false);
     if (!selectedCampaign) resetCampaignContext();
     setPanelMode('view');
+    formSnapshotRef.current = snapshotEditableForm(FORM_DEFAULTS);
     setFormValues(FORM_DEFAULTS);
     setFormError('');
+  }
+
+  function hasUnsavedEditorChanges() {
+    return (panelMode === 'create' || panelMode === 'edit')
+      && formSnapshotRef.current !== snapshotEditableForm(formValues);
+  }
+
+  function requestEditorTransition(transition) {
+    if (saving || pendingEditorTransitionRef.current) return;
+    if (!hasUnsavedEditorChanges()) {
+      transition();
+      return;
+    }
+    pendingEditorTransitionRef.current = transition;
+    setConfirmDialog({
+      open: true,
+      action: 'discard-editor',
+      title: '¿Descartar los cambios?',
+      description: 'Los cambios sin guardar se perderán. Puedes seguir editando para conservarlos.',
+      confirmLabel: 'Descartar cambios',
+      tone: 'warning',
+    });
+  }
+
+  function openCreatePanel() {
+    requestEditorTransition(performOpenCreatePanel);
+  }
+
+  function closeEditorPanel() {
+    requestEditorTransition(performCloseEditorPanel);
+  }
+
+  function selectCampaign(idCampaign) {
+    requestEditorTransition(() => {
+      setPanelMode('view');
+      void fetchCampaignDetail(idCampaign);
+    });
   }
 
   function handleFormChange(field, value) {
@@ -638,7 +692,7 @@ function CommunicationContent() {
         notifications.success('Campaña borrador creada correctamente.', { dedupeKey: 'comm-campaign-create-ok' });
         await fetchCampaigns({ silent: true });
         if (!current()) return;
-        closeEditorPanel();
+        performCloseEditorPanel();
         if (created?.id_campania) {
           await fetchCampaignDetail(created.id_campania);
         }
@@ -653,7 +707,7 @@ function CommunicationContent() {
         notifications.success('Campaña actualizada correctamente.', { dedupeKey: 'comm-campaign-update-ok' });
         await fetchCampaigns({ silent: true });
         if (!current()) return;
-        closeEditorPanel();
+        performCloseEditorPanel();
         if (updated?.id_campania) {
           await fetchCampaignDetail(updated.id_campania);
         }
@@ -831,9 +885,17 @@ function CommunicationContent() {
   }
   function closeConfirmDialog() {
     if (sending || retryingFailed || cancellingCampaign) return;
+    if (confirmDialog.action === 'discard-editor') pendingEditorTransitionRef.current = null;
     setConfirmDialog((prev) => ({ ...prev, open: false, action: '' }));
   }
   async function handleConfirmDialogAction() {
+    if (confirmDialog.action === 'discard-editor') {
+      const transition = pendingEditorTransitionRef.current;
+      pendingEditorTransitionRef.current = null;
+      setConfirmDialog((prev) => ({ ...prev, open: false, action: '' }));
+      transition?.();
+      return;
+    }
     if (confirmDialog.action === 'send') {
       await executeSendCampaign();
     } else if (confirmDialog.action === 'retry') {
@@ -880,7 +942,7 @@ function CommunicationContent() {
                 <SlidersHorizontal size={14} />
                 {activeFiltersCount > 0 ? `Filtros (${activeFiltersCount})` : 'Filtros'}
               </Button>
-              <Button type="button" className="gap-2" onClick={openCreatePanel}>
+              <Button type="button" className="gap-2" onClick={openCreatePanel} disabled={saving}>
                 <Plus size={14} />
                 Nueva
               </Button>
@@ -1007,10 +1069,8 @@ function CommunicationContent() {
                   return (
                     <button
                       type="button"
-                      onClick={() => {
-                        setPanelMode('view');
-                        void fetchCampaignDetail(campaign.id_campania);
-                      }}
+                      onClick={() => selectCampaign(campaign.id_campania)}
+                      disabled={saving}
                       className={`w-full rounded-xl border p-3 text-left transition-colors ${
                         isActive
                           ? 'border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)]'
@@ -1540,7 +1600,7 @@ function CommunicationContent() {
         title={confirmDialog.title}
         description={confirmDialog.description}
         confirmLabel={confirmDialog.confirmLabel}
-        cancelLabel="Cancelar"
+        cancelLabel={confirmDialog.action === 'discard-editor' ? 'Seguir editando' : 'Cancelar'}
         loading={sending || retryingFailed || cancellingCampaign}
         onConfirm={handleConfirmDialogAction}
       />
