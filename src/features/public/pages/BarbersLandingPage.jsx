@@ -5,6 +5,13 @@ import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from '../../../components/ui/dialog.jsx';
 import { listPublicCatalogBranches } from '../lib/catalogApi.js';
 import { listPublicAgendaBarberos } from '../booking/publicBookingApi.js';
 import { withImageVersion } from '../../../lib/imageCache.js';
@@ -36,7 +43,7 @@ function BarberLandingCard({ barber }) {
   const alias = toSafeText(barber?.alias_publico);
   const summary = truncateSummary(barber?.resumen_publico);
   const certs = Array.isArray(barber?.certificaciones_titulos)
-    ? barber.certificaciones_titulos.map((item) => toSafeText(item)).filter(Boolean).slice(0, 4)
+    ? barber.certificaciones_titulos.map((item) => toSafeText(item)).filter(Boolean)
     : [];
   const photoUrl = withImageVersion(barber?.foto_perfil_url, barber?.foto_perfil_updated_at);
   const hasPhoto = Boolean(photoUrl) && failedPhotoUrl !== photoUrl;
@@ -71,9 +78,11 @@ function BarberLandingCard({ barber }) {
         <h3 className="mf-font-display text-xl leading-tight tracking-[0.01em] text-[var(--mf-text)] drop-shadow-[0_2px_12px_rgba(0,0,0,0.26)] sm:text-[1.35rem]">
           {name}
         </h3>
-        <p className="mf-font-display mt-1.5 inline-flex max-w-full rounded-full border border-[color:color-mix(in_srgb,var(--mf-accent)_36%,var(--mf-nav-border))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--mf-accent)_17%,transparent),color-mix(in_srgb,var(--mf-accent)_10%,transparent))] px-3 py-1 text-[11px] tracking-[0.08em] text-[var(--mf-accent)]">
-          {alias || 'Barbero profesional'}
-        </p>
+        {alias ? (
+          <p className="mf-font-display mt-1.5 inline-flex max-w-full rounded-full border border-[color:color-mix(in_srgb,var(--mf-accent)_36%,var(--mf-nav-border))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--mf-accent)_17%,transparent),color-mix(in_srgb,var(--mf-accent)_10%,transparent))] px-3 py-1 text-[11px] tracking-[0.08em] text-[var(--mf-accent)]">
+            {alias}
+          </p>
+        ) : null}
         {summary ? (
           <p
             className="mt-3 text-sm leading-6 text-[color:color-mix(in_srgb,var(--mf-text-2)_90%,white_8%)]"
@@ -87,18 +96,69 @@ function BarberLandingCard({ barber }) {
             {summary}
           </p>
         ) : null}
-        {certs.length ? (
-          <div className="mt-3.5 flex flex-wrap justify-center gap-2">
-            {certs.map((cert) => (
-              <span
-                key={`${name}-${cert}`}
-                className="inline-flex rounded-full border border-[color:color-mix(in_srgb,var(--mf-accent)_24%,var(--mf-btn-border))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--mf-btn-bg)_90%,white_5%),color-mix(in_srgb,var(--mf-btn-bg)_96%,transparent))] px-2.5 py-1 text-[11px] font-medium text-[color:color-mix(in_srgb,var(--mf-text)_90%,white_10%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.09)]"
-              >
-                {cert}
-              </span>
-            ))}
-          </div>
-        ) : null}
+        <Dialog>
+          <DialogTrigger asChild>
+            <button
+              type="button"
+              className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-[color:color-mix(in_srgb,var(--mf-accent)_52%,var(--mf-nav-border))] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--mf-accent)_20%,var(--mf-btn-bg)),var(--mf-btn-bg))] px-4 py-2.5 text-sm font-semibold text-[var(--mf-text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mf-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mf-card)]"
+            >
+              Ver perfil
+            </button>
+          </DialogTrigger>
+          <DialogContent className="max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] overflow-x-hidden overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-10 sm:max-h-[min(88dvh,760px)] sm:max-w-3xl sm:p-7">
+            <div className="grid min-w-0 gap-6 sm:grid-cols-[minmax(0,17rem)_minmax(0,1fr)] sm:items-start">
+              <div className="relative mx-auto aspect-[4/5] w-full max-w-[17rem] overflow-hidden rounded-2xl border border-[color:color-mix(in_srgb,var(--mf-accent)_32%,var(--mf-nav-border))] bg-[var(--mf-btn-bg)] shadow-[var(--mf-shadow-soft)]">
+                {hasPhoto ? (
+                  <img
+                    src={photoUrl}
+                    alt={name}
+                    className="h-full w-full object-cover"
+                    onError={() => setFailedPhotoUrl(photoUrl)}
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,_color-mix(in_srgb,var(--mf-accent)_20%,transparent),_transparent_60%)] text-4xl font-semibold text-[var(--mf-text)]">
+                    {getInitials(name)}
+                  </div>
+                )}
+              </div>
+
+              <div className="min-w-0 text-left">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-[var(--mf-accent)]">Perfil público</p>
+                <DialogTitle className="mt-2 pr-10 text-3xl sm:text-4xl">{name}</DialogTitle>
+                {alias ? <p className="mt-2 text-sm font-medium text-[var(--mf-accent)]">{alias}</p> : null}
+                <DialogDescription asChild>
+                  <div className="mt-5">
+                    <h4 className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--mf-text-2)]">Biografía</h4>
+                    {toSafeText(barber?.resumen_publico) ? (
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-7 text-[var(--mf-text)]">
+                        {barber.resumen_publico}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-sm text-[var(--mf-text-2)]">Biografía no disponible.</p>
+                    )}
+
+                    <h4 className="mt-6 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--mf-text-2)]">Certificaciones y títulos</h4>
+                    {certs.length ? (
+                      <ul className="mt-3 space-y-2">
+                        {certs.map((cert, index) => (
+                          <li
+                            key={`${name}-${cert}-${index}`}
+                            className="flex min-w-0 gap-3 rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_90%,transparent)] px-3 py-2.5 text-sm text-[var(--mf-text)]"
+                          >
+                            <span aria-hidden="true" className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--mf-accent)]" />
+                            <span className="min-w-0 break-words">{cert}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-sm text-[var(--mf-text-2)]">No hay certificaciones publicadas.</p>
+                    )}
+                  </div>
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </article>
   );
@@ -201,7 +261,7 @@ export default function BarbersLandingPage() {
           <div>
             <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--mf-accent)]">Equipo</p>
             <h1 className="mf-font-display mt-2 text-4xl leading-none text-[var(--mf-text)] sm:text-5xl">Barberos</h1>
-            <p className="mt-2 text-sm text-[var(--mf-text-2)]">Conoce a nuestros barberos destacados.</p>
+            <p className="mt-2 text-sm text-[var(--mf-text-2)]">Conoce al equipo de barberos de MASTERFADE.</p>
           </div>
           <div className="flex items-center gap-2">
             <Link to="/" className="inline-flex items-center gap-2 rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-xs text-[var(--mf-text)]">
