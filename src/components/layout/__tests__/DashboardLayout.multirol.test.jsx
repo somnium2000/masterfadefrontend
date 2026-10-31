@@ -8,7 +8,7 @@ import DashboardLayout, { buildNavModules } from '../DashboardLayout.jsx';
 const session = vi.hoisted(() => ({ user: { id_usuario: 'same-session' }, roles: [], logout: vi.fn() }));
 vi.mock('../../../context/AuthContext.jsx', () => ({ useAuth: () => session, getUserDisplayName: () => 'Usuario' }));
 vi.mock('../../theme/ThemeSwitcher.jsx', () => ({ default: () => null }));
-vi.mock('../../branding/MasterfadeLogo.jsx', () => ({ default: () => null }));
+vi.mock('../../branding/MasterfadeLogo.jsx', () => ({ default: ({ variant }) => <div data-logo-variant={variant} /> }));
 vi.mock('../../navigation/PremiumBottomNav.jsx', () => ({ default: () => null }));
 vi.mock('framer-motion', async () => {
   const { createElement } = await import('react');
@@ -74,6 +74,16 @@ function Panels() {
 function view(path) {
   return <MemoryRouter initialEntries={[path]}><Panels /></MemoryRouter>;
 }
+
+test.each([['admin'], ['super_admin']])('logo sidebar %s reserva espacio para el control y desaparece al contraer', role => {
+  session.roles = [role];
+  render(view(adminPath(session.roles)));
+  const sidebarLogo = document.querySelector('[data-logo-variant="sidebar"]');
+  expect(sidebarLogo.parentElement).toHaveClass('left-0', 'right-11', 'justify-center');
+  fireEvent.click(screen.getByRole('button', { name: 'Colapsar sidebar' }));
+  expect(document.querySelector('[data-logo-variant="sidebar"]')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Expandir sidebar' })).toBeInTheDocument();
+});
 
 test.each([['admin', 'barbero'], ['super_admin', 'barbero']])('escritorio: cambia de panel, navega y vuelve con la misma sesión %j', async (...roles) => {
   session.roles = roles;

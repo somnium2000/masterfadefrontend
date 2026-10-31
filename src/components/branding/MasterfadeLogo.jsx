@@ -1,5 +1,7 @@
 import scriptDark from '../../assets/branding/masterfade-script-dark.png';
 import scriptLight from '../../assets/branding/masterfade-script-light.png';
+import sidebarScriptDark from '../../assets/branding/masterfade-script-sidebar-dark.png';
+import sidebarScriptLight from '../../assets/branding/masterfade-script-sidebar-light.png';
 import { useTheme } from '../../context/ThemeContext.jsx';
 
 const VARIANTS = {
@@ -29,14 +31,18 @@ const VARIANTS = {
   },
   sidebar: {
     gap: 'gap-0',
-    script: 'w-[210px] max-w-full',
+    script: 'w-[180px] max-w-full',
+    aspectRatio: '1221 / 349',
   },
 };
 
 export default function MasterfadeLogo({ variant = 'hero', className = '', showScriptMark = true }) {
   const { variant: themeVariant } = useTheme();
   const styles = VARIANTS[variant] || VARIANTS.hero;
-  const scriptSrc = themeVariant === 'dark' ? scriptLight : scriptDark;
+  const usesSidebarAsset = variant === 'sidebar';
+  const scriptSrc = themeVariant === 'dark'
+    ? (usesSidebarAsset ? sidebarScriptLight : scriptLight)
+    : (usesSidebarAsset ? sidebarScriptDark : scriptDark);
 
   return (
     <div className={`flex flex-col items-center text-center ${styles.gap} ${className}`.trim()}>
@@ -45,7 +51,7 @@ export default function MasterfadeLogo({ variant = 'hero', className = '', showS
           className={`${styles.script} relative select-none`}
           aria-label="Masterfade script logo"
           role="img"
-          style={{ aspectRatio: '1600 / 475' }}
+          style={{ aspectRatio: styles.aspectRatio || '1600 / 475' }}
         >
           <img
             src={scriptSrc}
