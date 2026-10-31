@@ -6,6 +6,7 @@ import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.js
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 
 const ease = [0.25, 0.46, 0.45, 0.94];
+const CTA_ENTRY_DELAYS = [0.65, 0.8, 0.95];
 const BG_URL = 'https://images.pexels.com/photos/5152514/pexels-photo-5152514.jpeg?auto=compress&cs=tinysrgb&w=1920';
 
 function DecorativeLine({ delay = 0, className = '' }) {
@@ -48,12 +49,12 @@ function PrimaryCta({ icon: Icon, label, onClick, order = 0 }) {
     <motion.button
       type="button"
       onClick={onClick}
-      initial={reducedMotion ? false : { opacity: 0.72, y: 10 }}
+      initial={reducedMotion ? false : { opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={reducedMotion ? { duration: 0 } : { duration: 0.38, delay: order * 0.07, ease }}
+      transition={reducedMotion ? { duration: 0 } : { duration: 0.6, delay: CTA_ENTRY_DELAYS[order], ease }}
       whileHover={reducedMotion ? undefined : { scale: 1.015, y: -1 }}
       whileTap={reducedMotion ? undefined : { scale: 0.975 }}
-      className="mf-accent-gradient mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl px-5 text-[15px] font-semibold transition-transform duration-200 hover:-translate-y-px hover:scale-[1.015] active:scale-[0.975] motion-reduce:transform-none motion-reduce:transition-none"
+      className="mf-accent-gradient mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl px-5 text-[15px] font-semibold"
     >
       <Icon size={18} strokeWidth={1.9} />
       <span>{label}</span>
@@ -68,15 +69,15 @@ function SecondaryCta({ icon: Icon, label, onClick, disabled = false, order = 0 
       type="button"
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
-      initial={reducedMotion ? false : { opacity: 0.72, y: 10 }}
+      initial={reducedMotion ? false : { opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={reducedMotion ? { duration: 0 } : { duration: 0.38, delay: order * 0.07, ease }}
+      transition={reducedMotion ? { duration: 0 } : { duration: 0.6, delay: CTA_ENTRY_DELAYS[order], ease }}
       whileHover={disabled || reducedMotion ? undefined : { scale: 1.015, y: -1 }}
       whileTap={disabled || reducedMotion ? undefined : { scale: 0.975 }}
-      className={`mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl border border-[var(--mf-btn-border)] px-5 text-[15px] transition-all duration-200 motion-reduce:transform-none motion-reduce:transition-none ${
+      className={`mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl border border-[var(--mf-btn-border)] px-5 text-[15px] transition-colors duration-200 ${
         disabled
           ? 'cursor-not-allowed bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)] opacity-70'
-          : 'bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] text-[var(--mf-text)] hover:-translate-y-px hover:scale-[1.015] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_72%,white_8%)] active:scale-[0.975]'
+          : 'bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] text-[var(--mf-text)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_72%,white_8%)]'
       }`}
     >
       <Icon size={18} strokeWidth={1.9} className="text-[var(--mf-accent)]" />
