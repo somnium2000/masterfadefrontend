@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ArrowLeft, CheckCircle2, Eye } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
@@ -119,7 +119,7 @@ export default function LoginPage() {
   const [loadingGoogle, setLoadingGoogle] = useState(false);
   const [error, setError] = useState('');
   const [showInvalidUserAuthBox, setShowInvalidUserAuthBox] = useState(false);
-  const [showPasswordWhilePress, setShowPasswordWhilePress] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [sessionLimitModalOpen, setSessionLimitModalOpen] = useState(false);
   const [replacingSession, setReplacingSession] = useState(false);
   const pendingSessionReplaceRef = useRef(null);
@@ -271,27 +271,8 @@ export default function LoginPage() {
     }
   }
 
-  function handlePasswordRevealStart(event) {
-    event.preventDefault();
-    setShowPasswordWhilePress(true);
-  }
-
-  function handlePasswordRevealEnd() {
-    setShowPasswordWhilePress(false);
-  }
-
-  function handlePasswordRevealKeyDown(event) {
-    if (event.key === ' ' || event.key === 'Enter') handlePasswordRevealStart(event);
-  }
-
-  function handlePasswordRevealKeyUp(event) {
-    if (event.key !== ' ' && event.key !== 'Enter') return;
-    event.preventDefault();
-    handlePasswordRevealEnd();
-  }
-
   return (
-    <div className="mf-login-page mf-page-gradient">
+    <div className="mf-login-page mf-login-page--public mf-page-gradient">
       <div className="mf-login-shell mf-mobile-frame mf-screen-pad mf-safe-top">
         <div className="mf-login-topbar">
           <Link className="mf-login-back" to="/">
@@ -319,12 +300,9 @@ export default function LoginPage() {
           >
             <div className="mf-login-card-header">
               <p className="mf-login-kicker">Acceso premium</p>
-              <h1 className="mf-login-title">Iniciar sesion</h1>
+              <h1 className="mf-login-title">Iniciar Sesión</h1>
               <p className="mf-login-subtitle">
-                Ingresa con tu correo y contrasena para continuar a tu experiencia MASTERFADE.
-              </p>
-              <p className="mf-login-trust-copy">
-                Tu acceso se valida de forma segura antes de entrar a tu panel privado.
+                Accede de forma segura a tu experiencia MASTERFADE.
               </p>
               {intent === 'seleccionar_plan' ? (
                 <div className="mf-login-intent-note">
@@ -400,21 +378,15 @@ export default function LoginPage() {
               </div>
 
               <div className="mf-form-group">
-                <div className="mf-row-between">
-                  <label className="mf-label" htmlFor="contrasena">
-                    Contrasena
-                  </label>
-
-                  <Link className="mf-link" to="/forgot-password">
-                    Olvidaste tu contrasena?
-                  </Link>
-                </div>
+                <label className="mf-label" htmlFor="contrasena">
+                  Contraseña
+                </label>
 
                 <div className="mf-password-field">
                   <input
                     id="contrasena"
                     className="mf-input mf-password-input"
-                    type={showPasswordWhilePress ? 'text' : 'password'}
+                    type={showPassword ? 'text' : 'password'}
                     autoComplete="current-password"
                     value={contrasena}
                     onChange={(event) => setContrasena(event.target.value)}
@@ -424,19 +396,20 @@ export default function LoginPage() {
                   <button
                     type="button"
                     className="mf-password-peek"
-                    aria-label="Manten presionado para ver la contrasena"
-                    title="Manten presionado para ver la contrasena"
-                    onPointerDown={handlePasswordRevealStart}
-                    onKeyDown={handlePasswordRevealKeyDown}
-                    onKeyUp={handlePasswordRevealKeyUp}
-                    onPointerUp={handlePasswordRevealEnd}
-                    onPointerLeave={handlePasswordRevealEnd}
-                    onPointerCancel={handlePasswordRevealEnd}
-                    onBlur={handlePasswordRevealEnd}
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    aria-pressed={showPassword}
+                    title={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    onClick={() => setShowPassword((current) => !current)}
                     disabled={isSubmitting}
                   >
-                    <Eye size={16} />
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                   </button>
+                </div>
+
+                <div className="mf-login-forgot-row">
+                  <Link className="mf-link" to="/forgot-password">
+                    ¿Olvidaste tu contraseña?
+                  </Link>
                 </div>
               </div>
 
@@ -474,9 +447,9 @@ export default function LoginPage() {
               </div>
 
               <div className="mf-register-inline">
-                <span>No tienes cuenta?</span>
+                <span>¿No tienes cuenta?</span>
                 <Link className="mf-link" to={registerHref}>
-                  Registrarte
+                  Regístrate
                 </Link>
               </div>
             </form>

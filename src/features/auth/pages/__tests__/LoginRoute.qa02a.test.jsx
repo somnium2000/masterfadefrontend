@@ -67,16 +67,43 @@ test('destino inválido utiliza /home sin bucle', async () => {
   mount('//evil.example'); fill(); fireEvent.click(screen.getByRole('button', { name: 'Entrar', exact: true }));
   await waitFor(() => expect(screen.getByTestId('target')).toHaveTextContent('/home'));
 });
-test.each(['Enter', ' '])('Login revela temporalmente con %s sin enviar y conserva cancelación de puntero', key => {
-  mount(); fill(); const button = screen.getByRole('button', { name: 'Manten presionado para ver la contrasena' });
+test('toggle de contraseña conserva el estado entre clics y actualiza icono y accesibilidad', () => {
+  mount(); fill();
   const input = document.querySelector('input[autocomplete="current-password"]');
-  fireEvent.keyDown(button, { key }); expect(input).toHaveAttribute('type', 'text');
-  fireEvent.keyUp(button, { key }); expect(input).toHaveAttribute('type', 'password');
-  fireEvent.keyDown(button, { key }); fireEvent.blur(button); expect(input).toHaveAttribute('type', 'password');
-  fireEvent.pointerDown(button); expect(input).toHaveAttribute('type', 'text');
-  fireEvent.pointerCancel(button); expect(input).toHaveAttribute('type', 'password');
-  fireEvent.pointerDown(button); fireEvent.pointerUp(button); expect(input).toHaveAttribute('type', 'password');
+  const showButton = screen.getByRole('button', { name: 'Mostrar contraseña' });
+  expect(showButton).toHaveAttribute('aria-pressed', 'false');
+  expect(showButton.querySelector('.lucide-eye')).toBeInTheDocument();
+  fireEvent.click(showButton);
+  const hideButton = screen.getByRole('button', { name: 'Ocultar contraseña' });
+  expect(input).toHaveAttribute('type', 'text');
+  expect(hideButton).toHaveAttribute('aria-pressed', 'true');
+  expect(hideButton.querySelector('.lucide-eye-off')).toBeInTheDocument();
+  fireEvent.click(hideButton);
+  expect(input).toHaveAttribute('type', 'password');
   expect(api.post).not.toHaveBeenCalled();
+});
+test.each(['Enter', ' '])('toggle de contraseña responde a %s como botón nativo sin enviar', key => {
+  mount(); fill(); const button = screen.getByRole('button', { name: 'Mostrar contraseña' });
+  const input = document.querySelector('input[autocomplete="current-password"]');
+  button.focus();
+  fireEvent.keyDown(button, { key });
+  if (key === ' ') fireEvent.keyUp(button, { key });
+  fireEvent.click(button);
+  if (key === 'Enter') fireEvent.keyUp(button, { key });
+  expect(input).toHaveAttribute('type', 'text');
+  expect(button).toHaveAttribute('type', 'button');
+  expect(api.post).not.toHaveBeenCalled();
+});
+test('presenta título exacto, Google visible y Facebook deshabilitado', () => {
+  mount();
+  expect(screen.getByRole('heading', { name: 'Iniciar Sesión' })).toBeInTheDocument();
+  const google = screen.getByRole('button', { name: 'Continuar con Google' });
+  const googleIcon = google.querySelector('.mf-social-icon');
+  expect(googleIcon).toBeInTheDocument();
+  expect(googleIcon).toHaveAttribute('viewBox', '0 0 24 24');
+  expect(Array.from(googleIcon.querySelectorAll('path')).map((path) => path.getAttribute('fill')))
+    .toEqual(['#EA4335', '#34A853', '#4A90E2', '#FBBC05']);
+  expect(screen.getByRole('button', { name: 'Facebook próximamente' })).toBeDisabled();
 });
 test('error de Login mantiene un único anuncio inline', () => {
   mount(); fireEvent.click(screen.getByRole('button', { name: 'Entrar', exact: true }));
