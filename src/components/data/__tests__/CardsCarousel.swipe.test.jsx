@@ -74,6 +74,25 @@ test('flechas e indicadores conservan navegación existente', async () => {
   expect(screen.getByRole('button', { name: 'Siguiente' })).toBeDisabled();
 });
 
+test('controles opt-in solo icono conservan nombre accesible y titulo', () => {
+  render(
+    <CardsCarousel
+      items={items}
+      getItemKey={(item) => item.id}
+      pageSizeByViewport={{ mobile: 1, tablet: 1, desktop: 1 }}
+      compactControls
+      iconOnlyControls
+      renderItem={(item) => <span>{item.id}</span>}
+    />
+  );
+  const previous = screen.getByRole('button', { name: 'Anterior' });
+  const next = screen.getByRole('button', { name: 'Siguiente' });
+  expect(previous).toHaveAttribute('title', 'Anterior');
+  expect(next).toHaveAttribute('title', 'Siguiente');
+  expect(previous.querySelector('span')).toHaveClass('sr-only');
+  expect(next.querySelector('span')).toHaveClass('sr-only');
+});
+
 test('swipe permanece desactivado por defecto para consumidores administrativos', () => {
   const { region } = mount({ enableSwipe: false });
   swipe(region);

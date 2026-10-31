@@ -22,7 +22,7 @@ function chunkItems(items, pageSize) {
   return chunks;
 }
 
-function CarouselActionButton({ onClick, icon, label, disabled = false, compact = false }) {
+function CarouselActionButton({ onClick, icon, label, disabled = false, compact = false, iconOnly = false }) {
   return (
     <button
       type="button"
@@ -42,7 +42,7 @@ function CarouselActionButton({ onClick, icon, label, disabled = false, compact 
       )}
     >
       {icon}
-      <span className={cn('text-xs font-semibold uppercase tracking-[0.08em]', compact ? 'hidden lg:inline' : 'hidden sm:inline')}>
+      <span className={cn('text-xs font-semibold uppercase tracking-[0.08em]', iconOnly ? 'sr-only' : compact ? 'hidden lg:inline' : 'hidden sm:inline')}>
         {label}
       </span>
     </button>
@@ -57,6 +57,7 @@ export default function CardsCarousel({
   pageSizeByViewport,
   gridClassName = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3',
   compactControls = false,
+  iconOnlyControls = false,
   showHeaderTag = true,
   showViewBadge = true,
   resetKey = null,
@@ -185,6 +186,7 @@ export default function CardsCarousel({
                 icon={<ChevronLeft size={15} strokeWidth={2.1} />}
                 disabled={isFirstPage}
                 compact={compactControls}
+                iconOnly={iconOnlyControls}
               />
               <CarouselActionButton
                 label="Siguiente"
@@ -192,6 +194,7 @@ export default function CardsCarousel({
                 icon={<ChevronRight size={15} strokeWidth={2.1} />}
                 disabled={isLastPage}
                 compact={compactControls}
+                iconOnly={iconOnlyControls}
               />
             </div>
           )}
