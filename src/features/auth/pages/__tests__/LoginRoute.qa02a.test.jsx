@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from '../../../../context/AuthContext.jsx';
@@ -94,14 +95,18 @@ test.each(['Enter', ' '])('toggle de contraseña responde a %s como botón nativ
   expect(button).toHaveAttribute('type', 'button');
   expect(api.post).not.toHaveBeenCalled();
 });
-test('presenta título exacto, Google visible y Facebook deshabilitado', () => {
+test('presenta título exacto, recurso local Google y Facebook deshabilitado', async () => {
   mount();
   expect(screen.getByRole('heading', { name: 'Iniciar Sesión' })).toBeInTheDocument();
   const google = screen.getByRole('button', { name: 'Continuar con Google' });
-  const googleIcon = google.querySelector('.mf-social-icon');
+  const googleIcon = google.querySelector('img.mf-social-icon');
   expect(googleIcon).toBeInTheDocument();
-  expect(googleIcon).toHaveAttribute('viewBox', '0 0 24 24');
-  expect(Array.from(googleIcon.querySelectorAll('path')).map((path) => path.getAttribute('fill')))
+  expect(googleIcon).toHaveAttribute('alt', '');
+  expect(googleIcon.getAttribute('src')).toContain('google-g.svg');
+  const svg = await readFile('src/features/auth/assets/google-g.svg', 'utf8');
+  expect(svg).toMatch(/xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+  expect(svg).toMatch(/viewBox="0 0 24 24"/);
+  expect([...svg.matchAll(/fill="(#[0-9A-F]{6})"/g)].map((match) => match[1]))
     .toEqual(['#EA4335', '#34A853', '#4A90E2', '#FBBC05']);
   expect(screen.getByRole('button', { name: 'Facebook próximamente' })).toBeDisabled();
 });
