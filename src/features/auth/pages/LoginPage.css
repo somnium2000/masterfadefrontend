@@ -676,28 +676,53 @@
 }
 
 .mf-login-page--public .mf-social-btn-google .mf-social-icon-wrap {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 999px;
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  overflow: visible;
+  background: transparent;
 }
 
 .mf-login-page--public .mf-social-btn-google .mf-social-icon,
 .mf-login-page--public .mf-social-btn-google .mf-social-icon-wrap > svg {
-  width: 20px;
-  height: 20px;
-  min-width: 20px;
-  min-height: 20px;
-  flex-basis: 20px;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  flex: 0 0 22px;
+  overflow: visible;
+}
+
+.mf-login-page--public .mf-login-aux-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -4px 0 18px;
 }
 
 .mf-login-page--public .mf-login-forgot-row {
   display: flex;
   justify-content: flex-end;
-  margin-top: 9px;
+  min-width: 0;
+  text-align: right;
+}
+
+.mf-login-page--public .mf-login-submit-row {
+  margin-top: 16px;
+}
+
+.mf-login-page--public .mf-login-submit {
+  width: 100%;
+  min-width: 0;
+  box-shadow: var(--mf-shadow-accent-strong);
+}
+
+.mf-login-page--public .mf-register-inline {
+  justify-content: center;
+  gap: 6px;
+  margin-top: 18px;
+  text-align: center;
 }
 
 .mf-login-page--public .mf-password-peek {
@@ -741,6 +766,21 @@
 
   .mf-login-page--public .mf-social-block {
     padding: 12px;
+  }
+
+  .mf-login-page--public .mf-login-aux-row {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .mf-login-page--public .mf-login-forgot-row {
+    flex: 1;
+  }
+
+  .mf-login-page--public .mf-register-inline {
+    align-items: center;
+    flex-direction: row;
+    justify-content: center;
   }
 }
 

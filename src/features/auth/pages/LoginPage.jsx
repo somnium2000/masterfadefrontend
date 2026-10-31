@@ -406,6 +406,19 @@ export default function LoginPage() {
                   </button>
                 </div>
 
+              </div>
+
+              <div className="mf-login-aux-row">
+                <label className="mf-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(event) => setRemember(event.target.checked)}
+                    disabled={isSubmitting}
+                  />
+                  <span>Recordarme</span>
+                </label>
+
                 <div className="mf-login-forgot-row">
                   <Link className="mf-link" to="/forgot-password">
                     ¿Olvidaste tu contraseña?
@@ -430,18 +443,8 @@ export default function LoginPage() {
                 </div>
               ) : null}
 
-              <div className="mf-actions">
-                <label className="mf-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={remember}
-                    onChange={(event) => setRemember(event.target.checked)}
-                    disabled={isSubmitting}
-                  />
-                  <span>Recordarme</span>
-                </label>
-
-                <button className="mf-btn" type="submit" disabled={isSubmitting}>
+              <div className="mf-login-submit-row">
+                <button className="mf-btn mf-login-submit" type="submit" disabled={isSubmitting}>
                   {loading ? 'Cargando...' : 'Entrar'}
                 </button>
               </div>

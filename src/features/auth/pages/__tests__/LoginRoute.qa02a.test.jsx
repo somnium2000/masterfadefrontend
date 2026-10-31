@@ -105,6 +105,16 @@ test('presenta título exacto, Google visible y Facebook deshabilitado', () => {
     .toEqual(['#EA4335', '#34A853', '#4A90E2', '#FBBC05']);
   expect(screen.getByRole('button', { name: 'Facebook próximamente' })).toBeDisabled();
 });
+test('bloque final agrupa auxiliares y mantiene el CTA antes del registro', () => {
+  mount();
+  const remember = screen.getByRole('checkbox', { name: 'Recordarme' });
+  const forgot = screen.getByRole('link', { name: '¿Olvidaste tu contraseña?' });
+  const submit = screen.getByRole('button', { name: 'Entrar', exact: true });
+  const register = screen.getByRole('link', { name: 'Regístrate' });
+  expect(remember.closest('.mf-login-aux-row')).toContainElement(forgot);
+  expect(submit).toHaveClass('mf-login-submit');
+  expect(submit.compareDocumentPosition(register) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
 test('error de Login mantiene un único anuncio inline', () => {
   mount(); fireEvent.click(screen.getByRole('button', { name: 'Entrar', exact: true }));
   expect(screen.getAllByRole('alert')).toHaveLength(1); expect(api.warning).not.toHaveBeenCalled(); expect(api.error).not.toHaveBeenCalled();
