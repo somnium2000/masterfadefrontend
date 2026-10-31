@@ -1119,6 +1119,7 @@ export default function ClientePlanesPage() {
             gridClassName="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
             compactControls
             showHeaderTag={false}
+            enableSwipe
             renderItem={(plan, index, pageIndex) => {
               const planOfferId = resolvePlanOfferId(plan) || "";
               return (

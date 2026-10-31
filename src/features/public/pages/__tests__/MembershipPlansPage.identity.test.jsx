@@ -41,7 +41,6 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 async function ready() {
   const view = render(<MembershipPlansPage />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Centro' }));
   await screen.findByRole('button', { name: 'Quiero este plan' });
   return view;
 }

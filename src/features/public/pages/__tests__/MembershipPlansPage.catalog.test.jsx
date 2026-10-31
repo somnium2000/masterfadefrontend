@@ -555,6 +555,38 @@ describe('persistencia aislada de intentos VIP', () => {
 });
 
 describe('catálogo público de membresías por sucursal', () => {
+  test('una única sucursal se selecciona y carga automáticamente sin mostrar selector', async () => {
+    api.listPublicCatalogBranches.mockResolvedValue({ branches: [branches[0]] });
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan('Plan único')] });
+    render(<MembershipPlansPage />);
+    expect(await screen.findByText('Plan único')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Planes en Centro' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Centro' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Sucursal requerida')).not.toBeInTheDocument();
+    expect(screen.getByText('Explora los planes disponibles y completa tu compra en minutos.')).toBeInTheDocument();
+    expect(api.listPublicPlansByBranch).toHaveBeenCalledExactlyOnceWith(A);
+  });
+
+  test('una única sucursal conserva una sola consulta bajo StrictMode', async () => {
+    api.listPublicCatalogBranches.mockResolvedValue({ branches: [branches[0]] });
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan('Plan estricto')] });
+    render(<StrictMode><MembershipPlansPage /></StrictMode>);
+    expect(await screen.findByText('Plan estricto')).toBeInTheDocument();
+    expect(api.listPublicCatalogBranches).toHaveBeenCalledTimes(1);
+    expect(api.listPublicPlansByBranch).toHaveBeenCalledTimes(1);
+  });
+
+  test('error de planes de sucursal única conserva reintento sin selector', async () => {
+    api.listPublicCatalogBranches.mockResolvedValue({ branches: [branches[0]] });
+    api.listPublicPlansByBranch.mockRejectedValueOnce(new Error('privado')).mockResolvedValueOnce({ plans: [plan('Recuperado único')] });
+    render(<MembershipPlansPage />);
+    expect(await screen.findByText('No se pudo cargar el catalogo de planes.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Centro' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+    expect(await screen.findByText('Recuperado único')).toBeInTheDocument();
+    expect(api.listPublicPlansByBranch).toHaveBeenCalledTimes(2);
+  });
+
   test('descarta respuesta antigua de A después de mostrar B', async () => {
     const pending = deferred();
     api.listPublicPlansByBranch.mockImplementation((id) => id === A ? pending.promise : Promise.resolve({ plans: [plan('Plan B', 200)] }));

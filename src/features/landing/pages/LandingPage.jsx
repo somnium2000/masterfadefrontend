@@ -42,44 +42,34 @@ function BrandBlock({ desktop = false }) {
   );
 }
 
-function PrimaryCta({ icon: Icon, label, onClick, delay }) {
+function PrimaryCta({ icon: Icon, label, onClick }) {
   return (
-    <motion.button
+    <button
       type="button"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay, ease }}
-      whileHover={{ scale: 1.015, y: -1 }}
-      whileTap={{ scale: 0.975 }}
       onClick={onClick}
-      className="mf-accent-gradient mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl px-5 text-[15px] font-semibold"
+      className="mf-accent-gradient mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl px-5 text-[15px] font-semibold transition-transform duration-200 hover:-translate-y-px hover:scale-[1.015] active:scale-[0.975] motion-reduce:transform-none motion-reduce:transition-none"
     >
       <Icon size={18} strokeWidth={1.9} />
       <span>{label}</span>
-    </motion.button>
+    </button>
   );
 }
 
-function SecondaryCta({ icon: Icon, label, onClick, delay, disabled = false }) {
+function SecondaryCta({ icon: Icon, label, onClick, disabled = false }) {
   return (
-    <motion.button
+    <button
       type="button"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay, ease }}
-      whileHover={disabled ? undefined : { scale: 1.015, y: -1 }}
-      whileTap={disabled ? undefined : { scale: 0.975 }}
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
-      className={`mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl border border-[var(--mf-btn-border)] px-5 text-[15px] transition-all ${
+      className={`mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl border border-[var(--mf-btn-border)] px-5 text-[15px] transition-all duration-200 motion-reduce:transform-none motion-reduce:transition-none ${
         disabled
           ? 'cursor-not-allowed bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)] opacity-70'
-          : 'bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] text-[var(--mf-text)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_72%,white_8%)]'
+          : 'bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] text-[var(--mf-text)] hover:-translate-y-px hover:scale-[1.015] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_72%,white_8%)] active:scale-[0.975]'
       }`}
     >
       <Icon size={18} strokeWidth={1.9} className="text-[var(--mf-accent)]" />
       <span>{label}</span>
-    </motion.button>
+    </button>
   );
 }
 
@@ -153,9 +143,9 @@ export default function LandingPage() {
                 </motion.p>
 
                 <div className="flex flex-col gap-3">
-                  <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} delay={0.7} />
-                  <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} delay={0.82} />
-                  <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} delay={0.94} />
+                  <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} />
+                  <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} />
+                  <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} />
                 </div>
               </div>
             </div>
@@ -202,9 +192,9 @@ export default function LandingPage() {
             </motion.p>
 
             <div className="w-full max-w-[380px] space-y-3">
-              <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} delay={0.7} />
-              <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} delay={0.82} />
-              <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} delay={0.94} />
+              <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} />
+              <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} />
+              <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} />
             </div>
 
             <motion.div

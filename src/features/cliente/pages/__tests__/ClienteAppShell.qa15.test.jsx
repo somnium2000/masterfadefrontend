@@ -85,3 +85,12 @@ test('hidratación inicial no consulta; StrictMode no duplica timer de carga', a
   auth.isHydrating = true; const view = render(<StrictMode><Page /></StrictMode>); await act(async () => new Promise(resolve => setTimeout(resolve, 10))); expect(fetchMock).not.toHaveBeenCalled();
   auth.isHydrating = false; view.rerender(<StrictMode><Page /></StrictMode>); await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 });
+test('navegación lateral conserva enlaces y separación vertical explícita', async () => {
+  await ready();
+  const navElement = screen.getByRole('navigation');
+  expect(navElement).toHaveClass('flex', 'flex-col', 'gap-3');
+  expect(navElement).not.toHaveClass('space-y-2');
+  for (const label of ['Inicio', 'Citas', 'Catálogo', 'Planes', 'Perfil']) {
+    expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+  }
+});

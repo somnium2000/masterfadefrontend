@@ -328,6 +328,7 @@ export default function ClienteDashboardPage() {
                 gridClassName="grid grid-cols-1 gap-3 sm:grid-cols-2"
                 compactControls
                 showHeaderTag={false}
+                enableSwipe
                 renderItem={(item) => (
                   <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
                     <p className="text-sm font-semibold text-[var(--mf-text)]">{item.nombre_servicio}</p>

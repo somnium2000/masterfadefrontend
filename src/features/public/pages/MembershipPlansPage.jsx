@@ -433,13 +433,22 @@ export default function MembershipPlansPage() {
         : [];
       validBranchIdsRef.current = new Set(nextBranches.map((branch) => String(branch.id_sucursal).trim()));
       setBranches(nextBranches);
+      if (nextBranches.length === 1) {
+        const onlyBranchId = String(nextBranches[0].id_sucursal).trim();
+        selectedBranchRef.current = onlyBranchId;
+        setSelectedBranchId(onlyBranchId);
+        setPlans([]);
+        setStatus("loading");
+        void loadPlansByBranch(onlyBranchId);
+        return;
+      }
       setStatus(nextBranches.length ? "idle" : "noBranches");
     } catch {
       if (!isMountedRef.current || requestId !== branchRequestRef.current) return;
       setErrorMessage("No se pudieron cargar las sucursales.");
       setStatus("branchesError");
     }
-  }, []);
+  }, [loadPlansByBranch]);
 
   const loadMembershipState = useCallback(async () => {
     const requestId = ++membershipRequestRef.current;
@@ -755,7 +764,9 @@ export default function MembershipPlansPage() {
             <p className="mt-8 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Membresias VIP</p>
             <h1 className="mf-font-display mt-4 text-[42px] leading-[0.92] text-[var(--mf-text)]">Eleva tu Estilo Cada Mes</h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--mf-text-2)]">
-              Selecciona la sucursal donde usaras tu plan y completa tu compra en minutos.
+              {branches.length === 1
+                ? "Explora los planes disponibles y completa tu compra en minutos."
+                : "Selecciona la sucursal donde usaras tu plan y completa tu compra en minutos."}
             </p>
             {isClienteSession ? (
               <span className="mt-4 inline-flex items-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs font-semibold tracking-[0.08em] text-[var(--mf-accent)]">
@@ -768,6 +779,7 @@ export default function MembershipPlansPage() {
             ) : null}
           </div>
 
+          {branches.length > 1 ? (
           <div className="mf-glass-surface mt-6 overflow-hidden rounded-[26px] border border-[var(--mf-btn-border)]/80 p-4 sm:p-5">
             <div className="relative flex flex-col items-center gap-3 text-center">
               <div className="max-w-xl">
@@ -807,6 +819,7 @@ export default function MembershipPlansPage() {
               })}
             </div>
           </div>
+          ) : null}
 
           {!selectedBranchId && status === "idle" ? (
             <div className="mf-glass-surface mt-8 rounded-[28px] p-6 text-center">

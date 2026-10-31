@@ -158,7 +158,7 @@ function ClientePerfilContent({ identity }) {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-6">
       <section className="mf-glass-surface rounded-[26px] border border-[var(--mf-nav-border)] p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-center gap-4">

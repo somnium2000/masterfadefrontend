@@ -69,3 +69,18 @@ test('los destinos existentes de Landing se conservan sin ejecutar operaciones d
     expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent(destination);
   }
 });
+
+test('CTA son visibles e interactivos desde el render inicial y respetan movimiento reducido', () => {
+  render(<ThemeProvider><MemoryRouter><LandingPage /></MemoryRouter></ThemeProvider>);
+  for (const label of ['Agendar Cita', 'Barberos', 'Planes de Membresía VIP']) {
+    for (const button of screen.getAllByRole('button', { name: label, exact: true })) {
+      expect(button).toBeVisible();
+      expect(button).toBeEnabled();
+      expect(button.style.opacity).toBe('');
+      expect(button.style.transform).toBe('');
+      expect(button).toHaveClass('motion-reduce:transform-none', 'motion-reduce:transition-none');
+    }
+  }
+  const source = readFileSync(resolve(cwd(), 'src/features/landing/pages/LandingPage.jsx'), 'utf8');
+  expect(source).not.toMatch(/<motion\.button/);
+});

@@ -29,6 +29,18 @@ test('QA12A: carga del perfil no expone mensajes técnicos arbitrarios', async (
   await waitFor(() => expect(notices.error).toHaveBeenCalledWith('No se pudo cargar tu perfil.'));
 });
 
+test('secciones del perfil usan separación uniforme entre progreso, tarjetas y eliminación', async () => {
+  render(<Page />);
+  const progress = await screen.findByText('Perfil en progreso');
+  const banner = progress.closest('section');
+  const container = banner?.parentElement;
+  expect(container).toHaveClass('flex', 'flex-col', 'gap-6');
+  expect(banner?.nextElementSibling).toHaveClass('grid');
+  expect(screen.getByRole('heading', { name: 'Identidad' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Contacto' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Eliminar cuenta' })).toBeInTheDocument();
+});
+
 test.each(['save', 'upload'])('QA12A: %s no expone mensajes técnicos arbitrarios', async kind => {
   const error = { message: 'ECONNREFUSED private.internal password=SYNTHETIC' };
   render(<Editor open profile={profile('A')} onSaved={vi.fn()} onOpenChange={vi.fn()} />);
