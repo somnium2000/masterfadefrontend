@@ -46,6 +46,12 @@ function formatSignedPoints(value) {
   return `${points >= 0 ? '+' : ''}${points}`;
 }
 
+function createAdjustmentIdempotencyKey() {
+  const key = globalThis.crypto?.randomUUID?.();
+  if (!key) throw new Error('No se pudo preparar el ajuste de forma segura.');
+  return key;
+}
+
 function formatDate(value) {
   if (!value) return 'Sin fecha';
   const parsed = new Date(value);
@@ -200,6 +206,7 @@ function AdminMasterPuntosContent() {
   const rewardRequestSeqRef = useRef(0);
   const readControllersRef = useRef({});
   const adjustmentLockRef = useRef(false);
+  const adjustmentAttemptRef = useRef(null);
   const rewardSaveLockRef = useRef(false);
 
   const [summary, setSummary] = useState(null);
@@ -485,12 +492,20 @@ function AdminMasterPuntosContent() {
     setSavingAdjustment(true);
     setSummaryError('');
     try {
-      await createAdminClientePuntosAjuste(selectedClienteId, {
+      const payload = {
         accion: adjustmentAction,
         puntos: adjustmentPoints,
         motivo: reasonTrimmed,
+      };
+      const fingerprint = JSON.stringify([selectedClienteId, payload.accion, payload.puntos, payload.motivo]);
+      if (adjustmentAttemptRef.current?.fingerprint !== fingerprint) {
+        adjustmentAttemptRef.current = { fingerprint, idempotencyKey: createAdjustmentIdempotencyKey() };
+      }
+      await createAdminClientePuntosAjuste(selectedClienteId, payload, {
+        idempotencyKey: adjustmentAttemptRef.current.idempotencyKey,
       });
       if (!isCurrent()) return;
+      adjustmentAttemptRef.current = null;
       notifications.success('Ajuste aplicado correctamente.');
       setAjustePointsAdd('');
       setAjustePointsSubtract('');
@@ -539,6 +554,7 @@ function AdminMasterPuntosContent() {
       setAjustePointsSubtract('');
       setAjusteReason('');
       setNegativeConfirmOpen(false);
+      adjustmentAttemptRef.current = null;
     } else if (summaryError && !summaryLoading) {
       void loadSummary(safeId);
     }

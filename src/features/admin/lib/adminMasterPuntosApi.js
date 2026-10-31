@@ -11,12 +11,18 @@ export async function getAdminClientePuntosResumen(idCliente, { signal } = {}) {
   return signal ? http.get(path, { signal }) : http.get(path);
 }
 
-export async function createAdminClientePuntosAjuste(idCliente, payload) {
+export async function createAdminClientePuntosAjuste(idCliente, payload, { idempotencyKey } = {}) {
   const safeId = String(idCliente || '').trim();
   if (!safeId) {
     throw new Error('Debes seleccionar un cliente.');
   }
-  return http.post(`${BASE}/clientes/${safeId}/ajuste`, payload);
+  const safeIdempotencyKey = String(idempotencyKey || '').trim();
+  if (!safeIdempotencyKey) {
+    throw new Error('No se pudo preparar el ajuste de forma segura.');
+  }
+  return http.post(`${BASE}/clientes/${safeId}/ajuste`, payload, {
+    headers: { 'x-idempotency-key': safeIdempotencyKey },
+  });
 }
 
 export async function searchAdminClientesActivos(query, { limit = 10, signal } = {}) {

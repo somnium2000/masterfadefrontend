@@ -112,14 +112,30 @@ test('suma válida conserva payload y bloquea duplicados mientras espera', async
   await ready(); await loaded(); const pending = deferred(); api.createAdminClientePuntosAjuste.mockReturnValueOnce(pending.promise); fillAdjustment();
   const form = screen.getByRole('button', { name: 'Aplicar ajuste' }).closest('form');
   act(() => { fireEvent.submit(form); fireEvent.submit(form); });
-  expect(api.createAdminClientePuntosAjuste).toHaveBeenCalledExactlyOnceWith('A', { accion: 'sumar', puntos: 2, motivo: 'Motivo sintético' });
+  expect(api.createAdminClientePuntosAjuste).toHaveBeenCalledExactlyOnceWith('A', { accion: 'sumar', puntos: 2, motivo: 'Motivo sintético' }, { idempotencyKey: expect.stringMatching(/^[0-9a-f-]{36}$/i) });
   await act(async () => pending.resolve({ data: {} })); expect(notifications.success).toHaveBeenCalledWith('Ajuste aplicado correctamente.');
 });
 test('resta solicita confirmación y conserva payload', async () => {
   await ready(); await loaded(); fillAdjustment(true); fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }));
   expect(api.createAdminClientePuntosAjuste).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
   expect(api.createAdminClientePuntosAjuste).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' })); fireEvent.click(screen.getByRole('button', { name: 'Si, aplicar ajuste' }));
-  await waitFor(() => expect(api.createAdminClientePuntosAjuste).toHaveBeenCalledExactlyOnceWith('A', { accion: 'restar', puntos: 2, motivo: 'Motivo sintético' }));
+  await waitFor(() => expect(api.createAdminClientePuntosAjuste).toHaveBeenCalledExactlyOnceWith('A', { accion: 'restar', puntos: 2, motivo: 'Motivo sintético' }, { idempotencyKey: expect.stringMatching(/^[0-9a-f-]{36}$/i) }));
+});
+test('reintento tras error conserva la misma clave idempotente', async () => {
+  await ready(); await loaded(); api.createAdminClientePuntosAjuste.mockRejectedValueOnce(new Error('timeout')).mockResolvedValueOnce({ data: {} }); fillAdjustment();
+  fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' })); await screen.findByText('No fue posible aplicar el ajuste.');
+  const firstKey = api.createAdminClientePuntosAjuste.mock.calls[0][2].idempotencyKey;
+  fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }));
+  await waitFor(() => expect(api.createAdminClientePuntosAjuste).toHaveBeenCalledTimes(2));
+  expect(api.createAdminClientePuntosAjuste.mock.calls[1][2].idempotencyKey).toBe(firstKey);
+});
+test('cambiar el payload después de un error genera una clave nueva', async () => {
+  await ready(); await loaded(); api.createAdminClientePuntosAjuste.mockRejectedValueOnce(new Error('timeout')).mockResolvedValueOnce({ data: {} }); fillAdjustment();
+  fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' })); await screen.findByText('No fue posible aplicar el ajuste.');
+  const firstKey = api.createAdminClientePuntosAjuste.mock.calls[0][2].idempotencyKey;
+  fireEvent.change(screen.getByPlaceholderText('Ej. 10'), { target: { value: '3' } }); fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }));
+  await waitFor(() => expect(api.createAdminClientePuntosAjuste).toHaveBeenCalledTimes(2));
+  expect(api.createAdminClientePuntosAjuste.mock.calls[1][2].idempotencyKey).not.toBe(firstKey);
 });
 test.each(['summary', 'search', 'config', 'save', 'adjustment'])('error técnico %s se reemplaza por mensaje funcional', async operation => {
   const technical = { status: 500, message: 'SQL SECRET INTERNAL', data: { error: { message: 'SQL SECRET INTERNAL' } } };
