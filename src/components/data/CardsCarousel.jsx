@@ -42,9 +42,11 @@ function CarouselActionButton({ onClick, icon, label, disabled = false, compact 
       )}
     >
       {icon}
-      <span className={cn('text-xs font-semibold uppercase tracking-[0.08em]', iconOnly ? 'sr-only' : compact ? 'hidden lg:inline' : 'hidden sm:inline')}>
-        {label}
-      </span>
+      {iconOnly ? null : (
+        <span className={cn('text-xs font-semibold uppercase tracking-[0.08em]', compact ? 'hidden lg:inline' : 'hidden sm:inline')}>
+          {label}
+        </span>
+      )}
     </button>
   );
 }

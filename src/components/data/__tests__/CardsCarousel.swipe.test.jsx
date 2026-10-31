@@ -74,7 +74,7 @@ test('flechas e indicadores conservan navegación existente', async () => {
   expect(screen.getByRole('button', { name: 'Siguiente' })).toBeDisabled();
 });
 
-test('controles opt-in solo icono conservan nombre accesible y titulo', () => {
+test('controles opt-in solo icono conservan nombre accesible y titulo sin renderizar etiquetas visibles', () => {
   render(
     <CardsCarousel
       items={items}
@@ -89,8 +89,8 @@ test('controles opt-in solo icono conservan nombre accesible y titulo', () => {
   const next = screen.getByRole('button', { name: 'Siguiente' });
   expect(previous).toHaveAttribute('title', 'Anterior');
   expect(next).toHaveAttribute('title', 'Siguiente');
-  expect(previous.querySelector('span')).toHaveClass('sr-only');
-  expect(next.querySelector('span')).toHaveClass('sr-only');
+  expect(previous.querySelector('span')).not.toBeInTheDocument();
+  expect(next.querySelector('span')).not.toBeInTheDocument();
 });
 
 test('swipe permanece desactivado por defecto para consumidores administrativos', () => {
