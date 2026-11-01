@@ -712,7 +712,10 @@ export function normalizeBookingPaymentUiState({
   if (['fallido', 'failed', 'rechazado'].includes(rawState)) {
     return {
       status: 'failed',
-      text: 'El pago no pudo completarse',
+      text: mapPublicBookingErrorMessage(
+        effectivePaymentResult?.customer_error_code,
+        'El pago no pudo completarse'
+      ),
       paymentLabel: 'fallido',
       totalPagadoHnl: amount,
       bookingConfirmed: false,
