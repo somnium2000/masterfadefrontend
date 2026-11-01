@@ -46,6 +46,12 @@ function formatSignedPoints(value) {
   return `${points >= 0 ? '+' : ''}${points}`;
 }
 
+function createAdjustmentIdempotencyKey() {
+  const key = globalThis.crypto?.randomUUID?.();
+  if (!key) throw new Error('No se pudo preparar el ajuste de forma segura.');
+  return key;
+}
+
 function formatDate(value) {
   if (!value) return 'Sin fecha';
   const parsed = new Date(value);
@@ -200,6 +206,7 @@ function AdminMasterPuntosContent() {
   const rewardRequestSeqRef = useRef(0);
   const readControllersRef = useRef({});
   const adjustmentLockRef = useRef(false);
+  const adjustmentAttemptRef = useRef(null);
   const rewardSaveLockRef = useRef(false);
 
   const [summary, setSummary] = useState(null);
@@ -226,6 +233,10 @@ function AdminMasterPuntosContent() {
   const canManagePoints = useMemo(() => {
     const roleList = Array.isArray(roles) ? roles.map((role) => normalizeText(role).toLowerCase()) : [];
     return roleList.includes('admin') || roleList.includes('super_admin');
+  }, [roles]);
+  const canEditGlobalRewards = useMemo(() => {
+    const roleList = Array.isArray(roles) ? roles.map((role) => normalizeText(role).toLowerCase()) : [];
+    return roleList.includes('super_admin');
   }, [roles]);
 
   useEffect(() => {
@@ -481,12 +492,20 @@ function AdminMasterPuntosContent() {
     setSavingAdjustment(true);
     setSummaryError('');
     try {
-      await createAdminClientePuntosAjuste(selectedClienteId, {
+      const payload = {
         accion: adjustmentAction,
         puntos: adjustmentPoints,
         motivo: reasonTrimmed,
+      };
+      const fingerprint = JSON.stringify([selectedClienteId, payload.accion, payload.puntos, payload.motivo]);
+      if (adjustmentAttemptRef.current?.fingerprint !== fingerprint) {
+        adjustmentAttemptRef.current = { fingerprint, idempotencyKey: createAdjustmentIdempotencyKey() };
+      }
+      await createAdminClientePuntosAjuste(selectedClienteId, payload, {
+        idempotencyKey: adjustmentAttemptRef.current.idempotencyKey,
       });
       if (!isCurrent()) return;
+      adjustmentAttemptRef.current = null;
       notifications.success('Ajuste aplicado correctamente.');
       setAjustePointsAdd('');
       setAjustePointsSubtract('');
@@ -535,6 +554,7 @@ function AdminMasterPuntosContent() {
       setAjustePointsSubtract('');
       setAjusteReason('');
       setNegativeConfirmOpen(false);
+      adjustmentAttemptRef.current = null;
     } else if (summaryError && !summaryLoading) {
       void loadSummary(safeId);
     }
@@ -549,6 +569,7 @@ function AdminMasterPuntosContent() {
   }
 
   function toggleRewardService(condition, serviceId) {
+    if (!canEditGlobalRewards) return;
     const safeCondition = normalizeText(condition);
     const safeServiceId = normalizeText(serviceId);
     if (!safeServiceId || !['sin_membresia', 'con_membresia'].includes(safeCondition)) return;
@@ -567,7 +588,7 @@ function AdminMasterPuntosContent() {
   }
 
   async function handleSaveRewardConfig() {
-    if (!canManagePoints || !rewardConfigLoaded || rewardConfigSaving || rewardSaveLockRef.current) return;
+    if (!canEditGlobalRewards || !rewardConfigLoaded || rewardConfigSaving || rewardSaveLockRef.current) return;
     rewardSaveLockRef.current = true;
     const requestSeq = ++rewardRequestSeqRef.current;
     const isCurrent = () => mountedRef.current && rewardRequestSeqRef.current === requestSeq;
@@ -629,21 +650,23 @@ function AdminMasterPuntosContent() {
               </p>
             ) : null}
           </div>
-          <Button
-            type="button"
-            onClick={handleSaveRewardConfig}
-            disabled={!rewardConfigLoaded || rewardConfigLoading || rewardConfigSaving}
-            className="w-full lg:w-auto"
-          >
-            {rewardConfigSaving ? (
-              <span className="inline-flex items-center gap-2">
-                <Loader2 size={14} className="animate-spin" />
-                Guardando...
-              </span>
-            ) : (
-              'Guardar configuracion'
-            )}
-          </Button>
+          {canEditGlobalRewards ? (
+            <Button
+              type="button"
+              onClick={handleSaveRewardConfig}
+              disabled={!rewardConfigLoaded || rewardConfigLoading || rewardConfigSaving}
+              className="w-full lg:w-auto"
+            >
+              {rewardConfigSaving ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin" />
+                  Guardando...
+                </span>
+              ) : (
+                'Guardar configuracion'
+              )}
+            </Button>
+          ) : null}
         </div>
 
         {rewardConfigError ? (
@@ -684,7 +707,7 @@ function AdminMasterPuntosContent() {
                           type="checkbox"
                           className="mt-1 h-4 w-4 accent-[var(--mf-accent)]"
                           checked={checked}
-                          disabled={rewardConfigSaving}
+                          disabled={!canEditGlobalRewards || rewardConfigSaving}
                           onChange={() => toggleRewardService(condition, service.id_servicio)}
                         />
                         <span className="min-w-0">

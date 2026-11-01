@@ -456,7 +456,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                                         animate={{ opacity: 1, x: 0 }}
                                         exit={{ opacity: 0, x: -10 }}
                                         transition={{ duration: 0.2 }}
-                                        className="absolute left-1/2 -translate-x-1/2"
+                                        className="absolute inset-y-0 left-0 right-11 flex items-center justify-center"
                                     >
                                         <MasterfadeLogo variant="sidebar" />
                                     </motion.div>

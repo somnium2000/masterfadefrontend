@@ -121,9 +121,42 @@ function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
 }
 
+const SPREADSHEET_FORMULA_CHARACTERS = new Set(['=', '+', '-', '@', '\uff1d', '\uff0b', '\uff0d', '\u2212', '\uff20']);
+const SPREADSHEET_NUMERIC_VALUE = /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?$/i;
+
+function isSpreadsheetPrefixCharacter(character) {
+  const codePoint = character.codePointAt(0);
+  return codePoint <= 0x20
+    || (codePoint >= 0x7f && codePoint <= 0x9f)
+    || [0xa0, 0x1680, 0x180e, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff].includes(codePoint)
+    || (codePoint >= 0x2000 && codePoint <= 0x200f)
+    || (codePoint >= 0x2060 && codePoint <= 0x206f);
+}
+
+function hasSpreadsheetFormulaPrefix(value) {
+  for (const character of value) {
+    if (isSpreadsheetPrefixCharacter(character)) continue;
+    return SPREADSHEET_FORMULA_CHARACTERS.has(character);
+  }
+  return false;
+}
+
+export function isSpreadsheetNumericValue(value) {
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'bigint') return true;
+  if (typeof value !== 'string' || /[\t\r\n]/.test(value)) return false;
+  return SPREADSHEET_NUMERIC_VALUE.test(value.trim());
+}
+
+export function neutralizeSpreadsheetCell(value) {
+  if (value === null || value === undefined || isSpreadsheetNumericValue(value)) return value;
+  const normalized = String(value);
+  return hasSpreadsheetFormulaPrefix(normalized) ? `'${normalized}` : normalized;
+}
+
 function csvEscape(value) {
   if (value === null || value === undefined) return '';
-  const normalized = String(value);
+  const normalized = String(neutralizeSpreadsheetCell(value));
   if (/["\r\n,]/.test(normalized)) return `"${normalized.replace(/"/g, '""')}"`;
   return normalized;
 }
@@ -604,7 +637,7 @@ function getDefaultSelectedKpisForModule(moduleType) {
     : [];
 }
 
-function buildCsvContent({ title, dateFrom, dateTo, sections }) {
+export function buildCsvContent({ title, dateFrom, dateTo, sections }) {
   const lines = [];
   lines.push(csvEscape(title));
   lines.push(`fecha_desde,${csvEscape(dateFrom)}`);
@@ -621,7 +654,7 @@ function buildCsvContent({ title, dateFrom, dateTo, sections }) {
   return `${lines.join('\n')}\n`;
 }
 
-function buildExcelHtml({ title, generatedAt, dateFrom, dateTo, sections }) {
+export function buildExcelHtml({ title, generatedAt, dateFrom, dateTo, sections }) {
   const sectionHtml = sections
     .map((section) => `
       <h3>${escapeHtml(section.label)}</h3>
@@ -629,7 +662,11 @@ function buildExcelHtml({ title, generatedAt, dateFrom, dateTo, sections }) {
         <thead><tr><th>Indicador</th><th>Valor</th></tr></thead>
         <tbody>
           ${section.items
-            .map((item) => `<tr><td>${escapeHtml(item.label)}</td><td>${escapeHtml(item.value)}</td></tr>`)
+            .map((item) => {
+              const labelStyle = isSpreadsheetNumericValue(item.label) ? '' : ` style="mso-number-format:'\\@';"`;
+              const valueStyle = isSpreadsheetNumericValue(item.value) ? '' : ` style="mso-number-format:'\\@';"`;
+              return `<tr><td${labelStyle}>${escapeHtml(neutralizeSpreadsheetCell(item.label))}</td><td${valueStyle}>${escapeHtml(neutralizeSpreadsheetCell(item.value))}</td></tr>`;
+            })
             .join('')}
         </tbody>
       </table>

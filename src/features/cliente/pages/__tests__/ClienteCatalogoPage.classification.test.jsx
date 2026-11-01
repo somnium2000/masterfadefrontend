@@ -31,6 +31,16 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+test('separa uniformemente Servicios, Paquetes y Promociones en todos los anchos', async () => {
+  render(<ClienteCatalogoPage />);
+  await screen.findByText('Reservable');
+  const sections = screen.getByTestId('cliente-catalog-sections');
+  expect(sections).toHaveClass('flex', 'flex-col', 'gap-5', 'sm:gap-6');
+  expect(sections).toContainElement(document.getElementById('servicios'));
+  expect(sections).toContainElement(document.getElementById('paquetes'));
+  expect(sections).toContainElement(document.getElementById('promociones'));
+});
+
 test('no agendables mantienen visibilidad separada y los informativos conservan su tratamiento', async () => {
   render(<ClienteCatalogoPage />);
   await screen.findByText('Reservable');

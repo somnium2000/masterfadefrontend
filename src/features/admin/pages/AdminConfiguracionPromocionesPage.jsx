@@ -8,7 +8,8 @@ import { listAdminServicios } from '../lib/adminCatalogApi.js';
 import { listAdminPaquetes } from '../lib/adminPackagesApi.js';
 import { emitCatalogSync } from '../../../lib/catalogSync.js';
 import { Button } from '../../../components/ui/button.jsx';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table.jsx';
@@ -749,15 +750,15 @@ function PromotionForm({ values, onChange, branchLabel, promotionId, serviceOpti
   const objetivoLabel = aplicaA === 'servicio' ? 'Servicio objetivo *' : 'Paquete objetivo *';
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2.5 text-sm text-[var(--mf-text-2)]">
+    <div className="flex flex-col gap-5">
+      <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3 text-sm text-[var(--mf-text-2)]">
         <span className="text-xs uppercase tracking-widest text-[var(--mf-text-2)]">Sucursal</span>
         <div className="mt-1 font-medium text-[var(--mf-text)]">{branchLabel || 'No definida'}</div>
       </div>
 
-      <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-3">
-        <p className="text-xs uppercase tracking-widest text-[var(--mf-text-2)]">Aplicacion de la Promocion</p>
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
+        <p className="text-xs font-semibold uppercase tracking-widest text-[var(--mf-accent)]">Aplicacion de la Promocion</p>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label>Tipo de promocion *</Label>
             <select
@@ -826,7 +827,7 @@ function PromotionForm({ values, onChange, branchLabel, promotionId, serviceOpti
         </div>
 
         {isDosPorUno ? (
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Cantidad requerida *</Label>
               <Input
@@ -853,18 +854,22 @@ function PromotionForm({ values, onChange, branchLabel, promotionId, serviceOpti
         ) : null}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5 sm:col-span-2"><Label>Titulo *</Label><Input value={values.titulo} onChange={(e) => onChange('titulo', e.target.value)} /></div>
-        <div className="space-y-1.5"><Label>Subtitulo</Label><Input value={values.subtitulo} onChange={(e) => onChange('subtitulo', e.target.value)} /></div>
+      <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
+        <p className="text-xs font-semibold uppercase tracking-widest text-[var(--mf-accent)]">Contenido</p>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5 sm:col-span-2"><Label>Titulo *</Label><Input value={values.titulo} onChange={(e) => onChange('titulo', e.target.value)} /></div>
+          <div className="space-y-1.5 sm:col-span-2"><Label>Subtitulo</Label><Input value={values.subtitulo} onChange={(e) => onChange('subtitulo', e.target.value)} /></div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>Descripcion *</Label>
+            <textarea className="mf-input min-h-[140px] resize-y py-3 leading-6" value={values.parrafos_texto} onChange={(e) => onChange('parrafos_texto', e.target.value)} />
+          </div>
+        </div>
       </div>
 
-      <div className="space-y-1.5">
-        <Label>Descripcion *</Label>
-        <textarea className="mf-input min-h-[120px] resize-y py-2" value={values.parrafos_texto} onChange={(e) => onChange('parrafos_texto', e.target.value)} />
-      </div>
-
-      <div className="space-y-1.5">
-        <ImageUploaderField
+      <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
+        <p className="text-xs font-semibold uppercase tracking-widest text-[var(--mf-accent)]">Imagenes</p>
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <ImageUploaderField
           label="Imagen principal"
           scopeKey="public_promotion_main"
           entityType="promocion"
@@ -878,11 +883,8 @@ function PromotionForm({ values, onChange, branchLabel, promotionId, serviceOpti
               onChange('imagen_principal_url', payload.public_url);
             }
           }}
-        />
-      </div>
-
-      <div className="space-y-1.5">
-        <ImageUploaderField
+          />
+          <ImageUploaderField
           label="Imagen mobile"
           helperText="Opcional para vista mobile de promociones publicas."
           scopeKey="public_promotion_mobile"
@@ -897,25 +899,29 @@ function PromotionForm({ values, onChange, branchLabel, promotionId, serviceOpti
               onChange('imagen_mobile_url', payload.public_url);
             }
           }}
-        />
+          />
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5"><Label className="mf-label">Estado</Label><select className="mf-select" value={values.estado} onChange={(e) => onChange('estado', e.target.value)}><option value="borrador">Borrador</option><option value="publicada">Publicada</option><option value="archivada">Archivada</option></select></div>
-        <div className="space-y-1.5"><Label>Orden visual *</Label><Input type="number" min="0" step="1" value={values.orden_visual} onChange={(e) => onChange('orden_visual', e.target.value)} /></div>
+      <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
+        <p className="text-xs font-semibold uppercase tracking-widest text-[var(--mf-accent)]">Publicacion</p>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5"><Label className="mf-label">Estado</Label><select className="mf-select" value={values.estado} onChange={(e) => onChange('estado', e.target.value)}><option value="borrador">Borrador</option><option value="publicada">Publicada</option><option value="archivada">Archivada</option></select></div>
+          <div className="space-y-1.5"><Label>Orden visual *</Label><Input type="number" min="0" step="1" value={values.orden_visual} onChange={(e) => onChange('orden_visual', e.target.value)} /></div>
+          <label className="flex items-center justify-between rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_72%,transparent)] px-3 py-3 text-sm"><span className="text-[var(--mf-text)]">Visible en landing publica</span><input type="checkbox" checked={Boolean(values.visible_publico)} onChange={(e) => onChange('visible_publico', e.target.checked)} className="h-4 w-4 accent-[var(--mf-accent)]" /></label>
+          <label className="flex items-center justify-between rounded-xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_72%,transparent)] px-3 py-3 text-sm"><span className="text-[var(--mf-text)]">Marcar como destacada</span><input type="checkbox" checked={Boolean(values.destacada)} onChange={(e) => onChange('destacada', e.target.checked)} className="h-4 w-4 accent-[var(--mf-accent)]" /></label>
+        </div>
       </div>
 
       {/* // JK: Campos de fecha/hora alineados para definir vigencia completa de la promocion. */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <PromotionDateField label="Vigencia desde" value={values.vigencia_desde} onChange={(nextValue) => onChange('vigencia_desde', nextValue)} />
-        <TimePickerPopoverField label="Hora inicio" value={values.vigencia_hora_desde} onChange={(nextValue) => onChange('vigencia_hora_desde', nextValue)} />
-        <PromotionDateField label="Vigencia hasta" value={values.vigencia_hasta} onChange={(nextValue) => onChange('vigencia_hasta', nextValue)} />
-        <TimePickerPopoverField label="Hora final" value={values.vigencia_hora_hasta} onChange={(nextValue) => onChange('vigencia_hora_hasta', nextValue)} />
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label className="flex items-center justify-between rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2.5 text-sm"><span className="text-[var(--mf-text)]">Visible en landing publica</span><input type="checkbox" checked={Boolean(values.visible_publico)} onChange={(e) => onChange('visible_publico', e.target.checked)} className="h-4 w-4 accent-[var(--mf-accent)]" /></label>
-        <label className="flex items-center justify-between rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2.5 text-sm"><span className="text-[var(--mf-text)]">Marcar como destacada</span><input type="checkbox" checked={Boolean(values.destacada)} onChange={(e) => onChange('destacada', e.target.checked)} className="h-4 w-4 accent-[var(--mf-accent)]" /></label>
+      <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 sm:p-5">
+        <p className="text-xs font-semibold uppercase tracking-widest text-[var(--mf-accent)]">Vigencias</p>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <PromotionDateField label="Vigencia desde" value={values.vigencia_desde} onChange={(nextValue) => onChange('vigencia_desde', nextValue)} />
+          <TimePickerPopoverField label="Hora inicio" value={values.vigencia_hora_desde} onChange={(nextValue) => onChange('vigencia_hora_desde', nextValue)} />
+          <PromotionDateField label="Vigencia hasta" value={values.vigencia_hasta} onChange={(nextValue) => onChange('vigencia_hasta', nextValue)} />
+          <TimePickerPopoverField label="Hora final" value={values.vigencia_hora_hasta} onChange={(nextValue) => onChange('vigencia_hora_hasta', nextValue)} />
+        </div>
       </div>
 
       {/* // JK: Reubica alerta de validacion debajo de vigencia/visibilidad para no tapar campos. */}
@@ -1323,8 +1329,8 @@ export default function AdminConfiguracionPromocionesPage() {
   return (
     <div className="space-y-4 px-2 pb-4 sm:px-4 sm:pb-6">
       <header className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-          <div className="space-y-3">
+        <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-end xl:justify-between xl:gap-6">
+          <div className="min-w-0 space-y-3 xl:max-w-[520px]">
             <div className="space-y-1">
               <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Configuracion - Promociones</p>
               <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Promociones</h1>
@@ -1334,15 +1340,15 @@ export default function AdminConfiguracionPromocionesPage() {
             {branchLoadError ? <ErrorBanner message={branchLoadError} /> : null}
           </div>
 
-          <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[560px]">
+          <div className="flex w-full min-w-0 flex-col gap-3 xl:max-w-[680px] xl:flex-1">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-[var(--mf-text-2)]">{filteredPromociones.length} de {promociones.length} promocion(es)</p>
               <ViewToggle defaultView={view} onViewChange={setView} storageKey="promociones" />
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-              <div className="relative w-full sm:max-w-[320px]"><Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" size={15} /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por titulo, slug o contenido" className="pl-9" /></div>
-              <Button variant="outline" className="gap-2" onClick={() => setFiltersOpen(true)}><SlidersHorizontal size={15} /> Filtros{activeFilterCount > 0 ? <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-xs text-[var(--mf-accent-text)]">{activeFilterCount}</span> : null}</Button>
-              <Button className="gap-2" onClick={openNuevo} disabled={actionsLockedByBranch}><Plus size={15} /> Nueva</Button>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(220px,1fr)_auto_auto] sm:items-center">
+              <div className="relative min-w-0"><Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" size={15} /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por titulo, slug o contenido" className="pl-9" /></div>
+              <Button variant="outline" className="w-full gap-2 sm:w-auto" onClick={() => setFiltersOpen(true)}><SlidersHorizontal size={15} /> Filtros{activeFilterCount > 0 ? <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-xs text-[var(--mf-accent-text)]">{activeFilterCount}</span> : null}</Button>
+              <Button className="w-full gap-2 sm:w-auto" onClick={openNuevo} disabled={actionsLockedByBranch}><Plus size={15} /> Nueva</Button>
             </div>
           </div>
         </div>
@@ -1363,7 +1369,8 @@ export default function AdminConfiguracionPromocionesPage() {
       {!loading && !listError && filteredPromociones.length > 0 && view === 'cards' ? (
         <CardsCarousel
           items={filteredPromociones}
-          pageSizeByViewport={{ mobile: 1, tablet: 2, desktop: 3 }}
+          pageSizeByViewport={{ mobile: 1, tablet: 2, desktop: 2 }}
+          gridClassName="grid grid-cols-1 gap-4 sm:grid-cols-2"
           resetKey={cardsResetKey}
           getItemKey={(promo) => `${promo?.id_promocion || 'promo'}:${promo?.id_sucursal || 'all'}`}
           renderItem={(promo, index, pageIndex) => (
@@ -1406,7 +1413,7 @@ export default function AdminConfiguracionPromocionesPage() {
       ) : null}
 
       {!loading && !listError && filteredPromociones.length > 0 && view === 'table' ? (
-        <div className="mf-table-wrap">
+        <div className="mf-table-wrap overflow-x-auto rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_82%,transparent)]">
           <Table>
             <TableHeader><TableRow className="border-[var(--mf-nav-border)]">{!sucursal ? <TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Sucursal</TableHead> : null}<TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em]">Titulo</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden lg:table-cell">Slug</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Estado</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Publico</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Destacada</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center hidden md:table-cell">Vigencia</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-center">Orden</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] hidden lg:table-cell">Fechas</TableHead><TableHead className="text-[var(--mf-accent)] text-[11px] uppercase tracking-[0.1em] text-right">Acciones</TableHead></TableRow></TableHeader>
             <TableBody>{filteredPromociones.map((promo) => (<TableRow key={`${promo.id_promocion}:${promo.id_sucursal}`} className="border-[var(--mf-nav-border)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_60%,transparent)] transition-colors">{!sucursal ? <TableCell className="text-[var(--mf-text-2)] text-sm whitespace-nowrap">{branchNameById[promo.id_sucursal] || 'Sin sucursal'}</TableCell> : null}<TableCell className="font-medium text-[var(--mf-text)]"><div className="flex items-center gap-2"><div className="h-10 w-16 shrink-0 overflow-hidden rounded-md border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)]">{promo.imagen_principal_url ? <img src={promo.imagen_principal_url} alt={promo.titulo || 'Promocion'} className="h-full w-full object-cover" loading="lazy" /> : null}</div><div><div>{promo.titulo}</div>{promo.subtitulo ? <div className="text-xs text-[var(--mf-text-2)] mt-0.5">{promo.subtitulo}</div> : null}</div></div></TableCell><TableCell className="text-[var(--mf-text-2)] hidden lg:table-cell">{promo.slug || '-'}</TableCell><TableCell className="text-center"><PromotionStateBadge estado={promo.estado} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVisibilityBadge visible={Boolean(promo.visible_publico)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionFeaturedBadge destacada={Boolean(promo.destacada)} /></TableCell><TableCell className="text-center hidden md:table-cell"><PromotionVigenciaBadge vigenciaDesde={promo.vigencia_desde} vigenciaHasta={promo.vigencia_hasta} vigenciaHoraDesde={promo.vigencia_hora_desde} vigenciaHoraHasta={promo.vigencia_hora_hasta} /></TableCell><TableCell className="text-center text-[var(--mf-text-2)]">{Number(promo.orden_visual ?? 100)}</TableCell><TableCell className="hidden lg:table-cell text-[var(--mf-text-2)] text-xs whitespace-nowrap">{(promo.vigencia_desde || '-')} {' -> '} {(promo.vigencia_hasta || '-')}</TableCell><TableCell className="text-right"><div className="flex items-center justify-end gap-1.5">{renderActions(promo)}</div></TableCell></TableRow>))}</TableBody>
@@ -1414,9 +1421,9 @@ export default function AdminConfiguracionPromocionesPage() {
         </div>
       ) : null}
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!formLoading && !open) closeEditor(); }}>
-        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editTarget ? 'Editar promocion' : 'Nueva promocion'}</DialogTitle><DialogDescription className="sr-only">Configura contenido, publicacion y vigencia de la promocion por sucursal.</DialogDescription></DialogHeader>
+      <UnsavedChangesDialog values={formValues} saving={formLoading} open={dialogOpen} onOpenChange={(open) => { if (!open) closeEditor(); }}>
+        <DialogContent className="max-h-[92dvh] w-[calc(100vw-1rem)] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader className="border-b border-[var(--mf-nav-border)] pb-4"><DialogTitle>{editTarget ? 'Editar promocion' : 'Nueva promocion'}</DialogTitle><DialogDescription className="sr-only">Configura contenido, publicacion y vigencia de la promocion por sucursal.</DialogDescription></DialogHeader>
           <PromotionForm
             values={formValues}
             onChange={handleFormChange}
@@ -1427,12 +1434,12 @@ export default function AdminConfiguracionPromocionesPage() {
             loadingTargets={loadingTargetOptions}
             errorMessage={formError}
           />
-          <DialogFooter className="mt-2"><Button variant="outline" onClick={closeEditor} disabled={formLoading}>Cancelar</Button><Button onClick={() => void handleGuardar()} disabled={formLoading || actionsLockedByBranch} className="gap-2 min-w-[140px]">{formLoading ? <Loader2 size={15} className="animate-spin" /> : null}{editTarget ? 'Guardar cambios' : 'Crear promocion'}</Button></DialogFooter>
+          <DialogFooter className="sticky bottom-0 z-10 mt-2 border-t border-[var(--mf-nav-border)] bg-[var(--mf-card)] py-4"><DialogClose asChild><Button variant="outline" disabled={formLoading} className="w-full sm:w-auto">Cancelar</Button></DialogClose><Button onClick={() => void handleGuardar()} disabled={formLoading || actionsLockedByBranch} className="w-full gap-2 sm:min-w-[140px] sm:w-auto">{formLoading ? <Loader2 size={15} className="animate-spin" /> : null}{editTarget ? 'Guardar cambios' : 'Crear promocion'}</Button></DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
 
       <Dialog open={detailOpen} onOpenChange={(open) => { if (!open) closeDetail(); }}>
-        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[92dvh] w-[calc(100vw-1rem)] overflow-y-auto sm:max-w-4xl">
           <DialogHeader><DialogTitle>Detalle de promocion</DialogTitle><DialogDescription className="sr-only">Consulta campos basicos de la promocion y su estado de publicacion.</DialogDescription></DialogHeader>
           {detailLoading ? <LoadingSpinner label="Cargando detalle..." /> : null}
           {!detailLoading && detailTarget ? (

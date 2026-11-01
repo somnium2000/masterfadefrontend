@@ -338,7 +338,7 @@ function App() {
         <Route path="configuracion/perfil" element={<Navigate to="configuracion/promociones" replace />} />
         <Route path="configuracion/spam" element={<Navigate to="configuracion/promociones" replace />} />
         <Route path="configuracion/comunicacion" element={<RouteErrorBoundary><AdminConfiguracionComunicacionPage /></RouteErrorBoundary>} />
-        <Route path="configuracion/promociones" element={<UnderConstructionPage title="Promociones" />} />
+        <Route path="configuracion/promociones" element={<RouteErrorBoundary><AdminConfiguracionPromocionesPage /></RouteErrorBoundary>} />
       </Route>
 
       {/* Seguridad */}

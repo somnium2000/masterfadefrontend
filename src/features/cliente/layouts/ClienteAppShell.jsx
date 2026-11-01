@@ -229,7 +229,7 @@ export default function ClienteAppShell() {
                 <MasterfadeLogo variant="sidebar" className="mx-auto" />
               </button>
 
-              <nav className="space-y-2">
+              <nav className="flex flex-col gap-3">
                 {CLIENT_NAV_ITEMS.map((item) => {
                   const active = activeTab === item.id;
                   const Icon = item.icon;

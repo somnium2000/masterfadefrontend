@@ -61,6 +61,83 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
+test('crear promocion con cambios solicita confirmacion antes de cerrar', async () => {
+  auth.roles = ['admin']; auth.branchIds = [A];
+  render(<Page />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Nueva' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Nueva promocion' });
+  fireEvent.change(dialog.querySelector('textarea'), { target: { value: 'Cambio sin guardar' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+  expect(await screen.findByRole('dialog', { name: '¿Descartar los cambios?' })).toBeInTheDocument();
+  expect(screen.getByDisplayValue('Cambio sin guardar')).toBeInTheDocument();
+});
+
+test('crear sin modificar y editar con valores normalizados cierran sin falso positivo', async () => {
+  auth.roles = ['admin']; auth.branchIds = [A];
+  render(<Page />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Nueva' }));
+  fireEvent.click(within(await screen.findByRole('dialog', { name: 'Nueva promocion' })).getByRole('button', { name: 'Cancelar' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+  const dialog = await editor();
+  expect(within(dialog).getByTestId('Imagen principal')).toHaveAttribute('data-asset', '');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+});
+
+test('editar con cambios permite seguir editando y descartar sin reutilizar el snapshot', async () => {
+  auth.roles = ['admin']; auth.branchIds = [A];
+  render(<Page />);
+  let dialog = await editor();
+  fireEvent.change(dialog.querySelector('textarea'), { target: { value: 'Descripcion conservada' } });
+  fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+  fireEvent.click(await screen.findByRole('button', { name: 'Seguir editando' }));
+  expect(screen.getByDisplayValue('Descripcion conservada')).toBeInTheDocument();
+
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Editar promocion' })).getByRole('button', { name: 'Cerrar' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Descartar cambios' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+  dialog = await editor();
+  expect(within(dialog).getByDisplayValue('Descripcion original')).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+});
+
+test('guardado exitoso cierra sin confirmacion y fallo conserva error y valores', async () => {
+  auth.roles = ['admin']; auth.branchIds = [A];
+  api.updateAdminConfigPromocion.mockRejectedValueOnce({ data: { error: { message: 'Fallo sintetico' } } }).mockResolvedValueOnce({ data: { promocion: promo() } });
+  render(<Page />);
+  const dialog = await editor();
+  fireEvent.change(dialog.querySelector('textarea'), { target: { value: 'Descripcion para guardar' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+  expect(await screen.findByText('Fallo sintetico')).toBeInTheDocument();
+  expect(screen.getByDisplayValue('Descripcion para guardar')).toBeInTheDocument();
+  expect(screen.queryByText('¿Descartar los cambios?')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(api.updateAdminConfigPromocion).toHaveBeenCalledTimes(2);
+  expect(screen.queryByText('¿Descartar los cambios?')).not.toBeInTheDocument();
+});
+
+test('guardado pendiente bloquea X, Escape y confirmaciones duplicadas', async () => {
+  auth.roles = ['admin']; auth.branchIds = [A];
+  const pending = deferred();
+  api.updateAdminConfigPromocion.mockImplementation(() => pending.promise);
+  render(<Page />);
+  const dialog = await editor();
+  fireEvent.change(dialog.querySelector('textarea'), { target: { value: 'Descripcion pendiente' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar cambios' }));
+  await waitFor(() => expect(api.updateAdminConfigPromocion).toHaveBeenCalledTimes(1));
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Editar promocion' })).getByRole('button', { name: 'Cerrar' }));
+  fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+  expect(screen.getByDisplayValue('Descripcion pendiente')).toBeInTheDocument();
+  expect(screen.queryByText('¿Descartar los cambios?')).not.toBeInTheDocument();
+  await act(async () => pending.resolve({ data: { promocion: promo() } }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+});
+
 test.each([0, 2])('admin %i sucursales no consulta global ni opera sin seleccion', async (count) => {
   auth.roles = ['admin']; auth.branchIds = [A, B].slice(0, count);
   render(<Page />);

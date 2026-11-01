@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { CalendarDays, Crown, House, LogIn, Plus, Scissors, Tag, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
@@ -6,6 +6,7 @@ import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.js
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 
 const ease = [0.25, 0.46, 0.45, 0.94];
+const CTA_ENTRY_DELAYS = [0.65, 0.8, 0.95];
 const BG_URL = 'https://images.pexels.com/photos/5152514/pexels-photo-5152514.jpeg?auto=compress&cs=tinysrgb&w=1920';
 
 function DecorativeLine({ delay = 0, className = '' }) {
@@ -42,16 +43,17 @@ function BrandBlock({ desktop = false }) {
   );
 }
 
-function PrimaryCta({ icon: Icon, label, onClick, delay }) {
+function PrimaryCta({ icon: Icon, label, onClick, order = 0 }) {
+  const reducedMotion = useReducedMotion();
   return (
     <motion.button
       type="button"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay, ease }}
-      whileHover={{ scale: 1.015, y: -1 }}
-      whileTap={{ scale: 0.975 }}
       onClick={onClick}
+      initial={reducedMotion ? false : { opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={reducedMotion ? { duration: 0 } : { duration: 0.6, delay: CTA_ENTRY_DELAYS[order], ease }}
+      whileHover={reducedMotion ? undefined : { scale: 1.015, y: -1 }}
+      whileTap={reducedMotion ? undefined : { scale: 0.975 }}
       className="mf-accent-gradient mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl px-5 text-[15px] font-semibold"
     >
       <Icon size={18} strokeWidth={1.9} />
@@ -60,18 +62,19 @@ function PrimaryCta({ icon: Icon, label, onClick, delay }) {
   );
 }
 
-function SecondaryCta({ icon: Icon, label, onClick, delay, disabled = false }) {
+function SecondaryCta({ icon: Icon, label, onClick, disabled = false, order = 0 }) {
+  const reducedMotion = useReducedMotion();
   return (
     <motion.button
       type="button"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay, ease }}
-      whileHover={disabled ? undefined : { scale: 1.015, y: -1 }}
-      whileTap={disabled ? undefined : { scale: 0.975 }}
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
-      className={`mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl border border-[var(--mf-btn-border)] px-5 text-[15px] transition-all ${
+      initial={reducedMotion ? false : { opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={reducedMotion ? { duration: 0 } : { duration: 0.6, delay: CTA_ENTRY_DELAYS[order], ease }}
+      whileHover={disabled || reducedMotion ? undefined : { scale: 1.015, y: -1 }}
+      whileTap={disabled || reducedMotion ? undefined : { scale: 0.975 }}
+      className={`mf-focus-ring flex h-14 w-full items-center justify-center gap-3 rounded-2xl border border-[var(--mf-btn-border)] px-5 text-[15px] transition-colors duration-200 ${
         disabled
           ? 'cursor-not-allowed bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)] opacity-70'
           : 'bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] text-[var(--mf-text)] hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_72%,white_8%)]'
@@ -153,9 +156,9 @@ export default function LandingPage() {
                 </motion.p>
 
                 <div className="flex flex-col gap-3">
-                  <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} delay={0.7} />
-                  <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} delay={0.82} />
-                  <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} delay={0.94} />
+                  <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} />
+                  <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} order={1} />
+                  <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} order={2} />
                 </div>
               </div>
             </div>
@@ -202,9 +205,9 @@ export default function LandingPage() {
             </motion.p>
 
             <div className="w-full max-w-[380px] space-y-3">
-              <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} delay={0.7} />
-              <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} delay={0.82} />
-              <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} delay={0.94} />
+              <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} />
+              <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} order={1} />
+              <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} order={2} />
             </div>
 
             <motion.div

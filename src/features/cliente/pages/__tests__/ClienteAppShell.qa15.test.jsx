@@ -11,7 +11,7 @@ vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => auth, get
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => notices }));
 vi.mock('../../../../config/supabaseClient.js', () => ({ supabase: null }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => nav, useLocation: () => ({ pathname: '/home/cliente' }), Outlet: ({ context }) => { outlet.current = context; return null; } }));
-vi.mock('../../../../components/branding/MasterfadeLogo.jsx', () => ({ default: () => null }));
+vi.mock('../../../../components/branding/MasterfadeLogo.jsx', () => ({ default: ({ variant, className }) => <div data-logo-variant={variant} className={className} /> }));
 vi.mock('../../../../components/navigation/PremiumBottomNav.jsx', () => ({ default: () => null }));
 vi.mock('../../../../components/theme/ThemeSwitcher.jsx', () => ({ default: () => null }));
 let Page, httpClient, clienteApi, fetchMock, invalidation;
@@ -27,6 +27,16 @@ beforeEach(async () => {
 afterEach(() => { cleanup(); httpClient.registerSessionInvalidationHandler(null); httpClient.abortInFlightRequests(); vi.unstubAllGlobals(); });
 async function ready() { const view = render(<Page />); await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1)); return view; }
 function changeB(view) { auth.user = { id_usuario: 'synthetic-B' }; view.rerender(<Page />); }
+
+test('sidebar Cliente mantiene el logo centrado y su navegación intacta', async () => {
+  await ready();
+  const logo = document.querySelector('[data-logo-variant="sidebar"]');
+  expect(logo).toHaveClass('mx-auto');
+  expect(logo.closest('button')).toHaveClass('w-full', 'justify-center', 'mb-4');
+  for (const label of ['Inicio', 'Citas', 'Catálogo', 'Planes', 'Perfil']) {
+    expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+  }
+});
 
 test.each([200, 401, 403, 500])('respuesta antigua A %s no afecta B ni invalida globalmente', async status => {
   const a = deferred(); fetchMock.mockReturnValueOnce(a.promise); const view = await ready(); const signalA = fetchMock.mock.calls[0][1].signal;
@@ -84,4 +94,13 @@ test('logout confirmado puede navegar cuando AuthContext ya limpió la identidad
 test('hidratación inicial no consulta; StrictMode no duplica timer de carga', async () => {
   auth.isHydrating = true; const view = render(<StrictMode><Page /></StrictMode>); await act(async () => new Promise(resolve => setTimeout(resolve, 10))); expect(fetchMock).not.toHaveBeenCalled();
   auth.isHydrating = false; view.rerender(<StrictMode><Page /></StrictMode>); await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+});
+test('navegación lateral conserva enlaces y separación vertical explícita', async () => {
+  await ready();
+  const navElement = screen.getByRole('navigation');
+  expect(navElement).toHaveClass('flex', 'flex-col', 'gap-3');
+  expect(navElement).not.toHaveClass('space-y-2');
+  for (const label of ['Inicio', 'Citas', 'Catálogo', 'Planes', 'Perfil']) {
+    expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+  }
 });
