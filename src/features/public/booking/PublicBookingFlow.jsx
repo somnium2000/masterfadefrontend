@@ -51,6 +51,7 @@ import {
   areServiceIdsEqual,
   createBookingBlock,
   evaluatePromotionForBlock,
+  preparePromotionTargetSelection,
   extractBookingCode,
   extractConfirmedAppointments,
   extractPlanIncludedServiceIds,
@@ -2457,14 +2458,26 @@ const agendaAutoLoadKeyRef = useRef('');
       });
       return;
     }
-    const evaluation = evaluatePromotionForBlock({
+    const contactState = resolveBlockContactState(currentBlock, effectiveActiveBlockIndex);
+    if (!contactState.fullName) {
+      notifications.warning(
+        effectiveActiveBlockIndex === 0
+          ? (titularState.isAuthenticated
+            ? 'Completa los datos faltantes del titular antes de elegir promociones.'
+            : 'Completa el nombre del titular antes de elegir promociones.')
+          : 'Completa nombre y apellido del acompañante antes de elegir promociones.',
+        { dedupeKey: 'public-booking-promotion-contact-required' }
+      );
+      return;
+    }
+    const preparedSelection = preparePromotionTargetSelection({
       block: currentBlock,
       promotion,
       servicesById,
       packagesById,
     });
-    if (!evaluation.canSelect) {
-      notifications.warning(evaluation.disabledReason || 'Esta promoción no aplica a la selección actual.', {
+    if (!preparedSelection.canSelect) {
+      notifications.warning(preparedSelection.disabledReason || 'Esta promoción no aplica a la selección actual.', {
         dedupeKey: 'public-booking-promotion-target-required',
       });
       return;
@@ -2489,6 +2502,13 @@ const agendaAutoLoadKeyRef = useRef('');
     }
 
     updateBlockAtIndex(effectiveActiveBlockIndex, (activeCurrentBlock) => {
+      const nextTargetSelection = preparePromotionTargetSelection({
+        block: activeCurrentBlock,
+        promotion,
+        servicesById,
+        packagesById,
+      });
+      if (!nextTargetSelection.canSelect) return activeCurrentBlock;
       const normalizedCurrentPromotionIds = normalizePromotionIds(
         activeCurrentBlock?.promotionIds,
         activeCurrentBlock?.promotionId
@@ -2505,7 +2525,7 @@ const agendaAutoLoadKeyRef = useRef('');
         ? String(nextPrimaryPromotion?.id_promocion_regla || '').trim()
         : '';
       return {
-        ...activeCurrentBlock,
+        ...nextTargetSelection.block,
         promotionId: nextPrimaryPromotionId,
         promotionIds: limitedPromotionIds,
         promotionRuleId: nextPromotionRuleId,
@@ -2513,6 +2533,7 @@ const agendaAutoLoadKeyRef = useRef('');
         id_promocion_regla: nextPromotionRuleId || null,
       };
     });
+    if (preparedSelection.targetAdded) resetAvailabilityViewState();
   }, [
     bookingBlocks,
     effectiveActiveBlockIndex,
@@ -2520,9 +2541,12 @@ const agendaAutoLoadKeyRef = useRef('');
     notifications,
     packagesById,
     promotionsById,
+    resetAvailabilityViewState,
+    resolveBlockContactState,
     rewardModeActive,
     selectedBranchId,
     servicesById,
+    titularState.isAuthenticated,
     updateBlockAtIndex,
   ]);
 

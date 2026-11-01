@@ -628,7 +628,6 @@ export default function AdminCitasPage() {
     confirmar: Boolean(selectedBarberId && previewServiceSelectionComplete && previewDate && previewTime),
   }), [previewDate, previewServiceSelectionComplete, previewTime, selectedBarberId]);
 
-  const showPreviewBlockingLoader = previewAvailabilityLoading && Object.keys(previewAvailabilityMap).length === 0;
 
   const syncPreviewServicesScrollState = useCallback(() => {
     const scroller = previewServicesScrollRef.current;
@@ -1773,50 +1772,54 @@ export default function AdminCitasPage() {
             </div>
 
             <div className="citas-calendar-head">
-              <button type="button" className="citas-nav-round" onClick={() => moveMonth(-1)} aria-label="Mes anterior">
+              <button type="button" className="citas-nav-round" onClick={() => moveMonth(-1)} aria-label="Mes anterior" disabled={previewAvailabilityLoading}>
                 <ArrowLeft size={16} />
               </button>
               <div className="citas-calendar-month">{formatMonth(previewMonth)}</div>
-              <button type="button" className="citas-nav-round" onClick={() => moveMonth(1)} aria-label="Mes siguiente">
+              <button type="button" className="citas-nav-round" onClick={() => moveMonth(1)} aria-label="Mes siguiente" disabled={previewAvailabilityLoading}>
                 <ArrowRight size={16} />
               </button>
             </div>
 
-            <div className="citas-calendar-grid">
-              <div className="citas-weekdays">
-                {WEEK_DAYS.map((day) => (
-                  <div key={day} className="citas-weekday">{day}</div>
-                ))}
-              </div>
-              <div className="citas-days">
-                {calendarCells.map((cell) => {
-                  const dayInfo = previewAvailabilityMap[cell.key];
-                  const available = Boolean(dayInfo?.disponible);
-                  const isSelected = previewDate === cell.key;
-                  const classNames = [
-                    'citas-day-btn',
-                    cell.inMonth ? 'is-in-month' : 'is-outside',
-                    available ? 'is-available' : 'is-unavailable',
-                    isSelected ? 'is-selected' : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ');
+            {previewAvailabilityLoading ? (
+              <LoadingSpinner label="Buscando fechas disponibles..." />
+            ) : (
+              <div className="citas-calendar-grid">
+                <div className="citas-weekdays">
+                  {WEEK_DAYS.map((day) => (
+                    <div key={day} className="citas-weekday">{day}</div>
+                  ))}
+                </div>
+                <div className="citas-days">
+                  {calendarCells.map((cell) => {
+                    const dayInfo = previewAvailabilityMap[cell.key];
+                    const available = Boolean(dayInfo?.disponible);
+                    const isSelected = previewDate === cell.key;
+                    const classNames = [
+                      'citas-day-btn',
+                      cell.inMonth ? 'is-in-month' : 'is-outside',
+                      available ? 'is-available' : 'is-unavailable',
+                      isSelected ? 'is-selected' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ');
 
-                  return (
-                    <button
-                      key={cell.key}
-                      type="button"
-                      className={classNames}
-                      onClick={() => handlePreviewDayClick(cell.key, cell.inMonth && available)}
-                      disabled={!cell.inMonth || !available}
-                      title={formatDateOnly(cell.key)}
-                    >
-                      {cell.label}
-                    </button>
-                  );
-                })}
+                    return (
+                      <button
+                        key={cell.key}
+                        type="button"
+                        className={classNames}
+                        onClick={() => handlePreviewDayClick(cell.key, cell.inMonth && available)}
+                        disabled={!cell.inMonth || !available}
+                        title={formatDateOnly(cell.key)}
+                      >
+                        {cell.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
@@ -2446,7 +2449,6 @@ export default function AdminCitasPage() {
           </div>
         </div>
 
-        {showPreviewBlockingLoader ? <LoadingSpinner /> : null}
         {previewError ? <ErrorBanner message={previewError} onRetry={fetchPreviewAvailability} /> : null}
 
         {previewStep === 'barberos' && renderPreviewStepBarberos()}
