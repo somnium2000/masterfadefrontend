@@ -53,7 +53,9 @@ describe("formulario PixelPay VIP", () => {
       card: { number: "4111111111111111", holder: "Cliente QA", expire: "3012", cvv: "987" },
       billing: { address: "Blvd Suyapa", country: "HN", state: "HN-CR", city: "Tegucigalpa", phone: "50499999999" },
     });
-    expect(screen.getByText(/VIP · Centro · L 300\.00/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'VIP' })).toBeInTheDocument();
+    expect(screen.getByText('Centro')).toBeInTheDocument();
+    expect(screen.getByText('L 300.00')).toBeInTheDocument();
     expect(screen.getByLabelText("Numero de tarjeta")).toHaveValue("");
     expect(screen.getByLabelText("CVV")).toHaveValue("");
   });
@@ -62,5 +64,17 @@ describe("formulario PixelPay VIP", () => {
     render(<PlanPurchaseFlowDialog open step="payment" orderSummary={orderSummary} pendingConfirmation />);
     expect(screen.getByText("Existe un pago pendiente de conciliación. No realices otro cobro.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pagar con PixelPay" })).toBeDisabled();
+  });
+
+  it("prioriza pagar y conserva las acciones secundarias", () => {
+    const onBackToSummary = vi.fn();
+    const onCancel = vi.fn();
+    render(<PlanPurchaseFlowDialog open step="payment" orderSummary={orderSummary} onBackToSummary={onBackToSummary} onCancel={onCancel} />);
+    const pay = screen.getByRole('button', { name: 'Pagar con PixelPay' });
+    expect(pay.parentElement.firstElementChild).toBe(pay);
+    fireEvent.click(screen.getByRole('button', { name: 'Volver al resumen' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(onBackToSummary).toHaveBeenCalledOnce();
+    expect(onCancel).toHaveBeenCalledOnce();
   });
 });

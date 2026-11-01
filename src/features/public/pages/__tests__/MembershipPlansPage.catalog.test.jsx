@@ -273,6 +273,37 @@ describe('persistencia aislada de intentos VIP', () => {
     return view;
   };
 
+  test('la aprobación directa conserva el recibo sin toast de éxito duplicado', async () => {
+    const result = { estado_intent_codigo: 'confirmado', confirmation: { estado: 'activa', id_suscripcion: 'subscription-a' } };
+    payment.confirmMembershipPayment.mockResolvedValue(result);
+    await renderPurchase();
+    await act(async () => buy());
+    await act(async () => dialog.props.onContinueToPayment());
+    await act(async () => dialog.props.onConfirmPayment({}));
+    expect(dialog.props.step).toBe('success');
+    expect(dialog.props.paymentConfirmation).toBe(result);
+    expect(notifications.success).not.toHaveBeenCalled();
+  });
+
+  test.each(['PAGADO', 'RECHAZADO'])('polling %s entrega el resultado sin toast ni segunda Sale', async (normalized_status) => {
+    const result = { normalized_status, estado_intent_codigo: normalized_status === 'PAGADO' ? 'confirmado' : 'fallido', id_suscripcion: 'subscription-a' };
+    payment.confirmMembershipPayment.mockResolvedValue({ pending_confirmation: true });
+    payment.queryMembershipPaymentStatus.mockResolvedValue(result);
+    await renderPurchase();
+    await act(async () => buy());
+    await act(async () => dialog.props.onContinueToPayment());
+    await act(async () => dialog.props.onConfirmPayment({}));
+    expect(payment.confirmMembershipPayment).toHaveBeenCalledTimes(1);
+    expect(notifications.success).not.toHaveBeenCalled();
+    if (normalized_status === 'PAGADO') {
+      expect(dialog.props.step).toBe('success');
+      expect(dialog.props.paymentConfirmation).toBe(result);
+    } else {
+      expect(dialog.props.step).toBe('payment');
+      expect(dialog.props.errorMessage).toMatch(/rechazado/);
+    }
+  });
+
   test('primera compra genera UUID una vez y almacena solo contexto mínimo antes de la respuesta', async () => {
     const pending = deferred();
     payment.createMembershipOrder.mockReturnValue(pending.promise);
@@ -524,6 +555,38 @@ describe('persistencia aislada de intentos VIP', () => {
 });
 
 describe('catálogo público de membresías por sucursal', () => {
+  test('una única sucursal se selecciona y carga automáticamente sin mostrar selector', async () => {
+    api.listPublicCatalogBranches.mockResolvedValue({ branches: [branches[0]] });
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan('Plan único')] });
+    render(<MembershipPlansPage />);
+    expect(await screen.findByText('Plan único')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Planes en Centro' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Centro' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Sucursal requerida')).not.toBeInTheDocument();
+    expect(screen.getByText('Explora los planes disponibles y completa tu compra en minutos.')).toBeInTheDocument();
+    expect(api.listPublicPlansByBranch).toHaveBeenCalledExactlyOnceWith(A);
+  });
+
+  test('una única sucursal conserva una sola consulta bajo StrictMode', async () => {
+    api.listPublicCatalogBranches.mockResolvedValue({ branches: [branches[0]] });
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan('Plan estricto')] });
+    render(<StrictMode><MembershipPlansPage /></StrictMode>);
+    expect(await screen.findByText('Plan estricto')).toBeInTheDocument();
+    expect(api.listPublicCatalogBranches).toHaveBeenCalledTimes(1);
+    expect(api.listPublicPlansByBranch).toHaveBeenCalledTimes(1);
+  });
+
+  test('error de planes de sucursal única conserva reintento sin selector', async () => {
+    api.listPublicCatalogBranches.mockResolvedValue({ branches: [branches[0]] });
+    api.listPublicPlansByBranch.mockRejectedValueOnce(new Error('privado')).mockResolvedValueOnce({ plans: [plan('Recuperado único')] });
+    render(<MembershipPlansPage />);
+    expect(await screen.findByText('No se pudo cargar el catalogo de planes.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Centro' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+    expect(await screen.findByText('Recuperado único')).toBeInTheDocument();
+    expect(api.listPublicPlansByBranch).toHaveBeenCalledTimes(2);
+  });
+
   test('descarta respuesta antigua de A después de mostrar B', async () => {
     const pending = deferred();
     api.listPublicPlansByBranch.mockImplementation((id) => id === A ? pending.promise : Promise.resolve({ plans: [plan('Plan B', 200)] }));

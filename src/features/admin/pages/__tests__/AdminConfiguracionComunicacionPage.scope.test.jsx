@@ -79,6 +79,98 @@ test('QA13: doble guardado emite un solo borrador', async () => {
   await act(async () => pending.resolve({ data: { campania: campaign(B) } }));
 });
 
+test('Cancelar sin cambios cierra inmediatamente y con cambios solicita confirmacion', async () => {
+  render(<Page />); await panel().findByText('Campaña A');
+  fireEvent.click(screen.getByRole('button', { name: 'Nueva' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+  expect(screen.queryByRole('heading', { name: '¿Descartar los cambios?' })).not.toBeInTheDocument();
+  expect(panel().getByText('Campaña A')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Nueva' }));
+  const fields = panel().getAllByRole('textbox').filter(field => !field.disabled);
+  fireEvent.change(fields[0], { target: { value: 'Borrador pendiente' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+  expect(screen.getByRole('heading', { name: '¿Descartar los cambios?' })).toBeInTheDocument();
+});
+
+test('Seguir editando conserva todos los campos y Descartar ejecuta el cierre pendiente', async () => {
+  render(<Page />); await panel().findByText('Campaña A');
+  fireEvent.click(screen.getByRole('button', { name: 'Nueva' }));
+  const values = ['Nombre pendiente', 'Asunto pendiente', 'Contenido pendiente', 'Notas pendientes'];
+  const fields = panel().getAllByRole('textbox').filter(field => !field.disabled);
+  values.forEach((value, index) => fireEvent.change(fields[index], { target: { value } }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Seguir editando' }));
+  values.forEach(value => expect(screen.getByDisplayValue(value)).toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }));
+  expect(screen.queryByRole('heading', { name: 'Nueva campaña borrador' })).not.toBeInTheDocument();
+  values.forEach(value => expect(screen.queryByDisplayValue(value)).not.toBeInTheDocument());
+});
+
+test('Nueva campaña protege la edicion actual y renueva el snapshot al descartar', async () => {
+  render(<Page />); await panel().findByText('Campaña A');
+  fireEvent.click(screen.getByRole('button', { name: 'Editar borrador' }));
+  const name = await screen.findByDisplayValue('Campaña A');
+  fireEvent.change(name, { target: { value: 'Campaña A modificada' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Nueva' }));
+  expect(screen.getByDisplayValue('Campaña A modificada')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }));
+  expect(screen.getByRole('heading', { name: 'Nueva campaña borrador' })).toBeInTheDocument();
+  expect(panel().getAllByRole('textbox').filter(field => !field.disabled)[0]).toHaveValue('');
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+  expect(screen.queryByRole('heading', { name: '¿Descartar los cambios?' })).not.toBeInTheDocument();
+});
+
+test('cambiar de A a B exige descarte; rechazar no consulta B y confirmar si lo hace', async () => {
+  render(<Page />); await panel().findByText('Campaña A');
+  fireEvent.click(screen.getByRole('button', { name: 'Editar borrador' }));
+  fireEvent.change(await screen.findByDisplayValue('Campaña A'), { target: { value: 'A sin guardar' } });
+  const callsBefore = api.getAdminConfigComunicacionCampania.mock.calls.filter(([id]) => id === B).length;
+  await pick(B);
+  expect(screen.getByRole('heading', { name: '¿Descartar los cambios?' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Seguir editando' }));
+  expect(screen.getByDisplayValue('A sin guardar')).toBeInTheDocument();
+  expect(api.getAdminConfigComunicacionCampania.mock.calls.filter(([id]) => id === B)).toHaveLength(callsBefore);
+
+  await pick(B);
+  fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }));
+  await panel().findByText('Campaña B');
+  expect(api.getAdminConfigComunicacionCampania.mock.calls.filter(([id]) => id === B)).toHaveLength(callsBefore + 1);
+});
+
+test('guardado fallido conserva valores, no pierde snapshot y permite reintentar', async () => {
+  api.updateAdminConfigComunicacionCampania.mockRejectedValueOnce(new Error('SYNTHETIC')).mockResolvedValueOnce({ data: { campania: campaign(A) } });
+  render(<Page />); await panel().findByText('Campaña A');
+  fireEvent.click(screen.getByRole('button', { name: 'Editar borrador' }));
+  fireEvent.change(await screen.findByDisplayValue('Campaña A'), { target: { value: 'Cambio recuperable' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+  await waitFor(() => expect(api.updateAdminConfigComunicacionCampania).toHaveBeenCalledTimes(1));
+  expect(screen.getByDisplayValue('Cambio recuperable')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+  expect(screen.getByRole('heading', { name: '¿Descartar los cambios?' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Seguir editando' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+  await waitFor(() => expect(api.updateAdminConfigComunicacionCampania).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.queryByRole('heading', { name: 'Editar campaña borrador' })).not.toBeInTheDocument());
+  expect(screen.queryByRole('heading', { name: '¿Descartar los cambios?' })).not.toBeInTheDocument();
+});
+
+test('guardado pendiente bloquea Cancelar, Nueva y cambio de campaña sin confirmaciones duplicadas', async () => {
+  const pending = deferred(); api.updateAdminConfigComunicacionCampania.mockReturnValue(pending.promise);
+  render(<Page />); await panel().findByText('Campaña A');
+  fireEvent.click(screen.getByRole('button', { name: 'Editar borrador' }));
+  fireEvent.change(await screen.findByDisplayValue('Campaña A'), { target: { value: 'Guardando A' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+  await waitFor(() => expect(api.updateAdminConfigComunicacionCampania).toHaveBeenCalledTimes(1));
+  expect(screen.getByRole('button', { name: 'Cancelar' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Nueva' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /Campaña B/ })).toBeDisabled();
+  expect(screen.queryByRole('heading', { name: '¿Descartar los cambios?' })).not.toBeInTheDocument();
+  await act(async () => pending.resolve({ data: { campania: campaign(A) } }));
+});
+
 test.each(['success', 'error'])('listado antiguo (%s) no sustituye busqueda vigente', async (outcome) => {
   const pending = deferred();
   api.listAdminConfigComunicacionCampanias.mockImplementation(({ q }) => q === 'A' ? pending.promise : Promise.resolve({ data: { campanias: q === 'B' ? [campaign(B)] : [], total: q === 'B' ? 1 : 0, offset: 0 } }));
@@ -229,21 +321,24 @@ test('una falla de consulta no borra exclusiones manuales de la misma campaña',
   await waitFor(() => expect(screen.getByRole('checkbox', { name: /elegible A/ })).toBeDisabled());
 });
 
-test.each(['success', 'error'])('guardado tardio de borrador (%s) no sobrescribe editor B', async (outcome) => {
+test.each(['success', 'error'])('guardado pendiente (%s) bloquea el cambio a B y conserva el resultado correcto', async (outcome) => {
   const pending = deferred(); api.updateAdminConfigComunicacionCampania.mockImplementation(() => pending.promise);
   render(<Page />); await panel().findByText('Campaña A');
   fireEvent.click(screen.getByRole('button', { name: 'Editar borrador' }));
   await screen.findByRole('heading', { name: 'Editar campaña borrador' });
   fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
   await waitFor(() => expect(api.updateAdminConfigComunicacionCampania).toHaveBeenCalledTimes(1));
-  await pick(B); await panel().findByText('Campaña B');
-  fireEvent.click(screen.getByRole('button', { name: 'Editar borrador' }));
-  await screen.findByDisplayValue('Campaña B');
+  await pick(B);
+  expect(screen.getByDisplayValue('Campaña A')).toBeDisabled();
   await act(async () => outcome === 'success' ? pending.resolve({ data: { campania: campaign(A) } }) : pending.reject({ data: { error: { message: 'Error antiguo' } } }));
-  expect(screen.getByDisplayValue('Campaña B')).toBeInTheDocument();
-  expect(notifications.success).not.toHaveBeenCalled();
-  expect(notifications.error).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: 'Guardar cambios' })).not.toBeDisabled();
+  if (outcome === 'success') {
+    await waitFor(() => expect(notifications.success).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('heading', { name: 'Editar campaña borrador' })).not.toBeInTheDocument();
+  } else {
+    await waitFor(() => expect(notifications.error).toHaveBeenCalledTimes(1));
+    expect(screen.getByDisplayValue('Campaña A')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Guardar cambios' })).not.toBeDisabled();
+  }
   expect(api.updateAdminConfigComunicacionCampania).toHaveBeenCalledTimes(1);
 });
 

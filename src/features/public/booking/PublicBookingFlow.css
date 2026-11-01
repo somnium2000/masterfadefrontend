@@ -1056,6 +1056,7 @@
   line-height: 1.4;
 }
 
+
 .public-booking-success {
   border-color: color-mix(in srgb, #31a36f 40%, var(--mf-nav-border) 60%);
   background: color-mix(in srgb, #31a36f 8%, var(--mf-card) 92%);

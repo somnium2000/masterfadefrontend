@@ -436,10 +436,6 @@ export default function PublicBookingAgendaStep() {
     [activeBlockIndex, bookingBlocksSummary]
   );
 
-  const selectedServiceIdsForPromotionSet = useMemo(
-    () => new Set(serviceIds),
-    [serviceIds]
-  );
   const selectedPromotionIdsSet = useMemo(
     () => new Set(Array.isArray(selectedPromotionIds) ? selectedPromotionIds : []),
     [selectedPromotionIds]
@@ -455,9 +451,9 @@ export default function PublicBookingAgendaStep() {
       const targetServiceId = String(promotion?.id_servicio_objetivo || '').trim();
       const targetPackageId = String(promotion?.id_paquete_objetivo || '').trim();
       const targetLabel = resolvePromotionTargetLabel(promotion);
-      const targetSelected = appliesTo === 'paquete'
-        ? Boolean(targetPackageId && selectedPackageId && selectedPackageId === targetPackageId)
-        : Boolean(targetServiceId && selectedServiceIdsForPromotionSet.has(targetServiceId));
+      const targetAvailable = appliesTo === 'paquete'
+        ? Boolean(targetPackageId && packages.some((pkg) => String(pkg?.id_paquete || '').trim() === targetPackageId))
+        : Boolean(targetServiceId && services.some((service) => String(service?.id_servicio || '').trim() === targetServiceId));
       const benefitLabel = formatPromotionBenefitLabel(promotion);
       const vigencyLabel = formatPromotionVigencyLabel(promotion);
       const disabledByBranch = !selectedBranchId;
@@ -465,7 +461,7 @@ export default function PublicBookingAgendaStep() {
       const disabledByReward = rewardModeActive;
       const disabledByLimit = !isSelected && !canSelectMorePromotions;
       const canSelect = isSelected
-        || (!disabledByBranch && !disabledByReward && !disabledByLimit && targetSelected);
+        || (!disabledByBranch && !disabledByReward && !disabledByLimit && targetAvailable);
 
       let disabledReason = '';
       if (isSelected) {
@@ -476,8 +472,8 @@ export default function PublicBookingAgendaStep() {
         disabledReason = 'El canje seleccionado no puede combinarse con promociones para esta reserva.';
       } else if (disabledByLimit) {
         disabledReason = `Puedes seleccionar hasta ${maxPromotionsPerBooking} promociones por reserva.`;
-      } else if (!targetSelected) {
-        disabledReason = `Requiere seleccionar ${targetLabel}`;
+      } else if (!targetAvailable) {
+        disabledReason = `${targetLabel} no está disponible en esta sucursal.`;
       }
 
       return {
@@ -495,11 +491,11 @@ export default function PublicBookingAgendaStep() {
     canSelectMorePromotions,
     maxPromotionsPerBooking,
     promotions,
+    packages,
     rewardModeActive,
     selectedBranchId,
-    selectedPackageId,
     selectedPromotionIdsSet,
-    selectedServiceIdsForPromotionSet,
+    services,
   ]);
   const selectedPromotionsForBlock = useMemo(
     () => promotionsForCards.filter((promotion) => promotion.isSelected),
@@ -1149,11 +1145,6 @@ export default function PublicBookingAgendaStep() {
         >
           <div className="citas-calendar-head public-booking-calendar-head">
             <h3 className="citas-side-title">Fechas Disponibles</h3>
-            {availabilityLoading ? (
-              <span className="public-booking-calendar-refresh" aria-live="polite">
-                Actualizando disponibilidad...
-              </span>
-            ) : null}
           </div>
 
           {!hasValidSelectionForCalendar ? (
@@ -1170,38 +1161,42 @@ export default function PublicBookingAgendaStep() {
                   className="citas-nav-round"
                   onClick={() => setMonth(-1)}
                   aria-label="Mes anterior"
-                  disabled={!canGoPrevMonth}
+                  disabled={availabilityLoading || !canGoPrevMonth}
                 >
                   <ArrowLeft size={16} />
                 </button>
                 <div className="citas-calendar-month">{formatMonth(currentMonth)}</div>
-                <button type="button" className="citas-nav-round" onClick={() => setMonth(1)} aria-label="Mes siguiente">
+                <button type="button" className="citas-nav-round" onClick={() => setMonth(1)} aria-label="Mes siguiente" disabled={availabilityLoading}>
                   <ArrowRight size={16} />
                 </button>
               </div>
 
-              <div className="citas-calendar-grid">
-                <div className="citas-weekdays">
-                  {WEEK_DAYS.map((day) => (
-                    <div key={day} className="citas-weekday">
-                      {day}
-                    </div>
-                  ))}
-                </div>
+              {availabilityLoading ? (
+                <LoadingSpinner label="Buscando fechas disponibles..." />
+              ) : (
+                <div className="citas-calendar-grid">
+                  <div className="citas-weekdays">
+                    {WEEK_DAYS.map((day) => (
+                      <div key={day} className="citas-weekday">
+                        {day}
+                      </div>
+                    ))}
+                  </div>
 
-                <div className="citas-days">
-                  {calendarCells.map((cell) => (
-                    <DayButton
-                      key={cell.key}
-                      cell={cell}
-                      dayInfo={availabilityMap[cell.key]}
-                      minDateKey={minBookingDateKey}
-                      isSelected={selectedDate === cell.key}
-                      onSelect={onSelectDay}
-                    />
-                  ))}
+                  <div className="citas-days">
+                    {calendarCells.map((cell) => (
+                      <DayButton
+                        key={cell.key}
+                        cell={cell}
+                        dayInfo={availabilityMap[cell.key]}
+                        minDateKey={minBookingDateKey}
+                        isSelected={selectedDate === cell.key}
+                        onSelect={onSelectDay}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </>
           ) : (
             <div className="public-booking-inherited-date-banner">

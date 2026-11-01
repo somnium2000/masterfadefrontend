@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ArrowLeft, CheckCircle2, Eye } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
@@ -8,6 +8,7 @@ import { consumeIdleSessionMessage, useAuth } from '../../../context/AuthContext
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { supabase } from '../../../config/supabaseClient.js';
 import AuthLandingBrandBlock from '../components/AuthLandingBrandBlock.jsx';
+import googleGUrl from '../assets/google-g.svg?url&no-inline';
 import { getSafeLoginReturnPath } from '../lib/loginReturnPath.js';
 import './LoginPage.css';
 
@@ -72,17 +73,6 @@ function resolveSafeLoginMessage(result) {
   return GENERIC_LOGIN_ERROR;
 }
 
-function GoogleMark(props) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
-      <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.2-.9 2.2-1.9 2.9l3 2.3c1.8-1.6 2.8-4 2.8-6.8 0-.7-.1-1.5-.2-2.2H12z" />
-      <path fill="#34A853" d="M12 21.5c2.6 0 4.8-.9 6.3-2.3l-3-2.3c-.8.6-2 .9-3.3.9-2.5 0-4.6-1.7-5.4-4l-3.1 2.4c1.5 3.1 4.7 5.3 8.5 5.3z" />
-      <path fill="#4A90E2" d="M6.6 13.8c-.2-.6-.3-1.2-.3-1.8s.1-1.3.3-1.8l-3.1-2.4C2.9 9 2.6 10.5 2.6 12s.3 3 1 4.2l3-2.4z" />
-      <path fill="#FBBC05" d="M12 6.2c1.4 0 2.7.5 3.7 1.4l2.7-2.7C16.8 3.4 14.6 2.5 12 2.5c-3.8 0-7 2.2-8.5 5.3l3.1 2.4c.8-2.3 2.9-4 5.4-4z" />
-    </svg>
-  );
-}
-
 function FacebookMark(props) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
@@ -119,7 +109,7 @@ export default function LoginPage() {
   const [loadingGoogle, setLoadingGoogle] = useState(false);
   const [error, setError] = useState('');
   const [showInvalidUserAuthBox, setShowInvalidUserAuthBox] = useState(false);
-  const [showPasswordWhilePress, setShowPasswordWhilePress] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [sessionLimitModalOpen, setSessionLimitModalOpen] = useState(false);
   const [replacingSession, setReplacingSession] = useState(false);
   const pendingSessionReplaceRef = useRef(null);
@@ -271,27 +261,8 @@ export default function LoginPage() {
     }
   }
 
-  function handlePasswordRevealStart(event) {
-    event.preventDefault();
-    setShowPasswordWhilePress(true);
-  }
-
-  function handlePasswordRevealEnd() {
-    setShowPasswordWhilePress(false);
-  }
-
-  function handlePasswordRevealKeyDown(event) {
-    if (event.key === ' ' || event.key === 'Enter') handlePasswordRevealStart(event);
-  }
-
-  function handlePasswordRevealKeyUp(event) {
-    if (event.key !== ' ' && event.key !== 'Enter') return;
-    event.preventDefault();
-    handlePasswordRevealEnd();
-  }
-
   return (
-    <div className="mf-login-page mf-page-gradient">
+    <div className="mf-login-page mf-login-page--public mf-page-gradient">
       <div className="mf-login-shell mf-mobile-frame mf-screen-pad mf-safe-top">
         <div className="mf-login-topbar">
           <Link className="mf-login-back" to="/">
@@ -319,12 +290,9 @@ export default function LoginPage() {
           >
             <div className="mf-login-card-header">
               <p className="mf-login-kicker">Acceso premium</p>
-              <h1 className="mf-login-title">Iniciar sesion</h1>
+              <h1 className="mf-login-title">Iniciar Sesión</h1>
               <p className="mf-login-subtitle">
-                Ingresa con tu correo y contrasena para continuar a tu experiencia MASTERFADE.
-              </p>
-              <p className="mf-login-trust-copy">
-                Tu acceso se valida de forma segura antes de entrar a tu panel privado.
+                Accede de forma segura a tu experiencia MASTERFADE.
               </p>
               {intent === 'seleccionar_plan' ? (
                 <div className="mf-login-intent-note">
@@ -355,7 +323,7 @@ export default function LoginPage() {
                     aria-label="Continuar con Google"
                   >
                     <span className="mf-social-icon-wrap" aria-hidden="true">
-                      <GoogleMark className="mf-social-icon" />
+                      <img className="mf-social-icon" src={googleGUrl} alt="" />
                     </span>
                     <span className="mf-social-text">
                       {loadingGoogle ? 'Redirigiendo...' : 'Google'}
@@ -400,21 +368,15 @@ export default function LoginPage() {
               </div>
 
               <div className="mf-form-group">
-                <div className="mf-row-between">
-                  <label className="mf-label" htmlFor="contrasena">
-                    Contrasena
-                  </label>
-
-                  <Link className="mf-link" to="/forgot-password">
-                    Olvidaste tu contrasena?
-                  </Link>
-                </div>
+                <label className="mf-label" htmlFor="contrasena">
+                  Contraseña
+                </label>
 
                 <div className="mf-password-field">
                   <input
                     id="contrasena"
                     className="mf-input mf-password-input"
-                    type={showPasswordWhilePress ? 'text' : 'password'}
+                    type={showPassword ? 'text' : 'password'}
                     autoComplete="current-password"
                     value={contrasena}
                     onChange={(event) => setContrasena(event.target.value)}
@@ -424,19 +386,33 @@ export default function LoginPage() {
                   <button
                     type="button"
                     className="mf-password-peek"
-                    aria-label="Manten presionado para ver la contrasena"
-                    title="Manten presionado para ver la contrasena"
-                    onPointerDown={handlePasswordRevealStart}
-                    onKeyDown={handlePasswordRevealKeyDown}
-                    onKeyUp={handlePasswordRevealKeyUp}
-                    onPointerUp={handlePasswordRevealEnd}
-                    onPointerLeave={handlePasswordRevealEnd}
-                    onPointerCancel={handlePasswordRevealEnd}
-                    onBlur={handlePasswordRevealEnd}
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    aria-pressed={showPassword}
+                    title={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    onClick={() => setShowPassword((current) => !current)}
                     disabled={isSubmitting}
                   >
-                    <Eye size={16} />
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                   </button>
+                </div>
+
+              </div>
+
+              <div className="mf-login-aux-row">
+                <label className="mf-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(event) => setRemember(event.target.checked)}
+                    disabled={isSubmitting}
+                  />
+                  <span>Recordarme</span>
+                </label>
+
+                <div className="mf-login-forgot-row">
+                  <Link className="mf-link" to="/forgot-password">
+                    ¿Olvidaste tu contraseña?
+                  </Link>
                 </div>
               </div>
 
@@ -457,26 +433,16 @@ export default function LoginPage() {
                 </div>
               ) : null}
 
-              <div className="mf-actions">
-                <label className="mf-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={remember}
-                    onChange={(event) => setRemember(event.target.checked)}
-                    disabled={isSubmitting}
-                  />
-                  <span>Recordarme</span>
-                </label>
-
-                <button className="mf-btn" type="submit" disabled={isSubmitting}>
+              <div className="mf-login-submit-row">
+                <button className="mf-btn mf-login-submit" type="submit" disabled={isSubmitting}>
                   {loading ? 'Cargando...' : 'Entrar'}
                 </button>
               </div>
 
               <div className="mf-register-inline">
-                <span>No tienes cuenta?</span>
+                <span>¿No tienes cuenta?</span>
                 <Link className="mf-link" to={registerHref}>
-                  Registrarte
+                  Regístrate
                 </Link>
               </div>
             </form>

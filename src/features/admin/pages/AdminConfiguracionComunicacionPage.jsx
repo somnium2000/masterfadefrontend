@@ -75,6 +75,15 @@ function mapCampaignToForm(campaign) {
   };
 }
 
+function snapshotEditableForm(values = {}) {
+  return JSON.stringify([
+    String(values.nombre_interno ?? ''),
+    String(values.asunto ?? ''),
+    String(values.contenido_texto ?? ''),
+    String(values.observaciones ?? ''),
+  ]);
+}
+
 function buildPayload(values) {
   return {
     tipo_campania: 'informativa',
@@ -234,6 +243,8 @@ function CommunicationContent() {
   const editorGenerationRef = useRef(0);
   const saveOperationRef = useRef(null);
   const campaignOperationRef = useRef(null);
+  const formSnapshotRef = useRef(snapshotEditableForm(FORM_DEFAULTS));
+  const pendingEditorTransitionRef = useRef(null);
   const listKey = JSON.stringify([searchQuery, filterOperationalState, showCancelledCampaigns, sortKey, campaignsOffset]);
   const listKeyRef = useRef(listKey);
 
@@ -260,6 +271,8 @@ function CommunicationContent() {
     campaignOperationRef.current = null;
     setScheduling(false); setSending(false); setRetryingFailed(false); setCancellingCampaign(false);
     setConfirmDialog(prev => ({ ...prev, open: false, action: '' }));
+    pendingEditorTransitionRef.current = null;
+    formSnapshotRef.current = snapshotEditableForm(FORM_DEFAULTS);
     campaignContextRef.current = { id, generation: campaignContextRef.current.generation + 1 };
     detailRequestRef.current += 1;
     eligibilityRequestRef.current += 1;
@@ -497,7 +510,9 @@ function CommunicationContent() {
           setPanelMode('view');
           notifications.warning('Solo se puede editar cuando la campaña está en borrador.', { dedupeKey: 'comm-campaign-edit-not-draft' });
         } else {
-          setFormValues(mapCampaignToForm(campaign));
+          const nextFormValues = mapCampaignToForm(campaign);
+          formSnapshotRef.current = snapshotEditableForm(nextFormValues);
+          setFormValues(nextFormValues);
           setFormError('');
           setPanelMode('edit');
         }
@@ -548,18 +563,19 @@ function CommunicationContent() {
     editorPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [panelMode]);
 
-  function openCreatePanel() {
+  function performOpenCreatePanel() {
     saveOperationRef.current = null;
     detailRequestRef.current += 1;
     editorGenerationRef.current += 1;
     setDetailLoading(false);
     setSaving(false);
     setPanelMode('create');
+    formSnapshotRef.current = snapshotEditableForm(FORM_DEFAULTS);
     setFormValues(FORM_DEFAULTS);
     setFormError('');
   }
 
-  function closeEditorPanel() {
+  function performCloseEditorPanel() {
     saveOperationRef.current = null;
     detailRequestRef.current += 1;
     editorGenerationRef.current += 1;
@@ -567,8 +583,46 @@ function CommunicationContent() {
     setSaving(false);
     if (!selectedCampaign) resetCampaignContext();
     setPanelMode('view');
+    formSnapshotRef.current = snapshotEditableForm(FORM_DEFAULTS);
     setFormValues(FORM_DEFAULTS);
     setFormError('');
+  }
+
+  function hasUnsavedEditorChanges() {
+    return (panelMode === 'create' || panelMode === 'edit')
+      && formSnapshotRef.current !== snapshotEditableForm(formValues);
+  }
+
+  function requestEditorTransition(transition) {
+    if (saving || pendingEditorTransitionRef.current) return;
+    if (!hasUnsavedEditorChanges()) {
+      transition();
+      return;
+    }
+    pendingEditorTransitionRef.current = transition;
+    setConfirmDialog({
+      open: true,
+      action: 'discard-editor',
+      title: '¿Descartar los cambios?',
+      description: 'Los cambios sin guardar se perderán. Puedes seguir editando para conservarlos.',
+      confirmLabel: 'Descartar cambios',
+      tone: 'warning',
+    });
+  }
+
+  function openCreatePanel() {
+    requestEditorTransition(performOpenCreatePanel);
+  }
+
+  function closeEditorPanel() {
+    requestEditorTransition(performCloseEditorPanel);
+  }
+
+  function selectCampaign(idCampaign) {
+    requestEditorTransition(() => {
+      setPanelMode('view');
+      void fetchCampaignDetail(idCampaign);
+    });
   }
 
   function handleFormChange(field, value) {
@@ -638,7 +692,7 @@ function CommunicationContent() {
         notifications.success('Campaña borrador creada correctamente.', { dedupeKey: 'comm-campaign-create-ok' });
         await fetchCampaigns({ silent: true });
         if (!current()) return;
-        closeEditorPanel();
+        performCloseEditorPanel();
         if (created?.id_campania) {
           await fetchCampaignDetail(created.id_campania);
         }
@@ -653,7 +707,7 @@ function CommunicationContent() {
         notifications.success('Campaña actualizada correctamente.', { dedupeKey: 'comm-campaign-update-ok' });
         await fetchCampaigns({ silent: true });
         if (!current()) return;
-        closeEditorPanel();
+        performCloseEditorPanel();
         if (updated?.id_campania) {
           await fetchCampaignDetail(updated.id_campania);
         }
@@ -831,9 +885,17 @@ function CommunicationContent() {
   }
   function closeConfirmDialog() {
     if (sending || retryingFailed || cancellingCampaign) return;
+    if (confirmDialog.action === 'discard-editor') pendingEditorTransitionRef.current = null;
     setConfirmDialog((prev) => ({ ...prev, open: false, action: '' }));
   }
   async function handleConfirmDialogAction() {
+    if (confirmDialog.action === 'discard-editor') {
+      const transition = pendingEditorTransitionRef.current;
+      pendingEditorTransitionRef.current = null;
+      setConfirmDialog((prev) => ({ ...prev, open: false, action: '' }));
+      transition?.();
+      return;
+    }
     if (confirmDialog.action === 'send') {
       await executeSendCampaign();
     } else if (confirmDialog.action === 'retry') {
@@ -865,11 +927,11 @@ function CommunicationContent() {
         </div>
       </header>
 
-      <section className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <article ref={editorPanelRef} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-4 sm:p-5">
-          <div className="flex items-center justify-between gap-2">
+      <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(360px,400px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(400px,440px)_minmax(0,1fr)]">
+        <article ref={editorPanelRef} className="min-w-0 overflow-hidden rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">Campañas</h2>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 variant="outline"
@@ -880,7 +942,7 @@ function CommunicationContent() {
                 <SlidersHorizontal size={14} />
                 {activeFiltersCount > 0 ? `Filtros (${activeFiltersCount})` : 'Filtros'}
               </Button>
-              <Button type="button" className="gap-2" onClick={openCreatePanel}>
+              <Button type="button" className="gap-2" onClick={openCreatePanel} disabled={saving}>
                 <Plus size={14} />
                 Nueva
               </Button>
@@ -997,6 +1059,7 @@ function CommunicationContent() {
                 pageSizeByViewport={{ mobile: 2, tablet: 2, desktop: 2 }}
                 gridClassName="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1"
                 compactControls
+                iconOnlyControls
                 showHeaderTag={false}
                 getItemKey={(campaign) => campaign.id_campania}
                 renderItem={(campaign) => {
@@ -1007,24 +1070,22 @@ function CommunicationContent() {
                   return (
                     <button
                       type="button"
-                      onClick={() => {
-                        setPanelMode('view');
-                        void fetchCampaignDetail(campaign.id_campania);
-                      }}
-                      className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                      onClick={() => selectCampaign(campaign.id_campania)}
+                      disabled={saving}
+                      className={`w-full min-w-0 rounded-xl border p-3.5 text-left shadow-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mf-accent)]/45 disabled:cursor-not-allowed disabled:opacity-60 ${
                         isActive
-                          ? 'border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)]'
-                          : 'border-[var(--mf-nav-border)] bg-transparent hover:bg-[var(--mf-btn-bg)]'
+                          ? 'border-[var(--mf-accent)]/55 bg-[var(--mf-btn-bg)] shadow-[var(--mf-shadow-soft)]'
+                          : 'border-[var(--mf-nav-border)] bg-transparent hover:-translate-y-0.5 hover:border-[var(--mf-accent)]/30 hover:bg-[var(--mf-btn-bg)]'
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-[var(--mf-text)]">{campaign.nombre_interno}</p>
-                          <p className="truncate text-xs text-[var(--mf-text-2)]">{campaign.asunto || '-'}</p>
+                      <div className="flex min-w-0 items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="line-clamp-2 break-words text-sm font-semibold leading-5 text-[var(--mf-text)]">{campaign.nombre_interno}</p>
+                          <p className="mt-1 line-clamp-2 break-words text-xs leading-4 text-[var(--mf-text-2)]">{campaign.asunto || '-'}</p>
                         </div>
                         <CampaignStateBadge estado={rowOperationalState} />
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--mf-text-2)]">
+                      <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-[var(--mf-text-2)]">
                         <CampaignTypeBadge tipo={campaign.tipo_campania} />
                         <span>Fecha: {formatDateTime(relevantDate)}</span>
                         {attentionLabel ? (
@@ -1033,16 +1094,16 @@ function CommunicationContent() {
                           </span>
                         ) : null}
                       </div>
-                      <div className="mt-2 grid grid-cols-3 gap-2">
-                        <div className="rounded-lg border border-[var(--mf-nav-border)] px-2 py-1.5">
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_65%,transparent)] px-2 py-2 text-center">
                           <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Pend.</p>
                           <p className="text-sm text-[var(--mf-text)]">{Number(campaign.total_pendientes || 0)}</p>
                         </div>
-                        <div className="rounded-lg border border-[var(--mf-nav-border)] px-2 py-1.5">
+                        <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_65%,transparent)] px-2 py-2 text-center">
                           <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Env.</p>
                           <p className="text-sm text-[var(--mf-text)]">{Number(campaign.total_enviados || 0)}</p>
                         </div>
-                        <div className="rounded-lg border border-[var(--mf-nav-border)] px-2 py-1.5">
+                        <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_65%,transparent)] px-2 py-2 text-center">
                           <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Fall.</p>
                           <p className="text-sm text-[var(--mf-text)]">{Number(campaign.total_fallidos || 0)}</p>
                         </div>
@@ -1055,20 +1116,17 @@ function CommunicationContent() {
           ) : null}
         </article>
 
-        <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-4 sm:p-5">
+        <article className="min-w-0 overflow-hidden rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-4 sm:p-5 lg:p-6">
           {panelMode === 'create' || panelMode === 'edit' ? (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--mf-nav-border)] pb-4">
                 <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
                   <ClipboardList size={15} />
                   {panelMode === 'create' ? 'Nueva campaña borrador' : 'Editar campaña borrador'}
                 </h2>
-                <Button type="button" variant="outline" onClick={closeEditorPanel} disabled={saving}>
-                  Cancelar
-                </Button>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label className="mf-label">Tipo de campaña</Label>
                   <Input value="informativa" disabled />
@@ -1098,7 +1156,7 @@ function CommunicationContent() {
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label className="mf-label">Contenido texto *</Label>
                   <textarea
-                    className="mf-input min-h-[180px] resize-y py-2"
+                    className="mf-input min-h-[210px] resize-y py-3 leading-6"
                     value={formValues.contenido_texto}
                     onChange={(event) => handleFormChange('contenido_texto', event.target.value)}
                     maxLength={20000}
@@ -1108,7 +1166,7 @@ function CommunicationContent() {
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label className="mf-label">Observaciones</Label>
                   <textarea
-                    className="mf-input min-h-[100px] resize-y py-2"
+                    className="mf-input min-h-[120px] resize-y py-3 leading-6"
                     value={formValues.observaciones}
                     onChange={(event) => handleFormChange('observaciones', event.target.value)}
                     maxLength={2000}
@@ -1119,8 +1177,11 @@ function CommunicationContent() {
 
               {formError ? <ErrorBanner message={formError} /> : null}
 
-              <div className="flex justify-end">
-                <Button type="button" className="gap-2" onClick={() => void handleSave()} disabled={saving}>
+              <div className="flex flex-col-reverse gap-2 border-t border-[var(--mf-nav-border)] pt-4 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" onClick={closeEditorPanel} disabled={saving} className="w-full sm:w-auto">
+                  Cancelar
+                </Button>
+                <Button type="button" className="w-full gap-2 sm:w-auto" onClick={() => void handleSave()} disabled={saving}>
                   <Save size={14} />
                   {saving ? 'Guardando...' : panelMode === 'create' ? 'Crear borrador' : 'Guardar cambios'}
                 </Button>
@@ -1129,8 +1190,8 @@ function CommunicationContent() {
           ) : null}
 
           {panelMode === 'view' ? (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--mf-nav-border)] pb-4">
                 <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">Detalle de campaña</h2>
                 <Button
                   type="button"
@@ -1156,8 +1217,8 @@ function CommunicationContent() {
               ) : null}
 
               {!detailLoading && !detailError && selectedCampaign ? (
-                <div className="space-y-3">
-                  <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-sm font-semibold text-[var(--mf-text)]">{selectedCampaign.nombre_interno}</p>
                       <CampaignStateBadge estado={operationalState} />
@@ -1540,7 +1601,7 @@ function CommunicationContent() {
         title={confirmDialog.title}
         description={confirmDialog.description}
         confirmLabel={confirmDialog.confirmLabel}
-        cancelLabel="Cancelar"
+        cancelLabel={confirmDialog.action === 'discard-editor' ? 'Seguir editando' : 'Cancelar'}
         loading={sending || retryingFailed || cancellingCampaign}
         onConfirm={handleConfirmDialogAction}
       />

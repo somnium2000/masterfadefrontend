@@ -58,6 +58,14 @@ test('root y roles de pantalla sin claims operativos no añaden accesos combinad
   expect(buildNavModules('/home/security', 'security_admin', ['root']).map(item => item.id)).toEqual(['seguridad']);
 });
 
+test('Auditoria multirrol aparece exclusivamente cuando los claims incluyen root', () => {
+  const withRoot = buildNavModules('/home/security', 'security_admin', ['cliente', 'security_admin', 'root']);
+  const withoutRoot = buildNavModules('/home/security', 'security_admin', ['admin', 'super_admin', 'security_admin']);
+
+  expect(withRoot[0].subItems.map(item => item.id)).toContain('seg-alertas');
+  expect(withoutRoot[0].subItems.map(item => item.id)).not.toContain('seg-alertas');
+});
+
 function Panels() {
   const { pathname } = useLocation();
   const pageRole = pathname.startsWith('/home/barbero') ? 'barbero' : session.roles.includes('super_admin') ? 'super_admin' : 'admin';

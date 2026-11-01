@@ -7,7 +7,11 @@ import {
   buildBookingHoldFingerprint,
   resolveBookingHoldIdempotencyKey,
 } from '../bookingIdempotency.js';
-import { extractMessage, mapPublicBookingErrorMessage } from '../bookingUtils.js';
+import {
+  extractMessage,
+  mapPublicBookingErrorMessage,
+  normalizeBookingPaymentUiState,
+} from '../bookingUtils.js';
 import useBookingCatalogs from '../hooks/useBookingCatalogs.js';
 
 const HOLD_ID = '11111111-1111-4111-8111-111111111111';
@@ -425,5 +429,28 @@ describe('booking UI hardening', () => {
     expect(mapPublicBookingErrorMessage('DB_SCHEMA_OUTDATED')).toBe('El servicio de reservas esta temporalmente en mantenimiento.');
     expect(mapPublicBookingErrorMessage('PUBLIC_CITAS_HOLD_CONFLICT')).toMatch(/hora seleccionada/i);
     expect(extractMessage(new TypeError('Failed to fetch'))).toMatch(/conectar con el servidor/i);
+  });
+
+  test('HTTP 200 processed=false muestra la precondicion segura de PixelPay', () => {
+    expect(normalizeBookingPaymentUiState({
+      paymentIntent: { estado_intent_codigo: 'link_generado', monto_hnl: 300 },
+      paymentResult: {
+        processed: false,
+        estado_intent_codigo: 'fallido',
+        customer_error_code: 'PIXELPAY_PRECONDITION_FAILED',
+      },
+    })).toMatchObject({
+      status: 'failed',
+      text: 'No fue posible procesar el pago con la configuración actual. No se realizó ningún cobro.',
+      paymentLabel: 'fallido',
+      totalPagadoHnl: 300,
+      bookingConfirmed: false,
+    });
+  });
+
+  test('fallo sin codigo seguro conserva el mensaje generico', () => {
+    expect(normalizeBookingPaymentUiState({
+      paymentResult: { processed: false, estado_intent_codigo: 'fallido' },
+    }).text).toBe('El pago no pudo completarse');
   });
 });

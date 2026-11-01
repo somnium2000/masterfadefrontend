@@ -631,3 +631,162 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Login público: ajustes aislados para no alterar Registro ni Recuperación. */
+.mf-login-page--public {
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+.mf-login-page--public .mf-login-center {
+  padding-top: clamp(20px, 4vh, 36px);
+}
+
+.mf-login-page--public .mf-login-card {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--mf-nav-border) 88%, var(--mf-accent) 12%);
+  box-shadow: var(--mf-shadow-card);
+}
+
+.mf-login-page--public .mf-login-card-header {
+  position: relative;
+  padding-bottom: 14px;
+}
+
+.mf-login-page--public .mf-login-card-header::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--mf-accent), transparent);
+  opacity: 0.58;
+}
+
+.mf-login-page--public .mf-login-subtitle {
+  max-width: 44ch;
+}
+
+.mf-login-page--public .mf-social-block {
+  padding: 14px;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--mf-card) 92%, transparent),
+    color-mix(in srgb, var(--mf-btn-bg) 82%, transparent)
+  );
+}
+
+.mf-login-page--public .mf-social-btn-google .mf-social-icon-wrap {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  overflow: visible;
+  background: transparent;
+}
+
+.mf-login-page--public .mf-social-btn-google .mf-social-icon,
+.mf-login-page--public .mf-social-btn-google .mf-social-icon-wrap > svg {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  flex: 0 0 22px;
+  overflow: visible;
+}
+
+.mf-login-page--public .mf-login-aux-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -4px 0 18px;
+}
+
+.mf-login-page--public .mf-login-forgot-row {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  text-align: right;
+}
+
+.mf-login-page--public .mf-login-submit-row {
+  margin-top: 16px;
+}
+
+.mf-login-page--public .mf-login-submit {
+  width: 100%;
+  min-width: 0;
+  box-shadow: var(--mf-shadow-accent-strong);
+}
+
+.mf-login-page--public .mf-register-inline {
+  justify-content: center;
+  gap: 6px;
+  margin-top: 18px;
+  text-align: center;
+}
+
+.mf-login-page--public .mf-password-peek {
+  width: 34px;
+  height: 34px;
+  right: 9px;
+}
+
+.mf-login-page--public .mf-password-peek:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mf-accent) 72%, transparent);
+  outline-offset: 2px;
+}
+
+.mf-login-page--public .mf-password-peek[aria-pressed='true'] {
+  color: var(--mf-accent);
+  background: color-mix(in srgb, var(--mf-accent) 12%, transparent);
+}
+
+@media (max-width: 420px) {
+  .mf-login-page--public {
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+
+  .mf-login-page--public .mf-login-center {
+    justify-content: flex-start;
+    min-height: auto;
+    padding-top: 18px;
+  }
+
+  .mf-login-page--public .mf-login-brand {
+    margin-bottom: 18px;
+  }
+
+  .mf-login-page--public .mf-login-card-header {
+    padding-top: 22px;
+  }
+
+  .mf-login-page--public .mf-login-title {
+    font-size: 29px;
+  }
+
+  .mf-login-page--public .mf-social-block {
+    padding: 12px;
+  }
+
+  .mf-login-page--public .mf-login-aux-row {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .mf-login-page--public .mf-login-forgot-row {
+    flex: 1;
+  }
+
+  .mf-login-page--public .mf-register-inline {
+    align-items: center;
+    flex-direction: row;
+    justify-content: center;
+  }
+}
+
+@media (min-width: 1280px) {
+  .mf-login-page--public .mf-login-center {
+    grid-template-columns: minmax(0, 1fr) minmax(520px, 590px);
+    gap: clamp(44px, 6vw, 76px);
+  }
+}

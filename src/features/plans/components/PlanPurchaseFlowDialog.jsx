@@ -1,6 +1,10 @@
-import { useState } from "react";
-import { CheckCircle2, CreditCard, Loader2, LockKeyhole } from "lucide-react";
+import { useRef, useState } from "react";
+import { CreditCard, Loader2, LockKeyhole } from "lucide-react";
+import { useConfirmationSound } from "../../../components/feedback/ConfirmationCard.jsx";
+import PaymentErrorContent from "../../../components/feedback/PaymentErrorContent.jsx";
+import MembershipConfirmation from "./MembershipConfirmation.jsx";
 import { Button } from "../../../components/ui/button.jsx";
+import { PaymentCheckoutSteps } from "../../payments/PaymentCheckoutPresentation.jsx";
 import { getPixelPayCustomerMessage } from "../../payments/pixelPayPresentation.js";
 import {
   Dialog,
@@ -93,6 +97,8 @@ export default function PlanPurchaseFlowDialog({
   errorMessage = "",
   disableClose = false,
   pendingConfirmation = false,
+  paymentIntent = null,
+  paymentConfirmation = null,
   onCancel,
   onBackToSummary,
   onContinueToPayment,
@@ -104,6 +110,25 @@ export default function PlanPurchaseFlowDialog({
     address: "", city: "", state: "HN-FM", phone: "",
   });
   const [fieldErrors, setFieldErrors] = useState({});
+  const operationId = paymentIntent?.id_payment_intent || orderSummary?.id_order || 'membership';
+  const [errorDisplay, setErrorDisplay] = useState({ message: errorMessage, open, operationId, acknowledged: false });
+  if (errorDisplay.message !== errorMessage || errorDisplay.open !== open || errorDisplay.operationId !== operationId) {
+    setErrorDisplay({ message: errorMessage, open, operationId, acknowledged: false });
+  }
+  const acknowledgeError = () => setErrorDisplay({ message: errorMessage, open, operationId, acknowledged: true });
+  const acknowledgeRef = useRef(null);
+  const cardInputRef = useRef(null);
+  const summaryContinueRef = useRef(null);
+  const uncertainMessage = getPixelPayCustomerMessage({ code: 'PIXELPAY_PAYMENT_UNCERTAIN' });
+  const pendingMessage = getPixelPayCustomerMessage({ pending_confirmation: true });
+  const reconciling = pendingConfirmation || errorMessage === uncertainMessage || errorMessage === pendingMessage;
+  const confirmationVisible = open && step === 'success' && !reconciling && !loading && (!errorMessage || Boolean(paymentConfirmation));
+  const showTransactionError = Boolean(errorMessage) && !confirmationVisible && !reconciling && !loading && !errorDisplay.acknowledged;
+  const onCheckDrawn = useConfirmationSound(confirmationVisible, operationId);
+  const displayStep = step === 'success' && !confirmationVisible ? 'payment' : step;
+  const safeErrorMessages = ['PIXELPAY_PAYMENT_DECLINED', 'PIXELPAY_PAYMENT_DATA_INVALID', 'PIXELPAY_PRECONDITION_FAILED', 'PIXELPAY_PAYMENT_PROCESSING_FAILED'].map(code => getPixelPayCustomerMessage({ code }));
+  const safeErrorDescription = safeErrorMessages.includes(errorMessage) ? errorMessage : getPixelPayCustomerMessage({ code: 'PIXELPAY_PAYMENT_PROCESSING_FAILED' });
+
   const setPaymentField = (field) => (event) => {
     const rawValue = event.target.value;
     const value = field === "cardNumber" ? formatVipCardNumber(rawValue)
@@ -117,7 +142,7 @@ export default function PlanPurchaseFlowDialog({
   const submitPixelPay = () => {
     const validationErrors = validateVipPaymentForm(paymentForm);
     setFieldErrors(validationErrors);
-    if (Object.keys(validationErrors).length || pendingConfirmation) return;
+    if (Object.keys(validationErrors).length || reconciling) return;
     onConfirmPayment?.({
       card: {
         number: digits(paymentForm.cardNumber), holder: paymentForm.cardHolder.trim(),
@@ -140,10 +165,10 @@ export default function PlanPurchaseFlowDialog({
     : (Array.isArray(plan?.beneficios) ? plan.beneficios : []);
   const serviceBenefits = benefits.filter((benefit) => String(benefit?.tipo || "").toLowerCase() !== "cortesia");
   const courtesyBenefits = benefits.filter((benefit) => String(benefit?.tipo || "").toLowerCase() === "cortesia");
-  const summaryText = `${plan?.nombre_plan || "Plan"} · ${branchLabel} · ${formatMoney(totals?.total_hnl)}`;
 
   return (
     <Dialog open={open} onOpenChange={(next) => {
+      if (!next && showTransactionError) { acknowledgeError(); return; }
       if (disableClose) return;
       if (!next) {
         setPaymentForm((current) => ({ ...current, cardNumber: "", expiry: "", cvv: "" }));
@@ -152,57 +177,60 @@ export default function PlanPurchaseFlowDialog({
       onOpenChange?.(next);
     }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
-        {step === "success" ? (
-          <div className="pt-5">
-            <div className="mx-auto inline-flex h-14 w-14 items-center justify-center rounded-full border border-emerald-400/35 bg-emerald-500/15 text-emerald-200">
-              <CheckCircle2 size={26} />
-            </div>
-            <h3 className="mt-4 text-center text-xl font-semibold text-[var(--mf-text)]">Pago confirmado</h3>
-            <p className="mt-2 text-center text-sm text-[var(--mf-text-2)]">
-              Tu suscripcion ya esta activa y lista para usar en esta sucursal.
-            </p>
-            <div className="mt-6">
-              <Button type="button" className="w-full" onClick={onFinish}>
-                Entendido
-              </Button>
-            </div>
-          </div>
+      <DialogContent
+        key={showTransactionError ? 'error' : confirmationVisible ? 'success' : 'form'}
+        className={showTransactionError ? 'payment-result-dialog' : confirmationVisible ? 'membership-confirmation-dialog' : displayStep === 'payment' ? 'mf-payment-dialog' : 'max-h-[85vh] overflow-y-auto sm:max-w-xl'}
+        role={showTransactionError ? 'alertdialog' : 'dialog'}
+        onOpenAutoFocus={(event) => {
+          if (showTransactionError) { event.preventDefault(); acknowledgeRef.current?.focus(); }
+          else if (displayStep === 'payment' && cardInputRef.current) { event.preventDefault(); cardInputRef.current.focus(); }
+          else if (displayStep === 'summary' && summaryContinueRef.current) { event.preventDefault(); summaryContinueRef.current.focus(); }
+        }}
+        onCloseAutoFocus={(event) => { if (open) event.preventDefault(); }}
+      >
+        {showTransactionError ? (
+          <PaymentErrorContent description={safeErrorDescription} acknowledgeRef={acknowledgeRef} onAcknowledge={acknowledgeError} />
+        ) : confirmationVisible ? (
+          <>
+            <DialogTitle className="sr-only">Confirmación de compra VIP</DialogTitle>
+            <DialogDescription className="sr-only">Resultado confirmado de tu compra</DialogDescription>
+            <MembershipConfirmation plan={plan} branchLabel={branchLabel} totals={totals} paymentConfirmation={paymentConfirmation} onCheckDrawn={onCheckDrawn} onDone={onFinish} />
+          </>
         ) : (
           <>
             <DialogHeader className="pt-3">
-              <DialogTitle>{step === "payment" ? "Pago seguro" : "Resumen de compra"}</DialogTitle>
+              <DialogTitle>{displayStep === "payment" ? "Pago seguro" : "Resumen de compra"}</DialogTitle>
               <DialogDescription>
-                {step === "payment"
+                {displayStep === "payment"
                   ? "Ingresa los datos solicitados para procesar el pago con PixelPay."
                   : "Verifica los datos antes de continuar al pago."}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
-              {step === "payment" ? (
+              {displayStep === "payment" ? (
                 <>
-                  <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Resumen rapido</p>
-                    <p className="mt-2 text-sm text-[var(--mf-text)]">{summaryText}</p>
+                  <PaymentCheckoutSteps processing={loading || reconciling} />
+                  <div className="mf-payment-panel mf-payment-summary">
+                    <div><p className="mf-checkout-section-title">Tu membresía</p><h3>{plan?.nombre_plan || "Plan"}</h3><p>{branchLabel}</p></div>
+                    <div><p>Total a pagar · {totals?.moneda_codigo || "HNL"}</p><strong>{formatMoney(totals?.total_hnl)}</strong></div>
                   </div>
-
-                  <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 text-sm">
+                  <div className="mf-payment-panel text-sm">
                     <p className="flex items-center gap-2 font-semibold text-[var(--mf-text)]">
                       <LockKeyhole size={14} />
                       Pago seguro
                     </p>
                     <p className="mt-1 text-[var(--mf-text-2)]">Los datos se envían a PixelPay y no se guardan en este navegador.</p>
 
-                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="mf-payment-form">
                       <label className="text-xs text-[var(--mf-text-2)]">
                         Numero de tarjeta
-                        <input className="mf-input mt-1 w-full" type="text" inputMode="numeric" autoComplete="cc-number" maxLength={23} value={paymentForm.cardNumber} onChange={setPaymentField("cardNumber")} />
+                        <input ref={cardInputRef} className="mf-input mt-1 w-full" type="text" inputMode="numeric" autoComplete="cc-number" placeholder="0000 0000 0000 0000" maxLength={23} value={paymentForm.cardNumber} onChange={setPaymentField("cardNumber")} />
                         {fieldErrors.cardNumber ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.cardNumber}</span> : null}
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         Nombre del titular
-                        <input className="mf-input mt-1 w-full" type="text" autoComplete="cc-name" value={paymentForm.cardHolder} onChange={setPaymentField("cardHolder")} />
+                        <input className="mf-input mt-1 w-full" type="text" autoComplete="cc-name" placeholder="Como aparece en tu tarjeta" value={paymentForm.cardHolder} onChange={setPaymentField("cardHolder")} />
                         {fieldErrors.cardHolder ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.cardHolder}</span> : null}
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
@@ -212,7 +240,7 @@ export default function PlanPurchaseFlowDialog({
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         CVV
-                        <input className="mf-input mt-1 w-full" type="password" inputMode="numeric" autoComplete="cc-csc" maxLength={4} value={paymentForm.cvv} onChange={setPaymentField("cvv")} />
+                        <input className="mf-input mt-1 w-full" type="password" inputMode="numeric" autoComplete="cc-csc" placeholder="CVV" maxLength={4} value={paymentForm.cvv} onChange={setPaymentField("cvv")} />
                         {fieldErrors.cvv ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.cvv}</span> : null}
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">Dirección de facturación<input className="mf-input mt-1 w-full" autoComplete="street-address" value={paymentForm.address} onChange={setPaymentField("address")} />{fieldErrors.address ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.address}</span> : null}</label>
@@ -225,7 +253,7 @@ export default function PlanPurchaseFlowDialog({
                       <CreditCard size={13} />
                       PAN y CVV permanecen únicamente en memoria y se limpian al enviar o cerrar.
                     </p>
-                    {pendingConfirmation ? (
+                    {reconciling ? (
                       <p role="status" className="mt-3 rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm font-medium text-[var(--mf-text)]">
                         {getPixelPayCustomerMessage({ pending_confirmation: true })}
                       </p>
@@ -233,7 +261,7 @@ export default function PlanPurchaseFlowDialog({
                   </div>
                 </>
               ) : null}
-              {step === "summary" ? (
+              {displayStep === "summary" ? (
                 <>
                   <div className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Plan</p>
@@ -290,41 +318,26 @@ export default function PlanPurchaseFlowDialog({
                 </>
               ) : null}
 
-              {errorMessage ? (
-                <div className="rounded-xl border border-red-400/35 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                  {errorMessage}
-                </div>
-              ) : null}
+
             </div>
 
-            <DialogFooter className="sticky bottom-0 bg-[var(--mf-bg)]/95 pt-3 backdrop-blur">
-              <Button type="button" variant="outline" onClick={onCancel} disabled={loading || disableClose}>
-                Cancelar
-              </Button>
-              {step === "payment" ? (
-                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      onBackToSummary?.();
-                    }}
-                    disabled={loading || disableClose}
-                  >
-                    Volver al resumen
-                  </Button>
-                  <Button type="button" onClick={submitPixelPay} disabled={loading || disableClose || pendingConfirmation}>
-                    {loading ? <Loader2 size={15} className="animate-spin" /> : null}
-                    Pagar con PixelPay
-                  </Button>
-                </div>
-              ) : (
-                <Button type="button" onClick={onContinueToPayment} disabled={loading || disableClose}>
-                  {loading ? <Loader2 size={15} className="animate-spin" /> : null}
-                  Continuar al pago
+            {displayStep === "payment" ? (
+              <DialogFooter className="mf-payment-footer">
+                <Button type="button" className="mf-payment-submit" onClick={submitPixelPay} disabled={loading || disableClose || reconciling}>
+                  {loading ? <Loader2 size={15} className="animate-spin" /> : <LockKeyhole size={15} />}
+                  Pagar con PixelPay
                 </Button>
-              )}
-            </DialogFooter>
+                <Button type="button" variant="outline" className="mf-payment-back" onClick={() => { onBackToSummary?.(); }} disabled={loading || disableClose}>Volver al resumen</Button>
+                <Button type="button" variant="ghost" onClick={onCancel} disabled={loading || disableClose}>Cancelar</Button>
+              </DialogFooter>
+            ) : (
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={onCancel} disabled={loading || disableClose}>Cancelar</Button>
+                <Button ref={summaryContinueRef} type="button" onClick={onContinueToPayment} disabled={loading || disableClose}>
+                  {loading ? <Loader2 size={15} className="animate-spin" /> : null}Continuar al pago
+                </Button>
+              </DialogFooter>
+            )}
           </>
         )}
       </DialogContent>

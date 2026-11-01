@@ -18,6 +18,10 @@ export async function getAdminCitasOperativasContexto() {
   return http.get('/v1/admin/citas/operativas/contexto');
 }
 
+export async function searchAdminReservation(code, branchId, options = {}) {
+  return http.get(`/v1/admin/citas/reservas/buscar${toQueryString({ codigo: code, id_sucursal: branchId || undefined })}`, { cache: false, dedupe: false, ...options });
+}
+
 export async function listAdminCitasOperativas(params = {}, options = {}) {
   return http.get(`/v1/admin/citas/operativas${toQueryString(params)}`, {
     cache: false,
