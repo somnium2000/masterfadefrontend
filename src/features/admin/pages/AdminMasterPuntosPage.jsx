@@ -18,6 +18,7 @@ import {
   getAdminMasterPuntosRegalias,
   getAdminClientePuntosResumen,
   searchAdminClientesActivos,
+  updateAdminMasterPuntosRegalias,
 } from '../lib/adminMasterPuntosApi.js';
 
 const MIN_REASON_LENGTH = 5;
@@ -208,6 +209,7 @@ function AdminMasterPuntosContent() {
   const readControllersRef = useRef({});
   const adjustmentLockRef = useRef(false);
   const adjustmentAttemptRef = useRef(null);
+  const rewardSaveLockRef = useRef(false);
 
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -226,6 +228,8 @@ function AdminMasterPuntosContent() {
     con_membresia: new Set(),
   });
   const [rewardConfigLoading, setRewardConfigLoading] = useState(false);
+  const [rewardConfigLoaded, setRewardConfigLoaded] = useState(false);
+  const [rewardConfigSaving, setRewardConfigSaving] = useState(false);
   const [rewardConfigError, setRewardConfigError] = useState('');
 
   const canManagePoints = useMemo(() => {
@@ -302,6 +306,7 @@ function AdminMasterPuntosContent() {
     readControllersRef.current.reward = controller;
     const isCurrent = () => mountedRef.current && rewardRequestSeqRef.current === requestSeq;
     setRewardConfigLoading(true);
+    setRewardConfigLoaded(false);
     setRewardConfigError('');
     try {
       const response = await getAdminMasterPuntosRegalias({ signal: controller.signal });
@@ -310,6 +315,7 @@ function AdminMasterPuntosContent() {
       setRewardRule(normalized.regla);
       setRewardServices(normalized.serviciosCatalogo);
       setRewardSelection(normalized.seleccion);
+      setRewardConfigLoaded(true);
     } catch (error) {
       if (!isCurrent()) return;
       const status = Number(error?.status || 0);
@@ -393,9 +399,11 @@ function AdminMasterPuntosContent() {
       navigate('/unauthorized', { replace: true });
       return undefined;
     }
-    void loadRewardConfig();
+    if (isSuperAdmin) {
+      void loadRewardConfig();
+    }
     return undefined;
-  }, [canManagePoints, loadRewardConfig, navigate]);
+  }, [canManagePoints, isSuperAdmin, loadRewardConfig, navigate]);
 
   useEffect(() => {
     if (!canManagePoints) return;
@@ -571,6 +579,58 @@ function AdminMasterPuntosContent() {
     setSearchingClientes(false);
   }
 
+  function toggleRewardService(condition, serviceId) {
+    if (!isSuperAdmin) return;
+    const safeCondition = normalizeText(condition);
+    const safeServiceId = normalizeText(serviceId);
+    if (!safeServiceId || !['sin_membresia', 'con_membresia'].includes(safeCondition)) return;
+    setRewardSelection((current) => {
+      const nextSet = new Set(current?.[safeCondition] || []);
+      if (nextSet.has(safeServiceId)) nextSet.delete(safeServiceId);
+      else nextSet.add(safeServiceId);
+      return {
+        sin_membresia: safeCondition === 'sin_membresia' ? nextSet : new Set(current?.sin_membresia || []),
+        con_membresia: safeCondition === 'con_membresia' ? nextSet : new Set(current?.con_membresia || []),
+      };
+    });
+  }
+
+  async function handleSaveRewardConfig() {
+    if (!isSuperAdmin || !rewardConfigLoaded || rewardConfigSaving || rewardSaveLockRef.current) return;
+    rewardSaveLockRef.current = true;
+    const requestSeq = ++rewardRequestSeqRef.current;
+    const isCurrent = () => mountedRef.current && rewardRequestSeqRef.current === requestSeq;
+    setRewardConfigSaving(true);
+    setRewardConfigError('');
+    try {
+      const response = await updateAdminMasterPuntosRegalias({
+        sin_membresia: Array.from(rewardSelection.sin_membresia || []),
+        con_membresia: Array.from(rewardSelection.con_membresia || []),
+      });
+      if (!isCurrent()) return;
+      const normalized = normalizeRewardConfigPayload(response?.data || response);
+      setRewardRule(normalized.regla);
+      setRewardServices(normalized.serviciosCatalogo);
+      setRewardSelection(normalized.seleccion);
+      notifications.success('Configuracion de servicios canjeables guardada.');
+    } catch (error) {
+      if (!isCurrent()) return;
+      const status = Number(error?.status || 0);
+      if (status === 401) {
+        navigate('/login', { replace: true });
+        return;
+      }
+      if (status === 403) {
+        navigate('/unauthorized', { replace: true });
+        return;
+      }
+      setRewardConfigError(resolveApiErrorMessage(error, 'No se pudo guardar la configuracion de servicios canjeables.'));
+    } finally {
+      rewardSaveLockRef.current = false;
+      if (mountedRef.current) setRewardConfigSaving(false);
+    }
+  }
+
   if (!canManagePoints) return null;
 
   return (
@@ -583,7 +643,8 @@ function AdminMasterPuntosContent() {
         </p>
       </header>
 
-      <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
+      {isSuperAdmin ? (
+        <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
@@ -598,9 +659,19 @@ function AdminMasterPuntosContent() {
               </p>
             ) : null}
           </div>
-          <p className="rounded-full border border-[var(--mf-nav-border)] px-3 py-1 text-xs font-semibold text-[var(--mf-text-2)]">
-            Configuración temporalmente bloqueada
-          </p>
+          <Button
+            type="button"
+            onClick={handleSaveRewardConfig}
+            disabled={!rewardConfigLoaded || rewardConfigLoading || rewardConfigSaving}
+            className="w-full lg:w-auto"
+          >
+            {rewardConfigSaving ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin" />
+                Guardando...
+              </span>
+            ) : 'Guardar configuracion'}
+          </Button>
         </div>
 
         {rewardConfigError ? (
@@ -635,13 +706,14 @@ function AdminMasterPuntosContent() {
                     return (
                       <label
                         key={`${condition}_${service.id_servicio}`}
-                        className="flex cursor-not-allowed items-start gap-3 rounded-lg border border-[var(--mf-nav-border)] px-3 py-2 text-sm opacity-80"
+                        className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--mf-nav-border)] px-3 py-2 text-sm transition-colors hover:border-[var(--mf-btn-border)]"
                       >
                         <input
                           type="checkbox"
                           className="mt-1 h-4 w-4 accent-[var(--mf-accent)]"
                           checked={checked}
-                          disabled
+                          disabled={rewardConfigSaving}
+                          onChange={() => toggleRewardService(condition, service.id_servicio)}
                         />
                         <span className="min-w-0">
                           <span className="block truncate font-semibold text-[var(--mf-text)]">{service.nombre_servicio}</span>
@@ -661,7 +733,8 @@ function AdminMasterPuntosContent() {
             </article>
           ))}
         </div>
-      </section>
+        </section>
+      ) : null}
 
       <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[320px,1fr]">
         <article className="min-w-0 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">

@@ -33,7 +33,14 @@ beforeEach(() => {
   api.createAdminClientePuntosAjuste.mockResolvedValue({ data: {} });
 });
 afterEach(cleanup);
-async function ready(strict = false) { const view = render(strict ? <StrictMode><Page /></StrictMode> : <Page />); await screen.findByText('Regla global activa: 10 puntos por recompensa.'); return view; }
+async function ready(strict = false) {
+  const view = render(strict ? <StrictMode><Page /></StrictMode> : <Page />);
+  await screen.findByText('Ruta a tu Cortesia');
+  if (auth.roles.includes('super_admin')) {
+    await screen.findByText('Regla global activa: 10 puntos por recompensa.');
+  }
+  return view;
+}
 async function picker() {
   fireEvent.click(screen.getByRole('button', { name: /Seleccionar cliente activo|^Cliente [AB]$/ }));
   return screen.findByRole('textbox', { name: 'Buscar cliente activo' });
@@ -49,18 +56,18 @@ function fillAdjustment(subtract = false) {
 test.each(['admin', 'super_admin', 'super_admin,admin'])('rol administrativo %s conserva acceso', async role => {
   auth.roles = role.split(','); await ready(); expect(navigate).not.toHaveBeenCalled();
 });
-test('admin consulta la configuración global sin controles de guardado', async () => {
+test('admin no visualiza ni consulta la configuración global', async () => {
   auth.roles = ['admin']; await ready();
-  expect(api.getAdminMasterPuntosRegalias).toHaveBeenCalledOnce();
+  expect(screen.queryByText('Servicios canjeables con MasterPuntos')).not.toBeInTheDocument();
+  expect(api.getAdminMasterPuntosRegalias).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: 'Guardar configuracion' })).not.toBeInTheDocument();
-  for (const checkbox of screen.getAllByRole('checkbox')) expect(checkbox).toBeDisabled();
 });
-test.each([{ roles: ['super_admin'] }, { roles: ['admin', 'super_admin'] }])('super_admin $roles también conserva configuración bloqueada', async ({ roles }) => {
+test.each([{ roles: ['super_admin'] }, { roles: ['admin', 'super_admin'] }])('super_admin $roles visualiza y edita la configuración', async ({ roles }) => {
   auth.roles = roles; await ready();
-  expect(screen.getByText('Configuración temporalmente bloqueada')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Guardar configuracion' })).not.toBeInTheDocument();
-  for (const checkbox of screen.getAllByRole('checkbox')) expect(checkbox).toBeDisabled();
-  expect(api.updateAdminMasterPuntosRegalias).not.toHaveBeenCalled();
+  expect(screen.getByText('Servicios canjeables con MasterPuntos')).toBeInTheDocument();
+  expect(api.getAdminMasterPuntosRegalias).toHaveBeenCalledOnce();
+  expect(screen.getByRole('button', { name: 'Guardar configuracion' })).toBeEnabled();
+  for (const checkbox of screen.getAllByRole('checkbox')) expect(checkbox).toBeEnabled();
 });
 test.each(['cliente', 'barbero'])('rol %s no consulta datos administrativos', async role => {
   auth.roles = [role]; render(<Page />); await waitFor(() => expect(navigate).toHaveBeenCalledWith('/unauthorized', { replace: true })); expect(api.getAdminMasterPuntosRegalias).not.toHaveBeenCalled();
@@ -152,7 +159,9 @@ test('cambiar el payload después de un error genera una clave nueva', async () 
 test.each(['summary', 'search', 'config', 'adjustment'])('error técnico %s se reemplaza por mensaje funcional', async operation => {
   const technical = { status: 500, message: 'SQL SECRET INTERNAL', data: { error: { message: 'SQL SECRET INTERNAL' } } };
   const expected = { summary: 'No se pudo cargar el resumen de puntos del cliente.', search: 'No se pudo buscar clientes activos.', config: 'No se pudo cargar la configuracion de servicios canjeables.', adjustment: 'No fue posible aplicar el ajuste.' };
-  if (operation === 'config') { api.getAdminMasterPuntosRegalias.mockRejectedValue(technical); render(<Page />); }
+  if (operation === 'config') {
+    auth.roles = ['super_admin']; api.getAdminMasterPuntosRegalias.mockRejectedValue(technical); render(<Page />);
+  }
   else {
     await ready();
     if (operation === 'summary') { api.getAdminClientePuntosResumen.mockRejectedValueOnce(technical); await select('A'); }
@@ -166,19 +175,20 @@ test('saldo insuficiente mantiene mensaje funcional', async () => {
   fillAdjustment(true); fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' })); fireEvent.click(screen.getByRole('button', { name: 'Si, aplicar ajuste' }));
   await screen.findByText('No hay puntos suficientes para completar la resta solicitada.');
 });
-test('regalías conserva selección visible sin permitir cambios ni guardado', async () => {
+test('super_admin conserva selección y payload sin duplicar guardado', async () => {
   auth.roles = ['super_admin'];
-  await ready();
-  const checks = screen.getAllByRole('checkbox'); expect(checks[0]).toBeChecked();
-  checks.forEach((checkbox) => expect(checkbox).toBeDisabled());
-  expect(screen.queryByRole('button', { name: 'Guardar configuracion' })).not.toBeInTheDocument();
-  expect(api.updateAdminMasterPuntosRegalias).not.toHaveBeenCalled();
+  await ready(); const pending = deferred(); api.updateAdminMasterPuntosRegalias.mockReturnValueOnce(pending.promise);
+  const checks = screen.getAllByRole('checkbox'); expect(checks[0]).toBeChecked(); fireEvent.click(checks[1]);
+  const save = screen.getByRole('button', { name: 'Guardar configuracion' }); act(() => { fireEvent.click(save); fireEvent.click(save); });
+  expect(api.updateAdminMasterPuntosRegalias).toHaveBeenCalledExactlyOnceWith({ sin_membresia: ['S'], con_membresia: ['S'] });
+  await act(async () => pending.resolve(config));
 });
 test.each([401, 403])('desmontaje descarta resumen y error tardío %s', async status => {
   const view = await ready(); const pending = deferred(); api.getAdminClientePuntosResumen.mockReturnValueOnce(pending.promise); await select('A'); view.unmount();
   await act(async () => pending.reject({ status })); expect(navigate).not.toHaveBeenCalled();
 });
 test('StrictMode no permite configuración antigua sobre la vigente', async () => {
+  auth.roles = ['super_admin'];
   const old = deferred(); api.getAdminMasterPuntosRegalias.mockReturnValueOnce(old.promise); await ready(true);
   await act(async () => old.resolve({ data: { regla: { puntos_para_premio: 99 } } }));
   expect(screen.getByText('Regla global activa: 10 puntos por recompensa.')).toBeInTheDocument(); expect(screen.queryByText(/99 puntos por recompensa/)).not.toBeInTheDocument();
@@ -195,7 +205,14 @@ test.each([401, 403])('ajuste vigente %s conserva redirección', async status =>
   await waitFor(() => expect(navigate).toHaveBeenCalledWith(status === 401 ? '/login' : '/unauthorized', { replace: true }));
 });
 test.each([401, 403])('regalías vigentes %s conservan redirección', async status => {
+  auth.roles = ['super_admin'];
   api.getAdminMasterPuntosRegalias.mockRejectedValueOnce({ status }); render(<Page />);
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith(status === 401 ? '/login' : '/unauthorized', { replace: true }));
+});
+test.each([401, 403])('guardar regalías vigente %s conserva redirección', async status => {
+  auth.roles = ['super_admin'];
+  await ready(); api.updateAdminMasterPuntosRegalias.mockRejectedValueOnce({ status });
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar configuracion' }));
   await waitFor(() => expect(navigate).toHaveBeenCalledWith(status === 401 ? '/login' : '/unauthorized', { replace: true }));
 });
 test('saldo B pendiente no se libera con resumen A tardío', async () => {
@@ -237,10 +254,18 @@ test('conflicto 409 no muestra detalles técnicos', async () => {
   await screen.findByText('No fue posible completar la operacion por un conflicto. Actualiza los datos e intenta nuevamente.'); expect(screen.queryByText('SQL INTERNAL')).not.toBeInTheDocument();
 });
 
-test('fallo de carga de regalías no expone controles de guardado', async () => {
+test('fallo de carga de regalías no permite guardar una selección no confirmada', async () => {
   auth.roles = ['super_admin'];
   api.getAdminMasterPuntosRegalias.mockRejectedValue(new Error('Red no disponible')); render(<Page />);
   await screen.findByText('No se pudo cargar la configuracion de servicios canjeables.');
-  expect(screen.queryByRole('button', { name: 'Guardar configuracion' })).not.toBeInTheDocument();
-  expect(api.updateAdminMasterPuntosRegalias).not.toHaveBeenCalled();
+  const save = screen.getByRole('button', { name: 'Guardar configuracion' });
+  fireEvent.click(save); expect(api.updateAdminMasterPuntosRegalias).not.toHaveBeenCalled(); expect(save).toBeDisabled();
+});
+test('fallo de guardado permite reintentar la configuración previamente cargada', async () => {
+  auth.roles = ['super_admin'];
+  await ready(); api.updateAdminMasterPuntosRegalias.mockRejectedValueOnce(new Error('Red no disponible')).mockResolvedValue(config);
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar configuracion' }));
+  await screen.findByText('No se pudo guardar la configuracion de servicios canjeables.');
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar configuracion' }));
+  await waitFor(() => expect(api.updateAdminMasterPuntosRegalias).toHaveBeenCalledTimes(2));
 });
