@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   Eye,
+  EyeOff,
   KeyRound,
   Mail,
   Megaphone,
@@ -55,8 +56,8 @@ export default function RegisterPage() {
   const [confirmarContrasena, setConfirmarContrasena] = useState('');
   const [aceptaTerminos, setAceptaTerminos] = useState(false);
   const [consentimientoMarketing, setConsentimientoMarketing] = useState(false);
-  const [showPasswordWhilePress, setShowPasswordWhilePress] = useState(false);
-  const [showConfirmPasswordWhilePress, setShowConfirmPasswordWhilePress] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [pendingEmail, setPendingEmail] = useState('');
@@ -77,34 +78,6 @@ export default function RegisterPage() {
     const query = params.toString();
     return query ? `/login?${query}` : '/login';
   }, [nextPath, intent, branchId, planId]);
-
-  function handlePasswordRevealStart(field, event) {
-    event.preventDefault();
-    if (field === 'password') {
-      setShowPasswordWhilePress(true);
-      return;
-    }
-    setShowConfirmPasswordWhilePress(true);
-  }
-
-  function handlePasswordRevealEnd(field) {
-    if (field === 'password') {
-      setShowPasswordWhilePress(false);
-      return;
-    }
-    setShowConfirmPasswordWhilePress(false);
-  }
-
-  function handlePasswordRevealKeyDown(field, event) {
-    if (event.key !== ' ' && event.key !== 'Enter') return;
-    handlePasswordRevealStart(field, event);
-  }
-
-  function handlePasswordRevealKeyUp(field, event) {
-    if (event.key !== ' ' && event.key !== 'Enter') return;
-    event.preventDefault();
-    handlePasswordRevealEnd(field);
-  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -165,6 +138,8 @@ export default function RegisterPage() {
         setResendCooldown(60);
         setContrasena('');
         setConfirmarContrasena('');
+        setShowPassword(false);
+        setShowConfirmPassword(false);
         return;
       }
 
@@ -322,7 +297,7 @@ export default function RegisterPage() {
                     <input
                       id="register_contrasena"
                       className="mf-input mf-register-input mf-register-input-password"
-                      type={showPasswordWhilePress ? 'text' : 'password'}
+                      type={showPassword ? 'text' : 'password'}
                       autoComplete="new-password"
                       value={contrasena}
                       onChange={(event) => setContrasena(event.target.value)}
@@ -332,18 +307,13 @@ export default function RegisterPage() {
                     <button
                       type="button"
                       className="mf-register-password-peek"
-                      aria-label="Mantén presionado para ver la contraseña"
-                      title="Mantén presionado para ver la contraseña"
+                      aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                      title={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                      aria-pressed={showPassword}
                       disabled={loading}
-                      onPointerDown={(event) => handlePasswordRevealStart('password', event)}
-                      onKeyDown={(event) => handlePasswordRevealKeyDown('password', event)}
-                      onKeyUp={(event) => handlePasswordRevealKeyUp('password', event)}
-                      onPointerUp={() => handlePasswordRevealEnd('password')}
-                      onPointerLeave={() => handlePasswordRevealEnd('password')}
-                      onPointerCancel={() => handlePasswordRevealEnd('password')}
-                      onBlur={() => handlePasswordRevealEnd('password')}
+                      onClick={() => setShowPassword((visible) => !visible)}
                     >
-                      <Eye size={16} />
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </div>
@@ -358,7 +328,7 @@ export default function RegisterPage() {
                     <input
                       id="register_confirmar"
                       className="mf-input mf-register-input mf-register-input-password"
-                      type={showConfirmPasswordWhilePress ? 'text' : 'password'}
+                      type={showConfirmPassword ? 'text' : 'password'}
                       autoComplete="new-password"
                       value={confirmarContrasena}
                       onChange={(event) => setConfirmarContrasena(event.target.value)}
@@ -368,18 +338,13 @@ export default function RegisterPage() {
                     <button
                       type="button"
                       className="mf-register-password-peek"
-                      aria-label="Mantén presionado para ver la contraseña"
-                      title="Mantén presionado para ver la contraseña"
+                      aria-label={showConfirmPassword ? 'Ocultar confirmación de contraseña' : 'Mostrar confirmación de contraseña'}
+                      title={showConfirmPassword ? 'Ocultar confirmación de contraseña' : 'Mostrar confirmación de contraseña'}
+                      aria-pressed={showConfirmPassword}
                       disabled={loading}
-                      onPointerDown={(event) => handlePasswordRevealStart('confirm', event)}
-                      onKeyDown={(event) => handlePasswordRevealKeyDown('confirm', event)}
-                      onKeyUp={(event) => handlePasswordRevealKeyUp('confirm', event)}
-                      onPointerUp={() => handlePasswordRevealEnd('confirm')}
-                      onPointerLeave={() => handlePasswordRevealEnd('confirm')}
-                      onPointerCancel={() => handlePasswordRevealEnd('confirm')}
-                      onBlur={() => handlePasswordRevealEnd('confirm')}
+                      onClick={() => setShowConfirmPassword((visible) => !visible)}
                     >
-                      <Eye size={16} />
+                      {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </div>

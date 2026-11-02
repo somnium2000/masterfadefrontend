@@ -18,6 +18,18 @@ test('abrir enlace no llama a API; confirmación inválida no habilita formulari
  window.history.replaceState(null,'','/register/confirm#token=bad');mount(GuestRegistrationConfirmPage);
  expect(screen.getByRole('alert')).toHaveTextContent('no es válido');expect(api.post).not.toHaveBeenCalled();
 });
+test('contraseñas finales alternan visibilidad de forma independiente sin perder valores ni enviar',()=>{
+ mount(GuestRegistrationConfirmPage);
+ const password=screen.getByLabelText('Contraseña final',{exact:true});const confirmation=screen.getByLabelText('Confirmar contraseña',{exact:true});
+ fireEvent.change(password,{target:{value:'FinalOwner9!'}});fireEvent.change(confirmation,{target:{value:'FinalOwner9!'}});
+ const showPassword=screen.getByRole('button',{name:'Mostrar contraseña final'});const showConfirmation=screen.getByRole('button',{name:'Mostrar confirmación de contraseña'});
+ expect(password).toHaveAttribute('type','password');expect(confirmation).toHaveAttribute('type','password');
+ fireEvent.click(showPassword);expect(password).toHaveAttribute('type','text');expect(confirmation).toHaveAttribute('type','password');
+ fireEvent.pointerUp(showPassword);fireEvent.blur(showPassword);expect(password).toHaveAttribute('type','text');expect(password).toHaveValue('FinalOwner9!');
+ fireEvent.click(showConfirmation);expect(confirmation).toHaveAttribute('type','text');expect(confirmation).toHaveValue('FinalOwner9!');
+ fireEvent.click(screen.getByRole('button',{name:'Ocultar contraseña final'}));expect(password).toHaveAttribute('type','password');expect(confirmation).toHaveAttribute('type','text');
+ expect(showPassword).toHaveAttribute('type','button');expect(showConfirmation).toHaveAttribute('type','button');expect(api.post).not.toHaveBeenCalled();
+});
 test.each([false,true])('confirmación final con marketing=%s, sin sesión automática ni token residual en URL',async marketing=>{
  mount(GuestRegistrationConfirmPage);expect(api.post).not.toHaveBeenCalled();complete();
  if(marketing)fireEvent.click(screen.getByLabelText('Acepto recibir comunicaciones comerciales.'));
@@ -40,9 +52,12 @@ test('no permite doble envío y descarta respuesta tras desmontar',async()=>{
 test('histórico 202 limpia contraseña inicial, muestra pendiente y no hace login',async()=>{
  api.post.mockResolvedValue({ok:true,data:{pending_verification:true}});mount(RegisterPage);
  for(const [name,value]of [['Nombre','New'],['Apellido','Owner'],['Correo (sera tu usuario/login)','guest@example.test'],['Contraseña','InitialOnly9!'],['Confirmar contraseña','InitialOnly9!']])fireEvent.change(screen.getByLabelText(name,{exact:true}),{target:{value}});
+ fireEvent.click(screen.getByRole('button',{name:'Mostrar contraseña'}));fireEvent.click(screen.getByRole('button',{name:'Mostrar confirmación de contraseña'}));
  fireEvent.click(screen.getByLabelText('Acepto terminos y condiciones para crear mi cuenta.'));fireEvent.click(screen.getByRole('button',{name:'Crear cuenta'}));
  expect(await screen.findByRole('status')).toHaveTextContent('Registro pendiente');expect(api.login).not.toHaveBeenCalled();
- expect(screen.getByLabelText('Contraseña',{exact:true})).toHaveValue('');expect(screen.getByRole('button',{name:'Crear cuenta'})).toBeDisabled();
+ expect(screen.getByLabelText('Contraseña',{exact:true})).toHaveValue('');expect(screen.getByLabelText('Contraseña',{exact:true})).toHaveAttribute('type','password');
+ expect(screen.getByLabelText('Confirmar contraseña',{exact:true})).toHaveAttribute('type','password');expect(screen.getByRole('button',{name:'Mostrar contraseña'})).toHaveAttribute('aria-pressed','false');
+ expect(screen.getByRole('button',{name:'Crear cuenta'})).toBeDisabled();
  expect(screen.getByRole('button',{name:'Reenviar en 60s'})).toBeDisabled();
  await waitFor(()=>expect(api.post).toHaveBeenCalledOnce());
 });
