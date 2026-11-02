@@ -416,11 +416,13 @@ function PackageItemsEditor({ items, onChange, serviciosList }) {
     return (
         <div className="flex flex-col gap-3 rounded-[16px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_82%,transparent)] p-3">
             <div className="flex items-center justify-between gap-3">
-                <Label className="text-xs uppercase tracking-widest text-[var(--mf-text-2)]">Servicios incluidos</Label>
+                <Label className="text-xs uppercase tracking-widest text-[var(--mf-text-2)]">Servicios incluidos *</Label>
                 <Button type="button" size="sm" variant="outline" onClick={addItem} className="gap-1.5">
                     <Plus size={13} /> Agregar
                 </Button>
             </div>
+
+            <p className="text-xs text-[var(--mf-text-2)]">Agrega al menos 2 servicios distintos.</p>
 
             {items.length === 0 ? (
                 <p className="text-xs text-[var(--mf-text-2)]">Aun no agregas servicios al paquete.</p>
@@ -507,9 +509,9 @@ function PaqueteForm({
             {isCreate ? (
                 <div className="flex flex-col gap-3 rounded-[14px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_72%,transparent)] p-3">
                     <div>
-                        <Label className="text-xs uppercase tracking-widest text-[var(--mf-text-2)]">Ofertas iniciales por sucursal</Label>
+                        <Label className="text-xs uppercase tracking-widest text-[var(--mf-text-2)]">Ofertas iniciales por sucursal *</Label>
                         <p className="mt-1 text-xs text-[var(--mf-text-2)]">
-                            Selecciona las sucursales donde se ofrecera inicialmente este paquete.
+                            Selecciona al menos una sucursal donde se ofrecera inicialmente este paquete.
                         </p>
                     </div>
                     {availableBranches.map((branch) => {
