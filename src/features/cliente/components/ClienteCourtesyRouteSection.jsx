@@ -103,6 +103,9 @@ function normalizeServiceRecord(service = {}) {
   return {
     id_servicio: id,
     nombre_servicio: name,
+    sucursales_disponibles: Array.isArray(service?.sucursales_disponibles)
+      ? service.sucursales_disponibles.map((branchId) => normalizeText(branchId)).filter(Boolean)
+      : [],
   };
 }
 
@@ -159,11 +162,12 @@ function normalizeSummary(payload) {
   const titularPoints = Math.max(0, toSafeInteger(summarySource?.puntos_titular ?? root?.puntos_titular, 0));
   const companionPoints = Math.max(0, toSafeInteger(summarySource?.puntos_integrante ?? root?.puntos_integrante, 0));
   const explicitProgress = summarySource?.progreso_actual ?? root?.progreso_actual;
-  const progressCurrent = explicitProgress == null
+  const computedProgress = explicitProgress == null
     ? ((totalBalance % rewardTarget) + rewardTarget) % rewardTarget
     : Math.max(0, toSafeInteger(explicitProgress, 0));
   const rewardsAvailable = Math.max(0, toSafeInteger(summarySource?.recompensas_disponibles ?? root?.recompensas_disponibles, 0));
   const canRedeem = Boolean(summarySource?.puede_canjear ?? root?.puede_canjear ?? totalBalance >= rewardTarget);
+  const progressCurrent = canRedeem ? rewardTarget : computedProgress;
   const summaryPlanStatus = summarySource?.estado_plan ?? root?.estado_plan;
   const hasActivePlan = summaryPlanStatus == null ? null : isOperationalPlanState(summaryPlanStatus);
 
@@ -333,8 +337,13 @@ export default function ClienteCourtesyRouteSection() {
     [summary]
   );
 
-  const resolveRedeemServices = useCallback(async ({ summaryServices }) => {
-    return uniqueServices(summaryServices);
+  const resolveRedeemServices = useCallback(async ({ summaryServices, branchId }) => {
+    const safeBranchId = normalizeText(branchId);
+    return uniqueServices(summaryServices).filter((service) => (
+      !safeBranchId
+      || service.sucursales_disponibles.length === 0
+      || service.sucursales_disponibles.includes(safeBranchId)
+    ));
   }, []);
 
   const loadRedeemContext = useCallback(async () => {
@@ -374,6 +383,7 @@ export default function ClienteCourtesyRouteSection() {
 
       const resolvedServices = await resolveRedeemServices({
         summaryServices: Array.isArray(summary?.serviceCandidates) ? summary.serviceCandidates : [],
+        branchId: preferredBranchId,
       });
       if (!isCurrent()) return;
       setServiceOptions(resolvedServices);
@@ -446,6 +456,7 @@ export default function ClienteCourtesyRouteSection() {
     try {
       const resolvedServices = await resolveRedeemServices({
         summaryServices: Array.isArray(summary?.serviceCandidates) ? summary.serviceCandidates : [],
+        branchId: safeBranchId,
       });
       if (!isCurrent()) return;
       setServiceOptions(resolvedServices);
@@ -629,7 +640,7 @@ export default function ClienteCourtesyRouteSection() {
 
               <p className="mt-2 text-sm text-[var(--mf-text-2)]">
                 {summary.canRedeem
-                  ? 'Ya puedes canjear tu recompensa.'
+                  ? 'Recompensa disponible. Ya puedes canjearla.'
                   : `Faltan ${summary.remainingPoints} puntos para tu cortesía.`}
               </p>
 

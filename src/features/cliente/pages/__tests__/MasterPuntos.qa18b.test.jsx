@@ -18,7 +18,7 @@ vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotification
 vi.mock('../../../public/lib/catalogApi.js', () => ({ listPublicCatalogBranches: branches }));
 vi.mock('react-router-dom', () => ({ useLocation: () => ({ search: '', pathname: '/home/cliente' }), useNavigate: () => navigate }));
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
-const summary = (balance = 12, owner = 'A') => ({ saldo_total: balance, puntos_titular: balance - 2, puntos_integrante: 2, puntos_para_premio: 10, progreso_actual: balance % 10, recompensas_disponibles: Math.floor(balance / 10), puede_canjear: balance >= 10, servicios_redimibles: [{ id_servicio: 'S', nombre_servicio: 'Servicio QA' }], historial: [{ id_points_tx: owner, motivo: `MOV-${owner}`, puntos: 2 }] });
+const summary = (balance = 12, owner = 'A') => ({ saldo_total: balance, puntos_titular: balance - 2, puntos_integrante: 2, puntos_para_premio: 10, progreso_actual: balance >= 10 ? 10 : balance % 10, recompensas_disponibles: Math.floor(balance / 10), puede_canjear: balance >= 10, servicios_redimibles: [{ id_servicio: 'S', nombre_servicio: 'Servicio QA', sucursales_disponibles: ['A', 'B'] }], historial: [{ id_points_tx: owner, motivo: `MOV-${owner}`, puntos: 2 }] });
 const branchData = { branches: [{ id_sucursal: 'A', nombre_sucursal: 'Suyapa' }, { id_sucursal: 'B', nombre_sucursal: 'City Mall' }] };
 const redemption = { data: { canje_context_token: 'synthetic-context-only', id_servicio_canje: 'S', id_sucursal: 'A', servicio_nombre: 'Servicio QA' } };
 beforeEach(() => {
@@ -80,6 +80,21 @@ test('cambio de sucursal conserva la selección vigente y el payload', async () 
   await ready(); await open(); fireEvent.change(screen.getByRole('combobox'), { target: { value: 'B' } });
   await waitFor(() => expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeEnabled()); fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));
   await waitFor(() => expect(api.redeemClientePuntosReward).toHaveBeenCalledExactlyOnceWith({ id_servicio: 'S', id_sucursal: 'B' }));
+});
+test('cambio de sucursal oculta servicios sin tarifa disponible allí', async () => {
+  api.getClientePuntosResumen.mockResolvedValue({
+    ...summary(),
+    servicios_redimibles: [
+      { id_servicio: 'S', nombre_servicio: 'Solo Suyapa', sucursales_disponibles: ['A'] },
+      { id_servicio: 'T', nombre_servicio: 'Solo City Mall', sucursales_disponibles: ['B'] },
+    ],
+  });
+  await ready(); fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' }));
+  expect(await screen.findByRole('button', { name: /Solo Suyapa\s*Seleccionado/ })).toBeInTheDocument();
+  expect(screen.queryByText('Solo City Mall')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'B' } });
+  expect(await screen.findByRole('button', { name: /Solo City Mall\s*Seleccionado/ })).toBeInTheDocument();
+  expect(screen.queryByText('Solo Suyapa')).not.toBeInTheDocument();
 });
 test('doble clic antes de render no duplica el canje', async () => {
   await ready(); await open(); const pending = deferred(); api.redeemClientePuntosReward.mockReturnValue(pending.promise);
@@ -187,8 +202,22 @@ test('un error previo desaparece al cambiar identidad y el reintento pertenece a
   fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })); await screen.findByText('MOV-B');
 });
 test('saldo, titular, acompañantes y progreso conservan el contrato informativo', async () => {
-  await ready(); expect(within(balance()).getByText('12')).toBeInTheDocument(); expect(screen.getAllByText('2/10')).toHaveLength(2);
+  await ready(); expect(within(balance()).getByText('12')).toBeInTheDocument(); expect(screen.getAllByText('10/10')).toHaveLength(2);
+  expect(screen.getByText('Recompensa disponible. Ya puedes canjearla.')).toBeInTheDocument();
   expect(screen.getByText(/Tus visitas:/)).toHaveTextContent('10'); expect(screen.getByText(/Puntos por acompañantes:/)).toHaveTextContent('2'); expect(screen.getByText('Recompensas disponibles').closest('article')).toHaveTextContent('1');
+});
+test('9/10 mantiene progreso normal y 10/10 muestra recompensa disponible completa', async () => {
+  api.getClientePuntosResumen.mockResolvedValueOnce(summary(9));
+  const view = await ready();
+  expect(screen.getAllByText('9/10')).toHaveLength(2);
+  expect(screen.queryByRole('button', { name: 'Canjear mi recompensa' })).not.toBeInTheDocument();
+
+  api.getClientePuntosResumen.mockResolvedValue(summary(10));
+  fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+  await waitFor(() => expect(screen.getAllByText('10/10')).toHaveLength(2));
+  expect(screen.getByText('Recompensa disponible. Ya puedes canjearla.')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Canjear mi recompensa' })).toBeEnabled();
+  view.unmount();
 });
 test('respuesta de error inesperada no se imprime como texto interno', async () => {
   api.getClientePuntosResumen.mockRejectedValue('SQL unexpected payload'); render(<Points />); await screen.findByText('No se pudo cargar tu resumen de superpuntos.'); expect(screen.queryByText('SQL unexpected payload')).not.toBeInTheDocument();
