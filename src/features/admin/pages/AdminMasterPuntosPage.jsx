@@ -18,7 +18,6 @@ import {
   getAdminMasterPuntosRegalias,
   getAdminClientePuntosResumen,
   searchAdminClientesActivos,
-  updateAdminMasterPuntosRegalias,
 } from '../lib/adminMasterPuntosApi.js';
 
 const MIN_REASON_LENGTH = 5;
@@ -97,6 +96,7 @@ function normalizeClienteRecord(cliente = {}, index = 0) {
     key: `${idCliente}_${index}`,
     id_cliente: idCliente,
     id_usuario: normalizeText(cliente?.id_usuario || ''),
+    id_sucursal_origen: normalizeText(cliente?.id_sucursal_origen || ''),
     nombre_completo: normalizeText(cliente?.nombre_completo || cliente?.nombre_cliente || cliente?.nombre || 'Cliente'),
     telefono_principal: normalizeText(cliente?.telefono_principal || cliente?.telefono || ''),
     correo_principal: normalizeText(cliente?.correo_principal || cliente?.correo || ''),
@@ -158,6 +158,7 @@ function normalizeSummary(payload) {
 
   return {
     cliente: {
+      id_sucursal_origen: normalizeText(root?.cliente?.id_sucursal_origen || summarySource?.id_sucursal_origen || ''),
       nombre_completo: normalizeText(root?.cliente?.nombre_completo || summarySource?.nombre_cliente || 'Cliente'),
       telefono_principal: normalizeText(root?.cliente?.telefono_principal || summarySource?.telefono_principal || ''),
       correo_principal: normalizeText(root?.cliente?.correo_principal || summarySource?.correo_principal || ''),
@@ -188,7 +189,7 @@ export default function AdminMasterPuntosPage() {
 function AdminMasterPuntosContent() {
   const navigate = useNavigate();
   const notifications = useNotifications();
-  const { roles } = useAuth();
+  const { roles, branchIds = [] } = useAuth();
 
   const [searchResults, setSearchResults] = useState([]);
   const [clientesError, setClientesError] = useState('');
@@ -207,7 +208,6 @@ function AdminMasterPuntosContent() {
   const readControllersRef = useRef({});
   const adjustmentLockRef = useRef(false);
   const adjustmentAttemptRef = useRef(null);
-  const rewardSaveLockRef = useRef(false);
 
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -226,15 +226,13 @@ function AdminMasterPuntosContent() {
     con_membresia: new Set(),
   });
   const [rewardConfigLoading, setRewardConfigLoading] = useState(false);
-  const [rewardConfigLoaded, setRewardConfigLoaded] = useState(false);
-  const [rewardConfigSaving, setRewardConfigSaving] = useState(false);
   const [rewardConfigError, setRewardConfigError] = useState('');
 
   const canManagePoints = useMemo(() => {
     const roleList = Array.isArray(roles) ? roles.map((role) => normalizeText(role).toLowerCase()) : [];
     return roleList.includes('admin') || roleList.includes('super_admin');
   }, [roles]);
-  const canEditGlobalRewards = useMemo(() => {
+  const isSuperAdmin = useMemo(() => {
     const roleList = Array.isArray(roles) ? roles.map((role) => normalizeText(role).toLowerCase()) : [];
     return roleList.includes('super_admin');
   }, [roles]);
@@ -267,6 +265,11 @@ function AdminMasterPuntosContent() {
   const adjustmentPoints = canUseAdd ? parsedPointsToAdd : canUseSubtract ? parsedPointsToSubtract : 0;
   const parsedPoints = adjustmentAction === 'restar' ? -adjustmentPoints : adjustmentPoints;
   const reasonTrimmed = normalizeText(ajusteReason);
+  const selectedClientBranchId = normalizeText(
+    selectedClienteData?.id_sucursal_origen || summary?.cliente?.id_sucursal_origen || ''
+  );
+  const canSubtractForSelectedClient = isSuperAdmin
+    || (Boolean(selectedClientBranchId) && branchIds.includes(selectedClientBranchId));
   const pointsAreValid = !pointsInputConflict
     && (hasAddInput || hasSubtractInput)
     && addIsValid
@@ -279,6 +282,7 @@ function AdminMasterPuntosContent() {
     && selectedClienteId
     && pointsAreValid
     && reasonIsValid
+    && (adjustmentAction !== 'restar' || canSubtractForSelectedClient)
     && !savingAdjustment
   );
 
@@ -298,7 +302,6 @@ function AdminMasterPuntosContent() {
     readControllersRef.current.reward = controller;
     const isCurrent = () => mountedRef.current && rewardRequestSeqRef.current === requestSeq;
     setRewardConfigLoading(true);
-    setRewardConfigLoaded(false);
     setRewardConfigError('');
     try {
       const response = await getAdminMasterPuntosRegalias({ signal: controller.signal });
@@ -307,7 +310,6 @@ function AdminMasterPuntosContent() {
       setRewardRule(normalized.regla);
       setRewardServices(normalized.serviciosCatalogo);
       setRewardSelection(normalized.seleccion);
-      setRewardConfigLoaded(true);
     } catch (error) {
       if (!isCurrent()) return;
       const status = Number(error?.status || 0);
@@ -360,6 +362,7 @@ function AdminMasterPuntosContent() {
         return {
           key: `${safeId}_selected`,
           id_cliente: safeId,
+          id_sucursal_origen: nextSummary?.cliente?.id_sucursal_origen || current?.id_sucursal_origen || '',
           nombre_completo: nextNombre || current?.nombre_completo || 'Cliente',
           telefono_principal: nextTelefono || current?.telefono_principal || '',
           correo_principal: nextCorreo || current?.correo_principal || '',
@@ -568,61 +571,6 @@ function AdminMasterPuntosContent() {
     setSearchingClientes(false);
   }
 
-  function toggleRewardService(condition, serviceId) {
-    if (!canEditGlobalRewards) return;
-    const safeCondition = normalizeText(condition);
-    const safeServiceId = normalizeText(serviceId);
-    if (!safeServiceId || !['sin_membresia', 'con_membresia'].includes(safeCondition)) return;
-    setRewardSelection((current) => {
-      const nextSet = new Set(current?.[safeCondition] || []);
-      if (nextSet.has(safeServiceId)) {
-        nextSet.delete(safeServiceId);
-      } else {
-        nextSet.add(safeServiceId);
-      }
-      return {
-        sin_membresia: safeCondition === 'sin_membresia' ? nextSet : new Set(current?.sin_membresia || []),
-        con_membresia: safeCondition === 'con_membresia' ? nextSet : new Set(current?.con_membresia || []),
-      };
-    });
-  }
-
-  async function handleSaveRewardConfig() {
-    if (!canEditGlobalRewards || !rewardConfigLoaded || rewardConfigSaving || rewardSaveLockRef.current) return;
-    rewardSaveLockRef.current = true;
-    const requestSeq = ++rewardRequestSeqRef.current;
-    const isCurrent = () => mountedRef.current && rewardRequestSeqRef.current === requestSeq;
-    setRewardConfigSaving(true);
-    setRewardConfigError('');
-    try {
-      const response = await updateAdminMasterPuntosRegalias({
-        sin_membresia: Array.from(rewardSelection.sin_membresia || []),
-        con_membresia: Array.from(rewardSelection.con_membresia || []),
-      });
-      if (!isCurrent()) return;
-      const normalized = normalizeRewardConfigPayload(response?.data || response);
-      setRewardRule(normalized.regla);
-      setRewardServices(normalized.serviciosCatalogo);
-      setRewardSelection(normalized.seleccion);
-      notifications.success('Configuracion de servicios canjeables guardada.');
-    } catch (error) {
-      if (!isCurrent()) return;
-      const status = Number(error?.status || 0);
-      if (status === 401) {
-        navigate('/login', { replace: true });
-        return;
-      }
-      if (status === 403) {
-        navigate('/unauthorized', { replace: true });
-        return;
-      }
-      setRewardConfigError(resolveApiErrorMessage(error, 'No se pudo guardar la configuracion de servicios canjeables.'));
-    } finally {
-      rewardSaveLockRef.current = false;
-      if (mountedRef.current) setRewardConfigSaving(false);
-    }
-  }
-
   if (!canManagePoints) return null;
 
   return (
@@ -650,23 +598,9 @@ function AdminMasterPuntosContent() {
               </p>
             ) : null}
           </div>
-          {canEditGlobalRewards ? (
-            <Button
-              type="button"
-              onClick={handleSaveRewardConfig}
-              disabled={!rewardConfigLoaded || rewardConfigLoading || rewardConfigSaving}
-              className="w-full lg:w-auto"
-            >
-              {rewardConfigSaving ? (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 size={14} className="animate-spin" />
-                  Guardando...
-                </span>
-              ) : (
-                'Guardar configuracion'
-              )}
-            </Button>
-          ) : null}
+          <p className="rounded-full border border-[var(--mf-nav-border)] px-3 py-1 text-xs font-semibold text-[var(--mf-text-2)]">
+            Configuración temporalmente bloqueada
+          </p>
         </div>
 
         {rewardConfigError ? (
@@ -701,14 +635,13 @@ function AdminMasterPuntosContent() {
                     return (
                       <label
                         key={`${condition}_${service.id_servicio}`}
-                        className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--mf-nav-border)] px-3 py-2 text-sm transition-colors hover:border-[var(--mf-btn-border)]"
+                        className="flex cursor-not-allowed items-start gap-3 rounded-lg border border-[var(--mf-nav-border)] px-3 py-2 text-sm opacity-80"
                       >
                         <input
                           type="checkbox"
                           className="mt-1 h-4 w-4 accent-[var(--mf-accent)]"
                           checked={checked}
-                          disabled={!canEditGlobalRewards || rewardConfigSaving}
-                          onChange={() => toggleRewardService(condition, service.id_servicio)}
+                          disabled
                         />
                         <span className="min-w-0">
                           <span className="block truncate font-semibold text-[var(--mf-text)]">{service.nombre_servicio}</span>
@@ -847,7 +780,7 @@ function AdminMasterPuntosContent() {
                       value={ajustePointsSubtract}
                       onChange={(event) => setAjustePointsSubtract(event.target.value)}
                       placeholder="Ej. 3"
-                      disabled={savingAdjustment || hasAddInput}
+                      disabled={savingAdjustment || hasAddInput || !canSubtractForSelectedClient}
                     />
                   </div>
                   <div>
@@ -861,6 +794,11 @@ function AdminMasterPuntosContent() {
                     />
                   </div>
                 </div>
+                {!canSubtractForSelectedClient ? (
+                  <p className="mt-2 text-xs text-[var(--mf-text-2)]">
+                    Solo puedes restar puntos a clientes de tus sucursales autorizadas.
+                  </p>
+                ) : null}
                 <p className="mt-2 text-xs text-[var(--mf-text-2)]">
                   {pointsInputConflict
                     ? 'Ingresa solo sumar o restar, no ambos.'
