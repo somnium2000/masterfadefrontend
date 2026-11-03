@@ -152,7 +152,7 @@ export default function ClienteDashboardPage() {
   const { error: notifyError } = notifications;
   const { isAuthenticated, isHydrated, isHydrating, logout } = useAuth();
   const outletContext = useOutletContext() || {};
-  const { refreshClienteProfile } = outletContext;
+  const { refreshClienteProfile, startNewAppointment } = outletContext;
 
   const [loading, setLoading] = useState(true);
   const [profileData, setProfileData] = useState(null);
@@ -256,7 +256,7 @@ export default function ClienteDashboardPage() {
       notifications.info('El agendamiento estara disponible proximamente.', { dedupeKey: 'cliente-booking-disabled' });
       return;
     }
-    navigate('/agendar');
+    void startNewAppointment?.();
   }
 
   if ((!canLoadDashboard && isHydrating) || loading) {

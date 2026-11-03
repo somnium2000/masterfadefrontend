@@ -17,10 +17,24 @@ vi.mock('../../../../components/theme/ThemeSwitcher.jsx', () => ({ default: () =
 let Page, httpClient, clienteApi, fetchMock, invalidation;
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 function response(owner, status = 200) { return { ok: status < 400, status, headers: new Headers({ 'content-type': 'application/json' }), json: async () => status < 400 ? { data: { owner } } : { error: { code: 'SYNTHETIC_ERROR' } } }; }
+function pointsResponse(balance, target = 10, status = 200) {
+  return {
+    ok: status < 400,
+    status,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: async () => status < 400
+      ? { data: { saldo_total: balance, puntos_para_premio: target, puede_canjear: balance >= target } }
+      : { error: { code: 'SYNTHETIC_ERROR' } },
+  };
+}
 beforeEach(async () => {
   vi.resetModules(); Object.assign(auth, { user: { id_usuario: 'synthetic-A' }, isAuthenticated: true, isHydrated: true, isHydrating: false });
   auth.logout.mockReset().mockResolvedValue({ ok: true, logged_out: true }); nav.mockReset(); notices.error.mockReset(); notices.info.mockReset(); invalidation = vi.fn();
-  fetchMock = vi.fn(async url => { if (!String(url).endsWith('/v1/cliente/me')) throw new Error('Unexpected synthetic request'); return response(auth.user?.id_usuario); }); vi.stubGlobal('fetch', fetchMock);
+  fetchMock = vi.fn(async url => {
+    if (String(url).endsWith('/v1/cliente/me')) return response(auth.user?.id_usuario);
+    if (String(url).endsWith('/v1/cliente/puntos/resumen')) return pointsResponse(9);
+    throw new Error('Unexpected synthetic request');
+  }); vi.stubGlobal('fetch', fetchMock);
   httpClient = await import('../../../../services/httpClient.js'); clienteApi = await import('../../lib/clienteApi.js'); httpClient.registerSessionInvalidationHandler(invalidation);
   Page = (await import('../../layouts/ClienteAppShell.jsx')).default;
 });
@@ -103,4 +117,73 @@ test('navegación lateral conserva enlaces y separación vertical explícita', a
   for (const label of ['Inicio', 'Citas', 'Catálogo', 'Planes', 'Perfil']) {
     expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
   }
+});
+test('nueva cita con 9/10 verifica puntos y entra al agendamiento normal', async () => {
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'Nueva cita' }));
+  await waitFor(() => expect(nav).toHaveBeenCalledExactlyOnceWith('/agendar'));
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/v1/cliente/puntos/resumen'))).toHaveLength(1);
+});
+test('nueva cita con 10/10 abre MasterPuntos sin crear cita ni descontar puntos', async () => {
+  fetchMock.mockImplementation(async url => {
+    if (String(url).endsWith('/v1/cliente/me')) return response(auth.user?.id_usuario);
+    if (String(url).endsWith('/v1/cliente/puntos/resumen')) return pointsResponse(10);
+    throw new Error('Unexpected synthetic request');
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'Nueva cita' }));
+  await waitFor(() => expect(nav).toHaveBeenCalledExactlyOnceWith('/home/cliente?accion=canjear'));
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/v1/cliente/citas'))).toHaveLength(0);
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/puntos/canjear'))).toHaveLength(0);
+});
+test('doble clic en nueva cita realiza una consulta y una navegación', async () => {
+  const pending = deferred();
+  fetchMock.mockImplementation(url => {
+    if (String(url).endsWith('/v1/cliente/me')) return Promise.resolve(response(auth.user?.id_usuario));
+    if (String(url).endsWith('/v1/cliente/puntos/resumen')) return pending.promise;
+    return Promise.reject(new Error('Unexpected synthetic request'));
+  });
+  await ready();
+  const button = screen.getByRole('button', { name: 'Nueva cita' });
+  fireEvent.click(button); fireEvent.click(button);
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/v1/cliente/puntos/resumen'))).toHaveLength(1);
+  await act(async () => pending.resolve(pointsResponse(9)));
+  expect(nav).toHaveBeenCalledExactlyOnceWith('/agendar');
+});
+test.each([401, 403, 500])('error %s al verificar recompensa bloquea navegación con mensaje seguro', async status => {
+  fetchMock.mockImplementation(async url => {
+    if (String(url).endsWith('/v1/cliente/me')) return response(auth.user?.id_usuario);
+    if (String(url).endsWith('/v1/cliente/puntos/resumen')) return pointsResponse(0, 10, status);
+    throw new Error('Unexpected synthetic request');
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'Nueva cita' }));
+  await waitFor(() => expect(notices.error).toHaveBeenCalledTimes(1));
+  expect(nav).not.toHaveBeenCalled();
+  expect(notices.error.mock.calls[0][0]).not.toMatch(/SYNTHETIC|SQL|500/);
+});
+test('error de red al verificar recompensa bloquea navegación con mensaje seguro', async () => {
+  fetchMock.mockImplementation(url => {
+    if (String(url).endsWith('/v1/cliente/me')) return Promise.resolve(response(auth.user?.id_usuario));
+    if (String(url).endsWith('/v1/cliente/puntos/resumen')) return Promise.reject(new TypeError('network private detail'));
+    return Promise.reject(new Error('Unexpected synthetic request'));
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'Nueva cita' }));
+  await waitFor(() => expect(notices.error).toHaveBeenCalledWith('No se pudo verificar tu recompensa. Intenta nuevamente.'));
+  expect(nav).not.toHaveBeenCalled();
+});
+test('respuesta de puntos de identidad anterior no navega ni afecta la nueva sesión', async () => {
+  const old = deferred();
+  fetchMock.mockImplementation(url => {
+    if (String(url).endsWith('/v1/cliente/me')) return Promise.resolve(response(auth.user?.id_usuario));
+    if (String(url).endsWith('/v1/cliente/puntos/resumen')) return old.promise;
+    return Promise.reject(new Error('Unexpected synthetic request'));
+  });
+  const view = await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'Nueva cita' }));
+  changeB(view);
+  await waitFor(() => expect(screen.getByText('synthetic-B')).toBeInTheDocument());
+  await act(async () => old.resolve(pointsResponse(10)));
+  expect(nav).not.toHaveBeenCalled();
 });

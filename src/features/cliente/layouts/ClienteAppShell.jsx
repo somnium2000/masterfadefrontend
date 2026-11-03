@@ -6,7 +6,7 @@ import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.js
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { getUserDisplayName, useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
-import { getClienteMe } from '../lib/clienteApi.js';
+import { getClienteMe, getClientePuntosResumen } from '../lib/clienteApi.js';
 import { CLIENT_BOOKING_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
 
 const CLIENT_NAV_ITEMS = [
@@ -52,6 +52,7 @@ export default function ClienteAppShell() {
   const sessionRef = useRef({ mounted: false, identity: '', generation: 0 });
   const profileControllersRef = useRef(new Set());
   const logoutPendingRef = useRef(false);
+  const newAppointmentRequestRef = useRef(null);
   const identity = JSON.stringify([user?.id_usuario || '', user?.cliente_id || '']);
 
   const activeTab = useMemo(() => resolveActiveTab(location.pathname), [location.pathname]);
@@ -68,6 +69,7 @@ export default function ClienteAppShell() {
     session.userId = user?.id_usuario || '';
     session.ready = canLoadClienteProfile;
     session.generation += 1;
+    newAppointmentRequestRef.current = null;
     redirectedUnauthorizedRef.current = false;
     return () => {
       session.mounted = false;
@@ -147,22 +149,56 @@ export default function ClienteAppShell() {
     };
   }, [canLoadClienteProfile, refreshClienteProfile]);
 
-  const outletContextValue = useMemo(
-    () => ({ refreshClienteProfile }),
-    [refreshClienteProfile]
-  );
-
   function handleNavigate(path) {
     navigate(path);
   }
 
-  function handleNewAppointment() {
+  const startNewAppointment = useCallback(async () => {
     if (!CLIENT_BOOKING_ENABLED) {
       notifications.info('Agendamiento proximamente disponible.', { dedupeKey: 'cliente-booking-disabled' });
       return;
     }
-    navigate('/agendar');
-  }
+    const current = sessionRef.current;
+    if (!current.mounted || !current.ready || current.identity !== identity) return;
+    if (newAppointmentRequestRef.current?.owner === identity
+      && newAppointmentRequestRef.current?.generation === current.generation) return;
+
+    const operation = { owner: identity, generation: current.generation };
+    newAppointmentRequestRef.current = operation;
+    const isCurrent = () => sessionRef.current.mounted
+      && sessionRef.current.ready
+      && sessionRef.current.identity === operation.owner
+      && sessionRef.current.generation === operation.generation
+      && newAppointmentRequestRef.current === operation;
+
+    try {
+      const payload = await getClientePuntosResumen();
+      if (!isCurrent()) return;
+      const summary = payload?.data || payload || {};
+      const balance = Number(summary?.saldo_total || 0);
+      const target = Number(summary?.puntos_para_premio || 0);
+      const mustRedeem = summary?.puede_canjear === true && target > 0 && balance >= target;
+      navigate(mustRedeem ? '/home/cliente?accion=canjear' : '/agendar');
+    } catch (error) {
+      if (!isCurrent()) return;
+      const status = Number(error?.status || 0);
+      const message = status === 401
+        ? 'Tu sesión expiró. Inicia sesión nuevamente.'
+        : status === 403
+          ? 'No tienes permisos para iniciar una nueva cita.'
+          : 'No se pudo verificar tu recompensa. Intenta nuevamente.';
+      notifyError(message);
+    } finally {
+      if (newAppointmentRequestRef.current === operation) {
+        newAppointmentRequestRef.current = null;
+      }
+    }
+  }, [identity, navigate, notifications, notifyError]);
+
+  const outletContextValue = useMemo(
+    () => ({ refreshClienteProfile, startNewAppointment }),
+    [refreshClienteProfile, startNewAppointment]
+  );
 
   function handleLogout() {
     if (logoutPendingRef.current) return;
@@ -256,7 +292,7 @@ export default function ClienteAppShell() {
               <div className="mt-auto space-y-3 pt-5">
                 <button
                   type="button"
-                  onClick={handleNewAppointment}
+                  onClick={() => void startNewAppointment()}
                   disabled={!CLIENT_BOOKING_ENABLED}
                   title={CLIENT_BOOKING_ENABLED ? 'Nueva cita' : 'Agendamiento proximamente disponible'}
                   className={[
