@@ -28,7 +28,10 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 async function ready() { const view = render(<Points />); await screen.findByText('MOV-A'); return view; }
-async function open() { fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' })); await screen.findByRole('button', { name: /Servicio QA\s*Seleccionado/ }); }
+async function open() {
+  fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' }));
+  fireEvent.click(await screen.findByRole('button', { name: /^Servicio QA$/ }));
+}
 function switchTo(view, id = 'B') { auth.user = id ? { id_usuario: `user-${id}`, cliente_id: `client-${id}` } : null; auth.isAuthenticated = Boolean(id); view.rerender(<Points />); }
 function balance() { return screen.getByText('Saldo total').closest('article'); }
 

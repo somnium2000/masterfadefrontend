@@ -29,7 +29,11 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 async function ready() { const view = render(<Points />); await screen.findByText('MOV-A'); return view; }
-async function open() { fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' })); await screen.findByRole('button', { name: /Servicio QA\s*Seleccionado/ }); }
+async function openWithoutSelection(serviceName = 'Servicio QA') {
+  fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' }));
+  return screen.findByRole('button', { name: new RegExp(`^${serviceName}$`) });
+}
+async function open() { const service = await openWithoutSelection(); fireEvent.click(service); }
 function switchTo(view, id = 'B') { auth.user = id ? { id_usuario: `user-${id}`, cliente_id: `client-${id}` } : null; auth.isAuthenticated = Boolean(id); view.rerender(<Points />); }
 function balance() { return screen.getByText('Saldo total').closest('article'); }
 
@@ -76,6 +80,33 @@ test('cerrar y reabrir diálogo descarta las opciones antiguas', async () => {
   await act(async () => old.resolve({ branches: [{ id_sucursal: 'OLD', nombre_sucursal: 'SUCURSAL OBSOLETA' }] }));
   expect(screen.queryByRole('option', { name: 'SUCURSAL OBSOLETA' })).not.toBeInTheDocument(); expect(screen.getByRole('combobox')).toHaveValue('A');
 });
+test('modal abierto no preselecciona servicios y reabrir exige selección explícita', async () => {
+  await ready();
+  const service = await openWithoutSelection();
+  expect(service).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();
+  fireEvent.click(service);
+  expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeEnabled();
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+  await openWithoutSelection();
+  expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();
+});
+test('envía exactamente Corte de Barba y no el primer servicio disponible', async () => {
+  api.getClientePuntosResumen.mockResolvedValue({
+    ...summary(),
+    servicios_redimibles: [
+      { id_servicio: 'CABELLO', nombre_servicio: 'Corte de Cabello', sucursales_disponibles: ['A'] },
+      { id_servicio: 'BARBA', nombre_servicio: 'Corte de Barba', sucursales_disponibles: ['A'] },
+    ],
+  });
+  await ready();
+  await openWithoutSelection('Corte de Cabello');
+  fireEvent.click(screen.getByRole('button', { name: /^Corte de Barba$/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));
+  await waitFor(() => expect(api.redeemClientePuntosReward).toHaveBeenCalledExactlyOnceWith({
+    id_servicio: 'BARBA', id_sucursal: 'A',
+  }));
+});
 test('cambio de sucursal conserva la selección vigente y el payload', async () => {
   await ready(); await open(); fireEvent.change(screen.getByRole('combobox'), { target: { value: 'B' } });
   await waitFor(() => expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeEnabled()); fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));
@@ -90,11 +121,14 @@ test('cambio de sucursal oculta servicios sin tarifa disponible allí', async ()
     ],
   });
   await ready(); fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' }));
-  expect(await screen.findByRole('button', { name: /Solo Suyapa\s*Seleccionado/ })).toBeInTheDocument();
+  const suyapaService = await screen.findByRole('button', { name: /^Solo Suyapa$/ });
+  fireEvent.click(suyapaService);
   expect(screen.queryByText('Solo City Mall')).not.toBeInTheDocument();
   fireEvent.change(screen.getByRole('combobox'), { target: { value: 'B' } });
-  expect(await screen.findByRole('button', { name: /Solo City Mall\s*Seleccionado/ })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: /^Solo City Mall$/ })).toBeInTheDocument();
   expect(screen.queryByText('Solo Suyapa')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();
+  expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
 });
 test('doble clic antes de render no duplica el canje', async () => {
   await ready(); await open(); const pending = deferred(); api.redeemClientePuntosReward.mockReturnValue(pending.promise);
@@ -148,9 +182,10 @@ test('doble apertura antes de render no duplica cargas', async () => {
   act(() => { fireEvent.click(button); fireEvent.click(button); }); expect(branches).toHaveBeenCalledTimes(1); await act(async () => pending.resolve(branchData));
 });
 test('sucursal preferida ausente no habilita canje con un valor invisible', async () => {
-  await ready(); branches.mockResolvedValue({ branches: [{ id_sucursal: 'B', nombre_sucursal: 'City Mall' }] }); await open();
-  expect(screen.getByRole('combobox')).toHaveValue('B'); fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));
-  expect(api.redeemClientePuntosReward).toHaveBeenCalledWith({ id_servicio: 'S', id_sucursal: 'B' });
+  await ready(); branches.mockResolvedValue({ branches: [{ id_sucursal: 'B', nombre_sucursal: 'City Mall' }] }); await openWithoutSelection();
+  expect(screen.getByRole('combobox')).toHaveValue('B');
+  expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();
+  expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
 });
 test('sucursales vacías no habilitan canje', async () => {
   await ready(); branches.mockResolvedValue({ branches: [] }); await open(); expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();

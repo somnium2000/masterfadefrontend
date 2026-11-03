@@ -387,7 +387,7 @@ export default function ClienteCourtesyRouteSection() {
       });
       if (!isCurrent()) return;
       setServiceOptions(resolvedServices);
-      setSelectedServiceId(normalizeText(resolvedServices[0]?.id_servicio));
+      setSelectedServiceId('');
     } catch (error) {
       if (!isCurrent()) return;
       redeemNavigationLockRef.current = false;
@@ -460,7 +460,11 @@ export default function ClienteCourtesyRouteSection() {
       });
       if (!isCurrent()) return;
       setServiceOptions(resolvedServices);
-      setSelectedServiceId(normalizeText(resolvedServices[0]?.id_servicio));
+      setSelectedServiceId((currentServiceId) => (
+        resolvedServices.some((service) => service.id_servicio === currentServiceId)
+          ? currentServiceId
+          : ''
+      ));
     } catch (error) {
       if (!isCurrent()) return;
       redeemNavigationLockRef.current = false;
@@ -531,7 +535,9 @@ export default function ClienteCourtesyRouteSection() {
     }
   }
 
-  const canSubmitRedeem = Boolean(CLIENT_BOOKING_ENABLED && selectedServiceId && selectedBranchId && !redeemLoading && !redeemSubmitting);
+  const selectedServiceIsValid = serviceOptions.some((service) => service.id_servicio === selectedServiceId);
+  const canSubmitRedeem = Boolean(CLIENT_BOOKING_ENABLED && selectedServiceId && selectedServiceIsValid
+    && selectedBranchId && !redeemLoading && !redeemSubmitting);
   const hasRedeemableServices = Boolean(Array.isArray(summary?.serviceCandidates) && summary.serviceCandidates.length > 0);
   const movementHistory = useMemo(() => {
     const source = Array.isArray(summary?.history) ? summary.history : [];
@@ -746,6 +752,7 @@ export default function ClienteCourtesyRouteSection() {
                       <button
                         key={service.id_servicio}
                         type="button"
+                        aria-pressed={active}
                         onClick={() => setSelectedServiceId(service.id_servicio)}
                         className={[
                           'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition-colors',
