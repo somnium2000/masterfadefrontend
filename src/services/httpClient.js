@@ -206,10 +206,19 @@ function isNetworkFetchError(err) {
   );
 }
 
-function createNetworkUnavailableError(cause) {
+function safeRequestIdFromHeaders(headers = {}) {
+  const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === 'x-request-id');
+  const candidate = String(entry?.[1] || '').trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate)
+    ? candidate
+    : '';
+}
+
+function createNetworkUnavailableError(cause, requestId = '') {
   const error = new Error(NETWORK_UNAVAILABLE_MESSAGE);
   error.status = 0;
   error.code = "NETWORK_UNAVAILABLE";
+  if (requestId) error.requestId = requestId;
   error.cause = cause;
   error.data = {
     error: {
@@ -409,7 +418,7 @@ export function request(path, options = {}) {
   } catch (err) {
     if (!invalidatedByThisRequest) assertCurrent();
     if (isNetworkFetchError(err)) {
-      throw createNetworkUnavailableError(err);
+      throw createNetworkUnavailableError(err, safeRequestIdFromHeaders(finalHeaders));
     }
     throw err;
   } finally {

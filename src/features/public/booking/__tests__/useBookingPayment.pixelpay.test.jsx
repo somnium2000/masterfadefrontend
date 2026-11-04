@@ -57,10 +57,47 @@ describe('useBookingPayment PixelPay guards', () => {
     });
 
     expect(queryPublicPixelPayStatus).toHaveBeenCalledTimes(1);
+    const requestOptions = queryPublicPixelPayStatus.mock.calls[0][1];
+    expect(requestOptions.headers['X-Request-Id']).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     await waitFor(() => expect(result.current.paymentResult).toMatchObject({
       provider_status: 'PENDING',
       estado_intent_codigo: 'pendiente_confirmacion',
     }));
+  });
+
+  it('conserva el request id en NETWORK_UNAVAILABLE sin reintentar Status', async () => {
+    queryPublicPixelPayStatus.mockImplementationOnce((_payload, options) => {
+      const error = Object.assign(new Error('Sin red'), {
+        code: 'NETWORK_UNAVAILABLE',
+        status: 0,
+        requestId: options.headers['X-Request-Id'],
+      });
+      return Promise.reject(error);
+    });
+    const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+
+    let error;
+    await act(async () => {
+      try {
+        await result.current.queryPixelPayStatusOnce({
+          groupId: GROUP_ID,
+          intentId: INTENT_ID,
+          titularEmail: EMAIL,
+        });
+      } catch (caught) {
+        error = caught;
+      }
+    });
+
+    expect(error).toMatchObject({ code: 'NETWORK_UNAVAILABLE', status: 0 });
+    expect(error.requestId).toBe(queryPublicPixelPayStatus.mock.calls[0][1].headers['X-Request-Id']);
+    expect(queryPublicPixelPayStatus).toHaveBeenCalledTimes(1);
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+    expect(JSON.stringify(error)).not.toContain(EMAIL);
+    expect(JSON.stringify(error)).not.toContain(INTENT_ID);
+    expect(JSON.stringify(error)).not.toContain(GROUP_ID);
   });
 
   it('deduplica sale concurrente y nunca dispara status automaticamente', async () => {

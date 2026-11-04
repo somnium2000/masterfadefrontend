@@ -79,6 +79,21 @@ test('respuesta mutable antigua se descarta sin repetir la operación enviada', 
 test('error de red vigente conserva el contrato NETWORK_UNAVAILABLE', async () => {
   fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch')); await expect(client.http.get('/v1/cliente/me')).rejects.toMatchObject({ code: 'NETWORK_UNAVAILABLE', status: 0 });
 });
+test('error de red conserva exclusivamente el X-Request-Id seguro de la solicitud', async () => {
+  const requestId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+  await expect(client.http.post('/v1/public/pagos/pixelpay/status', { sensitive: 'must-not-leak' }, {
+    headers: { 'X-Request-Id': requestId },
+  })).rejects.toMatchObject({ code: 'NETWORK_UNAVAILABLE', status: 0, requestId });
+});
+test('AbortError con X-Request-Id no se convierte en NETWORK_UNAVAILABLE', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await expect(client.http.post('/v1/public/pagos/pixelpay/status', {}, {
+    signal: controller.signal,
+    headers: { 'X-Request-Id': 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' },
+  })).rejects.toMatchObject({ name: 'AbortError' });
+});
 test('reintentos explícitos tras fallo no reutilizan promesas fallidas', async () => {
   fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch')); await expect(client.http.get('/v1/public/catalog/servicios')).rejects.toMatchObject({ code: 'NETWORK_UNAVAILABLE' });
   await expect(client.http.get('/v1/public/catalog/servicios')).resolves.toMatchObject({ owner: 'synthetic' }); expect(fetchMock).toHaveBeenCalledTimes(2);
