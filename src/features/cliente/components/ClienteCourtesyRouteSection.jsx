@@ -307,7 +307,7 @@ export default function ClienteCourtesyRouteSection() {
 
   const loadSummary = useCallback(async ({ silent = false } = {}) => {
     const generation = contextRef.current.generation;
-    if (!contextRef.current.mounted || !contextRef.current.ready) return;
+    if (!contextRef.current.mounted || !contextRef.current.ready) return null;
     const requestSeq = ++summarySeqRef.current;
     const isCurrent = () => contextRef.current.mounted && contextRef.current.ready
       && contextRef.current.generation === generation && summarySeqRef.current === requestSeq;
@@ -317,12 +317,15 @@ export default function ClienteCourtesyRouteSection() {
     setSummaryError('');
     try {
       const payload = await getClientePuntosResumen();
-      if (!isCurrent()) return;
-      setSummary(normalizeSummary(payload));
+      if (!isCurrent()) return null;
+      const normalizedSummary = normalizeSummary(payload);
+      setSummary(normalizedSummary);
+      return normalizedSummary;
     } catch (error) {
-      if (!isCurrent()) return;
+      if (!isCurrent()) return null;
       const message = resolveErrorMessage(error, 'No se pudo cargar tu resumen de superpuntos.');
       setSummaryError(message);
+      return null;
     } finally {
       if (isCurrent()) setLoadingSummary(false);
     }
@@ -346,8 +349,9 @@ export default function ClienteCourtesyRouteSection() {
     ));
   }, []);
 
-  const loadRedeemContext = useCallback(async () => {
-    if (!summary?.canRedeem) return;
+  const loadRedeemContext = useCallback(async ({ summaryOverride = null } = {}) => {
+    const effectiveSummary = summaryOverride || summary;
+    if (!effectiveSummary?.canRedeem) return;
     const generation = contextRef.current.generation;
     const requestSeq = ++redeemSeqRef.current;
     const isCurrent = () => contextRef.current.mounted && contextRef.current.ready
@@ -376,13 +380,13 @@ export default function ClienteCourtesyRouteSection() {
 
       const mePayload = meResult.status === 'fulfilled' ? (meResult.value?.data || meResult.value || {}) : {};
       const mePreferredBranch = normalizeText(mePayload?.cliente?.id_sucursal_preferida || mePayload?.id_sucursal_preferida);
-      const candidateBranchId = normalizeText(summary?.preferredBranchId || mePreferredBranch);
+      const candidateBranchId = normalizeText(effectiveSummary?.preferredBranchId || mePreferredBranch);
       const preferredBranchId = branches.some(branch => branch.id_sucursal === candidateBranchId)
         ? candidateBranchId : normalizeText(branches[0]?.id_sucursal);
       setSelectedBranchId(preferredBranchId);
 
       const resolvedServices = await resolveRedeemServices({
-        summaryServices: Array.isArray(summary?.serviceCandidates) ? summary.serviceCandidates : [],
+        summaryServices: Array.isArray(effectiveSummary?.serviceCandidates) ? effectiveSummary.serviceCandidates : [],
         branchId: preferredBranchId,
       });
       if (!isCurrent()) return;
@@ -397,14 +401,14 @@ export default function ClienteCourtesyRouteSection() {
     }
   }, [resolveRedeemServices, summary]);
 
-  const handleOpenRedeemModal = useCallback(async () => {
+  const handleOpenRedeemModal = useCallback(async ({ summaryOverride = null } = {}) => {
     if (!contextRef.current.ready || dialogOpenRef.current || redeemRequestLockRef.current.has(contextRef.current.identity)) return;
     dialogOpenRef.current = true;
     redeemNavigationLockRef.current = false;
     rewardPreparedShownRef.current = false;
     rewardDiscountInfoShownRef.current = false;
     setRedeemModalOpen(true);
-    await loadRedeemContext();
+    await loadRedeemContext({ summaryOverride });
   }, [loadRedeemContext]);
 
   function handleRedeemModalChange(open) {
@@ -424,25 +428,29 @@ export default function ClienteCourtesyRouteSection() {
 
   useEffect(() => {
     if (!ready) return;
-    if (autoRedeemHandledRef.current) return;
     const searchParams = new URLSearchParams(location.search || '');
     const shouldAutoRedeem = normalizeText(searchParams.get('accion')).toLowerCase() === 'canjear';
-    if (!shouldAutoRedeem) return;
-    if (loadingSummary) return;
-    autoRedeemHandledRef.current = true;
-
-    if (summary?.canRedeem) {
-      // AM: Autoapertura segura solo cuando backend/summary confirma recompensa disponible.
-      void handleOpenRedeemModal();
-      notifications.info('Canjea tu recompensa para continuar con tu cita.', {
-        dedupeKey: 'cliente-auto-open-redeem',
-      });
+    if (!shouldAutoRedeem) {
+      autoRedeemHandledRef.current = false;
+      return;
     }
+    if (autoRedeemHandledRef.current) return;
+    autoRedeemHandledRef.current = true;
 
     searchParams.delete('accion');
     const nextSearch = searchParams.toString();
     navigate(`/home/cliente${nextSearch ? `?${nextSearch}` : ''}`, { replace: true });
-  }, [ready, handleOpenRedeemModal, location.search, loadingSummary, navigate, notifications, summary?.canRedeem]);
+
+    void (async () => {
+      const refreshedSummary = await loadSummary();
+      if (!refreshedSummary?.canRedeem) return;
+      await handleOpenRedeemModal({ summaryOverride: refreshedSummary });
+      if (!dialogOpenRef.current) return;
+      notifications.info('Canjea tu recompensa para continuar con tu cita.', {
+        dedupeKey: 'cliente-auto-open-redeem',
+      });
+    })();
+  }, [ready, handleOpenRedeemModal, loadSummary, location.search, navigate, notifications]);
 
   async function handleBranchChange(nextBranchId) {
     const generation = contextRef.current.generation;
