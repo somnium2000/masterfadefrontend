@@ -388,6 +388,9 @@ function ClienteProfileEditor({ open, onOpenChange, profile, onSaved }) {
                   maxLength={1000}
                   placeholder="Describe estilo, cuidados o detalles importantes para tu corte."
                 />
+                <p className="mt-2 text-xs leading-5 text-[var(--mf-text-2)]">
+                  Este campo completa el porcentaje de tu perfil, pero puedes guardar tus cambios aunque todavía esté vacío.
+                </p>
               </div>
             </div>
           </section>

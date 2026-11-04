@@ -18,7 +18,7 @@ vi.mock('../../lib/clienteApi.js', () => ({ ...api, ALLOWED_PROFILE_IMAGE_TYPES:
 vi.mock('../../components/ClienteAccountDeletionDialog.jsx', () => ({ default: ({ open }) => open ? <p role="dialog" aria-label="Eliminar cuenta sintética">Eliminar</p> : null }));
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 const profile = id => ({ id_usuario: `account-${id}`, id_cliente: `client-${id}`, id_persona: `person-${id}`, nombre_completo: `CLIENT-${id}`, telefono_principal: '99999999', foto_perfil_asset_id: `asset-${id}`, foto_perfil_signed_url: `https://synthetic.invalid/${id}.jpg` });
-const payload = id => ({ cliente: profile(id), profile_completion: { completion_percent: 25, is_complete: false, missing_fields: ['direccion_texto'] } });
+const payload = id => ({ cliente: profile(id), profile_completion: { completion_percent: 67, is_complete: false, missing_fields: ['preferencias_corte'], recommended_fields: [] } });
 function identity(id) { auth.user = { id_usuario: `account-${id}` }; auth.clienteId = `client-${id}`; }
 beforeEach(() => { identity('A'); auth.isAuthenticated = true; auth.isHydrated = true; auth.isHydrating = false; auth.logout.mockReset(); nav.mockReset(); layout.refreshClienteProfile.mockReset(); Object.values(notices).forEach(m => m.mockReset()); Object.values(api).forEach(m => m.mockReset()); api.getClienteMe.mockResolvedValue(payload('A')); api.updateClienteMe.mockResolvedValue(payload('A')); api.prepareClienteProfileImageUpload.mockResolvedValue({ asset_id: 'new-asset' }); api.getClienteProfileImageReadUrl.mockResolvedValue({ url: 'https://synthetic.invalid/new.jpg' }); });
 afterEach(cleanup);
@@ -35,6 +35,8 @@ test('secciones del perfil usan separación uniforme entre progreso, tarjetas y 
   const banner = progress.closest('section');
   const container = banner?.parentElement;
   expect(container).toHaveClass('flex', 'flex-col', 'gap-6');
+  expect(banner).toHaveTextContent('Pendiente: Preferencias para barbero.');
+  expect(banner).toHaveTextContent('67%');
   expect(banner?.nextElementSibling).toHaveClass('grid');
   expect(screen.getByRole('heading', { name: 'Identidad' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Contacto' })).toBeInTheDocument();
@@ -159,6 +161,7 @@ describe('editor vigente', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {}); mount();
     const dialog = screen.getByRole('dialog', { name: 'Perfil privado del cliente' }); expect(document.getElementById(dialog.getAttribute('aria-describedby'))).toHaveTextContent('Actualiza solo lo necesario');
     for (const label of ['Teléfono principal *', 'Fecha de nacimiento', 'Género (opcional)', 'Dirección (opcional)', 'Preferencias para tu barbero']) { const control = screen.getByLabelText(label); control.focus(); expect(control).toHaveFocus(); }
+    expect(dialog).toHaveTextContent('Este campo completa el porcentaje de tu perfil, pero puedes guardar tus cambios aunque todavía esté vacío.');
     const ids = Array.from(dialog.querySelectorAll('[id]'), n => n.id); expect(new Set(ids).size).toBe(ids.length); expect(warn).not.toHaveBeenCalled(); warn.mockRestore();
     expect(dialog.textContent).not.toMatch(/Ã|Â/);
     fireEvent.keyDown(document.activeElement, { key: 'Escape', code: 'Escape' });
