@@ -10,35 +10,80 @@
 }
 
 .public-booking-topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(44px, 1fr) auto minmax(96px, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 14px;
+  min-height: 58px;
+  border: 1px solid var(--mf-nav-border);
+  border-radius: 18px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--mf-card) 92%, transparent);
 }
 
 .public-booking-topbar-left {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  justify-content: flex-start;
+  min-width: 0;
 }
 
-.public-booking-home {
+.public-booking-topbar-logo {
+  min-width: 0;
+  width: 100%;
+  justify-self: center;
+  pointer-events: none;
+}
+
+.public-booking-topbar-logo > div {
+  max-width: 100%;
+}
+
+.public-booking-topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.public-booking-topbar-control {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  flex: 0 0 auto;
+  gap: 7px;
   border: 1px solid var(--mf-nav-border);
-  border-radius: 999px;
-  min-height: 38px;
-  padding: 0 14px;
+  border-radius: 12px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
   background: color-mix(in srgb, var(--mf-btn-bg) 72%, var(--mf-card) 28%);
   color: var(--mf-text);
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
 }
 
-.public-booking-topbar-back {
-  border-radius: 999px;
+.public-booking-topbar-control:hover {
+  border-color: color-mix(in srgb, var(--mf-accent) 52%, var(--mf-nav-border) 48%);
+  background: color-mix(in srgb, var(--mf-accent) 10%, var(--mf-btn-bg) 90%);
+}
+
+.public-booking-topbar-control:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mf-accent) 88%, transparent);
+  outline-offset: 2px;
+}
+
+.public-booking-theme-button {
+  border-color: var(--mf-nav-border);
+  border-radius: 12px;
+}
+
+.public-booking-topbar-label {
+  white-space: nowrap;
 }
 
 .public-booking-main {
@@ -1128,7 +1173,30 @@
   }
 
   .public-booking-topbar {
-    align-items: flex-start;
+    grid-template-columns: 92px minmax(0, 1fr) 92px;
+    gap: 6px;
+    min-height: 56px;
+    padding: 5px 6px;
+  }
+
+  .public-booking-topbar-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .public-booking-topbar-control {
+    padding: 0;
+  }
+
+  .public-booking-topbar-actions {
+    gap: 4px;
   }
 
   .public-booking-agenda-stack {
@@ -1215,6 +1283,25 @@
 
   .public-booking-package-card {
     min-height: 160px;
+  }
+}
+
+@media (max-width: 359px) {
+  .public-booking-shell {
+    padding-inline: 8px;
+  }
+
+  .public-booking-topbar {
+    grid-template-columns: 92px minmax(0, 1fr) 92px;
+    gap: 3px;
+    padding-inline: 4px;
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-booking-topbar-control {
+    transition: none;
   }
 }
 

@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { ArrowLeft, House } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import MasterfadeLogo from '../../../../components/branding/MasterfadeLogo.jsx';
 import { Button } from '../../../../components/ui/button.jsx';
 import ThemeSwitcher from '../../../../components/theme/ThemeSwitcher.jsx';
 import BookingErrorState from './BookingErrorState.jsx';
@@ -21,23 +22,36 @@ const BookingLayout = memo(function BookingLayout({
       <div className="public-booking-shell">
         <header className="public-booking-topbar">
           <div className="public-booking-topbar-left">
-            <Link to={homePath} className="public-booking-home">
-              <House size={16} />
-              <span>{homeLabel}</span>
-            </Link>
             {showBackToBarberos ? (
               <Button
                 variant="outline"
-                size="sm"
-                className="public-booking-topbar-back gap-2"
+                className="public-booking-topbar-control public-booking-topbar-back"
                 onClick={onBackToBarberos}
+                aria-label="Volver a barberos"
               >
-                <ArrowLeft size={15} />
-                Volver a barberos
+                <ArrowLeft size={18} aria-hidden="true" />
+                <span className="public-booking-topbar-label">Volver a barberos</span>
               </Button>
             ) : null}
           </div>
-          <ThemeSwitcher showLabel={false} />
+
+          <MasterfadeLogo variant="topbar" className="public-booking-topbar-logo" />
+
+          <div className="public-booking-topbar-actions">
+            <Link
+              to={homePath}
+              className="public-booking-topbar-control public-booking-home"
+              aria-label={homeLabel}
+            >
+              <House size={18} aria-hidden="true" />
+              <span className="public-booking-topbar-label">{homeLabel}</span>
+            </Link>
+            <ThemeSwitcher
+              showLabel={false}
+              className="public-booking-theme-switcher"
+              buttonClassName="public-booking-theme-button"
+            />
+          </div>
         </header>
 
         {loading ? <BookingLoadingState /> : null}
