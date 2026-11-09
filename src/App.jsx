@@ -51,6 +51,7 @@ import AdminReportesConcurrenciaPage from './features/admin/pages/AdminReportesC
 import AdminAgendamientoCitasPage from './features/admin/pages/AdminAgendamientoCitasPage.jsx';
 import AdminAgendamientoHistorialPage from './features/admin/pages/AdminAgendamientoHistorialPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
+import SuperAdminDashboardPage from './features/admin/pages/SuperAdminDashboardPage.jsx';
 import AdminMasterPuntosPage from './features/admin/pages/AdminMasterPuntosPage.jsx';
 import AdminServiciosCatalogoPublicoPage from './features/admin/pages/AdminServiciosCatalogoPublicoPage.jsx';
 import AdminSeguridadAlertasPage from './features/admin/pages/AdminSeguridadAlertasPage.jsx';
@@ -242,8 +243,8 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<UnderConstructionPage title="Inicio" />} />
-        <Route path="kpis" element={<UnderConstructionPage title="KPIs" subtitle="Indicadores clave de rendimiento" />} />
+        <Route index element={<RouteErrorBoundary><SuperAdminDashboardPage /></RouteErrorBoundary>} />
+        <Route path="kpis" element={<RouteErrorBoundary><SuperAdminDashboardPage /></RouteErrorBoundary>} />
         {/* Personas */}
         <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
         <Route path="clientes" element={<RouteErrorBoundary><AdminClientesPage /></RouteErrorBoundary>} />
