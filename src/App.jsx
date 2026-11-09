@@ -244,7 +244,7 @@ function App() {
         }
       >
         <Route index element={<RouteErrorBoundary><SuperAdminDashboardPage /></RouteErrorBoundary>} />
-        <Route path="kpis" element={<RouteErrorBoundary><SuperAdminDashboardPage /></RouteErrorBoundary>} />
+        <Route path="kpis" element={<Navigate to="/home/super" replace />} />
         {/* Personas */}
         <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
         <Route path="clientes" element={<RouteErrorBoundary><AdminClientesPage /></RouteErrorBoundary>} />

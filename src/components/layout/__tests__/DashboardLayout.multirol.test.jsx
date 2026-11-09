@@ -51,6 +51,13 @@ test.each(['admin', 'super_admin', 'cliente', 'barbero', 'security_admin'])('rol
   if (role === 'cliente') expect(modules.map(item => item.id)).toEqual(['inicio']);
 });
 
+test('Super Admin conserva solo Dashboard en Inicio y Admin conserva KPIs', () => {
+  const superInicio = buildNavModules('/home/super', 'super_admin', ['super_admin']).find(item => item.id === 'inicio');
+  const adminInicio = buildNavModules('/home/admin', 'admin', ['admin']).find(item => item.id === 'inicio');
+  expect(superInicio.subItems.map(item => item.label)).toEqual(['Dashboard']);
+  expect(adminInicio.subItems.map(item => item.label)).toEqual(['Dashboard', 'KPIs']);
+});
+
 test('root y roles de pantalla sin claims operativos no añaden accesos combinados', () => {
   for (const roles of [['root', 'admin', 'barbero'], ['barbero'], ['admin'], []]) {
     expect(buildNavModules('/home/admin', 'admin', roles).some(item => item.id === 'mi-espacio-barbero')).toBe(false);

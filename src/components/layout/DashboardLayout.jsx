@@ -109,10 +109,12 @@ export function buildNavModules(basePath, role, roles = []) {
             label: 'Inicio',
             icon: House,
             path: basePath,
-            subItems: [
-                { id: 'dashboard', label: 'Dashboard', path: basePath },
-                { id: 'kpis', label: 'KPIs', path: `${basePath}/kpis` },
-            ],
+            subItems: role === 'super_admin'
+                ? [{ id: 'dashboard', label: 'Dashboard', path: basePath }]
+                : [
+                    { id: 'dashboard', label: 'Dashboard', path: basePath },
+                    { id: 'kpis', label: 'KPIs', path: `${basePath}/kpis` },
+                ],
         },
         {
             id: 'personas',

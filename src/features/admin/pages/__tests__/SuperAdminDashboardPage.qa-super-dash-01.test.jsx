@@ -12,9 +12,13 @@ vi.mock('../../lib/superAdminDashboardApi.js', () => ({
 function responseFor(periodo, overrides = {}) {
   return { data: {
     total_citas: 124,
-    valor_citas_hnl: 4,
+    ingresos_citas_hnl_total: 34,
+    ingresos_citas_hnl_periodo: 3,
     planes_activados: 2,
     masterpuntos_canjeados: 3,
+    ingresos_serie: [{ periodo: `${periodo.fecha_hasta}T10:00:00`, ingresos_hnl: 3 }],
+    actividad_serie: [{ periodo: `${periodo.fecha_hasta}T00:00:00`, planes_activados: 2, masterpuntos_canjeados: 3 }],
+    agrupacion: periodo.fecha_desde === periodo.fecha_hasta ? 'hour' : 'day',
     periodo,
     timezone: 'America/Tegucigalpa',
     actualizado_at: '2026-11-08T18:00:00.000Z',
@@ -39,13 +43,16 @@ describe('SuperAdminDashboardPage', () => {
     getSummary.mockImplementation((periodo) => Promise.resolve(responseFor(periodo)));
   });
 
-  it('muestra los cuatro indicadores y aclara que el valor no es ingreso', async () => {
+  it('muestra los cuatro indicadores, ingresos reales y dos gráficas accesibles', async () => {
     render(<SuperAdminDashboardPage />);
     expect(await screen.findByText('124')).toBeInTheDocument();
-    expect(screen.getByText(/L\s*4\.00/)).toBeInTheDocument();
-    expect(screen.getByText('Planes activados')).toBeInTheDocument();
+    expect(screen.getByText(/L\s*34\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/Período:.*3\.00/)).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /Evolución temporal de ingresos/i })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /Comparación temporal/i })).toBeInTheDocument();
+    expect(screen.getAllByText('Planes activados').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('MasterPuntos canjeados')).toBeInTheDocument();
-    expect(screen.getByText(/no representa ingresos cobrados/i)).toBeInTheDocument();
+    expect(screen.getByText(/Cobros confirmados asociados exclusivamente a citas/i)).toBeInTheDocument();
   });
 
   it('cambia de Hoy a 7 días y muestra únicamente la respuesta del nuevo período', async () => {
@@ -79,7 +86,7 @@ describe('SuperAdminDashboardPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
     expect(await screen.findByText(/última lectura válida de este período/i)).toBeInTheDocument();
     expect(screen.getByText('2')).toBeInTheDocument();
-    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getAllByText('3').length).toBeGreaterThanOrEqual(1);
   });
 
   it('valida fechas personalizadas vacías o invertidas sin enviar solicitudes', async () => {
