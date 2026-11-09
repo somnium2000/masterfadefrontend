@@ -18,7 +18,7 @@ vi.mock('../../lib/clienteApi.js', () => ({ ...api, ALLOWED_PROFILE_IMAGE_TYPES:
 vi.mock('../../components/ClienteAccountDeletionDialog.jsx', () => ({ default: ({ open }) => open ? <p role="dialog" aria-label="Eliminar cuenta sintética">Eliminar</p> : null }));
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 const profile = id => ({ id_usuario: `account-${id}`, id_cliente: `client-${id}`, id_persona: `person-${id}`, nombre_completo: `CLIENT-${id}`, telefono_principal: '99999999', foto_perfil_asset_id: `asset-${id}`, foto_perfil_signed_url: `https://synthetic.invalid/${id}.jpg` });
-const payload = id => ({ cliente: profile(id), profile_completion: { completion_percent: 25, is_complete: false, missing_fields: ['direccion_texto'] } });
+const payload = id => ({ cliente: profile(id), profile_completion: { completion_percent: 67, is_complete: false, missing_fields: ['preferencias_corte'], recommended_fields: [] } });
 function identity(id) { auth.user = { id_usuario: `account-${id}` }; auth.clienteId = `client-${id}`; }
 beforeEach(() => { identity('A'); auth.isAuthenticated = true; auth.isHydrated = true; auth.isHydrating = false; auth.logout.mockReset(); nav.mockReset(); layout.refreshClienteProfile.mockReset(); Object.values(notices).forEach(m => m.mockReset()); Object.values(api).forEach(m => m.mockReset()); api.getClienteMe.mockResolvedValue(payload('A')); api.updateClienteMe.mockResolvedValue(payload('A')); api.prepareClienteProfileImageUpload.mockResolvedValue({ asset_id: 'new-asset' }); api.getClienteProfileImageReadUrl.mockResolvedValue({ url: 'https://synthetic.invalid/new.jpg' }); });
 afterEach(cleanup);
@@ -35,6 +35,8 @@ test('secciones del perfil usan separación uniforme entre progreso, tarjetas y 
   const banner = progress.closest('section');
   const container = banner?.parentElement;
   expect(container).toHaveClass('flex', 'flex-col', 'gap-6');
+  expect(banner).toHaveTextContent('Pendiente: Preferencias para barbero.');
+  expect(banner).toHaveTextContent('67%');
   expect(banner?.nextElementSibling).toHaveClass('grid');
   expect(screen.getByRole('heading', { name: 'Identidad' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Contacto' })).toBeInTheDocument();
@@ -142,6 +144,30 @@ describe('editor vigente', () => {
     fireEvent.change(screen.getByLabelText('Archivo de fotografía privada'), { target: { files: [new File(['x'], 'x.txt', { type: 'text/plain' })] } });
     await waitFor(() => expect(notices.error).toHaveBeenCalledWith('No se pudo cargar la imagen de perfil.')); expect(api.updateClienteMe).not.toHaveBeenCalled(); expect(screen.getByAltText('Foto de perfil')).toHaveAttribute('src', 'https://synthetic.invalid/A.jpg');
   });
+  test('una subida bloquea el cierre y la foto cargada cuenta como borrador', async () => {
+    const upload = deferred();
+    api.prepareClienteProfileImageUpload.mockReturnValue(upload.promise);
+    const view = mount();
+    fireEvent.change(screen.getByLabelText('Archivo de fotografía privada'), { target: { files: [new File(['x'], 'qa.jpg', { type: 'image/jpeg' })] } });
+    fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+    expect(view.close).not.toHaveBeenCalled();
+    expect(screen.queryByText('¿Descartar los cambios?')).not.toBeInTheDocument();
+    await act(async () => upload.resolve({ asset_id: 'new-asset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Seguir editando' }));
+    expect(screen.getByAltText('Foto de perfil')).toHaveAttribute('src', 'https://synthetic.invalid/new.jpg');
+    expect(view.close).not.toHaveBeenCalled();
+  });
+  test('refrescar el mismo perfil conserva los cambios de esta apertura', () => {
+    const view = mount();
+    const address = screen.getByLabelText('Dirección (opcional)');
+    fireEvent.change(address, { target: { value: 'Borrador' } });
+    view.rerender(<Editor open profile={{ ...profile('A'), direccion_texto: 'Otro valor' }} onSaved={view.saved} onOpenChange={view.close} />);
+    expect(address).toHaveValue('Borrador');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(screen.getByRole('dialog', { name: '¿Descartar los cambios?' })).toBeInTheDocument();
+  });
   test('retiro voluntario envía null explícito', async () => { mount(); fireEvent.click(screen.getByRole('button', { name: 'Quitar' })); submit(); await waitFor(() => expect(api.updateClienteMe).toHaveBeenCalled()); expect(api.updateClienteMe.mock.calls[0][0].foto_perfil_asset_id).toBeNull(); });
   test('upload vigente conserva asset y URL para el guardado explícito', async () => {
     mount(); fireEvent.change(screen.getByLabelText('Archivo de fotografía privada'), { target: { files: [new File(['x'], 'x.jpg', { type: 'image/jpeg' })] } });
@@ -159,6 +185,7 @@ describe('editor vigente', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {}); mount();
     const dialog = screen.getByRole('dialog', { name: 'Perfil privado del cliente' }); expect(document.getElementById(dialog.getAttribute('aria-describedby'))).toHaveTextContent('Actualiza solo lo necesario');
     for (const label of ['Teléfono principal *', 'Fecha de nacimiento', 'Género (opcional)', 'Dirección (opcional)', 'Preferencias para tu barbero']) { const control = screen.getByLabelText(label); control.focus(); expect(control).toHaveFocus(); }
+    expect(dialog).toHaveTextContent('Este campo completa el porcentaje de tu perfil, pero puedes guardar tus cambios aunque todavía esté vacío.');
     const ids = Array.from(dialog.querySelectorAll('[id]'), n => n.id); expect(new Set(ids).size).toBe(ids.length); expect(warn).not.toHaveBeenCalled(); warn.mockRestore();
     expect(dialog.textContent).not.toMatch(/Ã|Â/);
     fireEvent.keyDown(document.activeElement, { key: 'Escape', code: 'Escape' });

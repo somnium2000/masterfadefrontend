@@ -1,4 +1,6 @@
-import { CheckCircle2, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import ConfirmationCard, { useConfirmationSound } from '../../../components/feedback/ConfirmationCard.jsx';
+import { CalendarDays, Copy, CreditCard, ReceiptText, UserRound, Loader2 } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import BookingActions from './components/BookingActions.jsx';
@@ -8,7 +10,7 @@ import {
   normalizeBookingPaymentUiState,
 } from './bookingUtils.js';
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function toSafeCode(value) {
   const normalized = String(value || '').trim();
@@ -26,19 +28,36 @@ function collectCodesFromList(list) {
 }
 
 function resolveBookingCodes({ bookingSuccessResult, paymentResult, holdResult }) {
+  const groupId = [
+    holdResult?.id_grupo_cita,
+    holdResult?.data?.id_grupo_cita,
+    bookingSuccessResult?.id_grupo_cita,
+    bookingSuccessResult?.confirmation?.id_grupo_cita,
+    bookingSuccessResult?.confirmation?.data?.id_grupo_cita,
+    bookingSuccessResult?.paymentResult?.id_grupo_cita,
+    bookingSuccessResult?.paymentResult?.data?.id_grupo_cita,
+    paymentResult?.id_grupo_cita,
+    paymentResult?.data?.id_grupo_cita,
+    paymentResult?.confirmation?.id_grupo_cita,
+    paymentResult?.confirmation?.data?.id_grupo_cita,
+  ].map((value) => String(value || '').trim()).find((value) => UUID_PATTERN.test(value));
+  if (groupId) return [buildBookingShortCode(groupId, 5)];
+  const groupCode = [
+    bookingSuccessResult?.codigo_cita,
+    bookingSuccessResult?.confirmation?.codigo_cita,
+    bookingSuccessResult?.paymentResult?.codigo_cita,
+    paymentResult?.codigo_cita,
+    paymentResult?.data?.codigo_cita,
+    paymentResult?.confirmation?.codigo_cita,
+    paymentResult?.confirmation?.data?.codigo_cita,
+    holdResult?.codigo_cita,
+    holdResult?.data?.codigo_cita,
+  ].map(toSafeCode).find(Boolean);
+  if (groupCode) return [groupCode];
   const candidates = [
-    toSafeCode(bookingSuccessResult?.codigo_cita),
-    toSafeCode(bookingSuccessResult?.confirmation?.codigo_cita),
     ...collectCodesFromList(bookingSuccessResult?.citas_confirmadas),
     ...collectCodesFromList(bookingSuccessResult?.confirmation?.citas_confirmadas),
-    toSafeCode(bookingSuccessResult?.paymentResult?.codigo_cita),
     ...collectCodesFromList(bookingSuccessResult?.paymentResult?.citas_confirmadas),
-    toSafeCode(paymentResult?.codigo_cita),
-    toSafeCode(paymentResult?.data?.codigo_cita),
-    toSafeCode(paymentResult?.confirmation?.codigo_cita),
-    toSafeCode(paymentResult?.confirmation?.data?.codigo_cita),
-    toSafeCode(holdResult?.codigo_cita),
-    toSafeCode(holdResult?.data?.codigo_cita),
     ...collectCodesFromList(paymentResult?.citas_confirmadas),
     ...collectCodesFromList(paymentResult?.citas),
     ...collectCodesFromList(paymentResult?.confirmation?.citas_confirmadas),
@@ -50,6 +69,7 @@ function resolveBookingCodes({ bookingSuccessResult, paymentResult, holdResult }
 }
 
 export default function PublicBookingSuccessStep() {
+  const [copyMessage, setCopyMessage] = useState('');
   const {
     bookingSuccessResult,
     bookingBlocksSummary,
@@ -79,17 +99,39 @@ export default function PublicBookingSuccessStep() {
     ?? 0
   );
   const isCoveredByPlan = paymentLabelLower === 'cubierto_por_plan' || coveredByPlanHnl > 0;
-  const fallbackShortCode = buildBookingShortCode(holdResult?.id_grupo_cita || null, 5);
-  const hasRealCode = bookingCodes.length > 0;
-  const displayCodes = hasRealCode
-    ? bookingCodes
-    : (fallbackShortCode && fallbackShortCode !== 'N/A' ? [fallbackShortCode] : []);
+  const displayCodes = bookingCodes;
+
+  async function copyCodes() {
+    try {
+      await navigator.clipboard.writeText(displayCodes.join(', '));
+      setCopyMessage('Código copiado');
+    } catch {
+      setCopyMessage('No se pudo copiar. Puedes seleccionar el código.');
+    }
+  }
+
+  const onCheckDrawn = useConfirmationSound(isConfirmedUi);
+
+  if (isConfirmedUi) return (
+    <div className="citas-confirm-wrap booking-confirmation-wrap">
+      <ConfirmationCard title="¡Reserva confirmada!" subtitle="Tu cita ha sido confirmada exitosamente." titleId="booking-confirmation-title" onCheckDrawn={onCheckDrawn} onDone={completeBookingFlow}>
+          <div className="booking-confirmation-receipt">
+            <div className="booking-confirmation-row"><CalendarDays aria-hidden="true" /><span>Código de cita</span><strong className="booking-confirmation-code">{displayCodes.length ? displayCodes.join(', ') : 'En proceso de asignación'}</strong>{displayCodes.length ? <button type="button" className="booking-confirmation-copy" onClick={copyCodes} aria-label="Copiar código de cita"><Copy size={16} /></button> : null}</div>
+            <div className="booking-confirmation-row"><CreditCard aria-hidden="true" /><span>Estado de pago</span><span className={paymentLabelLower === 'pagado' ? 'booking-confirmation-paid' : 'booking-confirmation-payment'}>{paymentLabelLower === 'pagado' ? 'Pagado' : paymentUiState.paymentLabel}</span></div>
+            {isCoveredByPlan ? <div className="booking-confirmation-row"><ReceiptText aria-hidden="true" /><span>Cubierto por tu plan</span><strong>{formatCurrencyHnl(coveredByPlanHnl)}</strong></div> : null}
+            <div className="booking-confirmation-row"><ReceiptText aria-hidden="true" /><span>{isCoveredByPlan ? 'Total pagado hoy' : 'Total pagado'}</span><strong>{formatCurrencyHnl(paymentUiState.totalPagadoHnl)}</strong></div>
+          </div>
+          <p className="booking-confirmation-copy-status" role="status">{copyMessage}</p>
+          <div className="booking-confirmation-appointments"><h2>CITAS CONFIRMADAS</h2>{bookingBlocksSummary.map((block) => <div key={block.id} className="booking-confirmation-appointment"><UserRound aria-hidden="true" /><div><span>{block.alias}</span><span>{block.barbero?.nombre_completo || 'Barbero'}</span></div></div>)}</div>
+      </ConfirmationCard>
+    </div>
+  );
 
   return (
     <div className="citas-confirm-wrap">
       <div className={`citas-surface p-5 ${isConfirmedUi ? 'public-booking-success' : ''}`.trim()}>
         <div className="public-booking-success-head">
-          <CheckCircle2 size={20} />
+          <Loader2 size={20} />
           <span>{paymentUiState.text}</span>
         </div>
 

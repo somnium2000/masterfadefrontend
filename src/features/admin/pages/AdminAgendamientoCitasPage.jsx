@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -10,21 +11,25 @@ import {
   RefreshCw,
   Search,
   SlidersHorizontal,
+  Ticket,
   X,
 } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table.jsx';
 import ViewToggle from '../../../components/data/ViewToggle.jsx';
+import './AdminAgendamientoCitasHeader.css';
 import EmptyState from '../../../components/data/EmptyState.jsx';
+import AdminReservationCode from '../components/AdminReservationCode.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import {
   getAdminCitasOperativasContexto,
+  searchAdminReservation,
   listAdminCitasAfectadasReagendacion,
   listAdminCitasOperativas,
   listPublicAgendaHorarios,
@@ -34,7 +39,7 @@ import {
   postAdminCitaReagendarEmergencia,
   postAdminCitasReagendarEmergenciaLote,
 } from '../lib/adminCitasApi.js';
-import { buildTimeSlots } from '../../public/booking/bookingUtils.js';
+import { buildTimeSlots, buildBookingShortCode } from '../../public/booking/bookingUtils.js';
 import { isAbortError } from '../../../services/httpClient.js';
 
 const FILTER_DEFAULTS = {
@@ -306,7 +311,26 @@ function buildOperationalEventsUrl(idSucursal) {
   return joinEventUrl(import.meta.env.VITE_API_URL, `/v1/admin/citas/operativas/events?${query.toString()}`);
 }
 
+const EMPTY_BATCH_FORM = { id_empleado_barbero: '', fecha: '', motivo: '' };
+
+function getBatchDraftChanges(items) {
+  return items.filter((item) => (
+    item.selected || item.id_empleado_barbero_nuevo || item.motivo
+    || item.fecha_inicio_nueva !== toInputDateTime(item.inicio_actual)
+    || item.picker_date !== toDateKey(item.inicio_actual)
+  )).map(({ id_cita, selected, id_empleado_barbero_nuevo, fecha_inicio_nueva, motivo, picker_date }) => (
+    { id_cita, selected, id_empleado_barbero_nuevo, fecha_inicio_nueva, motivo, picker_date }
+  ));
+}
+
 export default function AdminAgendamientoCitasPage() {
+  const [reservationOpen, setReservationOpen] = useState(false);
+  const [reservationCode, setReservationCode] = useState('');
+  const [reservationResults, setReservationResults] = useState(null);
+  const [reservationError, setReservationError] = useState('');
+  const [reservationLoading, setReservationLoading] = useState(false);
+  const reservationRequest = useRef(null);
+  useEffect(() => () => reservationRequest.current?.abort(), []);
   const navigate = useNavigate();
   const notifications = useNotifications();
   const { roles, isAuthenticated, invalidateSession } = useAuth();
@@ -347,9 +371,10 @@ export default function AdminAgendamientoCitasPage() {
   const [batchDialogOpen, setBatchDialogOpen] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchSaving, setBatchSaving] = useState(false);
-  const [batchForm, setBatchForm] = useState({ id_empleado_barbero: '', fecha: '', motivo: '' });
+  const [batchForm, setBatchForm] = useState(EMPTY_BATCH_FORM);
   const [batchItems, setBatchItems] = useState([]);
   const [batchPickerLoadingId, setBatchPickerLoadingId] = useState('');
+  const batchBusy = batchSaving || batchLoading || Boolean(batchPickerLoadingId);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [activeMobileContainer, setActiveMobileContainer] = useState('confirmada');
   const fetchInFlightRef = useRef(false);
@@ -639,6 +664,8 @@ export default function AdminAgendamientoCitasPage() {
   }, [canOperateWithSucursal, isAuthenticated, scheduleLiveRefresh, selectedSucursalId]);
 
   function handleSucursalSelectionChange(nextId) {
+    reservationRequest.current?.abort();
+    setReservationOpen(false); setReservationResults(null); setReservationLoading(false);
     const safeId = String(nextId || '').trim();
     setSelectedSucursalId(safeId);
     setFilters((prev) => ({ ...prev, idSucursal: safeId || 'all' }));
@@ -785,6 +812,14 @@ export default function AdminAgendamientoCitasPage() {
     }
   }
 
+  function handleBatchOpenChange(open) {
+    setBatchDialogOpen(open);
+    if (!open) {
+      setBatchForm(EMPTY_BATCH_FORM);
+      setBatchItems([]);
+    }
+  }
+
   async function fetchBatchAffected() {
     if (!selectedSucursalId) {
       notifications.warning('Selecciona una sucursal para operar.', { dedupeKey: 'agendamiento-citas-sucursal-required' });
@@ -906,7 +941,12 @@ export default function AdminAgendamientoCitasPage() {
         })),
       });
       notifications.success('Reagendación masiva completada sin cobro adicional.', { dedupeKey: 'agendamiento-citas-batch-ok' });
-      setBatchItems((prev) => prev.filter((item) => !item.selected));
+      const remainingItems = batchItems.filter((item) => !item.selected);
+      if (getBatchDraftChanges(remainingItems).length) {
+        setBatchItems(remainingItems);
+      } else {
+        handleBatchOpenChange(false);
+      }
       await fetchCitas({ silent: true, force: true });
     } catch (err) {
       notifications.error(mapAdminCitasErrorMessage(err, 'No fue posible completar la reagendación masiva.'), { dedupeKey: 'agendamiento-citas-batch-error' });
@@ -925,7 +965,7 @@ export default function AdminAgendamientoCitasPage() {
 
     const actionBlocked = !selectedSucursalId || !canOperateOnCita(cita);
     return (
-      <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita || actionBlocked} onClick={() => openStatusDialog(cita, operationCode)}>
+      <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita || actionBlocked} onClick={() => { setReservationOpen(false); setReservationResults(null); openStatusDialog(cita, operationCode); }}>
         <CalendarCheck2 size={14} />
         {actionLabel}
       </Button>
@@ -945,7 +985,7 @@ export default function AdminAgendamientoCitasPage() {
     );
   }
 
-  function renderCitaDetail(cita) {
+  function renderCitaDetail(cita, showActions = true) {
     const viewInfo = getAppointmentDisplayInfo(cita);
     const serviciosLegibles = getServiciosLegibles(cita);
     const telefono = String(cita?.telefono_cliente || '').trim();
@@ -953,6 +993,7 @@ export default function AdminAgendamientoCitasPage() {
       <details className="mt-2 rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2">
         <summary className="cursor-pointer text-xs font-semibold text-[var(--mf-text)]">Ver detalle</summary>
         <div className="mt-2 space-y-1 text-xs text-[var(--mf-text-2)]">
+          <p>Código de reserva: <span className="text-[var(--mf-accent)]">{cita.id_grupo_cita ? buildBookingShortCode(cita.id_grupo_cita, 5) : 'Sin grupo de reserva'}</span></p>
           <p>Titular: <span className="text-[var(--mf-text)]">{viewInfo.titularNombre || 'Sin registrar'}</span></p>
           <p>Integrante: <span className="text-[var(--mf-text)]">{viewInfo.aliasIntegrante || 'Sin registrar'}</span></p>
           {telefono ? <p>Teléfono: <span className="text-[var(--mf-text)]">{telefono}</span></p> : null}
@@ -965,102 +1006,52 @@ export default function AdminAgendamientoCitasPage() {
           {viewInfo.promocionesCount > 0 ? <p>Promoción: <span className="text-[var(--mf-text)]">{viewInfo.promocionesCount} aplicada(s)</span></p> : null}
           {viewInfo.comprobanteCodigo ? <p>Comprobante: <span className="text-[var(--mf-text)]">{viewInfo.comprobanteCodigo}</span></p> : null}
         </div>
-        {renderSecondaryActions(cita)}
+        {showActions ? renderSecondaryActions(cita) : null}
       </details>
     );
   }
 
+  function renderReservationCode(cita) {
+    return <AdminReservationCode groupId={cita.id_grupo_cita} />;
+  }
+
+  async function lookupReservation(event) {
+    event.preventDefault();
+    reservationRequest.current?.abort();
+    const controller = new AbortController();
+    reservationRequest.current = controller;
+    setReservationResults(null); setReservationError('');
+    const code = reservationCode.trim().toUpperCase();
+    if (!/^[A-Z0-9]{5}$/.test(code)) { setReservationError('Introduce un código de cinco letras o números.'); return; }
+    setReservationLoading(true);
+    try {
+      const response = await searchAdminReservation(code, selectedSucursalId, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      setReservationResults((response?.data ?? response)?.reservas || []);
+    } catch (error) {
+      if (!controller.signal.aborted && !handleAuthError(error)) setReservationError('No fue posible buscar la reserva. Intenta nuevamente.');
+    } finally { if (!controller.signal.aborted) setReservationLoading(false); }
+  }
+
   function renderMobileCardsList(items, emptyText) {
-    if (!items.length) return <p className="px-1 py-6 text-center text-sm text-[var(--mf-text-2)]">{emptyText}</p>;
-    return (
-      <div className="space-y-3">
-        {items.map((cita) => (
-          (() => {
-            const viewInfo = getAppointmentDisplayInfo(cita);
-            const servicioResumen = getServicioResumen(cita);
-            const telefono = String(cita?.telefono_cliente || '').trim();
-            return (
-          <article key={`mobile-${cita.id_cita}`} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_92%,transparent)] p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 space-y-1">
-                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Integrante</p>
-                <p className="truncate text-[15px] font-semibold text-[var(--mf-text)]">{viewInfo.aliasIntegrante}</p>
-                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Titular: <span className="text-[var(--mf-text)]">{viewInfo.titularNombre}</span></p>
-                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Barbero: <span className="text-[var(--mf-text)]">{cita.nombre_barbero || '-'}</span></p>
-                <p className="text-[13px] text-[var(--mf-text-2)]">Cita: <span className="text-[var(--mf-text)]">{formatDateTime(cita.inicio_at)}</span></p>
-                <p className="truncate text-[13px] text-[var(--mf-text-2)]">Servicio: <span className="text-[var(--mf-text)]">{servicioResumen}</span></p>
-              </div>
-              <div className="text-right">
-                <span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>
-                <p className="mt-2 text-[1.75rem] font-semibold leading-none text-[var(--mf-text)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p>
-              </div>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--mf-nav-border)] pt-2 text-xs text-[var(--mf-text-2)]">
-              <span className="inline-flex items-center gap-1">
-                <MapPin size={12} />
-                {cita.nombre_sucursal || 'Sin registrar'}
-              </span>
-              {telefono ? (
-                <span className="inline-flex items-center gap-1">
-                  <Phone size={12} />
-                  {telefono}
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              {renderItemActions(cita, { compact: true })}
-            </div>
-            {renderCitaDetail(cita)}
-          </article>
-            );
-          })()
-        ))}
-      </div>
-    );
+    return renderCardsList(items, emptyText);
   }
 
   function renderCardsList(items, emptyText) {
     if (!items.length) return <p className="text-sm text-[var(--mf-text-2)]">{emptyText}</p>;
-    return (
-      <div className="space-y-3">
-        {items.map((cita) => {
-          const viewInfo = getAppointmentDisplayInfo(cita);
-          const servicioResumen = getServicioResumen(cita);
-          const telefono = String(cita?.telefono_cliente || '').trim();
-          return (
-            <article key={cita.id_cita} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_92%,transparent)] p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 space-y-1">
-                  <p className="truncate text-[13px] text-[var(--mf-text-2)]">Integrante</p>
-                  <p className="truncate text-base font-semibold text-[var(--mf-text)]">{viewInfo.aliasIntegrante}</p>
-                  <p className="truncate text-[13px] text-[var(--mf-text-2)]">Barbero: <span className="text-[var(--mf-text)]">{cita.nombre_barbero || 'Sin registrar'}</span></p>
-                  <p className="text-[13px] text-[var(--mf-text-2)]">Fecha y hora: <span className="text-[var(--mf-text)]">{formatDateTime(cita.inicio_at)}</span></p>
-                  <p className="truncate text-[13px] text-[var(--mf-text-2)]">Servicio: <span className="text-[var(--mf-text)]">{servicioResumen}</span></p>
-                </div>
-                <div className="text-right">
-                  <span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>
-                  <p className="mt-2 text-xl font-semibold leading-none text-[var(--mf-text)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p>
-                </div>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--mf-nav-border)] pt-2 text-xs text-[var(--mf-text-2)]">
-                <span className="inline-flex items-center gap-1">
-                  <MapPin size={12} />
-                  {cita.nombre_sucursal || 'Sin registrar'}
-                </span>
-                {telefono ? (
-                  <span className="inline-flex items-center gap-1">
-                    <Phone size={12} />
-                    {telefono}
-                  </span>
-                ) : null}
-              </div>
-              <div className="mt-3">{renderItemActions(cita)}</div>
-              {renderCitaDetail(cita)}
-            </article>
-          );
-        })}
-      </div>
-    );
+    return <div className="space-y-3">{items.map((cita) => {
+      const info = getAppointmentDisplayInfo(cita);
+      return <article key={cita.id_cita} className="min-w-0 rounded-[22px] border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm text-[var(--mf-text-2)]">Integrante</span><span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span></div>
+        <h3 className="mt-4 break-words text-base font-semibold text-[var(--mf-text)]">{info.aliasIntegrante}</h3>
+        <p className="mt-1 text-base font-semibold text-[var(--mf-text)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p>
+        {renderReservationCode(cita)}
+        <div className="space-y-2 break-words text-sm text-[var(--mf-text-2)]"><p>Barbero: <strong className="text-[var(--mf-text)]">{cita.nombre_barbero || 'Sin registrar'}</strong></p><p>Fecha y hora: <span className="text-[var(--mf-text)]">{formatDateTime(cita.inicio_at)}</span></p><p>Servicio: <span className="text-[var(--mf-text)]">{getServicioResumen(cita)}</span></p></div>
+        <div className="mt-4 flex flex-wrap gap-x-2 gap-y-1 border-t border-[var(--mf-nav-border)] pt-4 text-sm text-[var(--mf-text-2)]"><span>{cita.nombre_sucursal || 'Sin registrar'}</span>{cita.telefono_cliente ? <span>· {cita.telefono_cliente}</span> : null}</div>
+        <div className="mt-2">{renderItemActions(cita, { compact: true })}</div>
+        {renderCitaDetail(cita)}
+      </article>;
+    })}</div>;
   }
 
   function renderTableList(items, emptyText) {
@@ -1082,6 +1073,7 @@ export default function AdminAgendamientoCitasPage() {
               return (
                 <TableRow key={cita.id_cita} className="border-[var(--mf-nav-border)]">
                   <TableCell className="font-medium">
+                    <p className="font-semibold text-[var(--mf-accent)]">{cita.id_grupo_cita ? buildBookingShortCode(cita.id_grupo_cita, 5) : 'Sin grupo de reserva'}</p>
                     {viewInfo.titularNombre}
                     <p className="text-xs text-[var(--mf-text-2)]">{viewInfo.aliasIntegrante}</p>
                     {cita.telefono_cliente ? <p className="text-xs text-[var(--mf-text-2)]">{cita.telefono_cliente}</p> : null}
@@ -1129,69 +1121,41 @@ export default function AdminAgendamientoCitasPage() {
 
   return (
     <div className="space-y-4 overflow-x-hidden px-3 pb-24 sm:px-4 sm:pb-6">
-      <section className="space-y-4 pt-1 lg:hidden">
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
-            <h1 className="mf-font-display text-3xl text-[var(--mf-text)]">Citas</h1>
-          </div>
-
-          <div>
-            <Label className="mf-label">Sucursal operativa</Label>
-            <select
-              className="mf-select mt-1"
-              value={selectedSucursalId}
-              onChange={(event) => handleSucursalSelectionChange(event.target.value)}
-            >
-              {hasMultipleSucursales ? <option value="">Selecciona una sucursal</option> : null}
-              {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="relative min-w-0 flex-1">
-              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
-              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por cliente, barbero o ID" className="h-11 rounded-2xl pl-9 pr-3 text-[0.98rem] min-[390px]:text-[1.03rem]" />
-            </div>
-            <div className="relative shrink-0">
-              <div className="origin-right scale-[0.94]">
-                <ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" />
-              </div>
-              {activeFilterCount > 0 ? (
-                <span className="absolute -right-2 -top-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-card)] px-1 text-[10px] font-semibold text-[var(--mf-text)]">
-                  {activeFilterCount}
-                </span>
-              ) : null}
-            </div>
-          </div>
-
-          <div className={`grid gap-2 ${canManageEmergency ? 'grid-cols-2' : 'grid-cols-1'}`}>
-            <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-sm font-semibold min-[390px]:text-base" onClick={handleManualRefresh} disabled={loading || !canOperateWithSucursal}>
-              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-              Actualizar
-            </Button>
-            <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-sm font-semibold min-[390px]:text-base" onClick={() => setFiltersOpen(true)}>
-              <SlidersHorizontal size={15} />
-              Filtros
-            </Button>
-            {canManageEmergency ? (
-              <Button type="button" variant="outline" className="h-11 min-w-0 gap-2 rounded-2xl px-3 text-center text-sm font-semibold min-[390px]:text-base" onClick={() => setBatchDialogOpen(true)}>
-                <AlertTriangle size={14} />
-                Reagendación
-              </Button>
-            ) : null}
-          </div>
-          {liveStatusLabel ? (
-            <p className="text-xs text-[var(--mf-text-2)]">{liveStatusLabel}</p>
-          ) : null}
-
-          {hiddenOperationalCount > 0 ? (
-            <div className="rounded-lg border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-xs text-[var(--mf-text-2)]">
-              {hiddenOperationalCount} cita(s) en espera o pendiente de pago no se muestran.
-            </div>
-          ) : null}
+      <header className="admin-citas-header rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] p-4 sm:p-5" aria-label="Herramientas de citas">
+        <div className="admin-citas-header__context space-y-1">
+          <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
+          <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Citas</h1>
+          <p className="text-sm text-[var(--mf-text-2)]">Gestiona confirmadas, en salón y en atención sin salir de la operación.</p>
         </div>
-      </section>
+        <div className="admin-citas-header__status text-sm text-[var(--mf-text-2)]" role="status">
+          <span className="font-semibold">{loading ? 'Cargando...' : `${citas.length} cita(s)`}</span>
+          {liveStatusLabel ? <span>{liveStatusLabel}</span> : null}
+        </div>
+        <div className="admin-citas-header__branch rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+          <Label htmlFor="operational-branch" className="mf-label">Sucursal operativa</Label>
+          <select id="operational-branch" className="mf-select mt-1 w-full min-w-0" value={selectedSucursalId} onChange={(event) => handleSucursalSelectionChange(event.target.value)}>
+            {hasMultipleSucursales ? <option value="">Selecciona una sucursal</option> : null}
+            {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
+          </select>
+          {selectedSucursal ? <p className="mt-1 text-xs text-[var(--mf-text-2)]">Operando en: {selectedSucursal.nombre_sucursal}</p> : null}
+        </div>
+        <div className="admin-citas-header__search relative">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
+          <Input aria-label="Buscar por cliente, barbero o ID" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por cliente, barbero o ID" className="h-11 w-full pl-9 pr-9" />
+          {search.trim() ? <button type="button" aria-label="Borrar búsqueda" onClick={() => setSearch('')} className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-[var(--mf-text-2)] hover:bg-[var(--mf-btn-bg)]"><X size={12} /></button> : null}
+        </div>
+        <Button type="button" variant="outline" className="admin-citas-header__lookup gap-2" onClick={() => setReservationOpen(true)}><Ticket size={15} />Buscar reserva</Button>
+        <Button type="button" variant="outline" className="admin-citas-header__filters gap-2" onClick={() => setFiltersOpen(true)}>
+          <SlidersHorizontal size={15} />Filtros
+          {activeFilterCount > 0 ? <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-xs text-[var(--mf-accent-text)]">{activeFilterCount}</span> : null}
+        </Button>
+        {activeFilterCount > 0 ? <Button type="button" variant="ghost" size="sm" className="admin-citas-header__clear text-xs text-[var(--mf-text-2)]" onClick={clearAllFilters}>Limpiar</Button> : null}
+        <Button type="button" variant="outline" className="admin-citas-header__refresh gap-2" onClick={handleManualRefresh} disabled={loading || !canOperateWithSucursal}>
+          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />Actualizar
+        </Button>
+        {canManageEmergency ? <Button type="button" variant="outline" className="admin-citas-header__emergency gap-2" onClick={() => setBatchDialogOpen(true)}><AlertTriangle size={14} />Reagendación masiva</Button> : null}
+        <div className="admin-citas-header__view"><ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" /></div>
+      </header>
 
       <section className="border-b border-[var(--mf-nav-border)] pb-1 lg:hidden">
         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
@@ -1215,70 +1179,8 @@ export default function AdminAgendamientoCitasPage() {
         </div>
       </section>
 
-      <header className="hidden rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] px-4 py-4 sm:px-5 sm:py-5 lg:block">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-          <div className="space-y-1">
-            <p className="text-xs uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
-            <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Citas</h1>
-            <p className="text-sm text-[var(--mf-text-2)]">Gestiona confirmadas, en salón y en atención sin salir de la operación.</p>
-          </div>
-          <div className="flex w-full flex-col gap-2 xl:w-auto xl:min-w-[640px]">
-            <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Label className="mf-label mb-0">Sucursal operativa</Label>
-                <select
-                  className="mf-select h-9 min-w-[260px]"
-                  value={selectedSucursalId}
-                  onChange={(event) => handleSucursalSelectionChange(event.target.value)}
-                >
-                  {hasMultipleSucursales ? <option value="">Selecciona una sucursal</option> : null}
-                  {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
-                </select>
-                {selectedSucursal ? <span className="text-xs text-[var(--mf-text-2)]">Operando en: {selectedSucursal.nombre_sucursal}</span> : null}
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm text-[var(--mf-text-2)]">
-                {loading ? 'Cargando...' : `${citas.length} cita(s)`}
-                {liveStatusLabel ? <span className="ml-2">{liveStatusLabel}</span> : null}
-              </span>
-              <ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" />
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-              <div className="relative w-full sm:max-w-[340px]">
-                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
-                <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por cliente, barbero o ID..." className="pl-9 pr-9" />
-                {search.trim() ? (
-                  <button type="button" onClick={() => setSearch('')} className="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-[var(--mf-text-2)] transition-colors hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-text)]">
-                    <X size={12} />
-                  </button>
-                ) : null}
-              </div>
-              <Button type="button" variant="outline" className="gap-2" onClick={() => setFiltersOpen(true)}>
-                <SlidersHorizontal size={15} />
-                Filtros
-                {activeFilterCount > 0 ? <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-xs text-[var(--mf-accent-text)]">{activeFilterCount}</span> : null}
-              </Button>
-              {activeFilterCount > 0 ? (
-                <Button variant="ghost" size="sm" className="gap-1 text-xs" onClick={clearAllFilters}>Limpiar</Button>
-              ) : null}
-              <Button type="button" variant="outline" className="gap-2" onClick={handleManualRefresh} disabled={loading || !canOperateWithSucursal}>
-                <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-                Actualizar
-              </Button>
-              {canManageEmergency ? (
-                <Button type="button" variant="outline" className="gap-2" onClick={() => setBatchDialogOpen(true)}>
-                  <AlertTriangle size={14} />
-                  Reagendación masiva
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </header>
-
       {hiddenOperationalCount > 0 ? (
-        <div className="hidden rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-2 text-sm text-[var(--mf-text-2)] lg:block">
+        <div className="rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-2 text-sm text-[var(--mf-text-2)]">
           {hiddenOperationalCount} cita(s) en espera o pendiente de pago no se muestran en estos contenedores.
         </div>
       ) : null}
@@ -1338,6 +1240,15 @@ export default function AdminAgendamientoCitasPage() {
         </div>
       ) : null}
 
+      <Dialog open={reservationOpen} onOpenChange={(open) => { setReservationOpen(open); if (!open) { reservationRequest.current?.abort(); setReservationLoading(false); setReservationResults(null); setReservationError(''); } }}>
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
+          <DialogHeader><DialogTitle>Buscar reserva</DialogTitle><DialogDescription>Consulta integrantes y horarios por código en la sucursal autorizada. Incluye citas finalizadas; cada cita conserva su estado.</DialogDescription></DialogHeader>
+          <form onSubmit={lookupReservation} className="flex flex-wrap gap-2"><Label htmlFor="reservation-code" className="w-full">Código de reserva</Label><Input id="reservation-code" value={reservationCode} onChange={(event) => { reservationRequest.current?.abort(); setReservationLoading(false); setReservationCode(event.target.value.toUpperCase()); setReservationResults(null); }} maxLength={5} autoCapitalize="characters" autoComplete="off" className="min-w-0 flex-1" /><Button type="submit" disabled={reservationLoading}>{reservationLoading ? 'Buscando…' : 'Buscar'}</Button></form>
+          <div role="status" aria-live="polite">{reservationError ? <p className="text-sm text-[var(--mf-text-2)]">{reservationError}</p> : null}{reservationResults?.length === 0 ? <p>No hay reservas coincidentes dentro de tu alcance.</p> : null}</div>
+          {reservationResults?.length > 1 ? <p className="text-sm text-[var(--mf-text-2)]">El código coincide con varias reservas. Verifica titular y fecha.</p> : null}
+          {reservationResults?.map((group) => <section key={group.id_grupo_cita} className="rounded-2xl border border-[var(--mf-nav-border)] p-3"><h3 className="font-semibold text-[var(--mf-accent)]">Reserva {group.codigo_reserva}</h3>{group.citas.map((cita) => <div key={cita.id_cita} className="border-b border-[var(--mf-nav-border)] py-3 last:border-0"><p className="break-words font-semibold">{getAppointmentDisplayInfo(cita).aliasIntegrante}</p><p className="text-sm">Titular: {getAppointmentDisplayInfo(cita).titularNombre}</p><p className="text-sm">{formatDateTime(cita.inicio_at)} · {cita.nombre_barbero}</p><p className="text-sm">{getServicioResumen(cita)} · {STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</p>{VISIBLE_OPERATIONAL_STATES.includes(cita.estado_cita_codigo) ? <div className="mt-2">{renderItemActions(cita, { compact: true })}</div> : null}{renderCitaDetail(cita, false)}</div>)}</section>)}
+        </DialogContent>
+      </Dialog>
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
@@ -1391,7 +1302,7 @@ export default function AdminAgendamientoCitasPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={singleDialogOpen} onOpenChange={setSingleDialogOpen}>
+      <UnsavedChangesDialog values={{ singleForm, singlePickerDate }} saving={singleSaving} open={singleDialogOpen} onOpenChange={setSingleDialogOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Reagendación de emergencia</DialogTitle>
@@ -1477,19 +1388,20 @@ export default function AdminAgendamientoCitasPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSingleDialogOpen(false)} disabled={singleSaving}>Cancelar</Button>
+            <DialogClose asChild><Button variant="outline" disabled={singleSaving}>Cancelar</Button></DialogClose>
             <Button onClick={submitSingleReschedule} disabled={singleSaving}>{singleSaving ? 'Guardando...' : 'Reagendar sin cobro'}</Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
 
       {canManageEmergency ? (
-        <Dialog open={batchDialogOpen} onOpenChange={setBatchDialogOpen}>
+        <UnsavedChangesDialog values={{ batchForm, items: getBatchDraftChanges(batchItems) }} saving={batchBusy} open={batchDialogOpen} onOpenChange={handleBatchOpenChange}>
           <DialogContent className="w-[calc(100vw-1rem)] max-h-[90vh] overflow-y-auto sm:max-w-5xl">
             <DialogHeader>
               <DialogTitle>Reagendación masiva de emergencia</DialogTitle>
               <DialogDescription>Selecciona y reprocesa en lote las citas afectadas por la emergencia.</DialogDescription>
             </DialogHeader>
+            <fieldset disabled={batchSaving} className="contents">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <Label className="mf-label">Barbero origen *</Label>
@@ -1607,15 +1519,16 @@ export default function AdminAgendamientoCitasPage() {
                 </Table>
               </div>
             ) : !batchLoading ? <p className="text-sm text-[var(--mf-text-2)]">Busca las citas afectadas para preparar el lote de reagendación.</p> : null}
+            </fieldset>
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setBatchDialogOpen(false)} disabled={batchSaving}>Cerrar</Button>
-              <Button onClick={submitBatchReschedule} disabled={batchSaving || batchItems.filter((item) => item.selected).length === 0}>
+              <DialogClose asChild><Button variant="outline" disabled={batchBusy}>Cerrar</Button></DialogClose>
+              <Button onClick={submitBatchReschedule} disabled={batchBusy || batchItems.filter((item) => item.selected).length === 0}>
                 {batchSaving ? 'Procesando...' : 'Reagendar seleccionadas'}
               </Button>
             </DialogFooter>
           </DialogContent>
-        </Dialog>
+        </UnsavedChangesDialog>
       ) : null}
     </div>
   );

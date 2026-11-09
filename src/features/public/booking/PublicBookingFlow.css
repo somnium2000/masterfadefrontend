@@ -10,35 +10,7 @@
 }
 
 .public-booking-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
   margin-bottom: 14px;
-}
-
-.public-booking-topbar-left {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.public-booking-home {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--mf-nav-border);
-  border-radius: 999px;
-  min-height: 38px;
-  padding: 0 14px;
-  background: color-mix(in srgb, var(--mf-btn-bg) 72%, var(--mf-card) 28%);
-  color: var(--mf-text);
-  font-size: 14px;
-}
-
-.public-booking-topbar-back {
-  border-radius: 999px;
 }
 
 .public-booking-main {
@@ -1056,6 +1028,7 @@
   line-height: 1.4;
 }
 
+
 .public-booking-success {
   border-color: color-mix(in srgb, #31a36f 40%, var(--mf-nav-border) 60%);
   background: color-mix(in srgb, #31a36f 8%, var(--mf-card) 92%);
@@ -1124,10 +1097,6 @@
 
   .public-booking-title {
     font-size: 28px;
-  }
-
-  .public-booking-topbar {
-    align-items: flex-start;
   }
 
   .public-booking-agenda-stack {
@@ -1214,6 +1183,12 @@
 
   .public-booking-package-card {
     min-height: 160px;
+  }
+}
+
+@media (max-width: 359px) {
+  .public-booking-shell {
+    padding-inline: 8px;
   }
 }
 

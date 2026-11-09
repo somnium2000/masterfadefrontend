@@ -10,15 +10,16 @@ const api = vi.hoisted(() => ({ getClientePuntosResumen: vi.fn(), getClienteMe: 
 const branches = vi.hoisted(() => vi.fn());
 const notices = vi.hoisted(() => ({ info: vi.fn(), success: vi.fn(), error: vi.fn() }));
 const navigate = vi.hoisted(() => vi.fn());
+const route = vi.hoisted(() => ({ search: '', pathname: '/home/cliente' }));
 const flags = vi.hoisted(() => ({ CLIENT_BOOKING_ENABLED: true, CLIENT_LOCK_MESSAGE: 'Proximamente...' }));
 vi.mock('../../lib/clienteApi.js', () => api);
 vi.mock('../../lib/clientFeatureFlags.js', () => flags);
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => auth }));
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => notices }));
 vi.mock('../../../public/lib/catalogApi.js', () => ({ listPublicCatalogBranches: branches }));
-vi.mock('react-router-dom', () => ({ useLocation: () => ({ search: '', pathname: '/home/cliente' }), useNavigate: () => navigate }));
+vi.mock('react-router-dom', () => ({ useLocation: () => route, useNavigate: () => navigate }));
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
-const summary = (balance = 12, owner = 'A') => ({ saldo_total: balance, puntos_titular: balance - 2, puntos_integrante: 2, puntos_para_premio: 10, progreso_actual: balance % 10, recompensas_disponibles: Math.floor(balance / 10), puede_canjear: balance >= 10, servicios_redimibles: [{ id_servicio: 'S', nombre_servicio: 'Servicio QA' }], historial: [{ id_points_tx: owner, motivo: `MOV-${owner}`, puntos: 2 }] });
+const summary = (balance = 12, owner = 'A') => ({ saldo_total: balance, puntos_titular: balance - 2, puntos_integrante: 2, puntos_para_premio: 10, progreso_actual: balance >= 10 ? 10 : balance % 10, recompensas_disponibles: Math.floor(balance / 10), puede_canjear: balance >= 10, servicios_redimibles: [{ id_servicio: 'S', nombre_servicio: 'Servicio QA', sucursales_disponibles: ['A', 'B'] }], historial: [{ id_points_tx: owner, motivo: `MOV-${owner}`, puntos: 2 }] });
 const branchData = { branches: [{ id_sucursal: 'A', nombre_sucursal: 'Suyapa' }, { id_sucursal: 'B', nombre_sucursal: 'City Mall' }] };
 const redemption = { data: { canje_context_token: 'synthetic-context-only', id_servicio_canje: 'S', id_sucursal: 'A', servicio_nombre: 'Servicio QA' } };
 beforeEach(() => {
@@ -26,12 +27,18 @@ beforeEach(() => {
   Object.values(api).forEach(mock => mock.mockReset()); Object.values(notices).forEach(mock => mock.mockReset()); navigate.mockReset();
   api.getClientePuntosResumen.mockResolvedValue(summary()); api.getClienteMe.mockResolvedValue({ cliente: { id_sucursal_preferida: 'A' } }); api.redeemClientePuntosReward.mockResolvedValue(redemption);
   branches.mockReset().mockResolvedValue(branchData); flags.CLIENT_BOOKING_ENABLED = true; sessionStorage.clear();
+  route.search = ''; route.pathname = '/home/cliente';
 });
 afterEach(cleanup);
 async function ready() { const view = render(<Points />); await screen.findByText('MOV-A'); return view; }
-async function open() { fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' })); await screen.findByRole('button', { name: /Servicio QA\s*Seleccionado/ }); }
+async function openWithoutSelection(serviceName = 'Servicio QA') {
+  fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' }));
+  return screen.findByRole('button', { name: new RegExp(`^${serviceName}$`) });
+}
+async function open() { const service = await openWithoutSelection(); fireEvent.click(service); }
 function switchTo(view, id = 'B') { auth.user = id ? { id_usuario: `user-${id}`, cliente_id: `client-${id}` } : null; auth.isAuthenticated = Boolean(id); view.rerender(<Points />); }
 function balance() { return screen.getByText('Saldo total').closest('article'); }
+function requestRedeem(view) { route.search = '?accion=canjear'; view.rerender(<Points />); }
 
 test.each([500, 0, 409])('mensaje técnico %s no se presenta', async status => {
   api.getClientePuntosResumen.mockRejectedValue({ status, message: 'SQL PRIVATE DETAIL', data: { error: { message: 'SQL PRIVATE DETAIL' } } }); render(<Points />);
@@ -76,23 +83,143 @@ test('cerrar y reabrir diálogo descarta las opciones antiguas', async () => {
   await act(async () => old.resolve({ branches: [{ id_sucursal: 'OLD', nombre_sucursal: 'SUCURSAL OBSOLETA' }] }));
   expect(screen.queryByRole('option', { name: 'SUCURSAL OBSOLETA' })).not.toBeInTheDocument(); expect(screen.getByRole('combobox')).toHaveValue('A');
 });
+test('modal abierto no preselecciona servicios y reabrir exige selección explícita', async () => {
+  await ready();
+  const service = await openWithoutSelection();
+  expect(service).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();
+  fireEvent.click(service);
+  expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeEnabled();
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: 'Seguir editando' }));
+  expect(service).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }));
+  await openWithoutSelection();
+  expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();
+});
+test('solicitudes sucesivas de nueva cita vuelven a abrir el selector con resumen actualizado', async () => {
+  const view = await ready();
+  api.getClientePuntosResumen.mockResolvedValue(summary(10));
+  requestRedeem(view);
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+  route.search = ''; view.rerender(<Points />);
+  requestRedeem(view);
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  expect(api.getClientePuntosResumen).toHaveBeenCalledTimes(3);
+  expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
+});
+test('saldo actualizado de 9/10 a 10/10 abre el selector sin preparar canje', async () => {
+  api.getClientePuntosResumen.mockResolvedValueOnce(summary(9));
+  const view = await ready();
+  api.getClientePuntosResumen.mockResolvedValueOnce(summary(10));
+  requestRedeem(view);
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();
+  expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
+});
+test('saldo actualizado 9/10 no abre selector y limpia una sola vez la solicitud', async () => {
+  api.getClientePuntosResumen.mockResolvedValue(summary(9));
+  const view = await ready();
+  requestRedeem(view); view.rerender(<Points />);
+  await waitFor(() => expect(api.getClientePuntosResumen).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(navigate).toHaveBeenCalledExactlyOnceWith('/home/cliente', { replace: true });
+  expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
+});
+test('doble render de la misma solicitud abre una sola vez el selector', async () => {
+  const view = await ready();
+  api.getClientePuntosResumen.mockResolvedValue(summary(10));
+  requestRedeem(view); view.rerender(<Points />);
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  expect(api.getClientePuntosResumen).toHaveBeenCalledTimes(2);
+  expect(branches).toHaveBeenCalledTimes(1);
+  expect(navigate).toHaveBeenCalledExactlyOnceWith('/home/cliente', { replace: true });
+});
+test('fallo al verificar la solicitud muestra error seguro y no simula saldo insuficiente', async () => {
+  const view = await ready();
+  api.getClientePuntosResumen.mockRejectedValueOnce(new Error('SQL PRIVATE DETAIL'));
+  requestRedeem(view);
+  await screen.findByText('No se pudo cargar tu resumen de superpuntos.');
+  expect(screen.queryByText('SQL PRIVATE DETAIL')).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
+});
+test('verificación obsoleta tras cambio de identidad no abre selector', async () => {
+  const view = await ready();
+  const pending = deferred(); api.getClientePuntosResumen.mockReturnValueOnce(pending.promise);
+  requestRedeem(view);
+  api.getClientePuntosResumen.mockResolvedValue(summary(9, 'B')); switchTo(view);
+  await screen.findByText('MOV-B');
+  await act(async () => pending.resolve(summary(10, 'A')));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
+});
+test('envía exactamente Corte de Barba y no el primer servicio disponible', async () => {
+  api.getClientePuntosResumen.mockResolvedValue({
+    ...summary(),
+    servicios_redimibles: [
+      { id_servicio: 'CABELLO', nombre_servicio: 'Corte de Cabello', sucursales_disponibles: ['A'] },
+      { id_servicio: 'BARBA', nombre_servicio: 'Corte de Barba', sucursales_disponibles: ['A'] },
+    ],
+  });
+  await ready();
+  await openWithoutSelection('Corte de Cabello');
+  fireEvent.click(screen.getByRole('button', { name: /^Corte de Barba$/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));
+  await waitFor(() => expect(api.redeemClientePuntosReward).toHaveBeenCalledExactlyOnceWith({
+    id_servicio: 'BARBA', id_sucursal: 'A',
+  }));
+});
 test('cambio de sucursal conserva la selección vigente y el payload', async () => {
   await ready(); await open(); fireEvent.change(screen.getByRole('combobox'), { target: { value: 'B' } });
   await waitFor(() => expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeEnabled()); fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));
   await waitFor(() => expect(api.redeemClientePuntosReward).toHaveBeenCalledExactlyOnceWith({ id_servicio: 'S', id_sucursal: 'B' }));
+});
+test('cambio de sucursal oculta servicios sin tarifa disponible allí', async () => {
+  api.getClientePuntosResumen.mockResolvedValue({
+    ...summary(),
+    servicios_redimibles: [
+      { id_servicio: 'S', nombre_servicio: 'Solo Suyapa', sucursales_disponibles: ['A'] },
+      { id_servicio: 'T', nombre_servicio: 'Solo City Mall', sucursales_disponibles: ['B'] },
+    ],
+  });
+  await ready(); fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' }));
+  const suyapaService = await screen.findByRole('button', { name: /^Solo Suyapa$/ });
+  fireEvent.click(suyapaService);
+  expect(screen.queryByText('Solo City Mall')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'B' } });
+  expect(await screen.findByRole('button', { name: /^Solo City Mall$/ })).toBeInTheDocument();
+  expect(screen.queryByText('Solo Suyapa')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();
+  expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
 });
 test('doble clic antes de render no duplica el canje', async () => {
   await ready(); await open(); const pending = deferred(); api.redeemClientePuntosReward.mockReturnValue(pending.promise);
   const button = screen.getByRole('button', { name: 'Confirmar canje' }); act(() => { fireEvent.click(button); fireEvent.click(button); });
   expect(api.redeemClientePuntosReward).toHaveBeenCalledTimes(1); await act(async () => pending.resolve(redemption));
 });
-test.each(['identity', 'unmount', 'close'])('canje pendiente tras %s no persiste ni navega', async transition => {
+test.each(['identity', 'unmount'])('canje pendiente tras %s no persiste ni navega', async transition => {
   const view = await ready(); await open(); const pending = deferred(); api.redeemClientePuntosReward.mockReturnValueOnce(pending.promise);
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));
   if (transition === 'identity') { api.getClientePuntosResumen.mockResolvedValue(summary(7, 'B')); switchTo(view); }
   if (transition === 'unmount') view.unmount();
-  if (transition === 'close') fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
   await act(async () => pending.resolve(redemption)); expect(sessionStorage.getItem('mf_reward_redeem_context_v1')).toBeNull(); expect(navigate).not.toHaveBeenCalled(); expect(notices.success).not.toHaveBeenCalled();
+});
+test('Escape y X no cierran un canje en curso', async () => {
+  await ready(); await open();
+  const pending = deferred();
+  api.redeemClientePuntosReward.mockReturnValueOnce(pending.promise);
+  const dialog = screen.getByRole('dialog', { name: 'Canjear recompensa' });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Confirmar canje' }));
+  fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' });
+  fireEvent.click(within(dialog).getAllByRole('button', { name: 'Cerrar' }).at(-1));
+  expect(dialog).toBeInTheDocument();
+  expect(screen.queryByText('¿Descartar los cambios?')).not.toBeInTheDocument();
+  await act(async () => pending.resolve(redemption));
+  expect(navigate).toHaveBeenCalledWith('/agendar?modo=canje');
 });
 test('canje vigente conserva almacenamiento, avisos y destino sin descontar localmente', async () => {
   await ready(); await open(); fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));
@@ -133,9 +260,10 @@ test('doble apertura antes de render no duplica cargas', async () => {
   act(() => { fireEvent.click(button); fireEvent.click(button); }); expect(branches).toHaveBeenCalledTimes(1); await act(async () => pending.resolve(branchData));
 });
 test('sucursal preferida ausente no habilita canje con un valor invisible', async () => {
-  await ready(); branches.mockResolvedValue({ branches: [{ id_sucursal: 'B', nombre_sucursal: 'City Mall' }] }); await open();
-  expect(screen.getByRole('combobox')).toHaveValue('B'); fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));
-  expect(api.redeemClientePuntosReward).toHaveBeenCalledWith({ id_servicio: 'S', id_sucursal: 'B' });
+  await ready(); branches.mockResolvedValue({ branches: [{ id_sucursal: 'B', nombre_sucursal: 'City Mall' }] }); await openWithoutSelection();
+  expect(screen.getByRole('combobox')).toHaveValue('B');
+  expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();
+  expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
 });
 test('sucursales vacías no habilitan canje', async () => {
   await ready(); branches.mockResolvedValue({ branches: [] }); await open(); expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();
@@ -187,8 +315,22 @@ test('un error previo desaparece al cambiar identidad y el reintento pertenece a
   fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })); await screen.findByText('MOV-B');
 });
 test('saldo, titular, acompañantes y progreso conservan el contrato informativo', async () => {
-  await ready(); expect(within(balance()).getByText('12')).toBeInTheDocument(); expect(screen.getAllByText('2/10')).toHaveLength(2);
+  await ready(); expect(within(balance()).getByText('12')).toBeInTheDocument(); expect(screen.getAllByText('10/10')).toHaveLength(2);
+  expect(screen.getByText('Recompensa disponible. Ya puedes canjearla.')).toBeInTheDocument();
   expect(screen.getByText(/Tus visitas:/)).toHaveTextContent('10'); expect(screen.getByText(/Puntos por acompañantes:/)).toHaveTextContent('2'); expect(screen.getByText('Recompensas disponibles').closest('article')).toHaveTextContent('1');
+});
+test('9/10 mantiene progreso normal y 10/10 muestra recompensa disponible completa', async () => {
+  api.getClientePuntosResumen.mockResolvedValueOnce(summary(9));
+  const view = await ready();
+  expect(screen.getAllByText('9/10')).toHaveLength(2);
+  expect(screen.queryByRole('button', { name: 'Canjear mi recompensa' })).not.toBeInTheDocument();
+
+  api.getClientePuntosResumen.mockResolvedValue(summary(10));
+  fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+  await waitFor(() => expect(screen.getAllByText('10/10')).toHaveLength(2));
+  expect(screen.getByText('Recompensa disponible. Ya puedes canjearla.')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Canjear mi recompensa' })).toBeEnabled();
+  view.unmount();
 });
 test('respuesta de error inesperada no se imprime como texto interno', async () => {
   api.getClientePuntosResumen.mockRejectedValue('SQL unexpected payload'); render(<Points />); await screen.findByText('No se pudo cargar tu resumen de superpuntos.'); expect(screen.queryByText('SQL unexpected payload')).not.toBeInTheDocument();

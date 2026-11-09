@@ -72,13 +72,12 @@ describe('catálogo público por sucursal', () => {
     expect(within(booked).getByText('Reservable')).toBeInTheDocument();
     expect(within(booked).queryByText('No reservable')).not.toBeInTheDocument();
     expect(within(booked).queryByText('Sin confirmar')).not.toBeInTheDocument();
-    const unavailable = screen.getByRole('heading', { name: 'Servicios no disponibles para agendar' }).closest('section');
-    expect(within(unavailable).getByText('No reservable')).toBeInTheDocument();
-    expect(within(unavailable).getByText('Sin confirmar')).toBeInTheDocument();
-    expect(within(unavailable).getByText('Detalle conservado')).toBeInTheDocument();
-    expect(within(unavailable).getAllByText('L 150.00')).toHaveLength(2);
-    expect(within(unavailable).getAllByText('30 min')).toHaveLength(2);
-    expect(within(unavailable).queryByText('Informativo')).not.toBeInTheDocument();
+    const informative = screen.getByRole('heading', { name: 'Servicios informativos' }).closest('section');
+    expect(within(informative).getByText('No reservable')).toBeInTheDocument();
+    expect(within(informative).getByText('Sin confirmar')).toBeInTheDocument();
+    expect(within(informative).getByText('Detalle conservado')).toBeInTheDocument();
+    expect(within(informative).getAllByText('L 150.00')).toHaveLength(3);
+    expect(screen.queryByRole('heading', { name: 'Servicios no disponibles para agendar' })).not.toBeInTheDocument();
     expect(screen.getAllByText('No reservable')).toHaveLength(1);
     expect(api.listPublicCatalogServices).toHaveBeenCalledTimes(1);
   });
@@ -90,8 +89,8 @@ describe('catálogo público por sucursal', () => {
     expect(await screen.findByText('Corte actual')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Servicios no disponibles para agendar' })).not.toBeInTheDocument();
     await act(async () => sync.callback());
-    const unavailable = screen.getByRole('heading', { name: 'Servicios no disponibles para agendar' }).closest('section');
-    expect(within(unavailable).getByText('Corte actual')).toBeInTheDocument();
+    const informative = screen.getByRole('heading', { name: 'Servicios informativos' }).closest('section');
+    expect(within(informative).getByText('Corte actual')).toBeInTheDocument();
     const booked = screen.getByRole('heading', { name: 'Servicios agendables' }).closest('section');
     expect(within(booked).queryByText('Corte actual')).not.toBeInTheDocument();
     expect(screen.getAllByText('Corte actual')).toHaveLength(1);
@@ -112,12 +111,13 @@ describe('catálogo público por sucursal', () => {
   });
 
   test('separa los servicios informativos de los agendables', async () => {
-    api.listPublicCatalogServices.mockResolvedValue({ services: [service('Corte A'), service('Consulta A', true)] });
+    api.listPublicCatalogServices.mockResolvedValue({ services: [service('Corte A'), { ...service('Consulta A', true), precio_hnl: 0 }] });
     render(<ServicesPage />);
     const agendable = await screen.findByRole('heading', { name: 'Servicios agendables' });
     const informative = screen.getByRole('heading', { name: 'Servicios informativos' });
     expect(within(agendable.closest('section')).getByText('Corte A')).toBeInTheDocument();
     expect(within(informative.closest('section')).getByText('Consulta A')).toBeInTheDocument();
+    expect(within(informative.closest('section')).getByText('Consultar precio')).toBeInTheDocument();
   });
 
   test('colecciones realmente vacías muestran sus mensajes normales', async () => {

@@ -82,6 +82,93 @@ export function evaluatePromotionForBlock({ block, promotion, servicesById, pack
   };
 }
 
+export function preparePromotionTargetSelection({ block, promotion, servicesById, packagesById }) {
+  const normalizedBlock = normalizeBookingBlock(block, 0);
+  const appliesTo = String(promotion?.aplica_a || '').trim().toLowerCase();
+  const targetServiceId = String(promotion?.id_servicio_objetivo || '').trim();
+  const targetPackageId = String(promotion?.id_paquete_objetivo || '').trim();
+
+  if (appliesTo === 'servicio') {
+    const targetService = targetServiceId ? servicesById.get(targetServiceId) || null : null;
+    if (!targetService) {
+      return {
+        canSelect: false,
+        block: normalizedBlock,
+        targetAdded: false,
+        disabledReason: 'El servicio de esta promoción no está disponible en la sucursal seleccionada.',
+      };
+    }
+    const selectedPackage = normalizedBlock.packageId
+      ? packagesById.get(normalizedBlock.packageId) || null
+      : null;
+    const serviceIncludedInPackage = (Array.isArray(selectedPackage?.items) ? selectedPackage.items : [])
+      .some((item) => String(item?.id_servicio || '').trim() === targetServiceId);
+    if (serviceIncludedInPackage) {
+      return {
+        canSelect: false,
+        block: normalizedBlock,
+        targetAdded: false,
+        disabledReason: 'El servicio objetivo ya forma parte del paquete seleccionado y no puede agregarse por separado.',
+      };
+    }
+    const targetAdded = !normalizedBlock.serviceIds.includes(targetServiceId);
+    const nextServiceIds = targetAdded
+      ? [...normalizedBlock.serviceIds, targetServiceId]
+      : normalizedBlock.serviceIds;
+    return {
+      canSelect: true,
+      targetAdded,
+      disabledReason: '',
+      block: {
+        ...normalizedBlock,
+        selectionType: normalizedBlock.packageId ? 'mixed' : 'services',
+        serviceIds: nextServiceIds,
+        selectedTime: targetAdded ? '' : normalizedBlock.selectedTime,
+        selectedDateTime: targetAdded ? '' : normalizedBlock.selectedDateTime,
+      },
+    };
+  }
+
+  if (appliesTo === 'paquete') {
+    const targetPackage = targetPackageId ? packagesById.get(targetPackageId) || null : null;
+    if (!targetPackage) {
+      return {
+        canSelect: false,
+        block: normalizedBlock,
+        targetAdded: false,
+        disabledReason: 'El paquete de esta promoción no está disponible en la sucursal seleccionada.',
+      };
+    }
+    const targetAdded = normalizedBlock.packageId !== targetPackageId;
+    const includedServiceIds = new Set(
+      (Array.isArray(targetPackage?.items) ? targetPackage.items : [])
+        .map((item) => String(item?.id_servicio || '').trim())
+        .filter(Boolean)
+    );
+    const nextServiceIds = normalizedBlock.serviceIds.filter((serviceId) => !includedServiceIds.has(serviceId));
+    return {
+      canSelect: true,
+      targetAdded,
+      disabledReason: '',
+      block: {
+        ...normalizedBlock,
+        packageId: targetPackageId,
+        serviceIds: nextServiceIds,
+        selectionType: nextServiceIds.length > 0 ? 'mixed' : 'package',
+        selectedTime: targetAdded ? '' : normalizedBlock.selectedTime,
+        selectedDateTime: targetAdded ? '' : normalizedBlock.selectedDateTime,
+      },
+    };
+  }
+
+  return {
+    canSelect: false,
+    block: normalizedBlock,
+    targetAdded: false,
+    disabledReason: 'Esta promoción no tiene un servicio o paquete válido para seleccionar.',
+  };
+}
+
 export function createBlockId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();

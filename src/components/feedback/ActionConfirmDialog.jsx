@@ -31,6 +31,7 @@ export default function ActionConfirmDialog({
   tone = 'warning',
   loading = false,
   onConfirm,
+  onCloseAutoFocus,
 }) {
   const reducedMotion = useReducedMotion();
   const styleConfig = TONE_STYLES[tone] || TONE_STYLES.warning;
@@ -38,7 +39,7 @@ export default function ActionConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader className="pb-2">
           <motion.div
             // AM: Microinteraccion sutil para reforzar confirmaciones sin ser invasiva.

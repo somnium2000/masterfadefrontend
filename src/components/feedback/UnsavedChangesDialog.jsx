@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Dialog } from '../ui/dialog.jsx';
 import ActionConfirmDialog from './ActionConfirmDialog.jsx';
 
@@ -15,15 +15,19 @@ function snapshot(values, field = '') {
   return JSON.stringify(typeof values === 'number' ? String(values) : values);
 }
 
-function OpenFormDialog({ values, saving, onOpenChange, children }) {
+function OpenFormDialog({ values, initialValues, saving, onOpenChange, children }) {
   // AM: La captura pertenece a esta apertura; errores y confirmaciones no remontan el formulario.
-  const [initialValues] = useState(() => snapshot(values));
+  const [openingSnapshot] = useState(() => snapshot(values));
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const dirty = initialValues !== snapshot(values);
+  const previousFocus = useRef(null);
+  const baseline = initialValues === undefined ? openingSnapshot : snapshot(initialValues);
+  const dirty = baseline !== snapshot(values);
 
   function requestOpenChange(nextOpen) {
     if (saving) return;
+    if (confirmOpen) return;
     if (!nextOpen && dirty) {
+      previousFocus.current = document.activeElement;
       setConfirmOpen(true);
       return;
     }
@@ -40,6 +44,13 @@ function OpenFormDialog({ values, saving, onOpenChange, children }) {
         description="Los cambios sin guardar se perderán. Puedes seguir editando para conservarlos."
         cancelLabel="Seguir editando"
         confirmLabel="Descartar cambios"
+        onCloseAutoFocus={(event) => {
+          const target = previousFocus.current;
+          if (target?.isConnected) {
+            event.preventDefault();
+            target.focus();
+          }
+        }}
         loading={saving}
         onConfirm={() => { if (!saving) onOpenChange(false); }}
       />

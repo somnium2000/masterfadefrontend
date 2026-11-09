@@ -1,8 +1,6 @@
 import { memo } from 'react';
-import { ArrowLeft, House } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { Button } from '../../../../components/ui/button.jsx';
-import ThemeSwitcher from '../../../../components/theme/ThemeSwitcher.jsx';
+import { ArrowLeft } from 'lucide-react';
+import PublicNavigationHeader from '../../../../components/layout/PublicNavigationHeader.jsx';
 import BookingErrorState from './BookingErrorState.jsx';
 import BookingLoadingState from './BookingLoadingState.jsx';
 
@@ -19,26 +17,18 @@ const BookingLayout = memo(function BookingLayout({
   return (
     <div className="public-booking-page mf-page-gradient min-h-screen">
       <div className="public-booking-shell">
-        <header className="public-booking-topbar">
-          <div className="public-booking-topbar-left">
-            <Link to={homePath} className="public-booking-home">
-              <House size={16} />
-              <span>{homeLabel}</span>
-            </Link>
-            {showBackToBarberos ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="public-booking-topbar-back gap-2"
-                onClick={onBackToBarberos}
-              >
-                <ArrowLeft size={15} />
-                Volver a barberos
-              </Button>
-            ) : null}
-          </div>
-          <ThemeSwitcher showLabel={false} />
-        </header>
+        <PublicNavigationHeader
+          className="public-booking-topbar"
+          booking
+          homePath={homePath}
+          homeLabel={homeLabel}
+          backControl={showBackToBarberos ? (
+            <button type="button" className="mf-header-control mf-focus-ring" onClick={onBackToBarberos}>
+              <ArrowLeft size={17} strokeWidth={1.8} aria-hidden="true" />
+              Volver a barberos
+            </button>
+          ) : null}
+        />
 
         {loading ? <BookingLoadingState /> : null}
         {error ? <BookingErrorState message={error} onRetry={onRetry} /> : null}

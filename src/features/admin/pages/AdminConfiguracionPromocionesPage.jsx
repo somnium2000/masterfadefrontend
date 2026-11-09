@@ -540,10 +540,6 @@ function TimePickerPopoverField({ label, value, onChange }) {
     setOpen(true);
   }, [applyCurrentValueToDraft, value]);
 
-  const closePicker = useCallback(() => {
-    setOpen(false);
-  }, []);
-
   const applySelection = useCallback(() => {
     // JK: Guarda siempre en HH:mm (24h) para mantener contrato actual del formulario.
     onChange(build24HourTime(draftHour, draftMinute, draftPeriod));
@@ -595,13 +591,10 @@ function TimePickerPopoverField({ label, value, onChange }) {
           </button>
         ) : null}
 
-        <Dialog open={open} onOpenChange={setOpen}>
+        <UnsavedChangesDialog values={{ draftHour, draftMinute, draftPeriod }} open={open} onOpenChange={setOpen}>
           <DialogContent
             // JK: Forzamos posicion centrada en todos los breakpoints para evitar cortes dentro del modal padre.
             className="left-1/2 right-auto top-1/2 bottom-auto w-[calc(100vw-1.25rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[20px] p-4 sm:p-5"
-            // JK: Evita cierres accidentales por interacciones externas, incluido scroll del modal principal.
-            onPointerDownOutside={(event) => event.preventDefault()}
-            onInteractOutside={(event) => event.preventDefault()}
           >
             <DialogHeader className="pb-2">
               <DialogTitle className="text-lg">{pickerTitle}</DialogTitle>
@@ -632,11 +625,11 @@ function TimePickerPopoverField({ label, value, onChange }) {
 
             <DialogFooter className="pt-3">
               <Button type="button" variant="ghost" size="sm" onClick={clearSelection}>Limpiar</Button>
-              <Button type="button" variant="outline" size="sm" onClick={closePicker}>Cancelar</Button>
+              <DialogClose asChild><Button type="button" variant="outline" size="sm">Cancelar</Button></DialogClose>
               <Button type="button" size="sm" onClick={applySelection}>Aplicar</Button>
             </DialogFooter>
           </DialogContent>
-        </Dialog>
+        </UnsavedChangesDialog>
       </div>
     </div>
   );
@@ -738,7 +731,7 @@ function SucursalSelector({ branchIds, allBranches, selected, onChange, loading,
   );
 }
 
-function PromotionForm({ values, onChange, branchLabel, promotionId, serviceOptions, packageOptions, loadingTargets, errorMessage }) {
+function PromotionForm({ values, onChange, branchLabel, promotionId, serviceOptions, packageOptions, loadingTargets, errorMessage, onUploadChange, saving }) {
   const typeRule = getPromotionTypeRule(values.tipo_promocion);
   const aplicaA = normalizePromotionTargetValue(values.aplica_a || typeRule.aplica_a, typeRule.aplica_a);
   const mecanica = normalizePromotionMechanicValue(values.mecanica || typeRule.mecanica_default, typeRule.mecanica_default);
@@ -870,6 +863,8 @@ function PromotionForm({ values, onChange, branchLabel, promotionId, serviceOpti
         <p className="text-xs font-semibold uppercase tracking-widest text-[var(--mf-accent)]">Imagenes</p>
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
           <ImageUploaderField
+          disabled={saving}
+          onUploadingChange={(uploading) => onUploadChange('main', uploading)}
           label="Imagen principal"
           scopeKey="public_promotion_main"
           entityType="promocion"
@@ -885,6 +880,8 @@ function PromotionForm({ values, onChange, branchLabel, promotionId, serviceOpti
           }}
           />
           <ImageUploaderField
+          disabled={saving}
+          onUploadingChange={(uploading) => onUploadChange('mobile', uploading)}
           label="Imagen mobile"
           helperText="Opcional para vista mobile de promociones publicas."
           scopeKey="public_promotion_mobile"
@@ -962,6 +959,8 @@ export default function AdminConfiguracionPromocionesPage() {
   const [formValues, setFormValues] = useState(FORM_DEFAULTS);
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
+  const [imageUploads, setImageUploads] = useState({});
+  const formBusy = formLoading || Object.values(imageUploads).some(Boolean);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -1019,6 +1018,7 @@ export default function AdminConfiguracionPromocionesPage() {
   }, [scopeKey, permissionsKey]);
 
   function closeEditor() {
+    setImageUploads({});
     editorRequest.current += 1;
     setDialogOpen(false);
     setFormLoading(false);
@@ -1278,7 +1278,7 @@ export default function AdminConfiguracionPromocionesPage() {
   }
 
   async function handleGuardar() {
-    if (!canUseBranch || formValues.id_sucursal !== sucursal || formLoading) return;
+    if (!canUseBranch || formValues.id_sucursal !== sucursal || formBusy) return;
     const request = editorRequest.current;
     const scope = scopeGeneration.current;
     const current = () => mountedRef.current && scope === scopeGeneration.current && request === editorRequest.current;
@@ -1421,7 +1421,7 @@ export default function AdminConfiguracionPromocionesPage() {
         </div>
       ) : null}
 
-      <UnsavedChangesDialog values={formValues} saving={formLoading} open={dialogOpen} onOpenChange={(open) => { if (!open) closeEditor(); }}>
+      <UnsavedChangesDialog values={formValues} saving={formBusy} open={dialogOpen} onOpenChange={(open) => { if (!open) closeEditor(); }}>
         <DialogContent className="max-h-[92dvh] w-[calc(100vw-1rem)] overflow-y-auto sm:max-w-4xl">
           <DialogHeader className="border-b border-[var(--mf-nav-border)] pb-4"><DialogTitle>{editTarget ? 'Editar promocion' : 'Nueva promocion'}</DialogTitle><DialogDescription className="sr-only">Configura contenido, publicacion y vigencia de la promocion por sucursal.</DialogDescription></DialogHeader>
           <PromotionForm
@@ -1431,10 +1431,12 @@ export default function AdminConfiguracionPromocionesPage() {
             promotionId={editTarget?.id_promocion || null}
             serviceOptions={serviceTargetOptions}
             packageOptions={packageTargetOptions}
+            saving={formLoading}
+            onUploadChange={(field, uploading) => setImageUploads((current) => ({ ...current, [field]: uploading }))}
             loadingTargets={loadingTargetOptions}
             errorMessage={formError}
           />
-          <DialogFooter className="sticky bottom-0 z-10 mt-2 border-t border-[var(--mf-nav-border)] bg-[var(--mf-card)] py-4"><DialogClose asChild><Button variant="outline" disabled={formLoading} className="w-full sm:w-auto">Cancelar</Button></DialogClose><Button onClick={() => void handleGuardar()} disabled={formLoading || actionsLockedByBranch} className="w-full gap-2 sm:min-w-[140px] sm:w-auto">{formLoading ? <Loader2 size={15} className="animate-spin" /> : null}{editTarget ? 'Guardar cambios' : 'Crear promocion'}</Button></DialogFooter>
+          <DialogFooter className="sticky bottom-0 z-10 mt-2 border-t border-[var(--mf-nav-border)] bg-[var(--mf-card)] py-4"><DialogClose asChild><Button variant="outline" disabled={formBusy} className="w-full sm:w-auto">Cancelar</Button></DialogClose><Button onClick={() => void handleGuardar()} disabled={formBusy || actionsLockedByBranch} className="w-full gap-2 sm:min-w-[140px] sm:w-auto">{formLoading ? <Loader2 size={15} className="animate-spin" /> : null}{editTarget ? 'Guardar cambios' : 'Crear promocion'}</Button></DialogFooter>
         </DialogContent>
       </UnsavedChangesDialog>
 

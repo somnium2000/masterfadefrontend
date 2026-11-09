@@ -123,6 +123,11 @@ test('paginación, estado vacío y reintento después de error de lista', async 
 test('creación valida obligatorios localmente y cancelación no escribe', async () => {
   render(<Page />); await screen.findByText('Cliente A Sintetico');
   fireEvent.click(screen.getByRole('button', { name: 'Nuevo' }));
+  expect(within(dialog()).getByText('DNI *')).toBeInTheDocument();
+  expect(within(dialog()).getByText('Telefono *')).toBeInTheDocument();
+  expect(within(dialog()).getByText('RTN (opcional)')).toBeInTheDocument();
+  expect(within(dialog()).getByText('Direccion')).toBeInTheDocument();
+  expect(within(dialog()).getByText('Observaciones')).toBeInTheDocument();
   fireEvent.click(within(dialog()).getByRole('button', { name: 'Crear cliente' }));
   expect(api.createAdminPersonaCliente).not.toHaveBeenCalled();
   fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancelar' }));

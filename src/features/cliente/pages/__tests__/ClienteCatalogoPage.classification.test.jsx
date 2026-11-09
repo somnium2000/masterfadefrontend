@@ -22,7 +22,7 @@ beforeEach(() => {
   api.listPublicCatalogBranches.mockResolvedValue({ branches: [
     { id_sucursal: 'A', nombre_sucursal: 'Centro' }, { id_sucursal: 'B', nombre_sucursal: 'Norte' },
   ] });
-  const catalog = { services: [service('Reservable', true), service('Informativo', false, true),
+  const catalog = { services: [service('Reservable', true), { ...service('Informativo', false, true), precio_hnl: 0 },
     service('No reservable', false), service('Sin confirmar', undefined)],
   packages: [{ id_paquete: 'P', nombre_paquete: 'Combo', precio_hnl: 300, items: [] }] };
   api.getPublicCatalog.mockResolvedValue(catalog);
@@ -47,17 +47,16 @@ test('no agendables mantienen visibilidad separada y los informativos conservan 
   const booked = document.getElementById('servicios');
   expect(within(booked).queryByText('No reservable')).not.toBeInTheDocument();
   expect(within(booked).queryByText('Sin confirmar')).not.toBeInTheDocument();
-  const unavailable = screen.getByText('Servicios no disponibles para agendar').closest('section');
-  expect(within(unavailable).getByText('No reservable')).toBeInTheDocument();
-  expect(within(unavailable).getByText('Sin confirmar')).toBeInTheDocument();
-  expect(within(unavailable).getByText('Detalle No reservable')).toBeInTheDocument();
-  expect(within(unavailable).getAllByText('L 123.00')).toHaveLength(2);
-  expect(within(unavailable).getAllByText('Duración: 25 min')).toHaveLength(2);
-  const cards = within(unavailable).getAllByRole('article');
-  expect(cards[0]).toHaveTextContent('No reservable');
-  expect(cards[1]).toHaveTextContent('Sin confirmar');
-  expect(screen.queryByText('Informativo')).not.toBeInTheDocument();
+  const informative = screen.getByText('Servicios informativos').closest('section');
+  expect(within(informative).getByText('No reservable')).toBeInTheDocument();
+  expect(within(informative).getByText('Sin confirmar')).toBeInTheDocument();
+  expect(within(informative).getByText('Detalle No reservable')).toBeInTheDocument();
+  expect(within(informative).getAllByText('L 123.00')).toHaveLength(2);
+  expect(within(informative).getByText('Consultar precio')).toBeInTheDocument();
+  expect(within(informative).queryByRole('button')).not.toBeInTheDocument();
+  expect(within(informative).queryByRole('link')).not.toBeInTheDocument();
   expect(screen.getAllByText('No reservable')).toHaveLength(1);
+  expect(screen.queryByText('Servicios no disponibles para agendar')).not.toBeInTheDocument();
   expect(api.getPublicCatalog).toHaveBeenCalledTimes(1);
 });
 

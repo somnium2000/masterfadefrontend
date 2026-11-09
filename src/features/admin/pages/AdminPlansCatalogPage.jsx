@@ -654,8 +654,8 @@ function PlanForm({
       {isCreate ? (
         <div className="flex flex-col gap-3 rounded-[14px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_72%,transparent)] p-3">
           <div>
-            <Label className="text-xs uppercase tracking-widest text-[var(--mf-text-2)]">Ofertas iniciales por sucursal</Label>
-            <p className="mt-1 text-xs text-[var(--mf-text-2)]">Selecciona las sucursales donde se ofrecera inicialmente este plan.</p>
+            <Label className="text-xs uppercase tracking-widest text-[var(--mf-text-2)]">Ofertas iniciales por sucursal *</Label>
+            <p className="mt-1 text-xs text-[var(--mf-text-2)]">Selecciona al menos una sucursal donde se ofrecera inicialmente este plan.</p>
           </div>
           {availableBranches.map((branch) => {
             const offer = values.ofertas.find((item) => item.id_sucursal === branch.id_sucursal);
@@ -783,7 +783,8 @@ function PlanForm({
 
       {isOfferOnly ? null : (
         <section aria-labelledby="plan-benefits-data" className="rounded-xl border border-[var(--mf-nav-border)] p-3 sm:p-4">
-          <h3 id="plan-benefits-data" className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--mf-accent)]">Beneficios incluidos</h3>
+          <h3 id="plan-benefits-data" className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--mf-accent)]">Beneficios incluidos *</h3>
+          <p className="mb-3 text-xs text-[var(--mf-text-2)]">Agrega al menos un beneficio: servicio o cortesía.</p>
           <PlanBenefitsEditor
             items={values.beneficios}
             onChange={(nextItems) => onChange("beneficios", nextItems)}

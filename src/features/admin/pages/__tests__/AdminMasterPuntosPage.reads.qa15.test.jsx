@@ -30,7 +30,17 @@ beforeEach(() => {
   api.createAdminClientePuntosAjuste.mockResolvedValue({ data: {} });
 });
 afterEach(() => { cleanup(); expect(api.createAdminClientePuntosAjuste).not.toHaveBeenCalled(); expect(api.updateAdminMasterPuntosRegalias).not.toHaveBeenCalled(); });
-async function ready(strict = false) { const view = render(strict ? <StrictMode><Page /></StrictMode> : <Page />); await screen.findByText('Regla global activa: 10 puntos por recompensa.'); return view; }
+async function ready(strict = false) {
+  const view = render(strict ? <StrictMode><Page /></StrictMode> : <Page />);
+  await screen.findByRole('button', { name: 'Seleccionar cliente activo' });
+  if (auth.roles.includes('super_admin')) {
+    await screen.findByText('Regla global activa: 10 puntos por recompensa.');
+  } else {
+    expect(api.getAdminMasterPuntosRegalias).not.toHaveBeenCalled();
+    expect(screen.queryByText('Servicios canjeables con MasterPuntos')).not.toBeInTheDocument();
+  }
+  return view;
+}
 async function picker() {
   fireEvent.click(screen.getByRole('button', { name: /Seleccionar cliente activo|^Cliente [AB]$/ }));
   return screen.findByRole('textbox', { name: 'Buscar cliente activo' });
@@ -46,7 +56,8 @@ test('cambiar de administrador limpia saldo, cliente e historial anteriores', as
   auth.user = { id_usuario: 'actor-b' }; view.rerender(<Page />);
   expect(screen.queryByText('Saldo total')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /^Cliente A$/ })).not.toBeInTheDocument();
-  await waitFor(() => expect(api.getAdminMasterPuntosRegalias).toHaveBeenCalledTimes(2));
+  await screen.findByRole('button', { name: 'Seleccionar cliente activo' });
+  expect(api.getAdminMasterPuntosRegalias).not.toHaveBeenCalled();
   expect(api.getAdminClientePuntosResumen).toHaveBeenCalledTimes(1);
 });
 test('cambio de alcance autorizado invalida el cliente elegido aunque conserve el rol', async () => {
@@ -74,6 +85,7 @@ test('nuevo texto aborta la búsqueda previa antes del debounce', async () => {
   expect(navigate).not.toHaveBeenCalled();
 });
 test('configuración pendiente queda abortada después del desmontaje', async () => {
+  auth.roles = ['super_admin'];
   const old = deferred(); api.getAdminMasterPuntosRegalias.mockReturnValueOnce(old.promise);
   const view = render(<StrictMode><Page /></StrictMode>);
   const signal = api.getAdminMasterPuntosRegalias.mock.calls[0][0]?.signal;

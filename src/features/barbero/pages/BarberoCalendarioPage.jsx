@@ -157,6 +157,17 @@ function getServiceSummary(appointment) {
   return 'Servicio';
 }
 
+function ClientPreferencesDisclosure({ appointment }) {
+  const preferences = String(appointment?.preferencias_corte || '').trim();
+  if (!preferences) return null;
+  return (
+    <details className="mt-2.5 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2">
+      <summary className="cursor-pointer text-xs font-semibold text-[var(--mf-accent)]">Preferencias del cliente</summary>
+      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--mf-text-2)]">{preferences}</p>
+    </details>
+  );
+}
+
 function normalizeStatus(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -403,6 +414,7 @@ export default function BarberoCalendarioPage() {
                     <p className="mt-1.5 text-sm font-semibold leading-tight text-[var(--mf-text)]">{appointment?.nombre_cliente || 'Cliente'}</p>
                     <p className="mt-1 text-sm leading-tight text-[var(--mf-text-2)]">{getServiceSummary(appointment)}</p>
                     <p className="mt-1.5 text-xs leading-none text-[var(--mf-text-2)]">Duracion: {Math.max(0, Number(appointment?.duracion_total_min || 0))} min</p>
+                    <ClientPreferencesDisclosure appointment={appointment} />
                   </article>
                 ))}
                 {totalSlides > 1 ? (

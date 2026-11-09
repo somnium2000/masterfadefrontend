@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarDays, MapPin, Scissors, Wallet } from 'lucide-react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import {
   Dialog,
   DialogContent,
@@ -198,6 +198,7 @@ function CitasList({ items, onOpenDetail }) {
 
 export default function ClienteHistorialCitasPage() {
   const navigate = useNavigate();
+  const { startNewAppointment } = useOutletContext() || {};
   const location = useLocation();
   const notifications = useNotifications();
   const { isAuthenticated, isHydrated, isHydrating, logout, user } = useAuth();
@@ -425,7 +426,7 @@ export default function ClienteHistorialCitasPage() {
             </div>
             <button
               type="button"
-              onClick={() => navigate('/agendar')}
+              onClick={() => void startNewAppointment?.()}
               className="mf-accent-gradient inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold"
             >
               <CalendarDays size={15} />
@@ -576,7 +577,7 @@ export default function ClienteHistorialCitasPage() {
                       type="button"
                       onClick={() => {
                         setPendingOpen(false);
-                        navigate('/agendar');
+                        void startNewAppointment?.();
                       }}
                       className="mt-2 inline-flex rounded-lg border border-red-200/40 px-3 py-1 text-xs font-semibold text-red-100 transition hover:bg-red-500/15"
                     >
@@ -674,7 +675,7 @@ export default function ClienteHistorialCitasPage() {
                   type="button"
                   onClick={() => {
                     setPendingOpen(false);
-                    navigate('/agendar');
+                    void startNewAppointment?.();
                   }}
                   className="inline-flex rounded-lg border border-amber-200/40 bg-amber-300/10 px-3 py-1.5 text-xs font-semibold text-amber-50 transition hover:bg-amber-300/20"
                 >

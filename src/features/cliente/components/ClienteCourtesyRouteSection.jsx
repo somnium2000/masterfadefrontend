@@ -1,3 +1,4 @@
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Coins, Gift, Loader2, RefreshCw, Sparkles, Users, UserRound } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -5,7 +6,7 @@ import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { Button } from '../../../components/ui/button.jsx';
 import {
-  Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -103,6 +104,9 @@ function normalizeServiceRecord(service = {}) {
   return {
     id_servicio: id,
     nombre_servicio: name,
+    sucursales_disponibles: Array.isArray(service?.sucursales_disponibles)
+      ? service.sucursales_disponibles.map((branchId) => normalizeText(branchId)).filter(Boolean)
+      : [],
   };
 }
 
@@ -159,11 +163,12 @@ function normalizeSummary(payload) {
   const titularPoints = Math.max(0, toSafeInteger(summarySource?.puntos_titular ?? root?.puntos_titular, 0));
   const companionPoints = Math.max(0, toSafeInteger(summarySource?.puntos_integrante ?? root?.puntos_integrante, 0));
   const explicitProgress = summarySource?.progreso_actual ?? root?.progreso_actual;
-  const progressCurrent = explicitProgress == null
+  const computedProgress = explicitProgress == null
     ? ((totalBalance % rewardTarget) + rewardTarget) % rewardTarget
     : Math.max(0, toSafeInteger(explicitProgress, 0));
   const rewardsAvailable = Math.max(0, toSafeInteger(summarySource?.recompensas_disponibles ?? root?.recompensas_disponibles, 0));
   const canRedeem = Boolean(summarySource?.puede_canjear ?? root?.puede_canjear ?? totalBalance >= rewardTarget);
+  const progressCurrent = canRedeem ? rewardTarget : computedProgress;
   const summaryPlanStatus = summarySource?.estado_plan ?? root?.estado_plan;
   const hasActivePlan = summaryPlanStatus == null ? null : isOperationalPlanState(summaryPlanStatus);
 
@@ -258,6 +263,7 @@ export default function ClienteCourtesyRouteSection() {
   const [redeemError, setRedeemError] = useState('');
   const [branchOptions, setBranchOptions] = useState([]);
   const [selectedBranchId, setSelectedBranchId] = useState('');
+  const [initialRedeemBranch, setInitialRedeemBranch] = useState('');
   const [serviceOptions, setServiceOptions] = useState([]);
   const [selectedServiceId, setSelectedServiceId] = useState('');
 
@@ -303,7 +309,7 @@ export default function ClienteCourtesyRouteSection() {
 
   const loadSummary = useCallback(async ({ silent = false } = {}) => {
     const generation = contextRef.current.generation;
-    if (!contextRef.current.mounted || !contextRef.current.ready) return;
+    if (!contextRef.current.mounted || !contextRef.current.ready) return null;
     const requestSeq = ++summarySeqRef.current;
     const isCurrent = () => contextRef.current.mounted && contextRef.current.ready
       && contextRef.current.generation === generation && summarySeqRef.current === requestSeq;
@@ -313,12 +319,15 @@ export default function ClienteCourtesyRouteSection() {
     setSummaryError('');
     try {
       const payload = await getClientePuntosResumen();
-      if (!isCurrent()) return;
-      setSummary(normalizeSummary(payload));
+      if (!isCurrent()) return null;
+      const normalizedSummary = normalizeSummary(payload);
+      setSummary(normalizedSummary);
+      return normalizedSummary;
     } catch (error) {
-      if (!isCurrent()) return;
+      if (!isCurrent()) return null;
       const message = resolveErrorMessage(error, 'No se pudo cargar tu resumen de superpuntos.');
       setSummaryError(message);
+      return null;
     } finally {
       if (isCurrent()) setLoadingSummary(false);
     }
@@ -333,12 +342,18 @@ export default function ClienteCourtesyRouteSection() {
     [summary]
   );
 
-  const resolveRedeemServices = useCallback(async ({ summaryServices }) => {
-    return uniqueServices(summaryServices);
+  const resolveRedeemServices = useCallback(async ({ summaryServices, branchId }) => {
+    const safeBranchId = normalizeText(branchId);
+    return uniqueServices(summaryServices).filter((service) => (
+      !safeBranchId
+      || service.sucursales_disponibles.length === 0
+      || service.sucursales_disponibles.includes(safeBranchId)
+    ));
   }, []);
 
-  const loadRedeemContext = useCallback(async () => {
-    if (!summary?.canRedeem) return;
+  const loadRedeemContext = useCallback(async ({ summaryOverride = null } = {}) => {
+    const effectiveSummary = summaryOverride || summary;
+    if (!effectiveSummary?.canRedeem) return;
     const generation = contextRef.current.generation;
     const requestSeq = ++redeemSeqRef.current;
     const isCurrent = () => contextRef.current.mounted && contextRef.current.ready
@@ -367,17 +382,19 @@ export default function ClienteCourtesyRouteSection() {
 
       const mePayload = meResult.status === 'fulfilled' ? (meResult.value?.data || meResult.value || {}) : {};
       const mePreferredBranch = normalizeText(mePayload?.cliente?.id_sucursal_preferida || mePayload?.id_sucursal_preferida);
-      const candidateBranchId = normalizeText(summary?.preferredBranchId || mePreferredBranch);
+      const candidateBranchId = normalizeText(effectiveSummary?.preferredBranchId || mePreferredBranch);
       const preferredBranchId = branches.some(branch => branch.id_sucursal === candidateBranchId)
         ? candidateBranchId : normalizeText(branches[0]?.id_sucursal);
+      setInitialRedeemBranch(preferredBranchId);
       setSelectedBranchId(preferredBranchId);
 
       const resolvedServices = await resolveRedeemServices({
-        summaryServices: Array.isArray(summary?.serviceCandidates) ? summary.serviceCandidates : [],
+        summaryServices: Array.isArray(effectiveSummary?.serviceCandidates) ? effectiveSummary.serviceCandidates : [],
+        branchId: preferredBranchId,
       });
       if (!isCurrent()) return;
       setServiceOptions(resolvedServices);
-      setSelectedServiceId(normalizeText(resolvedServices[0]?.id_servicio));
+      setSelectedServiceId('');
     } catch (error) {
       if (!isCurrent()) return;
       redeemNavigationLockRef.current = false;
@@ -387,14 +404,16 @@ export default function ClienteCourtesyRouteSection() {
     }
   }, [resolveRedeemServices, summary]);
 
-  const handleOpenRedeemModal = useCallback(async () => {
+  const handleOpenRedeemModal = useCallback(async ({ summaryOverride = null } = {}) => {
     if (!contextRef.current.ready || dialogOpenRef.current || redeemRequestLockRef.current.has(contextRef.current.identity)) return;
     dialogOpenRef.current = true;
+    setInitialRedeemBranch('');
+    setSelectedBranchId('');
     redeemNavigationLockRef.current = false;
     rewardPreparedShownRef.current = false;
     rewardDiscountInfoShownRef.current = false;
     setRedeemModalOpen(true);
-    await loadRedeemContext();
+    await loadRedeemContext({ summaryOverride });
   }, [loadRedeemContext]);
 
   function handleRedeemModalChange(open) {
@@ -414,25 +433,29 @@ export default function ClienteCourtesyRouteSection() {
 
   useEffect(() => {
     if (!ready) return;
-    if (autoRedeemHandledRef.current) return;
     const searchParams = new URLSearchParams(location.search || '');
     const shouldAutoRedeem = normalizeText(searchParams.get('accion')).toLowerCase() === 'canjear';
-    if (!shouldAutoRedeem) return;
-    if (loadingSummary) return;
-    autoRedeemHandledRef.current = true;
-
-    if (summary?.canRedeem) {
-      // AM: Autoapertura segura solo cuando backend/summary confirma recompensa disponible.
-      void handleOpenRedeemModal();
-      notifications.info('Canjea tu recompensa para continuar con tu cita.', {
-        dedupeKey: 'cliente-auto-open-redeem',
-      });
+    if (!shouldAutoRedeem) {
+      autoRedeemHandledRef.current = false;
+      return;
     }
+    if (autoRedeemHandledRef.current) return;
+    autoRedeemHandledRef.current = true;
 
     searchParams.delete('accion');
     const nextSearch = searchParams.toString();
     navigate(`/home/cliente${nextSearch ? `?${nextSearch}` : ''}`, { replace: true });
-  }, [ready, handleOpenRedeemModal, location.search, loadingSummary, navigate, notifications, summary?.canRedeem]);
+
+    void (async () => {
+      const refreshedSummary = await loadSummary();
+      if (!refreshedSummary?.canRedeem) return;
+      await handleOpenRedeemModal({ summaryOverride: refreshedSummary });
+      if (!dialogOpenRef.current) return;
+      notifications.info('Canjea tu recompensa para continuar con tu cita.', {
+        dedupeKey: 'cliente-auto-open-redeem',
+      });
+    })();
+  }, [ready, handleOpenRedeemModal, loadSummary, location.search, navigate, notifications]);
 
   async function handleBranchChange(nextBranchId) {
     const generation = contextRef.current.generation;
@@ -446,10 +469,15 @@ export default function ClienteCourtesyRouteSection() {
     try {
       const resolvedServices = await resolveRedeemServices({
         summaryServices: Array.isArray(summary?.serviceCandidates) ? summary.serviceCandidates : [],
+        branchId: safeBranchId,
       });
       if (!isCurrent()) return;
       setServiceOptions(resolvedServices);
-      setSelectedServiceId(normalizeText(resolvedServices[0]?.id_servicio));
+      setSelectedServiceId((currentServiceId) => (
+        resolvedServices.some((service) => service.id_servicio === currentServiceId)
+          ? currentServiceId
+          : ''
+      ));
     } catch (error) {
       if (!isCurrent()) return;
       redeemNavigationLockRef.current = false;
@@ -520,7 +548,9 @@ export default function ClienteCourtesyRouteSection() {
     }
   }
 
-  const canSubmitRedeem = Boolean(CLIENT_BOOKING_ENABLED && selectedServiceId && selectedBranchId && !redeemLoading && !redeemSubmitting);
+  const selectedServiceIsValid = serviceOptions.some((service) => service.id_servicio === selectedServiceId);
+  const canSubmitRedeem = Boolean(CLIENT_BOOKING_ENABLED && selectedServiceId && selectedServiceIsValid
+    && selectedBranchId && !redeemLoading && !redeemSubmitting);
   const hasRedeemableServices = Boolean(Array.isArray(summary?.serviceCandidates) && summary.serviceCandidates.length > 0);
   const movementHistory = useMemo(() => {
     const source = Array.isArray(summary?.history) ? summary.history : [];
@@ -629,7 +659,7 @@ export default function ClienteCourtesyRouteSection() {
 
               <p className="mt-2 text-sm text-[var(--mf-text-2)]">
                 {summary.canRedeem
-                  ? 'Ya puedes canjear tu recompensa.'
+                  ? 'Recompensa disponible. Ya puedes canjearla.'
                   : `Faltan ${summary.remainingPoints} puntos para tu cortesía.`}
               </p>
 
@@ -687,7 +717,7 @@ export default function ClienteCourtesyRouteSection() {
         ) : null}
       </div>
 
-      <Dialog open={redeemModalOpen} onOpenChange={handleRedeemModalChange}>
+      <UnsavedChangesDialog values={{ branch: selectedBranchId, service: selectedServiceId }} initialValues={{ branch: initialRedeemBranch, service: '' }} saving={redeemSubmitting} open={redeemModalOpen} onOpenChange={handleRedeemModalChange}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Canjear recompensa</DialogTitle>
@@ -735,6 +765,7 @@ export default function ClienteCourtesyRouteSection() {
                       <button
                         key={service.id_servicio}
                         type="button"
+                        aria-pressed={active}
                         onClick={() => setSelectedServiceId(service.id_servicio)}
                         className={[
                           'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition-colors',
@@ -764,14 +795,14 @@ export default function ClienteCourtesyRouteSection() {
           </div>
 
           <DialogFooter>
-            <Button
+            <DialogClose asChild><Button
               type="button"
               variant="outline"
-              onClick={() => handleRedeemModalChange(false)}
+
               disabled={redeemSubmitting}
             >
               Cerrar
-            </Button>
+            </Button></DialogClose>
             <Button
               type="button"
               onClick={() => void handleRedeemReward()}
@@ -784,8 +815,7 @@ export default function ClienteCourtesyRouteSection() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
     </section>
   );
 }
-

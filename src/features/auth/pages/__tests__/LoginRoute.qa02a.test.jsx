@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from '../../../../context/AuthContext.jsx';
@@ -67,16 +68,57 @@ test('destino inválido utiliza /home sin bucle', async () => {
   mount('//evil.example'); fill(); fireEvent.click(screen.getByRole('button', { name: 'Entrar', exact: true }));
   await waitFor(() => expect(screen.getByTestId('target')).toHaveTextContent('/home'));
 });
-test.each(['Enter', ' '])('Login revela temporalmente con %s sin enviar y conserva cancelación de puntero', key => {
-  mount(); fill(); const button = screen.getByRole('button', { name: 'Manten presionado para ver la contrasena' });
+test('toggle de contraseña conserva el estado entre clics y actualiza icono y accesibilidad', () => {
+  mount(); fill();
   const input = document.querySelector('input[autocomplete="current-password"]');
-  fireEvent.keyDown(button, { key }); expect(input).toHaveAttribute('type', 'text');
-  fireEvent.keyUp(button, { key }); expect(input).toHaveAttribute('type', 'password');
-  fireEvent.keyDown(button, { key }); fireEvent.blur(button); expect(input).toHaveAttribute('type', 'password');
-  fireEvent.pointerDown(button); expect(input).toHaveAttribute('type', 'text');
-  fireEvent.pointerCancel(button); expect(input).toHaveAttribute('type', 'password');
-  fireEvent.pointerDown(button); fireEvent.pointerUp(button); expect(input).toHaveAttribute('type', 'password');
+  const showButton = screen.getByRole('button', { name: 'Mostrar contraseña' });
+  expect(showButton).toHaveAttribute('aria-pressed', 'false');
+  expect(showButton.querySelector('.lucide-eye')).toBeInTheDocument();
+  fireEvent.click(showButton);
+  const hideButton = screen.getByRole('button', { name: 'Ocultar contraseña' });
+  expect(input).toHaveAttribute('type', 'text');
+  expect(hideButton).toHaveAttribute('aria-pressed', 'true');
+  expect(hideButton.querySelector('.lucide-eye-off')).toBeInTheDocument();
+  fireEvent.click(hideButton);
+  expect(input).toHaveAttribute('type', 'password');
   expect(api.post).not.toHaveBeenCalled();
+});
+test.each(['Enter', ' '])('toggle de contraseña responde a %s como botón nativo sin enviar', key => {
+  mount(); fill(); const button = screen.getByRole('button', { name: 'Mostrar contraseña' });
+  const input = document.querySelector('input[autocomplete="current-password"]');
+  button.focus();
+  fireEvent.keyDown(button, { key });
+  if (key === ' ') fireEvent.keyUp(button, { key });
+  fireEvent.click(button);
+  if (key === 'Enter') fireEvent.keyUp(button, { key });
+  expect(input).toHaveAttribute('type', 'text');
+  expect(button).toHaveAttribute('type', 'button');
+  expect(api.post).not.toHaveBeenCalled();
+});
+test('presenta título exacto, recurso local Google y Facebook deshabilitado', async () => {
+  mount();
+  expect(screen.getByRole('heading', { name: 'Iniciar Sesión' })).toBeInTheDocument();
+  const google = screen.getByRole('button', { name: 'Continuar con Google' });
+  const googleIcon = google.querySelector('img.mf-social-icon');
+  expect(googleIcon).toBeInTheDocument();
+  expect(googleIcon).toHaveAttribute('alt', '');
+  expect(googleIcon.getAttribute('src')).toContain('google-g.svg');
+  const svg = await readFile('src/features/auth/assets/google-g.svg', 'utf8');
+  expect(svg).toMatch(/xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+  expect(svg).toMatch(/viewBox="0 0 24 24"/);
+  expect([...svg.matchAll(/fill="(#[0-9A-F]{6})"/g)].map((match) => match[1]))
+    .toEqual(['#EA4335', '#34A853', '#4A90E2', '#FBBC05']);
+  expect(screen.getByRole('button', { name: 'Facebook próximamente' })).toBeDisabled();
+});
+test('bloque final agrupa auxiliares y mantiene el CTA antes del registro', () => {
+  mount();
+  const remember = screen.getByRole('checkbox', { name: 'Recordarme' });
+  const forgot = screen.getByRole('link', { name: '¿Olvidaste tu contraseña?' });
+  const submit = screen.getByRole('button', { name: 'Entrar', exact: true });
+  const register = screen.getByRole('link', { name: 'Regístrate' });
+  expect(remember.closest('.mf-login-aux-row')).toContainElement(forgot);
+  expect(submit).toHaveClass('mf-login-submit');
+  expect(submit.compareDocumentPosition(register) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 test('error de Login mantiene un único anuncio inline', () => {
   mount(); fireEvent.click(screen.getByRole('button', { name: 'Entrar', exact: true }));

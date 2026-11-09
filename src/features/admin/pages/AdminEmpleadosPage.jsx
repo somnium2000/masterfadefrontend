@@ -339,6 +339,7 @@ export default function AdminEmpleadosPage() {
   const [formValues, setFormValues] = useState(FORM_DEFAULTS);
   const [editingId, setEditingId] = useState('');
   const [formLoading, setFormLoading] = useState(false);
+  const [photoUploading, setPhotoUploading] = useState(false);
   const [formError, setFormError] = useState('');
   const [selectedEmpleado, setSelectedEmpleado] = useState(null);
   const [confirmTarget, setConfirmTarget] = useState(null);
@@ -611,7 +612,7 @@ export default function AdminEmpleadosPage() {
   }
 
   async function handleSubmit(personaLink = null) {
-    if (formLoading || saveLockRef.current) return;
+    if (formLoading || photoUploading || saveLockRef.current) return;
     const safeFormValues = isAdminOnly
       ? { ...formValues, roles: getAssignableEmployeeRoles(formValues.roles, true) }
       : formValues;
@@ -952,7 +953,7 @@ export default function AdminEmpleadosPage() {
         </div>
       ) : null}
 
-      <UnsavedChangesDialog values={formValues} saving={formLoading} open={formOpen} onOpenChange={handleFormOpenChange}>
+      <UnsavedChangesDialog values={formValues} saving={formLoading || photoUploading} open={formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingId ? 'Editar Empleado' : 'Nuevo Empleado'}</DialogTitle><DialogDescription className="sr-only">Datos personales, roles y sucursal. Los campos con asterisco son obligatorios.</DialogDescription></DialogHeader>
 
@@ -1062,6 +1063,8 @@ export default function AdminEmpleadosPage() {
                       maxBytes={5 * 1024 * 1024}
                       optimizeImageBeforeUpload
                       previewAspect="square"
+                      disabled={formLoading}
+                      onUploadingChange={setPhotoUploading}
                       valueAssetId={formValues.foto_perfil_asset_id}
                       initialPreviewUrl={formValues.foto_perfil_url}
                       onChange={(payload) => {
@@ -1172,8 +1175,8 @@ export default function AdminEmpleadosPage() {
           {formError && <p className="mt-3 rounded-[12px] bg-red-500/10 px-3 py-2 text-sm text-red-400">{formError}</p>}
 
           <DialogFooter>
-            <DialogClose asChild><Button variant="outline" disabled={formLoading}>Cancelar</Button></DialogClose>
-            <Button onClick={() => handleSubmit()} disabled={formLoading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar' : 'Crear empleado'}</Button>
+            <DialogClose asChild><Button variant="outline" disabled={formLoading || photoUploading}>Cancelar</Button></DialogClose>
+            <Button onClick={() => handleSubmit()} disabled={formLoading || photoUploading}>{formLoading ? 'Guardando...' : editingId ? 'Actualizar' : 'Crear empleado'}</Button>
           </DialogFooter>
         </DialogContent>
       </UnsavedChangesDialog>

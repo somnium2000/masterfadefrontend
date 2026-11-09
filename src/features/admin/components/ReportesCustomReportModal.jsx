@@ -1,3 +1,4 @@
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useEffect, useRef, useState } from 'react';
 import { FileDown, FileSpreadsheet, Loader2, Printer } from 'lucide-react';
 import { jsPDF } from 'jspdf';
@@ -5,7 +6,6 @@ import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
 import {
-  Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -958,6 +958,9 @@ export default function ReportesCustomReportModal({
   const [dateTo, setDateTo] = useState(null);
   const [selectedKpiIds, setSelectedKpiIds] = useState([]);
   const [runningAction, setRunningAction] = useState('');
+  const [savedDraft, setSavedDraft] = useState(null);
+  const reportDraft = { dateFrom, dateTo, selectedIds: selectedKpiIds };
+  const initialReportDraft = savedDraft || { dateFrom: null, dateTo: null, selectedIds: getDefaultSelectedKpisForModule(defaultModuleType) };
   // JK: Estado UX para bloquear acciones y mostrar progreso durante la generacion del reporte.
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   // JK: Nombre del usuario autenticado para encabezado de exportaciones.
@@ -971,6 +974,7 @@ export default function ReportesCustomReportModal({
     setDateFrom(null);
     setDateTo(null);
     setSelectedKpiIds(getDefaultSelectedKpisForModule(defaultModuleType));
+    setSavedDraft(null);
     setRunningAction('');
     setIsGeneratingReport(false);
   }, [defaultModuleType, open]);
@@ -1059,6 +1063,7 @@ export default function ReportesCustomReportModal({
       }
 
       if (!isCurrent()) return;
+      setSavedDraft(reportDraft);
       notifications.update(loadingId, {
         type: 'success',
         message: 'Reporte personalizado generado correctamente.',
@@ -1089,7 +1094,7 @@ export default function ReportesCustomReportModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <UnsavedChangesDialog key={defaultModuleType} values={reportDraft} initialValues={initialReportDraft} saving={isGeneratingReport} open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-4xl">
         <DialogHeader className="pb-1">
           <DialogTitle>Crear Reporte</DialogTitle>
@@ -1207,6 +1212,6 @@ export default function ReportesCustomReportModal({
           </Button>
         </DialogFooter>
       </DialogContent>
-    </Dialog>
+    </UnsavedChangesDialog>
   );
 }

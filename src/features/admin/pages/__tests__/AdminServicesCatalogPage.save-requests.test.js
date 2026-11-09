@@ -12,10 +12,13 @@ function fixture() {
   const env = {
     mountedRef: { current: true }, editorGenerationRef: { current: 0 }, saveOperationRef: { current: null },
     requestScope: 'scopeA', currentScopeRef: { current: 'scopeA' }, refreshServicesRef: { current: vi.fn().mockResolvedValue() },
-    validateForm: () => null,
+    validateForm: () => null, validateTariffForm: () => null,
+    normalizeTariffPrice: (values) => String(values.precio_hnl ?? '').trim() === '' && values.servicio_informativo ? 0 : parseFloat(values.precio_hnl),
     formValues: { nombre_servicio: 'A', descripcion: 'Texto A', orden_visual: '10', visible_publico: true, agendable: true },
     editTarget: { id_servicio: 'A', _mutation_branch_id: 'A' }, createBranchTariffs: [],
-    canManageServiceBarberAssignments: false, sucursal: 'A',
+    canManageServiceBarberAssignments: false, sucursal: 'A', useSameTariffForAll: false,
+    commonCreateTariff: { precio_hnl: '', duracion_min: '30', buffer_min: '5', activo: true, servicio_informativo: true },
+    serviceBarberAssignments: { loading: false, error: '', selectedIds: [] },
     updateAdminServicio: vi.fn(), createAdminServicio: vi.fn(),
     notifications: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
     navigate: vi.fn(), extractMessage: () => 'Error seguro', emitCatalogSync: vi.fn(), fetchServicios: vi.fn().mockResolvedValue(),
@@ -55,6 +58,22 @@ test('éxito normal conserva notificación, refresh y cierre', async () => {
   const f = fixture(); f.env.updateAdminServicio.mockResolvedValue({ data: {} }); await f.save();
   expect(f.env.notifications.success).toHaveBeenCalledTimes(1); expect(f.env.fetchServicios).toHaveBeenCalledTimes(1);
   expect(f.effects).toContainEqual(['dialog', false]); expect(f.effects.at(-1)).toEqual(['loading', false]);
+});
+test('creación informativa compartida sin precio envía cero por sucursal', async () => {
+  const f = fixture();
+  f.env.editTarget = null;
+  f.env.useSameTariffForAll = true;
+  f.env.formValues = { ...f.env.formValues, agendable: false };
+  f.env.createBranchTariffs = [{ id_sucursal: 'A' }, { id_sucursal: 'B' }];
+  f.env.createAdminServicio.mockResolvedValue({ data: { id_servicio: 'N' } });
+  await f.save();
+  expect(f.env.createAdminServicio).toHaveBeenCalledWith(expect.objectContaining({
+    agendable: false,
+    sucursales: [
+      expect.objectContaining({ id_sucursal: 'A', precio_hnl: 0, servicio_informativo: true }),
+      expect.objectContaining({ id_sucursal: 'B', precio_hnl: 0, servicio_informativo: true }),
+    ],
+  }));
 });
 test('fallo normal conserva formulario y libera operación', async () => {
   const f = fixture(); f.env.updateAdminServicio.mockRejectedValue({ status: 409 }); await f.save();
