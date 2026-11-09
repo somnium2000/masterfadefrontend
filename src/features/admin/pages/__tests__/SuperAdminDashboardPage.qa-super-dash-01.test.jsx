@@ -9,23 +9,34 @@ vi.mock('../../lib/superAdminDashboardApi.js', () => ({
   getSuperAdminDashboardSummary: (...args) => getSummary(...args),
 }));
 
-const snapshot = {
-  data: {
+function responseFor(periodo, overrides = {}) {
+  return { data: {
     total_citas: 124,
     valor_citas_hnl: 4,
-    planes_activados: 0,
-    masterpuntos_canjeados: 0,
-    periodo: { fecha_desde: '2026-11-08', fecha_hasta: '2026-11-08' },
+    planes_activados: 2,
+    masterpuntos_canjeados: 3,
+    periodo,
     timezone: 'America/Tegucigalpa',
     actualizado_at: '2026-11-08T18:00:00.000Z',
-  },
-};
+    ...overrides,
+  } };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 describe('SuperAdminDashboardPage', () => {
   afterEach(cleanup);
   beforeEach(() => {
     getSummary.mockReset();
-    getSummary.mockResolvedValue(snapshot);
+    getSummary.mockImplementation((periodo) => Promise.resolve(responseFor(periodo)));
   });
 
   it('muestra los cuatro indicadores y aclara que el valor no es ingreso', async () => {
@@ -37,22 +48,68 @@ describe('SuperAdminDashboardPage', () => {
     expect(screen.getByText(/no representa ingresos cobrados/i)).toBeInTheDocument();
   });
 
-  it('aplica períodos rápidos y ofrece fechas personalizadas', async () => {
+  it('cambia de Hoy a 7 días y muestra únicamente la respuesta del nuevo período', async () => {
     render(<SuperAdminDashboardPage />);
     await screen.findByText('124');
+    getSummary.mockImplementationOnce((periodo) => Promise.resolve(responseFor(periodo, { planes_activados: 7, masterpuntos_canjeados: 8 })));
     fireEvent.click(screen.getByRole('button', { name: '7 días' }));
-    await waitFor(() => expect(getSummary).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole('button', { name: 'Personalizado' }));
-    expect(screen.getByLabelText('Desde')).toHaveAttribute('type', 'date');
-    expect(screen.getByLabelText('Hasta')).toHaveAttribute('type', 'date');
+    expect(await screen.findByText('7')).toBeInTheDocument();
+    expect(screen.getByText('8')).toBeInTheDocument();
   });
 
-  it('no sustituye el último snapshot por ceros si actualizar falla', async () => {
+  it('muestra métricas no disponibles si falla un período distinto', async () => {
     render(<SuperAdminDashboardPage />);
     expect(await screen.findByText('124')).toBeInTheDocument();
-    getSummary.mockRejectedValueOnce(new Error('Servicio temporalmente no disponible'));
-    fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+    const nextPeriod = deferred();
+    getSummary.mockImplementationOnce(() => nextPeriod.promise);
+    fireEvent.click(screen.getByRole('button', { name: '7 días' }));
+    expect(await screen.findByLabelText('Cargando Planes activados')).toBeInTheDocument();
+    expect(screen.getByLabelText('Cargando MasterPuntos canjeados')).toBeInTheDocument();
+    nextPeriod.reject(new Error('Servicio temporalmente no disponible'));
     expect(await screen.findByRole('alert')).toHaveTextContent('Servicio temporalmente no disponible');
     expect(screen.getByText('124')).toBeInTheDocument();
+    expect(screen.getAllByText('—')).toHaveLength(2);
+    expect(screen.queryByText(/última lectura válida/i)).not.toBeInTheDocument();
+  });
+
+  it('conserva e identifica la última lectura válida si falla actualizar el mismo período', async () => {
+    render(<SuperAdminDashboardPage />);
+    expect(await screen.findByText('2')).toBeInTheDocument();
+    getSummary.mockRejectedValueOnce(new Error('Servicio temporalmente no disponible'));
+    fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+    expect(await screen.findByText(/última lectura válida de este período/i)).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
+  });
+
+  it('valida fechas personalizadas vacías o invertidas sin enviar solicitudes', async () => {
+    render(<SuperAdminDashboardPage />);
+    await screen.findByText('124');
+    fireEvent.click(screen.getByRole('button', { name: 'Personalizado' }));
+    fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '' } });
+    expect(await screen.findByText(/Selecciona ambas fechas/i)).toBeInTheDocument();
+    expect(getSummary).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '2026-11-10' } });
+    expect(await screen.findByText(/no puede ser posterior/i)).toBeInTheDocument();
+    expect(getSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignora respuestas concurrentes que llegan fuera de orden', async () => {
+    render(<SuperAdminDashboardPage />);
+    await screen.findByText('124');
+    const sevenDays = deferred();
+    const thirtyDays = deferred();
+    getSummary.mockImplementationOnce(() => sevenDays.promise).mockImplementationOnce(() => thirtyDays.promise);
+    fireEvent.click(screen.getByRole('button', { name: '7 días' }));
+    await waitFor(() => expect(getSummary).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: '30 días' }));
+    await waitFor(() => expect(getSummary).toHaveBeenCalledTimes(3));
+    const thirtyRange = getSummary.mock.calls[2][0];
+    thirtyDays.resolve(responseFor(thirtyRange, { planes_activados: 30, masterpuntos_canjeados: 31 }));
+    expect(await screen.findByText('30')).toBeInTheDocument();
+    const sevenRange = getSummary.mock.calls[1][0];
+    sevenDays.resolve(responseFor(sevenRange, { planes_activados: 70, masterpuntos_canjeados: 71 }));
+    await waitFor(() => expect(screen.queryByText('70')).not.toBeInTheDocument());
+    expect(screen.getByText('30')).toBeInTheDocument();
   });
 });

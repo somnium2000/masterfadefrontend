@@ -24,6 +24,18 @@ function rangeForPreset(preset) {
   return { fecha_desde: addDays(fecha_hasta, -(days - 1)), fecha_hasta };
 }
 
+function rangesMatch(left, right) {
+  return Boolean(left && right
+    && left.fecha_desde === right.fecha_desde
+    && left.fecha_hasta === right.fecha_hasta);
+}
+
+function validateRange(range) {
+  if (!range.fecha_desde || !range.fecha_hasta) return 'Selecciona ambas fechas para consultar el período.';
+  if (range.fecha_desde > range.fecha_hasta) return 'La fecha desde no puede ser posterior a la fecha hasta.';
+  return '';
+}
+
 function MetricCard({ icon: Icon, label, value, detail, loading }) {
   return (
     <article className="mf-premium-card min-w-0 p-4 sm:p-5">
@@ -45,15 +57,17 @@ export default function SuperAdminDashboardPage() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [failedRange, setFailedRange] = useState(null);
   const [preset, setPreset] = useState('today');
   const [range, setRange] = useState(() => rangeForPreset('today'));
   const requestRef = useRef(0);
 
-  const loadSummary = useCallback(async (nextRange = range) => {
+  const loadSummary = useCallback(async (nextRange) => {
     const requestId = requestRef.current + 1;
     requestRef.current = requestId;
     setLoading(true);
     setError('');
+    setFailedRange(null);
     try {
       const response = await getSuperAdminDashboardSummary(nextRange);
       if (requestRef.current !== requestId) return;
@@ -61,13 +75,15 @@ export default function SuperAdminDashboardPage() {
     } catch (loadError) {
       if (requestRef.current !== requestId) return;
       setError(loadError?.message || 'No fue posible cargar el resumen global.');
+      setFailedRange({ ...nextRange });
     } finally {
       if (requestRef.current === requestId) setLoading(false);
     }
-  }, [range]);
+  }, []);
 
   useEffect(() => {
-    if (!range.fecha_desde || !range.fecha_hasta || range.fecha_desde > range.fecha_hasta) {
+    if (validateRange(range)) {
+      requestRef.current += 1;
       setLoading(false);
       return undefined;
     }
@@ -80,11 +96,21 @@ export default function SuperAdminDashboardPage() {
     if (nextPreset !== 'custom') setRange(rangeForPreset(nextPreset));
   }
 
+  function updateCustomDate(field, value) {
+    setRange((current) => ({ ...current, [field]: value }));
+  }
+
+  const rangeError = validateRange(range);
+  const summaryMatchesRange = rangesMatch(summary?.periodo, range);
+  const failedCurrentRange = rangesMatch(failedRange, range);
+  const periodMetricsLoading = !rangeError && !summaryMatchesRange && !failedCurrentRange;
+  const keepingLastValidReading = Boolean(error && failedCurrentRange && summaryMatchesRange);
+
   const cards = [
-    { icon: CalendarDays, label: 'Citas totales', value: summary ? NUMBER.format(summary.total_citas) : '—', detail: 'Citas registradas en todo el historial.' },
-    { icon: CircleDollarSign, label: 'Valor de citas', value: summary ? HNL.format(summary.valor_citas_hnl) : '—', detail: 'Valor agendado elegible; no representa ingresos cobrados.' },
-    { icon: UsersRound, label: 'Planes activados', value: summary ? NUMBER.format(summary.planes_activados) : '—', detail: 'Activaciones registradas en el período seleccionado.' },
-    { icon: Gem, label: 'MasterPuntos canjeados', value: summary ? NUMBER.format(summary.masterpuntos_canjeados) : '—', detail: 'Transacciones de canje únicas en el período.' },
+    { icon: CalendarDays, label: 'Citas totales', value: summary ? NUMBER.format(summary.total_citas) : '—', detail: 'Citas registradas en todo el historial.', loading: loading && !summary },
+    { icon: CircleDollarSign, label: 'Valor de citas', value: summary ? HNL.format(summary.valor_citas_hnl) : '—', detail: 'Valor agendado elegible; no representa ingresos cobrados.', loading: loading && !summary },
+    { icon: UsersRound, label: 'Planes activados', value: summaryMatchesRange ? NUMBER.format(summary.planes_activados) : '—', detail: 'Activaciones registradas en el período seleccionado.', loading: periodMetricsLoading },
+    { icon: Gem, label: 'MasterPuntos canjeados', value: summaryMatchesRange ? NUMBER.format(summary.masterpuntos_canjeados) : '—', detail: 'Transacciones de canje únicas en el período.', loading: periodMetricsLoading },
   ];
 
   return (
@@ -109,26 +135,29 @@ export default function SuperAdminDashboardPage() {
         {preset === 'custom' && (
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="text-sm text-[var(--mf-text-2)]">Desde
-              <input type="date" value={range.fecha_desde} max={range.fecha_hasta} onChange={(event) => setRange((current) => ({ ...current, fecha_desde: event.target.value }))} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 text-[var(--mf-text)]" />
+              <input type="date" value={range.fecha_desde} max={range.fecha_hasta} onChange={(event) => updateCustomDate('fecha_desde', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 text-[var(--mf-text)]" />
             </label>
             <label className="text-sm text-[var(--mf-text-2)]">Hasta
-              <input type="date" value={range.fecha_hasta} min={range.fecha_desde} onChange={(event) => setRange((current) => ({ ...current, fecha_hasta: event.target.value }))} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 text-[var(--mf-text)]" />
+              <input type="date" value={range.fecha_hasta} min={range.fecha_desde} onChange={(event) => updateCustomDate('fecha_hasta', event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 text-[var(--mf-text)]" />
             </label>
           </div>
         )}
+        {rangeError && <p role="alert" className="mt-3 text-sm text-red-500">{rangeError}</p>}
       </section>
 
-      {error && (
+      {error && failedCurrentRange && (
         <div role="alert" className="mf-premium-card border border-red-500/30 p-4 text-sm text-red-500">
-          <p>{error}</p><Button className="mt-3" size="sm" variant="outline" onClick={() => loadSummary(range)}>Reintentar</Button>
+          <p>{error}</p>
+          {keepingLastValidReading && <p className="mt-1 text-[var(--mf-text-2)]">Mostrando la última lectura válida de este período.</p>}
+          <Button className="mt-3" size="sm" variant="outline" onClick={() => loadSummary(range)}>Reintentar</Button>
         </div>
       )}
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores ejecutivos">
-        {cards.map((card) => <MetricCard key={card.label} {...card} loading={loading && !summary} />)}
+        {cards.map((card) => <MetricCard key={card.label} {...card} />)}
       </section>
 
-      {summary?.actualizado_at && !error && (
+      {summary?.actualizado_at && summaryMatchesRange && (!error || keepingLastValidReading) && (
         <p className="text-right text-xs text-[var(--mf-text-3)]">Actualizado: {new Intl.DateTimeFormat('es-HN', { dateStyle: 'medium', timeStyle: 'short', timeZone: summary.timezone }).format(new Date(summary.actualizado_at))}</p>
       )}
     </div>
