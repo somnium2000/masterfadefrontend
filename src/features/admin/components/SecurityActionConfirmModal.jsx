@@ -1,6 +1,8 @@
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { Loader2 } from 'lucide-react';
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -28,10 +30,12 @@ export default function SecurityActionConfirmModal({
   tone = 'warning',
 }) {
   const canSubmit = !loading && (!requireComment || String(comment || '').trim().length > 0);
+  const Root = showCommentInput ? UnsavedChangesDialog : Dialog;
+  const guardProps = showCommentInput ? { values: comment, saving: loading } : {};
   const confirmVariant = tone === 'danger' ? 'destructive' : 'default';
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Root open={open} onOpenChange={onOpenChange} {...guardProps}>
       <DialogContent className="h-[92vh] max-h-[92vh] w-[96vw] max-w-[96vw] overflow-hidden p-0 sm:h-auto sm:max-h-[85vh] sm:max-w-lg sm:rounded-[24px] sm:p-0">
         <div className="flex h-full flex-col">
           <DialogHeader className="border-b border-[var(--mf-nav-border)] px-5 pb-4 pt-6 sm:px-6">
@@ -65,9 +69,9 @@ export default function SecurityActionConfirmModal({
           )}
 
           <DialogFooter className="border-t border-[var(--mf-nav-border)] px-5 py-4 sm:px-6">
-            <Button variant="outline" disabled={loading} onClick={() => onOpenChange(false)}>
+            <DialogClose asChild><Button variant="outline" disabled={loading}>
               {cancelLabel}
-            </Button>
+            </Button></DialogClose>
             <Button
               variant={confirmVariant}
               disabled={!canSubmit}
@@ -80,6 +84,6 @@ export default function SecurityActionConfirmModal({
           </DialogFooter>
         </div>
       </DialogContent>
-    </Dialog>
+    </Root>
   );
 }

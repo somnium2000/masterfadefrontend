@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ImagePlus, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '../ui/button.jsx';
 import { Label } from '../ui/label.jsx';
@@ -32,8 +32,15 @@ export default function ImageUploaderField({
   optimizeImageBeforeUpload = false,
   previewAspect = 'wide',
   onChange,
+  onUploadingChange,
 }) {
   const inputRef = useRef(null);
+  const uploadRef = useRef(null);
+  useLayoutEffect(() => () => {
+    const upload = uploadRef.current;
+    uploadRef.current = null;
+    upload?.onStatusChange?.(false);
+  }, []);
   const [uploading, setUploading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [previewUrl, setPreviewUrl] = useState(initialPreviewUrl || '');
@@ -54,9 +61,12 @@ export default function ImageUploaderField({
 
   async function handleFileSelection(event) {
     const sourceFile = event.target?.files?.[0];
-    if (!sourceFile) return;
+    if (!sourceFile || disabled || uploadRef.current) return;
+    const upload = { onStatusChange: onUploadingChange };
+    uploadRef.current = upload;
     setErrorMessage('');
     setUploading(true);
+    onUploadingChange?.(true);
     try {
       validateImageFile(sourceFile, { allowedMimeTypes, maxBytes });
       const optimizedFile = optimizeImageBeforeUpload
@@ -73,6 +83,7 @@ export default function ImageUploaderField({
         label,
       });
 
+      if (uploadRef.current !== upload) return;
       let privateSignedUrl = null;
       if (prepared.visibility === 'private') {
         const readResponse = await getAdminStorageAssetReadUrl(prepared.asset_id, { expires_in: 300 });
@@ -80,6 +91,7 @@ export default function ImageUploaderField({
         privateSignedUrl = readPayload?.url || null;
       }
 
+      if (uploadRef.current !== upload) return;
       const nextPreview = prepared.public_url || privateSignedUrl || '';
       setPreviewUrl(nextPreview);
       setAssetId(prepared.asset_id);
@@ -92,10 +104,12 @@ export default function ImageUploaderField({
         signed_read_url: privateSignedUrl,
       });
     } catch (error) {
-      setErrorMessage(extractStorageErrorMessage(error));
+      if (uploadRef.current === upload) setErrorMessage(extractStorageErrorMessage(error));
     } finally {
-      setUploading(false);
-      if (event.target) {
+      if (uploadRef.current === upload) {
+        uploadRef.current = null;
+        setUploading(false);
+        upload.onStatusChange?.(false);
         event.target.value = '';
       }
     }

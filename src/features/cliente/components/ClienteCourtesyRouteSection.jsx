@@ -1,3 +1,4 @@
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Coins, Gift, Loader2, RefreshCw, Sparkles, Users, UserRound } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -5,7 +6,7 @@ import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { Button } from '../../../components/ui/button.jsx';
 import {
-  Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -262,6 +263,7 @@ export default function ClienteCourtesyRouteSection() {
   const [redeemError, setRedeemError] = useState('');
   const [branchOptions, setBranchOptions] = useState([]);
   const [selectedBranchId, setSelectedBranchId] = useState('');
+  const [initialRedeemBranch, setInitialRedeemBranch] = useState('');
   const [serviceOptions, setServiceOptions] = useState([]);
   const [selectedServiceId, setSelectedServiceId] = useState('');
 
@@ -383,6 +385,7 @@ export default function ClienteCourtesyRouteSection() {
       const candidateBranchId = normalizeText(effectiveSummary?.preferredBranchId || mePreferredBranch);
       const preferredBranchId = branches.some(branch => branch.id_sucursal === candidateBranchId)
         ? candidateBranchId : normalizeText(branches[0]?.id_sucursal);
+      setInitialRedeemBranch(preferredBranchId);
       setSelectedBranchId(preferredBranchId);
 
       const resolvedServices = await resolveRedeemServices({
@@ -404,6 +407,8 @@ export default function ClienteCourtesyRouteSection() {
   const handleOpenRedeemModal = useCallback(async ({ summaryOverride = null } = {}) => {
     if (!contextRef.current.ready || dialogOpenRef.current || redeemRequestLockRef.current.has(contextRef.current.identity)) return;
     dialogOpenRef.current = true;
+    setInitialRedeemBranch('');
+    setSelectedBranchId('');
     redeemNavigationLockRef.current = false;
     rewardPreparedShownRef.current = false;
     rewardDiscountInfoShownRef.current = false;
@@ -712,7 +717,7 @@ export default function ClienteCourtesyRouteSection() {
         ) : null}
       </div>
 
-      <Dialog open={redeemModalOpen} onOpenChange={handleRedeemModalChange}>
+      <UnsavedChangesDialog values={{ branch: selectedBranchId, service: selectedServiceId }} initialValues={{ branch: initialRedeemBranch, service: '' }} saving={redeemSubmitting} open={redeemModalOpen} onOpenChange={handleRedeemModalChange}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Canjear recompensa</DialogTitle>
@@ -790,14 +795,14 @@ export default function ClienteCourtesyRouteSection() {
           </div>
 
           <DialogFooter>
-            <Button
+            <DialogClose asChild><Button
               type="button"
               variant="outline"
-              onClick={() => handleRedeemModalChange(false)}
+
               disabled={redeemSubmitting}
             >
               Cerrar
-            </Button>
+            </Button></DialogClose>
             <Button
               type="button"
               onClick={() => void handleRedeemReward()}
@@ -810,8 +815,7 @@ export default function ClienteCourtesyRouteSection() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
     </section>
   );
 }
-

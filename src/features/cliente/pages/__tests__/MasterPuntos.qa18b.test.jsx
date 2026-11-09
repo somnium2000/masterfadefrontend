@@ -91,6 +91,10 @@ test('modal abierto no preselecciona servicios y reabrir exige selección explí
   fireEvent.click(service);
   expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeEnabled();
   fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: 'Seguir editando' }));
+  expect(service).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }));
   await openWithoutSelection();
   expect(screen.getByRole('button', { name: 'Confirmar canje' })).toBeDisabled();
 });
@@ -197,13 +201,25 @@ test('doble clic antes de render no duplica el canje', async () => {
   const button = screen.getByRole('button', { name: 'Confirmar canje' }); act(() => { fireEvent.click(button); fireEvent.click(button); });
   expect(api.redeemClientePuntosReward).toHaveBeenCalledTimes(1); await act(async () => pending.resolve(redemption));
 });
-test.each(['identity', 'unmount', 'close'])('canje pendiente tras %s no persiste ni navega', async transition => {
+test.each(['identity', 'unmount'])('canje pendiente tras %s no persiste ni navega', async transition => {
   const view = await ready(); await open(); const pending = deferred(); api.redeemClientePuntosReward.mockReturnValueOnce(pending.promise);
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));
   if (transition === 'identity') { api.getClientePuntosResumen.mockResolvedValue(summary(7, 'B')); switchTo(view); }
   if (transition === 'unmount') view.unmount();
-  if (transition === 'close') fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
   await act(async () => pending.resolve(redemption)); expect(sessionStorage.getItem('mf_reward_redeem_context_v1')).toBeNull(); expect(navigate).not.toHaveBeenCalled(); expect(notices.success).not.toHaveBeenCalled();
+});
+test('Escape y X no cierran un canje en curso', async () => {
+  await ready(); await open();
+  const pending = deferred();
+  api.redeemClientePuntosReward.mockReturnValueOnce(pending.promise);
+  const dialog = screen.getByRole('dialog', { name: 'Canjear recompensa' });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Confirmar canje' }));
+  fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' });
+  fireEvent.click(within(dialog).getAllByRole('button', { name: 'Cerrar' }).at(-1));
+  expect(dialog).toBeInTheDocument();
+  expect(screen.queryByText('¿Descartar los cambios?')).not.toBeInTheDocument();
+  await act(async () => pending.resolve(redemption));
+  expect(navigate).toHaveBeenCalledWith('/agendar?modo=canje');
 });
 test('canje vigente conserva almacenamiento, avisos y destino sin descontar localmente', async () => {
   await ready(); await open(); fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));

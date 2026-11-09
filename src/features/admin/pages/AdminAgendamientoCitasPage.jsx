@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -16,7 +17,7 @@ import {
 import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table.jsx';
 import ViewToggle from '../../../components/data/ViewToggle.jsx';
 import './AdminAgendamientoCitasHeader.css';
@@ -310,6 +311,18 @@ function buildOperationalEventsUrl(idSucursal) {
   return joinEventUrl(import.meta.env.VITE_API_URL, `/v1/admin/citas/operativas/events?${query.toString()}`);
 }
 
+const EMPTY_BATCH_FORM = { id_empleado_barbero: '', fecha: '', motivo: '' };
+
+function getBatchDraftChanges(items) {
+  return items.filter((item) => (
+    item.selected || item.id_empleado_barbero_nuevo || item.motivo
+    || item.fecha_inicio_nueva !== toInputDateTime(item.inicio_actual)
+    || item.picker_date !== toDateKey(item.inicio_actual)
+  )).map(({ id_cita, selected, id_empleado_barbero_nuevo, fecha_inicio_nueva, motivo, picker_date }) => (
+    { id_cita, selected, id_empleado_barbero_nuevo, fecha_inicio_nueva, motivo, picker_date }
+  ));
+}
+
 export default function AdminAgendamientoCitasPage() {
   const [reservationOpen, setReservationOpen] = useState(false);
   const [reservationCode, setReservationCode] = useState('');
@@ -358,9 +371,10 @@ export default function AdminAgendamientoCitasPage() {
   const [batchDialogOpen, setBatchDialogOpen] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchSaving, setBatchSaving] = useState(false);
-  const [batchForm, setBatchForm] = useState({ id_empleado_barbero: '', fecha: '', motivo: '' });
+  const [batchForm, setBatchForm] = useState(EMPTY_BATCH_FORM);
   const [batchItems, setBatchItems] = useState([]);
   const [batchPickerLoadingId, setBatchPickerLoadingId] = useState('');
+  const batchBusy = batchSaving || batchLoading || Boolean(batchPickerLoadingId);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [activeMobileContainer, setActiveMobileContainer] = useState('confirmada');
   const fetchInFlightRef = useRef(false);
@@ -798,6 +812,14 @@ export default function AdminAgendamientoCitasPage() {
     }
   }
 
+  function handleBatchOpenChange(open) {
+    setBatchDialogOpen(open);
+    if (!open) {
+      setBatchForm(EMPTY_BATCH_FORM);
+      setBatchItems([]);
+    }
+  }
+
   async function fetchBatchAffected() {
     if (!selectedSucursalId) {
       notifications.warning('Selecciona una sucursal para operar.', { dedupeKey: 'agendamiento-citas-sucursal-required' });
@@ -919,7 +941,12 @@ export default function AdminAgendamientoCitasPage() {
         })),
       });
       notifications.success('Reagendación masiva completada sin cobro adicional.', { dedupeKey: 'agendamiento-citas-batch-ok' });
-      setBatchItems((prev) => prev.filter((item) => !item.selected));
+      const remainingItems = batchItems.filter((item) => !item.selected);
+      if (getBatchDraftChanges(remainingItems).length) {
+        setBatchItems(remainingItems);
+      } else {
+        handleBatchOpenChange(false);
+      }
       await fetchCitas({ silent: true, force: true });
     } catch (err) {
       notifications.error(mapAdminCitasErrorMessage(err, 'No fue posible completar la reagendación masiva.'), { dedupeKey: 'agendamiento-citas-batch-error' });
@@ -1275,7 +1302,7 @@ export default function AdminAgendamientoCitasPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={singleDialogOpen} onOpenChange={setSingleDialogOpen}>
+      <UnsavedChangesDialog values={{ singleForm, singlePickerDate }} saving={singleSaving} open={singleDialogOpen} onOpenChange={setSingleDialogOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Reagendación de emergencia</DialogTitle>
@@ -1361,19 +1388,20 @@ export default function AdminAgendamientoCitasPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSingleDialogOpen(false)} disabled={singleSaving}>Cancelar</Button>
+            <DialogClose asChild><Button variant="outline" disabled={singleSaving}>Cancelar</Button></DialogClose>
             <Button onClick={submitSingleReschedule} disabled={singleSaving}>{singleSaving ? 'Guardando...' : 'Reagendar sin cobro'}</Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
 
       {canManageEmergency ? (
-        <Dialog open={batchDialogOpen} onOpenChange={setBatchDialogOpen}>
+        <UnsavedChangesDialog values={{ batchForm, items: getBatchDraftChanges(batchItems) }} saving={batchBusy} open={batchDialogOpen} onOpenChange={handleBatchOpenChange}>
           <DialogContent className="w-[calc(100vw-1rem)] max-h-[90vh] overflow-y-auto sm:max-w-5xl">
             <DialogHeader>
               <DialogTitle>Reagendación masiva de emergencia</DialogTitle>
               <DialogDescription>Selecciona y reprocesa en lote las citas afectadas por la emergencia.</DialogDescription>
             </DialogHeader>
+            <fieldset disabled={batchSaving} className="contents">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <Label className="mf-label">Barbero origen *</Label>
@@ -1491,15 +1519,16 @@ export default function AdminAgendamientoCitasPage() {
                 </Table>
               </div>
             ) : !batchLoading ? <p className="text-sm text-[var(--mf-text-2)]">Busca las citas afectadas para preparar el lote de reagendación.</p> : null}
+            </fieldset>
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setBatchDialogOpen(false)} disabled={batchSaving}>Cerrar</Button>
-              <Button onClick={submitBatchReschedule} disabled={batchSaving || batchItems.filter((item) => item.selected).length === 0}>
+              <DialogClose asChild><Button variant="outline" disabled={batchBusy}>Cerrar</Button></DialogClose>
+              <Button onClick={submitBatchReschedule} disabled={batchBusy || batchItems.filter((item) => item.selected).length === 0}>
                 {batchSaving ? 'Procesando...' : 'Reagendar seleccionadas'}
               </Button>
             </DialogFooter>
           </DialogContent>
-        </Dialog>
+        </UnsavedChangesDialog>
       ) : null}
     </div>
   );

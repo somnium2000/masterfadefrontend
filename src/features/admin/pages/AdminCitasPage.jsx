@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -16,7 +17,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { Button } from '../../../components/ui/button.jsx';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
+import { DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
@@ -627,7 +628,6 @@ export default function AdminCitasPage() {
     agenda: Boolean(selectedBarberId),
     confirmar: Boolean(selectedBarberId && previewServiceSelectionComplete && previewDate && previewTime),
   }), [previewDate, previewServiceSelectionComplete, previewTime, selectedBarberId]);
-
 
   const syncPreviewServicesScrollState = useCallback(() => {
     const scroller = previewServicesScrollRef.current;
@@ -2548,7 +2548,7 @@ export default function AdminCitasPage() {
         </div>
       )}
 
-      <Dialog open={restrictionDialogOpen} onOpenChange={setRestrictionDialogOpen}>
+      <UnsavedChangesDialog values={restrictionForm} saving={restrictionSaving} open={restrictionDialogOpen} onOpenChange={setRestrictionDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Nueva restricción</DialogTitle>
@@ -2624,15 +2624,15 @@ export default function AdminCitasPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRestrictionDialogOpen(false)} disabled={restrictionSaving}>Cancelar</Button>
+            <DialogClose asChild><Button variant="outline" disabled={restrictionSaving}>Cancelar</Button></DialogClose>
             <Button onClick={handleSaveRestriction} disabled={restrictionSaving}>
               {restrictionSaving ? 'Guardando...' : 'Guardar restricción'}
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
 
-      <Dialog open={branchDayOffDialogOpen} onOpenChange={setBranchDayOffDialogOpen}>
+      <UnsavedChangesDialog values={branchDayOffForm} saving={branchDayOffSaving} open={branchDayOffDialogOpen} onOpenChange={setBranchDayOffDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Nueva excepción de sucursal</DialogTitle>
@@ -2723,13 +2723,13 @@ export default function AdminCitasPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setBranchDayOffDialogOpen(false)} disabled={branchDayOffSaving}>Cancelar</Button>
+            <DialogClose asChild><Button variant="outline" disabled={branchDayOffSaving}>Cancelar</Button></DialogClose>
             <Button onClick={handleCreateBranchDayOff} disabled={branchDayOffSaving}>
               {branchDayOffSaving ? 'Guardando...' : 'Guardar excepción'}
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
     </div>
   );
 }

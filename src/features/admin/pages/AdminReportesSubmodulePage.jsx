@@ -1,3 +1,4 @@
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart3,
@@ -14,7 +15,7 @@ import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
 import {
-  Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -854,6 +855,7 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
   });
   // JK: Estado temporal del modal de filtros para permitir rango no inicializado al abrir.
   const [modalFilters, setModalFilters] = useState(null);
+  const [applyingFilters, setApplyingFilters] = useState(false);
 
   const [grouping, setGrouping] = useState('diario');
   // JK: Estado independiente por grafico de Ingresos para alternar 7/30 dias sin afectar KPIs.
@@ -1548,14 +1550,19 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
         ...(modalFilters || {}),
       }
       : filters;
-    const success = await fetchDashboard({
-      overrideFilters: candidateFilters,
-      markAsAppliedFilter: true,
-    });
-    if (success) {
-      setFilters(candidateFilters);
-      setFiltersOpen(false);
-      setModalFilters(null);
+    setApplyingFilters(true);
+    try {
+      const success = await fetchDashboard({
+        overrideFilters: candidateFilters,
+        markAsAppliedFilter: true,
+      });
+      if (success) {
+        setFilters(candidateFilters);
+        setFiltersOpen(false);
+        setModalFilters(null);
+      }
+    } finally {
+      setApplyingFilters(false);
     }
   }, [fetchDashboard, filters, modalFilters, useHeaderActionsLayout]);
 
@@ -2592,7 +2599,7 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
       />
 
       {useHeaderActionsLayout ? (
-        <Dialog open={filtersOpen} onOpenChange={handleFiltersDialogOpenChange}>
+        <UnsavedChangesDialog values={modalFilters} saving={applyingFilters} open={filtersOpen} onOpenChange={handleFiltersDialogOpenChange}>
           <DialogContent className="sm:max-w-xl">
             <DialogHeader>
               <DialogTitle>Filtros de {moduleMeta.label}</DialogTitle>
@@ -2653,16 +2660,16 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
               ) : null}
             </div>
             <DialogFooter className="mt-2">
-              <Button type="button" variant="outline" onClick={() => handleFiltersDialogOpenChange(false)}>
+              <DialogClose asChild><Button type="button" variant="outline">
                 Cancelar
-              </Button>
+              </Button></DialogClose>
               <Button type="button" className="gap-2" onClick={() => void handleApplyFilters()} disabled={loadingDashboard}>
                 {loadingDashboard ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
                 Aplicar filtros
               </Button>
             </DialogFooter>
           </DialogContent>
-        </Dialog>
+        </UnsavedChangesDialog>
       ) : null}
     </div>
   );

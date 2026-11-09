@@ -1,7 +1,8 @@
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Loader2, ShieldCheck } from "lucide-react";
 import {
-  Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -124,7 +125,7 @@ export default function AdminAccountDeletionDecisionDialog({
   useLayoutEffect(() => {
     generationRef.current += 1;
     operationRef.current = null;
-    setPhrase(''); setAcknowledged(false); setPassword(''); setComment(''); setSubmitting(false); setErrorMessage('');
+    setPhrase(''); setAcknowledged(false); setPassword(''); setReauthMethod('password'); setComment(''); setSubmitting(false); setErrorMessage('');
     return () => { generationRef.current += 1; operationRef.current = null; };
   }, [open, mode, detail?.request?.id_solicitud, user?.id_usuario]);
   const permissions = detail?.permissions || {};
@@ -188,7 +189,14 @@ export default function AdminAccountDeletionDecisionDialog({
   }, [acknowledged, approving, canSubmit, comment, onOpenChange, reset, open, onApprove, onReject, password, reauthMethod, phrase, user?.email, user?.id_usuario]);
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <UnsavedChangesDialog
+      key={JSON.stringify([user?.id_usuario, mode, detail?.request?.id_solicitud])}
+      initialValues={{ phrase: "", acknowledged: false, password: false, reauthMethod: "password", comment: "" }}
+      values={{ phrase, acknowledged, password: Boolean(password), reauthMethod, comment }}
+      saving={submitting}
+      open={open}
+      onOpenChange={handleOpenChange}
+    >
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{approving ? "Aprobar eliminacion de cuenta" : "Rechazar solicitud"}</DialogTitle>
@@ -257,15 +265,15 @@ export default function AdminAccountDeletionDecisionDialog({
         </div>
 
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={submitting} onClick={() => handleOpenChange(false)}>
+          <DialogClose asChild><Button type="button" variant="outline" disabled={submitting}>
             Volver
-          </Button>
+          </Button></DialogClose>
           <Button type="button" variant={approving ? "default" : "destructive"} disabled={!canSubmit} onClick={handleSubmit} className="gap-2">
             {submitting ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
             {approving ? "Aprobar" : "Rechazar"}
           </Button>
         </DialogFooter>
       </DialogContent>
-    </Dialog>
+    </UnsavedChangesDialog>
   );
 }

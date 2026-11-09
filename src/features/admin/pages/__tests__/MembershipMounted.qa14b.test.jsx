@@ -16,6 +16,7 @@ vi.mock('../../../../components/ui/dialog.jsx', () => ({
   Dialog: ({ open, children }) => open ? <div>{children}</div> : null,
   DialogContent: ({ children }) => <div>{children}</div>, DialogHeader: ({ children }) => <div>{children}</div>,
   DialogTitle: ({ children }) => <h2>{children}</h2>, DialogDescription: ({ children }) => <p>{children}</p>,
+  DialogClose: ({ children }) => children,
   DialogFooter: ({ children }) => <div>{children}</div>,
 }));
 function deferred() {

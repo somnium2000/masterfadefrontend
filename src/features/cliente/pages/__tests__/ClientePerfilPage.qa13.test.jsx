@@ -144,6 +144,30 @@ describe('editor vigente', () => {
     fireEvent.change(screen.getByLabelText('Archivo de fotografía privada'), { target: { files: [new File(['x'], 'x.txt', { type: 'text/plain' })] } });
     await waitFor(() => expect(notices.error).toHaveBeenCalledWith('No se pudo cargar la imagen de perfil.')); expect(api.updateClienteMe).not.toHaveBeenCalled(); expect(screen.getByAltText('Foto de perfil')).toHaveAttribute('src', 'https://synthetic.invalid/A.jpg');
   });
+  test('una subida bloquea el cierre y la foto cargada cuenta como borrador', async () => {
+    const upload = deferred();
+    api.prepareClienteProfileImageUpload.mockReturnValue(upload.promise);
+    const view = mount();
+    fireEvent.change(screen.getByLabelText('Archivo de fotografía privada'), { target: { files: [new File(['x'], 'qa.jpg', { type: 'image/jpeg' })] } });
+    fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+    expect(view.close).not.toHaveBeenCalled();
+    expect(screen.queryByText('¿Descartar los cambios?')).not.toBeInTheDocument();
+    await act(async () => upload.resolve({ asset_id: 'new-asset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Seguir editando' }));
+    expect(screen.getByAltText('Foto de perfil')).toHaveAttribute('src', 'https://synthetic.invalid/new.jpg');
+    expect(view.close).not.toHaveBeenCalled();
+  });
+  test('refrescar el mismo perfil conserva los cambios de esta apertura', () => {
+    const view = mount();
+    const address = screen.getByLabelText('Dirección (opcional)');
+    fireEvent.change(address, { target: { value: 'Borrador' } });
+    view.rerender(<Editor open profile={{ ...profile('A'), direccion_texto: 'Otro valor' }} onSaved={view.saved} onOpenChange={view.close} />);
+    expect(address).toHaveValue('Borrador');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(screen.getByRole('dialog', { name: '¿Descartar los cambios?' })).toBeInTheDocument();
+  });
   test('retiro voluntario envía null explícito', async () => { mount(); fireEvent.click(screen.getByRole('button', { name: 'Quitar' })); submit(); await waitFor(() => expect(api.updateClienteMe).toHaveBeenCalled()); expect(api.updateClienteMe.mock.calls[0][0].foto_perfil_asset_id).toBeNull(); });
   test('upload vigente conserva asset y URL para el guardado explícito', async () => {
     mount(); fireEvent.change(screen.getByLabelText('Archivo de fotografía privada'), { target: { files: [new File(['x'], 'x.jpg', { type: 'image/jpeg' })] } });

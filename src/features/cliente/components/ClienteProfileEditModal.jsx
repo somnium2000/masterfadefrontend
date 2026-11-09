@@ -1,7 +1,8 @@
-﻿import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+﻿import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Camera, Loader2, Phone, Trash2, UserRound } from 'lucide-react';
 import {
-  Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -135,20 +136,6 @@ function ClienteProfileEditor({ open, onOpenChange, profile, onSaved }) {
   const [photoChanged, setPhotoChanged] = useState(false);
   const [photoLoadError, setPhotoLoadError] = useState(false);
 
-  useLayoutEffect(() => {
-    if (!open) return;
-    generationRef.current += 1;
-    operationRef.current = null;
-    setSaving(false);
-    setUploading(false);
-    const nextForm = normalizeInitialForm(profile);
-    setForm(nextForm);
-    setPreviewUrl(profile?.foto_perfil_signed_url || '');
-    setUploadedAssetId(profile?.foto_perfil_asset_id || null);
-    setPhotoChanged(false);
-    setPhotoLoadError(false);
-  }, [open, profile]);
-
   const fullName = useMemo(() => {
     const nombres = String(profile?.nombres || '').trim();
     const apellidos = String(profile?.apellidos || '').trim();
@@ -248,7 +235,7 @@ function ClienteProfileEditor({ open, onOpenChange, profile, onSaved }) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <UnsavedChangesDialog values={{ form, uploadedAssetId }} saving={saving || uploading} open={open} onOpenChange={onOpenChange}>
       <DialogContent className="!left-1/2 !top-1/2 !bottom-auto !right-auto !w-[calc(100vw-1rem)] !max-w-[680px] !-translate-x-1/2 !-translate-y-1/2 !rounded-[22px] max-h-[88vh] overflow-y-auto p-0">
         <DialogHeader className="border-b border-[var(--mf-nav-border)] px-5 pb-4 pt-5 sm:px-6">
           <DialogTitle>Perfil privado del cliente</DialogTitle>
@@ -406,16 +393,15 @@ function ClienteProfileEditor({ open, onOpenChange, profile, onSaved }) {
           </section>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving || uploading}>
+            <DialogClose asChild><Button type="button" variant="outline" disabled={saving || uploading}>
               Cancelar
-            </Button>
+            </Button></DialogClose>
             <Button type="submit" disabled={saving || uploading}>
               {saving ? 'Guardando...' : 'Guardar perfil'}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
-    </Dialog>
+    </UnsavedChangesDialog>
   );
 }
-

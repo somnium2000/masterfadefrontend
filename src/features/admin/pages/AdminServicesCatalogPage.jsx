@@ -459,6 +459,8 @@ export default function AdminServicesCatalogPage() {
     const [formError, setFormError] = useState('');
     const [formLoading, setFormLoading] = useState(false);
     const [serviceBarberAssignments, setServiceBarberAssignments] = useState(SERVICE_BARBER_ASSIGNMENTS_DEFAULTS);
+    const { assignedIds = [], selectedIds } = serviceBarberAssignments;
+    const changedBarberIds = [...selectedIds.filter((id) => !assignedIds.includes(id)), ...assignedIds.filter((id) => !selectedIds.includes(id))];
     const [createBranchTariffs, setCreateBranchTariffs] = useState([]);
     const [useSameTariffForAll, setUseSameTariffForAll] = useState(true);
     const [commonCreateTariff, setCommonCreateTariff] = useState(TARIFF_FORM_DEFAULTS);
@@ -816,12 +818,8 @@ export default function AdminServicesCatalogPage() {
                 if (cancelled) return;
                 const payload = response?.data ?? response;
                 const barberos = Array.isArray(payload?.barberos) ? payload.barberos : [];
-                setServiceBarberAssignments({
-                    loading: false,
-                    error: '',
-                    barberos,
-                    selectedIds: barberos.filter((barbero) => barbero?.ofrece_servicio).map((barbero) => barbero.id_empleado),
-                });
+                const assignedIds = barberos.filter((barbero) => barbero?.ofrece_servicio).map((barbero) => barbero.id_empleado);
+                setServiceBarberAssignments({ loading: false, error: '', barberos, selectedIds: assignedIds, assignedIds });
             })
             .catch((err) => {
                 if (cancelled) return;
@@ -1501,7 +1499,7 @@ export default function AdminServicesCatalogPage() {
             )}
 
             {/* Dialog Crear / Editar */}
-            <UnsavedChangesDialog values={{ formValues, createBranchTariffs, useSameTariffForAll, commonCreateTariff, selectedIds: serviceBarberAssignments.selectedIds }} saving={formLoading} open={dialogOpen} onOpenChange={handleServiceDialogOpenChange}>
+            <UnsavedChangesDialog values={{ formValues, createBranchTariffs, useSameTariffForAll, commonCreateTariff, selectedIds: changedBarberIds }} saving={formLoading} open={dialogOpen} onOpenChange={handleServiceDialogOpenChange}>
                 <DialogContent className={`w-[calc(100vw-1rem)] max-h-[calc(100vh-1.5rem)] overflow-y-auto ${canManageServiceBarberAssignments && editTarget ? 'sm:max-w-2xl' : 'sm:max-w-md'}`}>
                     <DialogHeader>
                         <DialogTitle>{editTarget ? 'Editar servicio' : 'Nuevo servicio'}</DialogTitle>
@@ -1842,5 +1840,3 @@ export default function AdminServicesCatalogPage() {
         </div>
     );
 }
-
-

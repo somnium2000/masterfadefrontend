@@ -1,8 +1,9 @@
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, ShieldAlert, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
-  Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -178,6 +179,13 @@ async function getFreshAccountDeletionReauthToken({ expectedUserId, email, passw
   return token;
 }
 
+const EMPTY_ACKS = {
+  acepta_perder_masterpuntos: false,
+  acepta_cancelar_membresia: false,
+  acepta_historial_anonimizado: false,
+  acepta_irreversibilidad: false,
+};
+
 export default function ClienteAccountDeletionDialog({
   open,
   onOpenChange,
@@ -196,12 +204,7 @@ export default function ClienteAccountDeletionDialog({
   const [reauthMethod, setReauthMethod] = useState("password");
   useEffect(relayDeletionGoogleResult, []);
   const [confirmationText, setConfirmationText] = useState("");
-  const [acks, setAcks] = useState(() => ({
-    acepta_perder_masterpuntos: false,
-    acepta_cancelar_membresia: false,
-    acepta_historial_anonimizado: false,
-    acepta_irreversibilidad: false,
-  }));
+  const [acks, setAcks] = useState(EMPTY_ACKS);
   const previewStartedRef = useRef(false);
   const createStartedRef = useRef(false);
   const confirmStartedRef = useRef(false);
@@ -225,12 +228,7 @@ export default function ClienteAccountDeletionDialog({
     setPassword("");
     setReauthMethod("password");
     setConfirmationText("");
-    setAcks({
-      acepta_perder_masterpuntos: false,
-      acepta_cancelar_membresia: false,
-      acepta_historial_anonimizado: false,
-      acepta_irreversibilidad: false,
-    });
+    setAcks(EMPTY_ACKS);
     previewStartedRef.current = false;
     createStartedRef.current = false;
     confirmStartedRef.current = false;
@@ -365,7 +363,14 @@ export default function ClienteAccountDeletionDialog({
   }, [acks, canConfirm, confirmationText, expectedUserId, navigate, password, reauthMethod, preview, profile?.correo_principal, requestInfo]);
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <UnsavedChangesDialog
+      key={expectedUserId}
+      initialValues={{ password: false, reauthMethod: "password", confirmationText: "", acks: EMPTY_ACKS }}
+      values={{ password: Boolean(password), reauthMethod, confirmationText, acks }}
+      saving={creatingRequest || confirming}
+      open={open}
+      onOpenChange={handleOpenChange}
+    >
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Eliminar cuenta</DialogTitle>
@@ -500,14 +505,13 @@ export default function ClienteAccountDeletionDialog({
         ) : null}
 
         <DialogFooter>
-          <button
+          <DialogClose asChild><button
             type="button"
             className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--mf-btn-border)] bg-[var(--mf-card)] px-4 text-sm font-semibold text-[var(--mf-text)]"
-            disabled={confirming}
-            onClick={() => handleOpenChange(false)}
+            disabled={creatingRequest || confirming}
           >
             Cerrar
-          </button>
+          </button></DialogClose>
           {preview?.can_delete === true && step === "preview" ? (
             <button
               type="button"
@@ -531,6 +535,6 @@ export default function ClienteAccountDeletionDialog({
           ) : null}
         </DialogFooter>
       </DialogContent>
-    </Dialog>
+    </UnsavedChangesDialog>
   );
 }
