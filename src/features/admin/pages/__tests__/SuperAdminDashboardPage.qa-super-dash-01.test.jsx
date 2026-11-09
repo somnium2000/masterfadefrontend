@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import SuperAdminDashboardPage from '../SuperAdminDashboardPage.jsx';
 
 const getSummary = vi.fn();
+const originalMatchMedia = window.matchMedia;
 vi.mock('../../lib/superAdminDashboardApi.js', () => ({
   getSuperAdminDashboardSummary: (...args) => getSummary(...args),
 }));
@@ -37,7 +38,11 @@ function deferred() {
 }
 
 describe('SuperAdminDashboardPage', () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    window.matchMedia = originalMatchMedia;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+  });
   beforeEach(() => {
     getSummary.mockReset();
     getSummary.mockImplementation((periodo) => Promise.resolve(responseFor(periodo)));
@@ -119,4 +124,44 @@ describe('SuperAdminDashboardPage', () => {
     await waitFor(() => expect(screen.queryByText('70')).not.toBeInTheDocument());
     expect(screen.getByText('30')).toBeInTheDocument();
   });
+
+  it('representa fechas discontinuas con ceros y conserva totales exactos', async () => {
+    render(<SuperAdminDashboardPage />);
+    await screen.findByText('124');
+    getSummary.mockImplementationOnce((periodo) => Promise.resolve(responseFor(periodo, {
+      ingresos_citas_hnl_periodo: 5,
+      planes_activados: 1,
+      masterpuntos_canjeados: 2,
+      ingresos_serie: [
+        { periodo: '2026-11-06T00:00:00', ingresos_hnl: 2 },
+        { periodo: '2026-11-07T00:00:00', ingresos_hnl: 0 },
+        { periodo: '2026-11-08T00:00:00', ingresos_hnl: 3 },
+      ],
+      actividad_serie: [
+        { periodo: '2026-11-06T00:00:00', planes_activados: 0, masterpuntos_canjeados: 1 },
+        { periodo: '2026-11-07T00:00:00', planes_activados: 0, masterpuntos_canjeados: 0 },
+        { periodo: '2026-11-08T00:00:00', planes_activados: 1, masterpuntos_canjeados: 1 },
+      ],
+      agrupacion: 'day',
+    })));
+    fireEvent.click(screen.getByRole('button', { name: '7 días' }));
+    expect(await screen.findByText(/Período:.*5\.00/)).toBeInTheDocument();
+    expect(screen.getAllByText(/07\/11: L\s*0\.00/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/07\/11: 0 planes activados y 0 canjes/)).toBeInTheDocument();
+  });
+
+  it.each([[360, '0 0 340 230'], [390, '0 0 340 230'], [768, '0 0 720 250'], [1440, '0 0 720 250']])(
+    'adapta la geometría SVG al viewport de %ipx',
+    async (width, viewBox) => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+      window.matchMedia = vi.fn(() => ({ matches: width < 640, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+      render(<SuperAdminDashboardPage />);
+      const income = await screen.findByRole('img', { name: /Evolución temporal de ingresos/i });
+      const activity = screen.getByRole('img', { name: /Comparación temporal/i });
+      expect(income).toHaveAttribute('viewBox', viewBox);
+      expect(activity).toHaveAttribute('viewBox', viewBox);
+      expect(income).toHaveClass('max-w-full');
+      expect(activity).toHaveClass('max-w-full');
+    },
+  );
 });

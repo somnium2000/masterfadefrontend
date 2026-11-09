@@ -47,6 +47,21 @@ function bucketLabel(value, grouping) {
   return `${day}/${month}`;
 }
 
+function useCompactChart() {
+  const query = '(max-width: 639px)';
+  const [compact, setCompact] = useState(() => (typeof window !== 'undefined'
+    ? (window.matchMedia?.(query).matches ?? window.innerWidth < 640)
+    : false));
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const media = window.matchMedia(query);
+    const update = (event) => setCompact(event.matches);
+    media.addEventListener?.('change', update);
+    return () => media.removeEventListener?.('change', update);
+  }, []);
+  return compact;
+}
+
 function MetricCard({ icon: Icon, label, value, detail, secondary, loading }) {
   return (
     <article className="mf-premium-card min-w-0 p-4 sm:p-5">
@@ -72,9 +87,11 @@ function ChartShell({ title, subtitle, children, loading, empty }) {
 }
 
 function IncomeChart({ rows, grouping, range, loading }) {
+  const compact = useCompactChart();
   const values = rows.map((item) => Number(item.ingresos_hnl || 0));
   const maxValue = Math.max(...values, 1);
-  const width = 720; const height = 250; const left = 46; const right = 18; const top = 22; const bottom = 42;
+  const width = compact ? 340 : 720; const height = compact ? 230 : 250;
+  const left = compact ? 38 : 46; const right = compact ? 10 : 18; const top = 22; const bottom = compact ? 38 : 42;
   const chartWidth = width - left - right; const chartHeight = height - top - bottom;
   const points = rows.map((item, index) => ({
     ...item,
@@ -83,15 +100,15 @@ function IncomeChart({ rows, grouping, range, loading }) {
   }));
   const line = points.map((point) => `${point.x},${point.y}`).join(' ');
   const area = points.length ? `${left},${top + chartHeight} ${line} ${points.at(-1).x},${top + chartHeight}` : '';
-  const labelStep = Math.max(1, Math.ceil(rows.length / 6));
+  const labelStep = Math.max(1, Math.ceil(rows.length / (compact ? 4 : 6)));
   return (
     <ChartShell title="Evolución de ingresos por citas" subtitle={`${periodLabel(range)} · Total ${HNL.format(values.reduce((sum, value) => sum + value, 0))}`} loading={loading} empty={!rows.length}>
       <div className="mt-4 w-full overflow-hidden">
-        <svg viewBox={`0 0 ${width} ${height}`} className="h-auto min-h-[250px] w-full" role="img" aria-label="Evolución temporal de ingresos confirmados por citas">
+        <svg viewBox={`0 0 ${width} ${height}`} className="block h-auto max-w-full" role="img" aria-label="Evolución temporal de ingresos confirmados por citas">
           {[0, 0.5, 1].map((ratio) => <line key={ratio} x1={left} x2={width - right} y1={top + chartHeight * ratio} y2={top + chartHeight * ratio} stroke="var(--mf-nav-border)" />)}
           <polygon points={area} fill="var(--mf-accent)" opacity="0.12" /><polyline points={line} fill="none" stroke="var(--mf-accent)" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" />
-          {points.map((point, index) => <g key={point.periodo}><circle cx={point.x} cy={point.y} r="5" fill="var(--mf-card)" stroke="var(--mf-accent)" strokeWidth="3"><title>{`${bucketLabel(point.periodo, grouping)}: ${HNL.format(point.ingresos_hnl)}`}</title></circle>{index % labelStep === 0 || index === points.length - 1 ? <text x={point.x} y={height - 12} textAnchor="middle" fill="var(--mf-text-2)" fontSize="12">{bucketLabel(point.periodo, grouping)}</text> : null}</g>)}
-          <text x="4" y={top + 4} fill="var(--mf-text-2)" fontSize="12">{HNL.format(maxValue)}</text><text x="20" y={top + chartHeight + 4} fill="var(--mf-text-2)" fontSize="12">L 0</text>
+          {points.map((point, index) => <g key={point.periodo}><circle cx={point.x} cy={point.y} r={compact ? 4 : 5} fill="var(--mf-card)" stroke="var(--mf-accent)" strokeWidth="3"><title>{`${bucketLabel(point.periodo, grouping)}: ${HNL.format(point.ingresos_hnl)}`}</title></circle>{index % labelStep === 0 || index === points.length - 1 ? <text x={point.x} y={height - 10} textAnchor="middle" fill="var(--mf-text-2)" fontSize={compact ? 10 : 12}>{bucketLabel(point.periodo, grouping)}</text> : null}</g>)}
+          <text x="2" y={top + 4} fill="var(--mf-text-2)" fontSize={compact ? 9 : 12}>{HNL.format(maxValue)}</text><text x={compact ? 12 : 20} y={top + chartHeight + 4} fill="var(--mf-text-2)" fontSize={compact ? 9 : 12}>L 0</text>
         </svg>
       </div>
       <ul className="sr-only">{rows.map((item) => <li key={item.periodo}>{bucketLabel(item.periodo, grouping)}: {HNL.format(item.ingresos_hnl)}</li>)}</ul>
@@ -100,18 +117,20 @@ function IncomeChart({ rows, grouping, range, loading }) {
 }
 
 function ActivityChart({ rows, grouping, range, loading }) {
+  const compact = useCompactChart();
   const maxValue = Math.max(...rows.flatMap((item) => [Number(item.planes_activados || 0), Number(item.masterpuntos_canjeados || 0)]), 1);
-  const width = 720; const height = 250; const left = 36; const right = 18; const top = 20; const bottom = 44;
+  const width = compact ? 340 : 720; const height = compact ? 230 : 250;
+  const left = compact ? 26 : 36; const right = compact ? 8 : 18; const top = 20; const bottom = compact ? 38 : 44;
   const chartHeight = height - top - bottom; const groupWidth = (width - left - right) / Math.max(rows.length, 1);
-  const barWidth = Math.min(24, Math.max(5, groupWidth * 0.3)); const labelStep = Math.max(1, Math.ceil(rows.length / 6));
+  const barWidth = Math.min(compact ? 10 : 24, Math.max(compact ? 2 : 5, groupWidth * 0.3)); const labelStep = Math.max(1, Math.ceil(rows.length / (compact ? 4 : 6)));
   return (
     <ChartShell title="Activaciones y canjes" subtitle={`${periodLabel(range)} · Comparación temporal`} loading={loading} empty={!rows.length}>
       <div className="mt-4 flex flex-wrap gap-4 text-xs text-[var(--mf-text-2)]" aria-label="Leyenda"><span className="inline-flex items-center gap-2"><i className="h-3 w-3 rounded-sm bg-[var(--mf-accent)]" /> Planes activados</span><span className="inline-flex items-center gap-2"><i className="h-3 w-3 rounded-sm bg-cyan-500" /> Canjes MasterPuntos</span></div>
       <div className="mt-2 w-full overflow-hidden">
-        <svg viewBox={`0 0 ${width} ${height}`} className="h-auto min-h-[250px] w-full" role="img" aria-label="Comparación temporal de planes activados y canjes MasterPuntos">
+        <svg viewBox={`0 0 ${width} ${height}`} className="block h-auto max-w-full" role="img" aria-label="Comparación temporal de planes activados y canjes MasterPuntos">
           <line x1={left} x2={width - right} y1={top + chartHeight} y2={top + chartHeight} stroke="var(--mf-nav-border)" />
-          {rows.map((item, index) => { const center = left + groupWidth * index + groupWidth / 2; const plans = Number(item.planes_activados || 0); const points = Number(item.masterpuntos_canjeados || 0); const plansHeight = (plans / maxValue) * chartHeight; const pointsHeight = (points / maxValue) * chartHeight; return <g key={item.periodo}><rect x={center - barWidth - 2} y={top + chartHeight - plansHeight} width={barWidth} height={plansHeight} rx="3" fill="var(--mf-accent)"><title>{`${bucketLabel(item.periodo, grouping)}: ${plans} planes activados`}</title></rect><rect x={center + 2} y={top + chartHeight - pointsHeight} width={barWidth} height={pointsHeight} rx="3" fill="#06b6d4"><title>{`${bucketLabel(item.periodo, grouping)}: ${points} canjes MasterPuntos`}</title></rect>{index % labelStep === 0 || index === rows.length - 1 ? <text x={center} y={height - 12} textAnchor="middle" fill="var(--mf-text-2)" fontSize="12">{bucketLabel(item.periodo, grouping)}</text> : null}</g>; })}
-          <text x="4" y={top + 4} fill="var(--mf-text-2)" fontSize="12">{NUMBER.format(maxValue)}</text>
+          {rows.map((item, index) => { const center = left + groupWidth * index + groupWidth / 2; const plans = Number(item.planes_activados || 0); const points = Number(item.masterpuntos_canjeados || 0); const plansHeight = (plans / maxValue) * chartHeight; const pointsHeight = (points / maxValue) * chartHeight; return <g key={item.periodo}><rect x={center - barWidth - 1} y={top + chartHeight - plansHeight} width={barWidth} height={plansHeight} rx="2" fill="var(--mf-accent)"><title>{`${bucketLabel(item.periodo, grouping)}: ${plans} planes activados`}</title></rect><rect x={center + 1} y={top + chartHeight - pointsHeight} width={barWidth} height={pointsHeight} rx="2" fill="#06b6d4"><title>{`${bucketLabel(item.periodo, grouping)}: ${points} canjes MasterPuntos`}</title></rect>{index % labelStep === 0 || index === rows.length - 1 ? <text x={center} y={height - 10} textAnchor="middle" fill="var(--mf-text-2)" fontSize={compact ? 10 : 12}>{bucketLabel(item.periodo, grouping)}</text> : null}</g>; })}
+          <text x="2" y={top + 4} fill="var(--mf-text-2)" fontSize={compact ? 9 : 12}>{NUMBER.format(maxValue)}</text>
         </svg>
       </div>
       <ul className="sr-only">{rows.map((item) => <li key={item.periodo}>{bucketLabel(item.periodo, grouping)}: {item.planes_activados} planes activados y {item.masterpuntos_canjeados} canjes</li>)}</ul>
