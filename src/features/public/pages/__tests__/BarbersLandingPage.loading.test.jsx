@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({ branches: vi.fn(), barbers: vi.fn() }));
 vi.mock('../../lib/catalogApi.js', () => ({ listPublicCatalogBranches: api.branches }));
 vi.mock('../../booking/publicBookingApi.js', () => ({ listPublicAgendaBarberos: api.barbers }));
 vi.mock('react-router-dom', () => ({ Link: ({ children }) => <span>{children}</span> }));
+vi.mock('../../../../components/branding/MasterfadeLogo.jsx', () => ({ default: () => null }));
 vi.mock('../../../../components/theme/ThemeSwitcher.jsx', () => ({ default: () => null }));
 
 beforeEach(() => {

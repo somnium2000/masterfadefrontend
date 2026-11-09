@@ -15,9 +15,8 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
+import PublicNavigationHeader from '../../../components/layout/PublicNavigationHeader.jsx';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
-import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import {
   listPublicCatalogBranches,
@@ -369,23 +368,11 @@ export default function ServicesPage() {
   return (
     <div className="mf-page-gradient min-h-screen pb-[100px]">
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 pb-10 pt-4 sm:px-8">
-        <header className="flex items-start justify-between gap-6">
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className="inline-flex items-center gap-2 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-4 py-2 text-sm text-[var(--mf-text)] transition-colors duration-200 hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_70%,white_12%)]"
-          >
-            <House size={16} strokeWidth={1.8} />
-            <span>Volver al inicio</span>
-          </button>
-
-          <ThemeSwitcher />
-        </header>
+        <PublicNavigationHeader onHome={() => navigate('/')} />
 
         <main className="mx-auto mt-8 w-full max-w-4xl">
           <div className="flex flex-col items-center text-center">
-            <MasterfadeLogo variant="publicPromotions" className="-my-6 sm:-my-8 md:-my-10" />
-            <p className="mt-8 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">
               Catalogo publico
             </p>
             <h1 className="mf-font-display mt-4 text-[42px] leading-[0.92] text-[var(--mf-text)]">

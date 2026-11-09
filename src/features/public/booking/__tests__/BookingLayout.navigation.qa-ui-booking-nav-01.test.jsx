@@ -33,10 +33,10 @@ function renderLayout(props = {}) {
 }
 
 describe('BookingLayout navigation header', () => {
-  it('uses the official topbar logo and keeps home and theme controls accessible', () => {
+  it('uses the official navigation logo and keeps home and theme controls accessible', () => {
     renderLayout({ homePath: '/home/cliente', homeLabel: 'Inicio MasterFade' });
 
-    expect(screen.getByRole('img', { name: 'Masterfade script logo' })).toHaveAttribute('data-variant', 'topbar');
+    expect(screen.getByRole('img', { name: 'Masterfade script logo' })).toHaveAttribute('data-variant', 'navigation');
     expect(screen.getByRole('link', { name: 'Inicio MasterFade' })).toHaveAttribute('href', '/home/cliente');
     expect(screen.getByRole('button', { name: 'Cambiar a tema claro' })).toBeInTheDocument();
     expect(screen.getByTestId('theme-label-setting')).toHaveTextContent('false');

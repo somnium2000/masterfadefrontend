@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { CalendarDays, Crown, Home, LogOut, Plus, ShieldCheck, Sparkles, UserRound } from 'lucide-react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import '../../../components/layout/NavigationHeader.css';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
@@ -219,30 +220,31 @@ export default function ClienteAppShell() {
   return (
     <div className="mf-page-gradient min-h-screen pb-[110px] lg:pb-0">
       <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 pb-6 pt-3 sm:px-6 lg:px-8">
-        <header className="sticky top-0 z-30 py-2 backdrop-blur-xl">
-          <div className="mf-glass-surface rounded-[28px] border border-[var(--mf-btn-border)]/80 p-4 sm:p-5">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">
+        <header className="lg:sticky lg:top-0 lg:z-30 lg:py-2 lg:backdrop-blur-xl">
+          <div className="mf-header-surface p-3 sm:px-4">
+            <MasterfadeLogo variant="navigation" className="mb-3 border-b border-[var(--mf-nav-border)] pb-2.5 lg:hidden" />
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+              <div className="min-w-0 flex-[1_1_130px]">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--mf-accent)]">
                   {sectionTitle}
                 </p>
-                <p className="mf-font-display mt-1 truncate text-[26px] leading-none text-[var(--mf-text)] sm:text-[30px]">
+                <p title={displayName} className="mf-font-display mt-1 truncate text-[22px] leading-none text-[var(--mf-text)] sm:text-[26px]">
                   {displayName}
                 </p>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-[11px] font-medium text-[var(--mf-text-2)]">
-                    <ShieldCheck size={12} className="text-[var(--mf-accent)]" />
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-2 py-1 text-[10px] font-medium text-[var(--mf-text-2)]">
+                    <ShieldCheck size={12} aria-hidden="true" className="shrink-0 text-[var(--mf-accent)]" />
                     Sesión segura activa
                   </span>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="mf-header-controls ml-auto">
                 <ThemeSwitcher showLabel={false} />
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 text-sm font-semibold text-[var(--mf-text-2)] transition-colors hover:border-[var(--mf-btn-border)] hover:text-[var(--mf-text)]"
+                  className="mf-header-control mf-focus-ring"
                   aria-label="Cerrar sesión"
                   title="Cerrar sesión"
                 >
@@ -260,7 +262,7 @@ export default function ClienteAppShell() {
               <button
                 type="button"
                 onClick={() => handleNavigate('/home/cliente')}
-                className="mb-4 inline-flex w-full items-center justify-center rounded-xl border border-transparent py-1"
+                className="mf-focus-ring mb-4 inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-transparent py-1"
               >
                 <MasterfadeLogo variant="sidebar" className="mx-auto" />
               </button>

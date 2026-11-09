@@ -44,6 +44,7 @@ function changeB(view) { auth.user = { id_usuario: 'synthetic-B' }; view.rerende
 
 test('sidebar Cliente mantiene el logo centrado y su navegación intacta', async () => {
   await ready();
+  expect(screen.getByRole('banner').querySelector('[data-logo-variant="navigation"]')).toHaveClass('lg:hidden');
   const logo = document.querySelector('[data-logo-variant="sidebar"]');
   expect(logo).toHaveClass('mx-auto');
   expect(logo.closest('button')).toHaveClass('w-full', 'justify-center', 'mb-4');

@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { House, Scissors } from 'lucide-react';
+import { Scissors } from 'lucide-react';
 import LoadingSpinner from '../../../components/data/LoadingSpinner.jsx';
 import EmptyState from '../../../components/data/EmptyState.jsx';
 import ErrorBanner from '../../../components/data/ErrorBanner.jsx';
-import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
+import PublicNavigationHeader from '../../../components/layout/PublicNavigationHeader.jsx';
 import {
   Dialog,
   DialogContent,
@@ -257,20 +256,13 @@ export default function BarbersLandingPage() {
   return (
     <div className="mf-page-gradient min-h-screen">
       <div className="mx-auto w-full max-w-6xl px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
-        <header className="mb-6 flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--mf-accent)]">Equipo</p>
-            <h1 className="mf-font-display mt-2 text-4xl leading-none text-[var(--mf-text)] sm:text-5xl">Barberos</h1>
-            <p className="mt-2 text-sm text-[var(--mf-text-2)]">Conoce al equipo de barberos de MASTERFADE.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Link to="/" className="inline-flex items-center gap-2 rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2 text-xs text-[var(--mf-text)]">
-              <House size={14} />
-              Inicio
-            </Link>
-            <ThemeSwitcher />
-          </div>
-        </header>
+        <PublicNavigationHeader homeLabel="Inicio" />
+
+        <div className="my-6">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--mf-accent)]">Equipo</p>
+          <h1 className="mf-font-display mt-2 text-4xl leading-none text-[var(--mf-text)] sm:text-5xl">Barberos</h1>
+          <p className="mt-2 text-sm text-[var(--mf-text-2)]">Conoce al equipo de barberos de MASTERFADE.</p>
+        </div>
 
         {status === 'error' ? <ErrorBanner message={errorMessage} onRetry={loadBarbers} /> : null}
         {status === 'success' && partialLoad ? (

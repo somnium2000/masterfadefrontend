@@ -1,9 +1,6 @@
 import { memo } from 'react';
-import { ArrowLeft, House } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import MasterfadeLogo from '../../../../components/branding/MasterfadeLogo.jsx';
-import { Button } from '../../../../components/ui/button.jsx';
-import ThemeSwitcher from '../../../../components/theme/ThemeSwitcher.jsx';
+import { ArrowLeft } from 'lucide-react';
+import PublicNavigationHeader from '../../../../components/layout/PublicNavigationHeader.jsx';
 import BookingErrorState from './BookingErrorState.jsx';
 import BookingLoadingState from './BookingLoadingState.jsx';
 
@@ -20,39 +17,18 @@ const BookingLayout = memo(function BookingLayout({
   return (
     <div className="public-booking-page mf-page-gradient min-h-screen">
       <div className="public-booking-shell">
-        <header className="public-booking-topbar">
-          <div className="public-booking-topbar-left">
-            {showBackToBarberos ? (
-              <Button
-                variant="outline"
-                className="public-booking-topbar-control public-booking-topbar-back"
-                onClick={onBackToBarberos}
-                aria-label="Volver a barberos"
-              >
-                <ArrowLeft size={18} aria-hidden="true" />
-                <span className="public-booking-topbar-label">Volver a barberos</span>
-              </Button>
-            ) : null}
-          </div>
-
-          <MasterfadeLogo variant="topbar" className="public-booking-topbar-logo" />
-
-          <div className="public-booking-topbar-actions">
-            <Link
-              to={homePath}
-              className="public-booking-topbar-control public-booking-home"
-              aria-label={homeLabel}
-            >
-              <House size={18} aria-hidden="true" />
-              <span className="public-booking-topbar-label">{homeLabel}</span>
-            </Link>
-            <ThemeSwitcher
-              showLabel={false}
-              className="public-booking-theme-switcher"
-              buttonClassName="public-booking-theme-button"
-            />
-          </div>
-        </header>
+        <PublicNavigationHeader
+          className="public-booking-topbar"
+          booking
+          homePath={homePath}
+          homeLabel={homeLabel}
+          backControl={showBackToBarberos ? (
+            <button type="button" className="mf-header-control mf-focus-ring" onClick={onBackToBarberos}>
+              <ArrowLeft size={17} strokeWidth={1.8} aria-hidden="true" />
+              Volver a barberos
+            </button>
+          ) : null}
+        />
 
         {loading ? <BookingLoadingState /> : null}
         {error ? <BookingErrorState message={error} onRetry={onRetry} /> : null}
