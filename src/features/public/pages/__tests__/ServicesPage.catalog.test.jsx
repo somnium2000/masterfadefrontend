@@ -112,12 +112,13 @@ describe('catálogo público por sucursal', () => {
   });
 
   test('separa los servicios informativos de los agendables', async () => {
-    api.listPublicCatalogServices.mockResolvedValue({ services: [service('Corte A'), service('Consulta A', true)] });
+    api.listPublicCatalogServices.mockResolvedValue({ services: [service('Corte A'), { ...service('Consulta A', true), precio_hnl: 0 }] });
     render(<ServicesPage />);
     const agendable = await screen.findByRole('heading', { name: 'Servicios agendables' });
     const informative = screen.getByRole('heading', { name: 'Servicios informativos' });
     expect(within(agendable.closest('section')).getByText('Corte A')).toBeInTheDocument();
     expect(within(informative.closest('section')).getByText('Consulta A')).toBeInTheDocument();
+    expect(within(informative.closest('section')).getByText('Consultar precio')).toBeInTheDocument();
   });
 
   test('colecciones realmente vacías muestran sus mensajes normales', async () => {

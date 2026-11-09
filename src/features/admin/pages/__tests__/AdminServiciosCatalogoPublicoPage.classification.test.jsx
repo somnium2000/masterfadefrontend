@@ -21,7 +21,7 @@ beforeEach(() => {
     { id_sucursal: 'A', nombre_sucursal: 'Centro' }, { id_sucursal: 'B', nombre_sucursal: 'Norte' },
   ] });
   api.getPublicCatalog.mockResolvedValue({ services: [
-    service('Reservable', true), service('Informativo', false, true),
+    service('Reservable', true), { ...service('Informativo', false, true), precio_hnl: 0 },
     service('No reservable', false, false, 20), service('Sin confirmar', undefined, false, 5),
   ], packages: [{ id_paquete: 'P', nombre_paquete: 'Combo', precio_hnl: 300, items: [] }] });
   api.listPublicCatalogPlans.mockResolvedValue({ plans: [{ id_plan: 'VIP', nombre_plan: 'Plan VIP', precio_hnl: 500 }] });
@@ -52,6 +52,7 @@ test('clasifica servicios por el contrato sin duplicar y conserva datos y orden'
   expect(cards[1]).toHaveTextContent('Duración: 25 min');
   const informative = screen.getByRole('heading', { name: 'Servicios informativos' }).closest('section');
   expect(within(informative).getByText('Informativo')).toBeInTheDocument();
+  expect(within(informative).getByText('Precio: Consultar precio')).toBeInTheDocument();
   expect(screen.getAllByText('No reservable')).toHaveLength(1);
   expect(screen.getByText('Combo')).toBeInTheDocument();
   expect(screen.getByText('Plan VIP')).toBeInTheDocument();

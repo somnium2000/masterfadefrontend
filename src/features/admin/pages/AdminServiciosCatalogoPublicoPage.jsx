@@ -283,7 +283,7 @@ export default function AdminServiciosCatalogoPublicoPage() {
                 chips={[
                   { label: 'Tipo', value: 'Informativo' },
                   { label: 'Orden', value: Number(row.orden_visual ?? 100) },
-                  { label: 'Precio', value: `L ${Number(row.precio_hnl ?? 0).toFixed(2)}` },
+                  { label: 'Precio', value: Number(row.precio_hnl) > 0 ? `L ${Number(row.precio_hnl).toFixed(2)}` : 'Consultar precio' },
                 ]}
               />
             ))}

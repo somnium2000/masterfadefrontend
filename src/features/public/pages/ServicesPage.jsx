@@ -32,7 +32,8 @@ function formatPriceHnl(value) {
 }
 
 function ServiceCard({ item, compact = false, nonBookable = false }) {
-  const displayPrice = formatPriceHnl(item?.precio_hnl);
+  const isInformativeWithoutPrice = item?.servicio_informativo === true && Number(item?.precio_hnl) === 0;
+  const displayPrice = isInformativeWithoutPrice ? 'Consultar precio' : formatPriceHnl(item?.precio_hnl);
   return (
     <motion.article
       data-catalog-card="true"

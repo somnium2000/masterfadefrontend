@@ -1197,9 +1197,7 @@ export default function AdminServicesCatalogPage() {
     const modeLabel = 'servicios';
 
     function ServiceBadges({ servicio, selectedTariff }) {
-        const informative = sucursal
-            ? Boolean(selectedTariff?.servicio_informativo)
-            : !servicio.agendable;
+        const informative = Boolean(selectedTariff?.servicio_informativo);
         return (
             <div className="flex flex-wrap gap-1.5">
                 <ServiceStatusBadge activo={Boolean(servicio.activo)} />
@@ -1232,7 +1230,7 @@ export default function AdminServicesCatalogPage() {
                 <div className="flex min-w-0 flex-wrap gap-1.5">
                     {visibleBranches.map((tarifa) => (
                         <span key={getTarifaKey(tarifa)} className="max-w-full truncate rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-2 py-0.5 text-xs text-[var(--mf-text)]">
-                            {getBranchShortName(tarifa.nombre_sucursal)}
+                            {getBranchShortName(tarifa.nombre_sucursal)}{tarifa.servicio_informativo ? ' · Informativo' : ''}
                         </span>
                     ))}
                     {activeTariffs.length > visibleBranches.length ? (
