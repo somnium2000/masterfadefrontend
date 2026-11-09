@@ -996,7 +996,6 @@ function AdminMasterPuntosContent() {
           <div className="relative">
             <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
             <Input
-              autoFocus
               value={searchDraft}
               onChange={(event) => {
                 searchRequestSeqRef.current += 1;
