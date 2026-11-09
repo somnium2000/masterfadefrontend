@@ -112,14 +112,15 @@ test('unavailable promotion target disables the card without changing selection'
 test.each([
   ['light', 1280],
   ['dark', 390],
-])('calendar loading uses branded spinner and blocks dates in %s mode at %ipx', (theme, width) => {
+])('calendar loading uses accessible spinner and blocks dates in %s mode at %ipx', (theme, width) => {
   document.documentElement.classList.toggle('dark', theme === 'dark');
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
   context.current.availabilityLoading = true;
 
   const { container } = render(<PublicBookingAgendaStep />);
   expect(screen.getByText('Buscando fechas disponibles...')).toBeTruthy();
-  expect(screen.getByAltText('Masterfade cargando')).toBeTruthy();
+  expect(screen.getByRole('status')).toBeTruthy();
+  expect(container.querySelector('img')).toBeNull();
   expect(screen.getByRole('button', { name: 'Mes anterior' }).disabled).toBe(true);
   expect(screen.getByRole('button', { name: 'Mes siguiente' }).disabled).toBe(true);
   expect(container.querySelectorAll('.citas-day-btn')).toHaveLength(0);
