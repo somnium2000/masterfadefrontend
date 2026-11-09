@@ -37,6 +37,10 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function openFilters() {
+  fireEvent.click(screen.getByRole('button', { name: 'Filtros' }));
+}
+
 describe('SuperAdminDashboardPage', () => {
   afterEach(() => {
     cleanup();
@@ -60,9 +64,24 @@ describe('SuperAdminDashboardPage', () => {
     expect(screen.getByText(/Cobros confirmados asociados exclusivamente a citas/i)).toBeInTheDocument();
   });
 
+  it('inicia con filtros cerrados, título exacto y alterna el panel solo con Filtros', async () => {
+    render(<SuperAdminDashboardPage />);
+    expect(await screen.findByRole('heading', { name: 'Panel Ejecutivo' })).toBeInTheDocument();
+    const filterButton = screen.getByRole('button', { name: 'Filtros' });
+    expect(filterButton).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('region', { name: 'Período de indicadores' })).not.toBeInTheDocument();
+    fireEvent.click(filterButton);
+    expect(screen.getByRole('region', { name: 'Período de indicadores' })).toBeInTheDocument();
+    expect(filterButton).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(filterButton);
+    expect(screen.queryByRole('region', { name: 'Período de indicadores' })).not.toBeInTheDocument();
+    expect(getSummary).toHaveBeenCalledTimes(1);
+  });
+
   it('cambia de Hoy a 7 días y muestra únicamente la respuesta del nuevo período', async () => {
     render(<SuperAdminDashboardPage />);
     await screen.findByText('124');
+    openFilters();
     getSummary.mockImplementationOnce((periodo) => Promise.resolve(responseFor(periodo, { planes_activados: 7, masterpuntos_canjeados: 8 })));
     fireEvent.click(screen.getByRole('button', { name: '7 días' }));
     expect(await screen.findByText('7')).toBeInTheDocument();
@@ -72,6 +91,7 @@ describe('SuperAdminDashboardPage', () => {
   it('muestra métricas no disponibles si falla un período distinto', async () => {
     render(<SuperAdminDashboardPage />);
     expect(await screen.findByText('124')).toBeInTheDocument();
+    openFilters();
     const nextPeriod = deferred();
     getSummary.mockImplementationOnce(() => nextPeriod.promise);
     fireEvent.click(screen.getByRole('button', { name: '7 días' }));
@@ -97,6 +117,7 @@ describe('SuperAdminDashboardPage', () => {
   it('valida fechas personalizadas vacías o invertidas sin enviar solicitudes', async () => {
     render(<SuperAdminDashboardPage />);
     await screen.findByText('124');
+    openFilters();
     fireEvent.click(screen.getByRole('button', { name: 'Personalizado' }));
     fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '' } });
     expect(await screen.findByText(/Selecciona ambas fechas/i)).toBeInTheDocument();
@@ -109,6 +130,7 @@ describe('SuperAdminDashboardPage', () => {
   it('ignora respuestas concurrentes que llegan fuera de orden', async () => {
     render(<SuperAdminDashboardPage />);
     await screen.findByText('124');
+    openFilters();
     const sevenDays = deferred();
     const thirtyDays = deferred();
     getSummary.mockImplementationOnce(() => sevenDays.promise).mockImplementationOnce(() => thirtyDays.promise);
@@ -128,6 +150,7 @@ describe('SuperAdminDashboardPage', () => {
   it('representa fechas discontinuas con ceros y conserva totales exactos', async () => {
     render(<SuperAdminDashboardPage />);
     await screen.findByText('124');
+    openFilters();
     getSummary.mockImplementationOnce((periodo) => Promise.resolve(responseFor(periodo, {
       ingresos_citas_hnl_periodo: 5,
       planes_activados: 1,
