@@ -498,8 +498,7 @@ export default function ClienteCatalogoPage() {
   }, [fetchCatalogData, normalizedSearchTerm]);
 
   const agendables = useMemo(() => services.filter((item) => item?.agendable === true && item?.servicio_informativo !== true), [services]);
-  const informativeServices = useMemo(() => services.filter((item) => item?.servicio_informativo === true), [services]);
-  const nonBookableServices = useMemo(() => services.filter((item) => item?.agendable !== true && item?.servicio_informativo !== true), [services]);
+  const informativeServices = useMemo(() => services.filter((item) => item?.servicio_informativo === true || item?.agendable !== true), [services]);
   const sortedPromotions = useMemo(() => {
     return [...promotions].sort((a, b) => {
       const featuredDiff = Number(Boolean(b?.destacada)) - Number(Boolean(a?.destacada));
@@ -634,24 +633,6 @@ export default function ClienteCatalogoPage() {
                     footer={Number(item?.duracion_min) > 0
                       ? <p className="mt-2 text-xs text-[var(--mf-text-2)]">Duración de referencia: {item.duracion_min} min</p>
                       : null}
-                  />
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {nonBookableServices.length > 0 ? (
-            <section className="space-y-3">
-              <SectionTitle icon={Scissors} title="Servicios no disponibles para agendar" subtitle="Consulta los detalles de estos servicios." />
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                {nonBookableServices.map((item) => (
-                  <CatalogItemCard
-                    key={item.id_servicio}
-                    title={item.nombre_servicio}
-                    subtitle="No disponible para agendar"
-                    description={item.descripcion || ''}
-                    price={Number(item?.precio_hnl) > 0 ? formatPrice(item.precio_hnl) : null}
-                    footer={<p className="mt-2 text-xs text-[var(--mf-text-2)]">Duración: {item.duracion_min} min</p>}
                   />
                 ))}
               </div>

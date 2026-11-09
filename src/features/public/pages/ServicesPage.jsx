@@ -352,8 +352,7 @@ export default function ServicesPage() {
   }
 
   const agendableServices = services.filter((item) => item?.agendable === true && item?.servicio_informativo !== true);
-  const informativeServices = services.filter((item) => item?.servicio_informativo === true);
-  const nonBookableServices = services.filter((item) => item?.agendable !== true && item?.servicio_informativo !== true);
+  const informativeServices = services.filter((item) => item?.servicio_informativo === true || item?.agendable !== true);
 
   const navItems = [
     { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate('/') },
@@ -497,16 +496,6 @@ export default function ServicesPage() {
                     ))}
                   </CatalogSection>
 
-                  {nonBookableServices.length > 0 ? (
-                    <section className="mt-8">
-                      <h2 className="mf-font-display text-[26px] text-[var(--mf-text)]">Servicios no disponibles para agendar</h2>
-                      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                        {nonBookableServices.map((item) => (
-                          <ServiceCard key={item.id_servicio} item={item} nonBookable />
-                        ))}
-                      </div>
-                    </section>
-                  ) : null}
                 </>
               )}
 

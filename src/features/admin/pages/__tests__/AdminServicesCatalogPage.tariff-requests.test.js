@@ -11,6 +11,7 @@ function fixture() {
     tariffTarget: { servicio: { id_servicio: 'S-A' }, tarifa: { id_sucursal: 'A', id_tarifa: 'T-A' } },
     tariffFormValues: { precio_hnl: '100', duracion_min: '30', buffer_min: '5', activo: true, servicio_informativo: false },
     validateTariffForm: () => null, extractMessage: () => 'Mensaje seguro',
+    normalizeTariffPrice: (values) => String(values.precio_hnl ?? '').trim() === '' && values.servicio_informativo ? 0 : parseFloat(values.precio_hnl),
     updateAdminServicioTarifa: vi.fn(), createAdminServicioTarifa: vi.fn(), fetchServicios: vi.fn().mockResolvedValue(),
     notifications: { success: vi.fn(), error: vi.fn() }, emitCatalogSync: vi.fn(), navigate: vi.fn(),
     setTariffFormError: value => effects.push(['error', value]), setTariffFormLoading: value => effects.push(['loading', value]),
@@ -40,6 +41,16 @@ test('SV05-TARIFF-DUP-01: dos invocaciones simultáneas emiten una sola petició
   a.resolve({}); await Promise.all([first, second]);
   expect(f.env.notifications.success).toHaveBeenCalledTimes(1);
   expect(f.effects).toContainEqual(['dialog', false]); expect(f.effects.at(-1)).toEqual(['loading', false]);
+});
+
+test('tarifa informativa con precio eliminado envía cero sin convertirla en agendable', async () => {
+  const f = fixture();
+  f.env.tariffFormValues = { ...f.env.tariffFormValues, precio_hnl: '', servicio_informativo: true };
+  f.env.updateAdminServicioTarifa.mockResolvedValue({});
+  await f.save();
+  expect(f.env.updateAdminServicioTarifa).toHaveBeenCalledWith('S-A', 'A', {
+    precio_hnl: 0, duracion_min: 30, buffer_min: 5, activo: true, servicio_informativo: true,
+  });
 });
 
 test('SV05-TARIFF-STALE-01: resultado de A no cierra B, notifica ni libera su loading; tampoco durante refresh', async () => {
