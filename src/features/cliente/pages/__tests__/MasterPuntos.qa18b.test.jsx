@@ -40,6 +40,23 @@ function switchTo(view, id = 'B') { auth.user = id ? { id_usuario: `user-${id}`,
 function balance() { return screen.getByText('Saldo total').closest('article'); }
 function requestRedeem(view) { route.search = '?accion=canjear'; view.rerender(<Points />); }
 
+test.each([false, true])('enlace directo de canje respeta pausa %s', async enabled => {
+  flags.CLIENT_BOOKING_ENABLED = enabled;
+  const view = await ready();
+  requestRedeem(view);
+  if (enabled) {
+    await screen.findByRole('dialog');
+    await waitFor(() => expect(notices.info).toHaveBeenCalledWith('Canjea tu recompensa para continuar con tu cita.', expect.any(Object)));
+  } else {
+    await waitFor(() => expect(notices.info).toHaveBeenCalledWith(flags.CLIENT_LOCK_MESSAGE, expect.any(Object)));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('MOV-A')).toBeInTheDocument();
+    expect(branches).not.toHaveBeenCalled();
+    expect(notices.info).not.toHaveBeenCalledWith('Canjea tu recompensa para continuar con tu cita.', expect.anything());
+  }
+  expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
+});
+
 test.each([500, 0, 409])('mensaje técnico %s no se presenta', async status => {
   api.getClientePuntosResumen.mockRejectedValue({ status, message: 'SQL PRIVATE DETAIL', data: { error: { message: 'SQL PRIVATE DETAIL' } } }); render(<Points />);
   await screen.findByText(status === 409 ? 'No fue posible completar la operación por un conflicto. Actualiza tus puntos e intenta nuevamente.' : 'No se pudo cargar tu resumen de superpuntos.');

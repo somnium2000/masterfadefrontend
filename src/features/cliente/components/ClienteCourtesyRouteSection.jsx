@@ -446,6 +446,11 @@ export default function ClienteCourtesyRouteSection() {
     const nextSearch = searchParams.toString();
     navigate(`/home/cliente${nextSearch ? `?${nextSearch}` : ''}`, { replace: true });
 
+    if (!CLIENT_BOOKING_ENABLED) {
+      notifications.info(CLIENT_LOCK_MESSAGE, { dedupeKey: 'cliente-booking-paused' });
+      return;
+    }
+
     void (async () => {
       const refreshedSummary = await loadSummary();
       if (!refreshedSummary?.canRedeem) return;
