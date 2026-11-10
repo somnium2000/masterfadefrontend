@@ -102,10 +102,11 @@ export default function PremiumBottomNav({
               <div className={`${compactBarberPreset ? 'mx-1.5' : 'mx-1 min-[360px]:mx-2'} flex shrink-0 flex-col items-center`}>
                 <motion.button
                   type="button"
-                  whileHover={{ scale: 1.08, y: -2 }}
-                  whileTap={{ scale: 0.92 }}
-                  onClick={fabItem.onClick}
-                  className={fabClass}
+                  whileHover={fabItem.disabled ? undefined : { scale: 1.08, y: -2 }}
+                  whileTap={fabItem.disabled ? undefined : { scale: 0.92 }}
+                  onClick={fabItem.disabled ? undefined : fabItem.onClick}
+                  disabled={fabItem.disabled}
+                  className={`${fabClass} ${fabItem.disabled ? 'cursor-not-allowed opacity-60' : ''}`}
                   aria-label={fabItem.label}
                 >
                   <FabIcon size={fabIconSize} strokeWidth={2.5} />

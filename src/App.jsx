@@ -60,6 +60,8 @@ import AdminSeguridadSesionesPage from './features/admin/pages/AdminSeguridadSes
 import AdminSeguridadUsuariosPage from './features/admin/pages/AdminSeguridadUsuariosPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
+import BookingUnavailablePage from './features/public/pages/BookingUnavailablePage.jsx';
+import { PUBLIC_BOOKING_ENABLED } from './features/public/lib/publicBookingFeatureFlags.js';
 
 const PublicBookingFlow = lazy(() => import('./features/public/booking/PublicBookingFlow.jsx'));
 const PublicBookingBarberosStep = lazy(() => import('./features/public/booking/PublicBookingBarberosStep.jsx'));
@@ -156,7 +158,7 @@ function App() {
         element={
           <RouteErrorBoundary>
             <BookingSuspense>
-              <PublicBookingFlow />
+              {PUBLIC_BOOKING_ENABLED ? <PublicBookingFlow /> : <BookingUnavailablePage />}
             </BookingSuspense>
           </RouteErrorBoundary>
         }

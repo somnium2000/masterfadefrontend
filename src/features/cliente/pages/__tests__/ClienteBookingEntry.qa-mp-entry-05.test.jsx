@@ -36,7 +36,9 @@ vi.mock('../../components/ClienteCourtesyRouteSection.jsx', () => ({ default: ()
 vi.mock('../../components/ClienteProfileCompletionBanner.jsx', () => ({ default: () => null }));
 vi.mock('../../components/ClienteProfileEditModal.jsx', () => ({ default: () => null }));
 vi.mock('../../components/ClienteSummaryCards.jsx', () => ({
-  default: ({ onNewAppointment }) => <button type="button" onClick={onNewAppointment}>Agendar nueva</button>,
+  default: ({ onNewAppointment, appointmentActionsEnabled, appointmentActionLabel }) => (
+    <button type="button" disabled={!appointmentActionsEnabled} onClick={onNewAppointment}>{appointmentActionLabel}</button>
+  ),
 }));
 vi.mock('../../../../components/data/CardsCarousel.jsx', () => ({ default: () => null }));
 
@@ -49,11 +51,12 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-test('Inicio delega ambas acciones de nueva cita en la verificación central', async () => {
+test('Inicio bloquea ambas acciones de nueva cita cuando el indicador está deshabilitado', async () => {
   render(<ClienteDashboardPage />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Agendar nueva' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Agendar' }));
-  expect(startNewAppointment).toHaveBeenCalledTimes(2);
+  const buttons = await screen.findAllByRole('button', { name: 'Proximamente...' });
+  expect(buttons).toHaveLength(2);
+  for (const button of buttons) expect(button).toBeDisabled();
+  expect(startNewAppointment).not.toHaveBeenCalled();
   expect(navigate).not.toHaveBeenCalledWith('/agendar');
 });
 

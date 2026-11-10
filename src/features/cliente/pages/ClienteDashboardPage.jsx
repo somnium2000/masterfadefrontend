@@ -308,6 +308,7 @@ export default function ClienteDashboardPage() {
           <button
             type="button"
             onClick={handleBookingAction}
+            disabled={!CLIENT_BOOKING_ENABLED}
             title={CLIENT_BOOKING_ENABLED ? undefined : 'El agendamiento estara disponible proximamente.'}
             className={[
               'text-xs font-semibold uppercase tracking-[0.08em]',
@@ -340,6 +341,7 @@ export default function ClienteDashboardPage() {
                     <button
                       type="button"
                       onClick={handleBookingAction}
+                      disabled={!CLIENT_BOOKING_ENABLED}
                       title={CLIENT_BOOKING_ENABLED ? undefined : 'El agendamiento estara disponible proximamente.'}
                       className={[
                         'mt-3 inline-flex h-8 items-center justify-center rounded-lg border px-3 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors',
@@ -370,6 +372,7 @@ export default function ClienteDashboardPage() {
                   <button
                     type="button"
                     onClick={handleBookingAction}
+                    disabled={!CLIENT_BOOKING_ENABLED}
                     title={CLIENT_BOOKING_ENABLED ? undefined : 'El agendamiento estara disponible proximamente.'}
                     className={[
                       'mt-3 inline-flex h-8 items-center justify-center rounded-lg border px-3 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors',
