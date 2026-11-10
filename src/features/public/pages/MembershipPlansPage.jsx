@@ -23,6 +23,7 @@ import { useAuth } from "../../../context/AuthContext.jsx";
 import { useNotifications } from "../../../context/NotificationsContext.jsx";
 import { listPublicCatalogBranches, listPublicPlansByBranch } from "../lib/catalogApi.js";
 import {
+  VIP_MEMBERSHIPS_ENABLED,
   VIP_MEMBERSHIPS_PURCHASE_ENABLED,
   VIP_MEMBERSHIPS_PURCHASE_LOCK_MESSAGE,
 } from "../lib/vipMembershipFeatureFlags.js";
@@ -454,7 +455,7 @@ export default function MembershipPlansPage() {
     const generation = purchaseGenerationRef.current;
     const isCurrent = () => isMountedRef.current && requestId === membershipRequestRef.current
       && generation === purchaseGenerationRef.current && purchaseIdentityRef.current === purchaseIdentity;
-    if (!purchaseIdentity || isHydrating || isHydrated === false) {
+    if (!VIP_MEMBERSHIPS_ENABLED || !purchaseIdentity || isHydrating || isHydrated === false) {
       setMembershipState(null);
       setMembershipLoading(false);
       return;
@@ -474,6 +475,7 @@ export default function MembershipPlansPage() {
 
   useEffect(() => {
     isMountedRef.current = true;
+    if (!VIP_MEMBERSHIPS_ENABLED) return () => { isMountedRef.current = false; };
     let active = true;
     queueMicrotask(() => { if (active) void loadBranches(); });
 
@@ -741,6 +743,27 @@ export default function MembershipPlansPage() {
     { id: "login", label: isAuthenticated ? "Mi panel" : "Iniciar sesion", icon: LogIn, onClick: () => navigate(isAuthenticated ? "/home" : "/login") },
     { id: "promociones", label: "Promociones", icon: Tag, onClick: () => navigate("/promociones") },
   ];
+
+  if (!VIP_MEMBERSHIPS_ENABLED) {
+    return (
+      <div className="mf-page-gradient min-h-screen pb-[100px]">
+        <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 pb-10 pt-4 sm:px-8">
+          <PublicNavigationHeader onHome={() => navigate('/')} />
+          <main className="mx-auto mt-8 w-full max-w-2xl">
+            <section className="mf-glass-surface rounded-[28px] border border-[var(--mf-btn-border)] p-8 text-center">
+              <Crown className="mx-auto text-[var(--mf-accent)]" size={42} aria-hidden="true" />
+              <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Membresías VIP</p>
+              <h1 className="mf-font-display mt-3 text-4xl text-[var(--mf-text)]">Temporalmente pausadas</h1>
+              <p className="mt-4 text-sm leading-7 text-[var(--mf-text-2)]">
+                Los planes VIP no están disponibles por el momento. Podrás consultar y comprar planes cuando el servicio sea habilitado nuevamente.
+              </p>
+            </section>
+          </main>
+        </div>
+        <PremiumBottomNav activeId="servicios" sideItems={navItems} isDesktop />
+      </div>
+    );
+  }
 
   return (
     <div className="mf-page-gradient min-h-screen pb-[100px]">

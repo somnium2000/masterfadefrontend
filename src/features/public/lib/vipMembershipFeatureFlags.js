@@ -5,6 +5,11 @@ export function readEnvFlag(value, fallback = false) {
   return true;
 }
 
+export const VIP_MEMBERSHIPS_ENABLED = readEnvFlag(
+  import.meta.env.VITE_VIP_MEMBERSHIPS_ENABLED,
+  false
+);
+
 export const VIP_MEMBERSHIPS_PURCHASE_ENABLED = readEnvFlag(
   import.meta.env.VITE_VIP_MEMBERSHIPS_PURCHASE_ENABLED,
   false
