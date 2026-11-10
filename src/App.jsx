@@ -301,8 +301,8 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<UnderConstructionPage title="Inicio" />} />
-        <Route path="kpis" element={<UnderConstructionPage title="KPIs" />} />
+        <Route index element={<Navigate to="/home/admin/empleados" replace />} />
+        <Route path="kpis" element={<Navigate to="/home/admin/empleados" replace />} />
         {/* Personas */}
         <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
         <Route path="clientes" element={<RouteErrorBoundary><AdminClientesPage /></RouteErrorBoundary>} />

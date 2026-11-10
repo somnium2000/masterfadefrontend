@@ -220,7 +220,7 @@ export function buildNavModules(basePath, role, roles = []) {
         });
     }
 
-    return modules;
+    return role === 'admin' ? modules.filter((module) => module.id !== 'inicio') : modules;
 }
 
 function normalizePath(path) {
@@ -440,14 +440,15 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                 { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
             ]
             : [
-                { id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate(basePath) },
+                ...(currentRole === 'super_admin' ? [{ id: 'inicio', label: 'Inicio', icon: House, onClick: () => navigate(basePath) }] : []),
                 { id: 'personas', label: 'Personas', icon: Users, onClick: () => navigate(`${basePath}/empleados`) },
                 { id: 'servicios', label: 'Servicios', icon: Scissors, onClick: () => navigate(`${basePath}/catalog/servicios`) },
                 { id: 'sucursales', label: 'Sucursales', icon: Building2, onClick: () => navigate(`${basePath}/sucursales`) },
                 { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
             ];
     const ActiveModuleIcon = activeModule?.icon;
-    const mobileSideItems = currentRole === 'barbero' ? mobileItems : mobileItems.slice(0, 4);
+    const mobileSideItems = currentRole === 'barbero' ? mobileItems
+        : currentRole === 'admin' ? mobileItems.filter((item) => item.id !== 'salir') : mobileItems.slice(0, 4);
 
     return (
         <div className="min-h-screen bg-[var(--mf-bg)] text-[var(--mf-text)]">
