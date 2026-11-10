@@ -38,7 +38,7 @@ import {
 } from "../lib/clienteApi.js";
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
 import useMembershipPaymentPolling from "../../plans/hooks/useMembershipPaymentPolling.js";
-import { CLIENT_LOCK_MESSAGE, CLIENT_PLAN_PURCHASE_ENABLED } from "../lib/clientFeatureFlags.js";
+import { CLIENT_PLAN_PURCHASE_ENABLED } from "../lib/clientFeatureFlags.js";
 import { getPixelPayCustomerMessage, isPixelPayUncertainError } from "../../payments/pixelPayPresentation.js";
 
 const PIXELPAY_PENDING_MESSAGE = getPixelPayCustomerMessage({ pending_confirmation: true });
@@ -1131,7 +1131,7 @@ export default function ClientePlanesPage() {
                   loading={Boolean(planOfferId) && loadingPlanOfferId === planOfferId}
                   disabled={Boolean(loadingPlanOfferId && planOfferId && loadingPlanOfferId !== planOfferId)}
                   purchaseEnabled={CLIENT_PLAN_PURCHASE_ENABLED}
-                  lockLabel={CLIENT_LOCK_MESSAGE}
+                  lockLabel="Compra de planes temporalmente no disponible"
                 />
               );
             }}
