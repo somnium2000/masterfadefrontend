@@ -7,6 +7,9 @@ import ClienteHistorialCitasPage from '../ClienteHistorialCitasPage.jsx';
 
 const startNewAppointment = vi.hoisted(() => vi.fn());
 const navigate = vi.hoisted(() => vi.fn());
+const flags = vi.hoisted(() => ({ CLIENT_BOOKING_ENABLED: false, CLIENT_CITAS_ENABLED: true, CLIENT_LOCK_MESSAGE: 'Agendamiento temporalmente no disponible' }));
+const location = vi.hoisted(() => ({ pathname:'/home/cliente/citas', state:null }));
+vi.mock('../../lib/clientFeatureFlags.js', () => flags);
 const api = vi.hoisted(() => ({
   descartarClienteCitaPendiente: vi.fn(),
   getClienteCitaDetalle: vi.fn(),
@@ -21,7 +24,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    useLocation: () => ({ pathname: '/home/cliente/citas', state: null }),
+    useLocation: () => location,
     useNavigate: () => navigate,
     useOutletContext: () => ({ refreshClienteProfile: vi.fn(), startNewAppointment }),
   };
@@ -43,6 +46,7 @@ vi.mock('../../components/ClienteSummaryCards.jsx', () => ({
 vi.mock('../../../../components/data/CardsCarousel.jsx', () => ({ default: () => null }));
 
 beforeEach(() => {
+  flags.CLIENT_BOOKING_ENABLED=false; location.state=null;
   startNewAppointment.mockReset(); navigate.mockReset();
   Object.values(api).forEach((mock) => mock.mockReset());
   api.getClienteMe.mockResolvedValue({ cliente: {}, profile_completion: { completion_percent: 100, is_complete: true } });
@@ -53,7 +57,7 @@ afterEach(cleanup);
 
 test('Inicio bloquea ambas acciones de nueva cita cuando el indicador está deshabilitado', async () => {
   render(<ClienteDashboardPage />);
-  const buttons = await screen.findAllByRole('button', { name: 'Proximamente...' });
+  const buttons = await screen.findAllByRole('button', { name: flags.CLIENT_LOCK_MESSAGE });
   expect(buttons).toHaveLength(2);
   for (const button of buttons) expect(button).toBeDisabled();
   expect(startNewAppointment).not.toHaveBeenCalled();
@@ -68,6 +72,7 @@ test('Historial delega Nueva cita en la verificación central', async () => {
 });
 
 test('Historial conserva sin interceptar la recuperación de pago pendiente', async () => {
+  flags.CLIENT_BOOKING_ENABLED=true;
   api.getClienteCitaPendiente.mockResolvedValue({
     pendiente: { id_grupo_cita: 'GRUPO', citas: [], sucursal: {}, total_pendiente_hnl: 100 },
   });
@@ -81,4 +86,17 @@ test('Historial conserva sin interceptar la recuperación de pago pendiente', as
   await waitFor(() => expect(navigate).toHaveBeenCalledWith('/agendar/pagar?id_grupo_cita=GRUPO&id_intent=INTENT'));
   expect(startNewAppointment).not.toHaveBeenCalled();
   expect(navigate).not.toHaveBeenCalledWith('/agendar');
+});
+
+test.each([false,true])('pausa bloquea reanudacion por acceso guardado %s',async saved=>{
+  if(saved)location.state={openPendingPaymentModal:true};
+  sessionStorage.setItem('mf_pending_payment_context_v1',JSON.stringify({id_grupo_cita:'GRUPO',id_intent:'INTENT'}));
+  api.getClienteCitaPendiente.mockResolvedValue({pendiente:{id_grupo_cita:'GRUPO',citas:[],sucursal:{},total_pendiente_hnl:0}});
+  render(<ClienteHistorialCitasPage />);
+  if(!saved)fireEvent.click(await screen.findByRole('button',{name:'Continuar pago'}));
+  await waitFor(()=>expect(notifications.info).toHaveBeenCalledWith(flags.CLIENT_LOCK_MESSAGE));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(api.retomarClienteCitaPendiente).not.toHaveBeenCalled();
+  expect(startNewAppointment).not.toHaveBeenCalled();
+  expect(navigate).not.toHaveBeenCalledWith(expect.stringContaining('/agendar'));
 });

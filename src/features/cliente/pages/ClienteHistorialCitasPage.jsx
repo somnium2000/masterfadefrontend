@@ -17,7 +17,7 @@ import {
   listClienteCitas,
   retomarClienteCitaPendiente,
 } from '../lib/clienteApi.js';
-import { CLIENT_CITAS_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
+import { CLIENT_BOOKING_ENABLED, CLIENT_CITAS_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
 
 const PENDING_PAYMENT_CONTEXT_STORAGE_KEY = 'mf_pending_payment_context_v1';
 const BOOKING_PAYMENT_CONTEXT_STORAGE_KEY = 'masterfade.publicBookingPayment.v1';
@@ -273,10 +273,18 @@ export default function ClienteHistorialCitasPage() {
   }, [notifications]);
 
   const handleOpenPending = useCallback(async () => {
+    if (!CLIENT_BOOKING_ENABLED) {
+      notifications.info(CLIENT_LOCK_MESSAGE);
+      return;
+    }
     await loadPendingReservation({ openModal: true });
-  }, [loadPendingReservation]);
+  }, [loadPendingReservation, notifications]);
 
   const handleContinuePendingPayment = useCallback(async () => {
+    if (!CLIENT_BOOKING_ENABLED) {
+      notifications.info(CLIENT_LOCK_MESSAGE);
+      return;
+    }
     const groupId = String(pendingData?.id_grupo_cita || '').trim();
     if (!groupId) {
       notifications.warning('No encontramos una reserva pendiente vigente.');

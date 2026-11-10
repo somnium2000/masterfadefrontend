@@ -9,4 +9,4 @@ function readEnvFlag(value, fallback = true) {
 export const CLIENT_BOOKING_ENABLED = readEnvFlag(import.meta.env.VITE_CLIENT_BOOKING_ENABLED, false);
 export const CLIENT_CITAS_ENABLED = readEnvFlag(import.meta.env.VITE_CLIENT_CITAS_ENABLED, true);
 export const CLIENT_PLAN_PURCHASE_ENABLED = readEnvFlag(import.meta.env.VITE_CLIENT_PLAN_PURCHASE_ENABLED, false);
-export const CLIENT_LOCK_MESSAGE = String(import.meta.env.VITE_CLIENT_LOCK_MESSAGE || 'Proximamente...').trim() || 'Proximamente...';
+export const CLIENT_LOCK_MESSAGE = String(import.meta.env.VITE_CLIENT_LOCK_MESSAGE || 'Agendamiento temporalmente no disponible').trim() || 'Agendamiento temporalmente no disponible';

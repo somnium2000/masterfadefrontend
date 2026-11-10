@@ -55,6 +55,16 @@ const CLIENT = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const KEY1 = 'eeeeeeee-eeee-4eee-8eee-000000000001';
 const KEY2 = 'eeeeeeee-eeee-4eee-8eee-000000000002';
 const STORAGE_KEY = 'mf_vip_purchase_attempt_v1';
+test('compra pausada no reabre intento guardado ni consulta o crea pagos', async () => {
+  flags.enabled=false; authenticateCliente();
+  sessionStorage.setItem(STORAGE_KEY,JSON.stringify({version:1,identity:`${USER}:${CLIENT}`,offerId:'Plan A-offer',branchId:A,key:KEY1,status:'resolved',orderSummary:{id_order:'ORDER'},paymentIntent:{id_payment_intent:'INTENT'}}));
+  await renderPurchase();
+  expect(screen.queryByTestId('purchase-flow')).not.toBeInTheDocument();
+  expect(payment.createMembershipOrder).not.toHaveBeenCalled();
+  expect(payment.createMembershipPaymentIntent).not.toHaveBeenCalled();
+  expect(payment.confirmMembershipPayment).not.toHaveBeenCalled();
+  expect(payment.queryMembershipPaymentStatus).not.toHaveBeenCalled();
+});
 const storedAttempt = () => JSON.parse(sessionStorage.getItem(STORAGE_KEY));
 function authenticateCliente(userId = USER) {
   Object.assign(auth, { isAuthenticated: true, roles: ['cliente'],
