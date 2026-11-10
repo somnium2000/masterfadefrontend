@@ -43,7 +43,7 @@ export default function AdminAccountDeletionPage() {
   const [tab, setTab] = useState("personal");
   const [filters, setFilters] = useState({ search: "", subject: "personal", status: "all", page: 1, limit: 20 });
   const [listData, setListData] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [notice, setNotice] = useState("");
   const [detailOpen, setDetailOpen] = useState(false);
@@ -89,6 +89,7 @@ export default function AdminAccountDeletionPage() {
       if (current()) setListData(data);
     } catch (error) {
       if (!current()) return;
+      setListData(null);
       setErrorMessage(sanitizeAdminAccountDeletionError(error, "No se pudo cargar el listado."));
     } finally {
       if (current()) setLoading(false);
@@ -270,9 +271,9 @@ export default function AdminAccountDeletionPage() {
               </div>
             ))}
           </div>
-        ) : (
+        ) : listData && !errorMessage ? (
           <div className="p-5 text-sm text-[var(--mf-text-2)]">Sin solicitudes para estos filtros.</div>
-        )}
+        ) : null}
       </div>
 
       <AdminAccountDeletionDetailDialog
