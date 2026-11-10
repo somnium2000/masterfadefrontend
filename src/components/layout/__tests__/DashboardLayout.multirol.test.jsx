@@ -6,10 +6,11 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import DashboardLayout, { buildNavModules } from '../DashboardLayout.jsx';
 
 const session = vi.hoisted(() => ({ user: { id_usuario: 'same-session' }, roles: [], logout: vi.fn() }));
+const bottom = vi.hoisted(() => ({ items: [] }));
 vi.mock('../../../context/AuthContext.jsx', () => ({ useAuth: () => session, getUserDisplayName: () => 'Usuario' }));
 vi.mock('../../theme/ThemeSwitcher.jsx', () => ({ default: () => null }));
 vi.mock('../../branding/MasterfadeLogo.jsx', () => ({ default: ({ variant }) => <div data-logo-variant={variant} /> }));
-vi.mock('../../navigation/PremiumBottomNav.jsx', () => ({ default: () => null }));
+vi.mock('../../navigation/PremiumBottomNav.jsx', () => ({ default: ({ sideItems }) => { bottom.items=sideItems; return null; } }));
 vi.mock('framer-motion', async () => {
   const { createElement } = await import('react');
   const components = {};
@@ -51,11 +52,11 @@ test.each(['admin', 'super_admin', 'cliente', 'barbero', 'security_admin'])('rol
   if (role === 'cliente') expect(modules.map(item => item.id)).toEqual(['inicio']);
 });
 
-test('Super Admin conserva solo Dashboard en Inicio y Admin conserva KPIs', () => {
+test('Super Admin conserva Dashboard y Admin no tiene Inicio ni KPIs', () => {
   const superInicio = buildNavModules('/home/super', 'super_admin', ['super_admin']).find(item => item.id === 'inicio');
   const adminInicio = buildNavModules('/home/admin', 'admin', ['admin']).find(item => item.id === 'inicio');
   expect(superInicio.subItems.map(item => item.label)).toEqual(['Dashboard']);
-  expect(adminInicio.subItems.map(item => item.label)).toEqual(['Dashboard', 'KPIs']);
+  expect(adminInicio).toBeUndefined();
 });
 
 test('root y roles de pantalla sin claims operativos no añaden accesos combinados', () => {
@@ -81,6 +82,18 @@ function Panels() {
 function view(path) {
   return <MemoryRouter initialEntries={[path]}><Panels /></MemoryRouter>;
 }
+
+test.each([320,390,768,1440])('Admin no expone Inicio, Dashboard ni KPIs en menus a %ipx',width=>{
+  Object.defineProperty(window,'innerWidth',{configurable:true,value:width});
+  session.roles=['admin','barbero'];render(view('/home/admin/empleados'));
+  expect(screen.queryByRole('button',{name:/^(Inicio|Dashboard|KPIs)$/})).not.toBeInTheDocument();
+  expect(bottom.items?.some(item=>['Inicio','Dashboard','KPIs'].includes(item.label))).toBe(false);
+  fireEvent.click(screen.getByRole('button',{name:'Abrir menú'}));
+  const dialog=screen.getByRole('dialog');
+  expect(within(dialog).queryByRole('button',{name:/^(Inicio|Dashboard|KPIs)$/})).not.toBeInTheDocument();
+  expect(within(dialog).getByRole('button',{name:'Personas'})).toBeInTheDocument();
+  expect(within(dialog).getByRole('button',{name:'Mi espacio Barbero'})).toBeInTheDocument();
+});
 
 test.each([['admin'], ['super_admin']])('logo sidebar %s reserva espacio para el control y desaparece al contraer', role => {
   session.roles = [role];
