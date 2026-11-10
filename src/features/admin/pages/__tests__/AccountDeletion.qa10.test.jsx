@@ -36,6 +36,21 @@ test.each(['approve','reject','retry'])('doble operación %s emite una sola soli
 test('error arbitrario no se muestra al usuario', async () => {
   api.listAdminAccountDeletionRequests.mockRejectedValue({ message: 'ECONNREFUSED private.internal password=SYNTHETIC' }); render(<Page />);
   expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo cargar el listado.');
+  expect(screen.queryByText('Sin solicitudes para estos filtros.')).not.toBeInTheDocument();
+});
+test.each([320,390,768,1440])('carga, error y vacio son excluyentes a %ipx y permiten reintentar',async width=>{
+  Object.defineProperty(window,'innerWidth',{configurable:true,value:width});
+  const request=deferred();api.listAdminAccountDeletionRequests.mockReturnValueOnce(request.promise);
+  render(<Page/>);
+  expect(screen.getByText('Cargando solicitudes.')).toBeInTheDocument();
+  expect(screen.queryByText('Sin solicitudes para estos filtros.')).not.toBeInTheDocument();
+  await act(async()=>request.reject(new Error('synthetic')));
+  expect(screen.getByRole('alert')).toBeInTheDocument();
+  expect(screen.queryByText('Sin solicitudes para estos filtros.')).not.toBeInTheDocument();
+  api.listAdminAccountDeletionRequests.mockResolvedValue({items:[],pagination:{page:1,total_pages:1}});
+  fireEvent.click(screen.getByRole('button',{name:'Actualizar'}));
+  expect(await screen.findByText('Sin solicitudes para estos filtros.')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 test.each(['approve','reject','retry'])('operación %s desmontada no emite avisos ni recarga', async kind => {
   const pending = deferred(); const method = api[{ approve: 'approveAdminAccountDeletionRequest', reject: 'rejectAdminAccountDeletionRequest', retry: 'retryAdminAccountDeletionRequest' }[kind]];
