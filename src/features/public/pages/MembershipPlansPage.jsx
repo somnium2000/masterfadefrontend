@@ -329,7 +329,7 @@ export default function MembershipPlansPage() {
     }
     purchaseAttemptRef.current = candidate;
     setTerminalOrderOfferId(candidate.status === "terminal" ? candidate.offerId : "");
-    if (candidate.orderSummary && candidate.paymentIntent) {
+    if (VIP_MEMBERSHIPS_PURCHASE_ENABLED && candidate.orderSummary && candidate.paymentIntent) {
       setPurchaseOrderSummary(candidate.orderSummary);
       setMembershipPaymentIntent(candidate.paymentIntent);
       setPurchasePendingConfirmation(true);

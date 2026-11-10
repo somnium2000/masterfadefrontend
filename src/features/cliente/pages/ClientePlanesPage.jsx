@@ -456,6 +456,7 @@ export default function ClientePlanesPage() {
   }, [loadInitial]);
 
   useEffect(() => {
+    if (!CLIENT_PLAN_PURCHASE_ENABLED) return;
     const stored = readClientPurchaseAttempt();
     if (!purchaseIdentity || stored?.identity !== purchaseIdentity
       || !stored?.orderSummary || !stored?.paymentIntent) return;
