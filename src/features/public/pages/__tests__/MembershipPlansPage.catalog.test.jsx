@@ -10,7 +10,7 @@ const api = vi.hoisted(() => ({ listPublicCatalogBranches: vi.fn(), listPublicPl
 const sync = vi.hoisted(() => ({ callback: null, unsubscribe: vi.fn() }));
 const navigate = vi.hoisted(() => vi.fn());
 const auth = vi.hoisted(() => ({ isAuthenticated: false, roles: [] }));
-const flags = vi.hoisted(() => ({ enabled: true }));
+const flags = vi.hoisted(() => ({ available: true, enabled: true }));
 const notifications = vi.hoisted(() => ({ warning: vi.fn(), error: vi.fn(), success: vi.fn() }));
 const dialog = vi.hoisted(() => ({ props: null }));
 const payment = vi.hoisted(() => ({
@@ -28,6 +28,7 @@ vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => auth }));
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => notifications }));
 vi.mock('../../../cliente/lib/clienteApi.js', () => payment);
 vi.mock('../../lib/vipMembershipFeatureFlags.js', () => ({
+  get VIP_MEMBERSHIPS_ENABLED() { return flags.available; },
   get VIP_MEMBERSHIPS_PURCHASE_ENABLED() { return flags.enabled; },
   VIP_MEMBERSHIPS_PURCHASE_LOCK_MESSAGE: 'Próximamente...',
 }));
@@ -90,6 +91,7 @@ beforeEach(() => {
   vi.spyOn(globalThis.crypto, 'randomUUID').mockImplementation(() =>
     `eeeeeeee-eeee-4eee-8eee-${String(++sequence).padStart(12, '0')}`);
   flags.enabled = true;
+  flags.available = true;
   Object.values(notifications).forEach((mock) => mock.mockReset());
   dialog.props = null;
   Object.values(payment).forEach((mock) => mock.mockReset());
@@ -124,6 +126,16 @@ async function renderPurchase({ strict = false } = {}) {
   await screen.findByText('Plan A');
   return view;
 }
+
+test('muestra pausa VIP sin consultar catalogo ni estado del cliente', async () => {
+  flags.available = false;
+  render(<MembershipPlansPage />);
+  expect(await screen.findByRole('heading', { name: 'Temporalmente pausadas' })).toBeInTheDocument();
+  expect(screen.getByText(/planes VIP no están disponibles/i)).toBeInTheDocument();
+  expect(api.listPublicCatalogBranches).not.toHaveBeenCalled();
+  expect(api.listPublicPlansByBranch).not.toHaveBeenCalled();
+  expect(payment.getClientePlanEstado).not.toHaveBeenCalled();
+});
 
 describe('exclusion de seleccion durante creacion de orden VIP', () => {
   test('A no cambia a B mientras crea orden A y conserva exclusivamente el resumen backend', async () => {

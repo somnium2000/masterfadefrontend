@@ -15,7 +15,7 @@ vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn() }) }));
 vi.mock('../../../cliente/lib/clienteApi.js', () => payment);
 vi.mock('../../../../lib/catalogSync.js', () => ({ subscribeCatalogSync: () => () => {} }));
-vi.mock('../../lib/vipMembershipFeatureFlags.js', () => ({ VIP_MEMBERSHIPS_PURCHASE_ENABLED: true, VIP_MEMBERSHIPS_PURCHASE_LOCK_MESSAGE: 'Proximamente' }));
+vi.mock('../../lib/vipMembershipFeatureFlags.js', () => ({ VIP_MEMBERSHIPS_ENABLED: true, VIP_MEMBERSHIPS_PURCHASE_ENABLED: true, VIP_MEMBERSHIPS_PURCHASE_LOCK_MESSAGE: 'Proximamente' }));
 vi.mock('../../../../components/branding/MasterfadeLogo.jsx', () => ({ default: () => null }));
 vi.mock('../../../../components/theme/ThemeSwitcher.jsx', () => ({ default: () => null }));
 vi.mock('../../../../components/navigation/PremiumBottomNav.jsx', () => ({ default: () => null }));
