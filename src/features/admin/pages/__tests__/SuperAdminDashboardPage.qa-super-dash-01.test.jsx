@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import SuperAdminDashboardPage from '../SuperAdminDashboardPage.jsx';
 
 const getSummary = vi.fn();
@@ -44,6 +44,7 @@ function openFilters() {
 describe('SuperAdminDashboardPage', () => {
   afterEach(() => {
     cleanup();
+    delete document.documentElement.dataset.theme;
     window.matchMedia = originalMatchMedia;
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
   });
@@ -62,6 +63,21 @@ describe('SuperAdminDashboardPage', () => {
     expect(screen.getAllByText('Planes activados').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('MasterPuntos canjeados')).toBeInTheDocument();
     expect(screen.getByText(/Cobros confirmados asociados exclusivamente a citas/i)).toBeInTheDocument();
+  });
+
+  it.each([[320,'light'],[390,'dark'],[768,'light'],[1440,'dark']])('citas muestra titulo, descripcion y cero del backend a %ipx en %s',async(width,theme)=>{
+    Object.defineProperty(window,'innerWidth',{configurable:true,value:width});
+    document.documentElement.dataset.theme=theme;
+    getSummary.mockImplementation(periodo=>Promise.resolve(responseFor(periodo,{total_citas:0})));
+    render(<SuperAdminDashboardPage/>);
+    const title=await screen.findByText('Citas confirmadas y atendidas');
+    const card=title.closest('article');
+    await waitFor(()=>expect(within(card).getByText('0')).toBeInTheDocument());
+    expect(within(card).getByText('Total histórico de citas confirmadas, en salón, en atención o completadas.')).toBeInTheDocument();
+    expect(card).toHaveClass('min-w-0');
+    expect(title.className).not.toMatch(/truncate|line-clamp|whitespace-nowrap/);
+    expect(within(title.closest('section')).getAllByRole('article')).toHaveLength(4);
+    delete document.documentElement.dataset.theme;
   });
 
   it('inicia con filtros cerrados, título exacto y alterna el panel solo con Filtros', async () => {
@@ -122,7 +138,9 @@ describe('SuperAdminDashboardPage', () => {
     fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '' } });
     expect(await screen.findByText(/Selecciona ambas fechas/i)).toBeInTheDocument();
     expect(getSummary).toHaveBeenCalledTimes(1);
-    fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '2026-11-10' } });
+    const tomorrow = new Date(getSummary.mock.calls[0][0].fecha_hasta + 'T00:00:00Z');
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    fireEvent.change(screen.getByLabelText('Desde'), { target: { value: tomorrow.toISOString().slice(0,10) } });
     expect(await screen.findByText(/no puede ser posterior/i)).toBeInTheDocument();
     expect(getSummary).toHaveBeenCalledTimes(1);
   });

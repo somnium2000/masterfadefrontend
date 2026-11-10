@@ -150,7 +150,7 @@ export default function SuperAdminDashboardPage() {
   const periodLoading = !rangeError && !summaryMatchesRange && !failedCurrentRange; const keepingLastValidReading = Boolean(error && failedCurrentRange && summaryMatchesRange); const currentSummary = summaryMatchesRange ? summary : null;
   const incomeRows = useMemo(() => currentSummary?.ingresos_serie || [], [currentSummary]); const activityRows = useMemo(() => currentSummary?.actividad_serie || [], [currentSummary]);
   const cards = [
-    { icon: CalendarDays, label: 'Citas totales', value: summary ? NUMBER.format(summary.total_citas) : '—', detail: 'Citas registradas en todo el historial.', loading: loading && !summary },
+    { icon: CalendarDays, label: 'Citas confirmadas y atendidas', value: summary ? NUMBER.format(summary.total_citas) : '—', detail: 'Total histórico de citas confirmadas, en salón, en atención o completadas.', loading: loading && !summary },
     { icon: CircleDollarSign, label: 'Ingresos por citas (HNL)', value: summary ? HNL.format(summary.ingresos_citas_hnl_total) : '—', secondary: currentSummary ? `Período: ${HNL.format(currentSummary.ingresos_citas_hnl_periodo)}` : null, detail: 'Cobros confirmados asociados exclusivamente a citas.', loading: loading && !summary },
     { icon: UsersRound, label: 'Planes activados', value: currentSummary ? NUMBER.format(currentSummary.planes_activados) : '—', detail: 'Activaciones registradas en el período seleccionado.', loading: periodLoading },
     { icon: Gem, label: 'MasterPuntos canjeados', value: currentSummary ? NUMBER.format(currentSummary.masterpuntos_canjeados) : '—', detail: 'Transacciones de canje únicas en el período.', loading: periodLoading },
