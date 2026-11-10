@@ -26,6 +26,17 @@ function safeText(value) {
   return normalized || '';
 }
 
+function createClientRequestId() {
+  const browserCrypto = globalThis.crypto;
+  if (typeof browserCrypto?.randomUUID === 'function') return browserCrypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  browserCrypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function writeStoredPaymentContext(context) {
   if (typeof window === 'undefined') return;
   try {
@@ -414,13 +425,18 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     if (pixelPayStatusRef.current?.key === requestKey) return pixelPayStatusRef.current.promise;
 
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const clientRequestId = createClientRequestId();
     const promise = (async () => {
       setCheckingPaymentStatus(true);
       const response = await queryPublicPixelPayStatus({
         id_grupo_cita: normalizedGroupId,
         id_intent: normalizedIntentId,
         titular_email: normalizedEmail,
-      }, { authenticated, signal: controller?.signal });
+      }, {
+        authenticated,
+        signal: controller?.signal,
+        headers: { 'X-Request-Id': clientRequestId },
+      });
       if (mountedRef.current && isCurrentPaymentGroup(normalizedGroupId)) {
         setPaymentResultState(response);
       }

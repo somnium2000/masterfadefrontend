@@ -202,7 +202,7 @@ function ServicioForm({ values, onChange, includeTariffFields = true }) {
                         />
                     </div>
                     <div className="flex flex-col gap-1">
-                        <Label htmlFor="f-precio">Precio HNL *</Label>
+                        <Label htmlFor="f-precio">Precio HNL {values.servicio_informativo ? '(opcional)' : '*'}</Label>
                         <Input
                             id="f-precio"
                             type="number"
@@ -277,7 +277,7 @@ function TarifaForm({ values, onChange, serviceName, branchName }) {
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="flex flex-col gap-1">
-                    <Label htmlFor="tarifa-precio">Precio HNL *</Label>
+                    <Label htmlFor="tarifa-precio">Precio HNL {values.servicio_informativo ? '(opcional)' : '*'}</Label>
                     <Input id="tarifa-precio" type="number" min="0" step="0.01" value={values.precio_hnl} onChange={(e) => onChange('precio_hnl', e.target.value)} />
                 </div>
                 <div className="flex flex-col gap-1">
@@ -308,8 +308,9 @@ function validateForm(values, { includeTariffFields = true } = {}) {
     if (includeTariffFields) {
         const dur = parseInt(values.duracion_min, 10);
         if (isNaN(dur) || dur < 1) return 'La Duración debe ser al menos 1 minuto.';
+        const precioVacio = String(values.precio_hnl ?? '').trim() === '';
         const precio = parseFloat(values.precio_hnl);
-        if (isNaN(precio) || precio < 0) return 'El precio no puede ser negativo.';
+        if ((!values.servicio_informativo && precioVacio) || (!precioVacio && (isNaN(precio) || precio < 0))) return 'El precio no puede ser negativo.';
     }
     const orden = parseInt(values.orden_visual, 10);
     if (isNaN(orden) || orden < 0) return 'El orden visual no puede ser negativo.';
@@ -317,13 +318,20 @@ function validateForm(values, { includeTariffFields = true } = {}) {
 }
 
 function validateTariffForm(values) {
+    const precioVacio = String(values.precio_hnl ?? '').trim() === '';
     const precio = parseFloat(values.precio_hnl);
-    if (isNaN(precio) || precio < 0) return 'El precio no puede ser negativo.';
+    if ((!values.servicio_informativo && precioVacio) || (!precioVacio && (isNaN(precio) || precio < 0))) return 'El precio no puede ser negativo.';
     const dur = parseInt(values.duracion_min, 10);
     if (isNaN(dur) || dur < 1) return 'La duración debe ser al menos 1 minuto.';
     const buffer = parseInt(values.buffer_min, 10);
     if (isNaN(buffer) || buffer < 0) return 'El buffer no puede ser negativo.';
     return null;
+}
+
+function normalizeTariffPrice(values) {
+    return String(values?.precio_hnl ?? '').trim() === '' && values?.servicio_informativo
+        ? 0
+        : parseFloat(values?.precio_hnl);
 }
 
 function summarizeAssignedBarbers(barberos = [], maxVisible = 2) {
@@ -459,6 +467,8 @@ export default function AdminServicesCatalogPage() {
     const [formError, setFormError] = useState('');
     const [formLoading, setFormLoading] = useState(false);
     const [serviceBarberAssignments, setServiceBarberAssignments] = useState(SERVICE_BARBER_ASSIGNMENTS_DEFAULTS);
+    const { assignedIds = [], selectedIds } = serviceBarberAssignments;
+    const changedBarberIds = [...selectedIds.filter((id) => !assignedIds.includes(id)), ...assignedIds.filter((id) => !selectedIds.includes(id))];
     const [createBranchTariffs, setCreateBranchTariffs] = useState([]);
     const [useSameTariffForAll, setUseSameTariffForAll] = useState(true);
     const [commonCreateTariff, setCommonCreateTariff] = useState(TARIFF_FORM_DEFAULTS);
@@ -816,12 +826,8 @@ export default function AdminServicesCatalogPage() {
                 if (cancelled) return;
                 const payload = response?.data ?? response;
                 const barberos = Array.isArray(payload?.barberos) ? payload.barberos : [];
-                setServiceBarberAssignments({
-                    loading: false,
-                    error: '',
-                    barberos,
-                    selectedIds: barberos.filter((barbero) => barbero?.ofrece_servicio).map((barbero) => barbero.id_empleado),
-                });
+                const assignedIds = barberos.filter((barbero) => barbero?.ofrece_servicio).map((barbero) => barbero.id_empleado);
+                setServiceBarberAssignments({ loading: false, error: '', barberos, selectedIds: assignedIds, assignedIds });
             })
             .catch((err) => {
                 if (cancelled) return;
@@ -902,7 +908,7 @@ export default function AdminServicesCatalogPage() {
                 const source = useSameTariffForAll ? commonCreateTariff : tariff;
                 return {
                 id_sucursal: tariff.id_sucursal,
-                precio_hnl: parseFloat(source.precio_hnl),
+                precio_hnl: normalizeTariffPrice(source),
                 duracion_min: parseInt(source.duracion_min, 10),
                 buffer_min: parseInt(source.buffer_min, 10),
                 activo: Boolean(source.activo),
@@ -1075,7 +1081,7 @@ export default function AdminServicesCatalogPage() {
         setTariffFormError('');
         try {
             const payload = {
-                precio_hnl: parseFloat(tariffFormValues.precio_hnl),
+                precio_hnl: normalizeTariffPrice(tariffFormValues),
                 duracion_min: parseInt(tariffFormValues.duracion_min, 10),
                 buffer_min: parseInt(tariffFormValues.buffer_min, 10),
                 activo: Boolean(tariffFormValues.activo),
@@ -1199,9 +1205,7 @@ export default function AdminServicesCatalogPage() {
     const modeLabel = 'servicios';
 
     function ServiceBadges({ servicio, selectedTariff }) {
-        const informative = sucursal
-            ? Boolean(selectedTariff?.servicio_informativo)
-            : !servicio.agendable;
+        const informative = Boolean(selectedTariff?.servicio_informativo);
         return (
             <div className="flex flex-wrap gap-1.5">
                 <ServiceStatusBadge activo={Boolean(servicio.activo)} />
@@ -1220,7 +1224,7 @@ export default function AdminServicesCatalogPage() {
             }
             return (
                 <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-3">
-                    <BranchConfigField label="Precio" value={formatServicePrice(selectedTariff.precio_hnl)} />
+                    <BranchConfigField label="Precio" value={selectedTariff.servicio_informativo && Number(selectedTariff.precio_hnl) === 0 ? 'Consultar precio' : formatServicePrice(selectedTariff.precio_hnl)} />
                     <BranchConfigField label="Duración" value={`${selectedTariff.duracion_min ?? '-'} min`} />
                     <BranchConfigField label="Buffer" value={`${selectedTariff.buffer_min ?? '-'} min`} />
                 </div>
@@ -1234,7 +1238,7 @@ export default function AdminServicesCatalogPage() {
                 <div className="flex min-w-0 flex-wrap gap-1.5">
                     {visibleBranches.map((tarifa) => (
                         <span key={getTarifaKey(tarifa)} className="max-w-full truncate rounded-full border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-2 py-0.5 text-xs text-[var(--mf-text)]">
-                            {getBranchShortName(tarifa.nombre_sucursal)}
+                            {getBranchShortName(tarifa.nombre_sucursal)}{tarifa.servicio_informativo ? ' · Informativo' : ''}
                         </span>
                     ))}
                     {activeTariffs.length > visibleBranches.length ? (
@@ -1501,7 +1505,7 @@ export default function AdminServicesCatalogPage() {
             )}
 
             {/* Dialog Crear / Editar */}
-            <UnsavedChangesDialog values={{ formValues, createBranchTariffs, useSameTariffForAll, commonCreateTariff, selectedIds: serviceBarberAssignments.selectedIds }} saving={formLoading} open={dialogOpen} onOpenChange={handleServiceDialogOpenChange}>
+            <UnsavedChangesDialog values={{ formValues, createBranchTariffs, useSameTariffForAll, commonCreateTariff, selectedIds: changedBarberIds }} saving={formLoading} open={dialogOpen} onOpenChange={handleServiceDialogOpenChange}>
                 <DialogContent className={`w-[calc(100vw-1rem)] max-h-[calc(100vh-1.5rem)] overflow-y-auto ${canManageServiceBarberAssignments && editTarget ? 'sm:max-w-2xl' : 'sm:max-w-md'}`}>
                     <DialogHeader>
                         <DialogTitle>{editTarget ? 'Editar servicio' : 'Nuevo servicio'}</DialogTitle>
@@ -1842,5 +1846,3 @@ export default function AdminServicesCatalogPage() {
         </div>
     );
 }
-
-

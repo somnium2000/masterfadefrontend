@@ -13,9 +13,10 @@ const VARIANTS = {
     gap: 'gap-0',
     script: 'w-[220px] sm:w-[250px] md:w-[320px] max-w-[82vw]',
   },
-  topbar: {
+  navigation: {
     gap: 'gap-0',
-    script: 'w-[116px] min-[360px]:w-[132px] sm:w-[150px] md:w-[180px] max-w-[46vw]',
+    script: 'w-[clamp(190px,52vw,226px)] max-w-full',
+    aspectRatio: '1221 / 349',
   },
   public: {
     gap: 'gap-0',
@@ -39,7 +40,7 @@ const VARIANTS = {
 export default function MasterfadeLogo({ variant = 'hero', className = '', showScriptMark = true }) {
   const { variant: themeVariant } = useTheme();
   const styles = VARIANTS[variant] || VARIANTS.hero;
-  const usesSidebarAsset = variant === 'sidebar';
+  const usesSidebarAsset = variant === 'sidebar' || variant === 'navigation';
   const scriptSrc = themeVariant === 'dark'
     ? (usesSidebarAsset ? sidebarScriptLight : scriptLight)
     : (usesSidebarAsset ? sidebarScriptDark : scriptDark);

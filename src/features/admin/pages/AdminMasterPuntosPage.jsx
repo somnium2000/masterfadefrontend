@@ -97,6 +97,7 @@ function normalizeClienteRecord(cliente = {}, index = 0) {
     key: `${idCliente}_${index}`,
     id_cliente: idCliente,
     id_usuario: normalizeText(cliente?.id_usuario || ''),
+    id_sucursal_origen: normalizeText(cliente?.id_sucursal_origen || ''),
     nombre_completo: normalizeText(cliente?.nombre_completo || cliente?.nombre_cliente || cliente?.nombre || 'Cliente'),
     telefono_principal: normalizeText(cliente?.telefono_principal || cliente?.telefono || ''),
     correo_principal: normalizeText(cliente?.correo_principal || cliente?.correo || ''),
@@ -158,6 +159,7 @@ function normalizeSummary(payload) {
 
   return {
     cliente: {
+      id_sucursal_origen: normalizeText(root?.cliente?.id_sucursal_origen || summarySource?.id_sucursal_origen || ''),
       nombre_completo: normalizeText(root?.cliente?.nombre_completo || summarySource?.nombre_cliente || 'Cliente'),
       telefono_principal: normalizeText(root?.cliente?.telefono_principal || summarySource?.telefono_principal || ''),
       correo_principal: normalizeText(root?.cliente?.correo_principal || summarySource?.correo_principal || ''),
@@ -188,7 +190,7 @@ export default function AdminMasterPuntosPage() {
 function AdminMasterPuntosContent() {
   const navigate = useNavigate();
   const notifications = useNotifications();
-  const { roles } = useAuth();
+  const { roles, branchIds = [] } = useAuth();
 
   const [searchResults, setSearchResults] = useState([]);
   const [clientesError, setClientesError] = useState('');
@@ -234,7 +236,7 @@ function AdminMasterPuntosContent() {
     const roleList = Array.isArray(roles) ? roles.map((role) => normalizeText(role).toLowerCase()) : [];
     return roleList.includes('admin') || roleList.includes('super_admin');
   }, [roles]);
-  const canEditGlobalRewards = useMemo(() => {
+  const isSuperAdmin = useMemo(() => {
     const roleList = Array.isArray(roles) ? roles.map((role) => normalizeText(role).toLowerCase()) : [];
     return roleList.includes('super_admin');
   }, [roles]);
@@ -267,6 +269,11 @@ function AdminMasterPuntosContent() {
   const adjustmentPoints = canUseAdd ? parsedPointsToAdd : canUseSubtract ? parsedPointsToSubtract : 0;
   const parsedPoints = adjustmentAction === 'restar' ? -adjustmentPoints : adjustmentPoints;
   const reasonTrimmed = normalizeText(ajusteReason);
+  const selectedClientBranchId = normalizeText(
+    selectedClienteData?.id_sucursal_origen || summary?.cliente?.id_sucursal_origen || ''
+  );
+  const canSubtractForSelectedClient = isSuperAdmin
+    || (Boolean(selectedClientBranchId) && branchIds.includes(selectedClientBranchId));
   const pointsAreValid = !pointsInputConflict
     && (hasAddInput || hasSubtractInput)
     && addIsValid
@@ -279,6 +286,7 @@ function AdminMasterPuntosContent() {
     && selectedClienteId
     && pointsAreValid
     && reasonIsValid
+    && (adjustmentAction !== 'restar' || canSubtractForSelectedClient)
     && !savingAdjustment
   );
 
@@ -360,6 +368,7 @@ function AdminMasterPuntosContent() {
         return {
           key: `${safeId}_selected`,
           id_cliente: safeId,
+          id_sucursal_origen: nextSummary?.cliente?.id_sucursal_origen || current?.id_sucursal_origen || '',
           nombre_completo: nextNombre || current?.nombre_completo || 'Cliente',
           telefono_principal: nextTelefono || current?.telefono_principal || '',
           correo_principal: nextCorreo || current?.correo_principal || '',
@@ -390,9 +399,11 @@ function AdminMasterPuntosContent() {
       navigate('/unauthorized', { replace: true });
       return undefined;
     }
-    void loadRewardConfig();
+    if (isSuperAdmin) {
+      void loadRewardConfig();
+    }
     return undefined;
-  }, [canManagePoints, loadRewardConfig, navigate]);
+  }, [canManagePoints, isSuperAdmin, loadRewardConfig, navigate]);
 
   useEffect(() => {
     if (!canManagePoints) return;
@@ -569,17 +580,14 @@ function AdminMasterPuntosContent() {
   }
 
   function toggleRewardService(condition, serviceId) {
-    if (!canEditGlobalRewards) return;
+    if (!isSuperAdmin) return;
     const safeCondition = normalizeText(condition);
     const safeServiceId = normalizeText(serviceId);
     if (!safeServiceId || !['sin_membresia', 'con_membresia'].includes(safeCondition)) return;
     setRewardSelection((current) => {
       const nextSet = new Set(current?.[safeCondition] || []);
-      if (nextSet.has(safeServiceId)) {
-        nextSet.delete(safeServiceId);
-      } else {
-        nextSet.add(safeServiceId);
-      }
+      if (nextSet.has(safeServiceId)) nextSet.delete(safeServiceId);
+      else nextSet.add(safeServiceId);
       return {
         sin_membresia: safeCondition === 'sin_membresia' ? nextSet : new Set(current?.sin_membresia || []),
         con_membresia: safeCondition === 'con_membresia' ? nextSet : new Set(current?.con_membresia || []),
@@ -588,7 +596,7 @@ function AdminMasterPuntosContent() {
   }
 
   async function handleSaveRewardConfig() {
-    if (!canEditGlobalRewards || !rewardConfigLoaded || rewardConfigSaving || rewardSaveLockRef.current) return;
+    if (!isSuperAdmin || !rewardConfigLoaded || rewardConfigSaving || rewardSaveLockRef.current) return;
     rewardSaveLockRef.current = true;
     const requestSeq = ++rewardRequestSeqRef.current;
     const isCurrent = () => mountedRef.current && rewardRequestSeqRef.current === requestSeq;
@@ -635,7 +643,8 @@ function AdminMasterPuntosContent() {
         </p>
       </header>
 
-      <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
+      {isSuperAdmin ? (
+        <section className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
@@ -650,23 +659,19 @@ function AdminMasterPuntosContent() {
               </p>
             ) : null}
           </div>
-          {canEditGlobalRewards ? (
-            <Button
-              type="button"
-              onClick={handleSaveRewardConfig}
-              disabled={!rewardConfigLoaded || rewardConfigLoading || rewardConfigSaving}
-              className="w-full lg:w-auto"
-            >
-              {rewardConfigSaving ? (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 size={14} className="animate-spin" />
-                  Guardando...
-                </span>
-              ) : (
-                'Guardar configuracion'
-              )}
-            </Button>
-          ) : null}
+          <Button
+            type="button"
+            onClick={handleSaveRewardConfig}
+            disabled={!rewardConfigLoaded || rewardConfigLoading || rewardConfigSaving}
+            className="w-full lg:w-auto"
+          >
+            {rewardConfigSaving ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin" />
+                Guardando...
+              </span>
+            ) : 'Guardar configuracion'}
+          </Button>
         </div>
 
         {rewardConfigError ? (
@@ -707,7 +712,7 @@ function AdminMasterPuntosContent() {
                           type="checkbox"
                           className="mt-1 h-4 w-4 accent-[var(--mf-accent)]"
                           checked={checked}
-                          disabled={!canEditGlobalRewards || rewardConfigSaving}
+                          disabled={rewardConfigSaving}
                           onChange={() => toggleRewardService(condition, service.id_servicio)}
                         />
                         <span className="min-w-0">
@@ -728,7 +733,8 @@ function AdminMasterPuntosContent() {
             </article>
           ))}
         </div>
-      </section>
+        </section>
+      ) : null}
 
       <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[320px,1fr]">
         <article className="min-w-0 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
@@ -847,7 +853,7 @@ function AdminMasterPuntosContent() {
                       value={ajustePointsSubtract}
                       onChange={(event) => setAjustePointsSubtract(event.target.value)}
                       placeholder="Ej. 3"
-                      disabled={savingAdjustment || hasAddInput}
+                      disabled={savingAdjustment || hasAddInput || !canSubtractForSelectedClient}
                     />
                   </div>
                   <div>
@@ -861,6 +867,11 @@ function AdminMasterPuntosContent() {
                     />
                   </div>
                 </div>
+                {!canSubtractForSelectedClient ? (
+                  <p className="mt-2 text-xs text-[var(--mf-text-2)]">
+                    Solo puedes restar puntos a clientes de tus sucursales autorizadas.
+                  </p>
+                ) : null}
                 <p className="mt-2 text-xs text-[var(--mf-text-2)]">
                   {pointsInputConflict
                     ? 'Ingresa solo sumar o restar, no ambos.'
@@ -985,7 +996,6 @@ function AdminMasterPuntosContent() {
           <div className="relative">
             <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mf-text-2)]" />
             <Input
-              autoFocus
               value={searchDraft}
               onChange={(event) => {
                 searchRequestSeqRef.current += 1;

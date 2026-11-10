@@ -1,7 +1,8 @@
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, ShieldAlert, Send } from "lucide-react";
 import {
-  Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -247,7 +248,14 @@ export default function InternalAccountDeletionRequestDialog({
   }, [acks, canSubmit, confirmationPhrase, handleOpenChange, onCreated, password, reauthMethod, user?.email, user?.id_usuario]);
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <UnsavedChangesDialog
+      key={user?.id_usuario}
+      initialValues={{ password: false, reauthMethod: "password", confirmationPhrase: "", acks: DEFAULT_ACKS }}
+      values={{ password: Boolean(password), reauthMethod, confirmationPhrase, acks }}
+      saving={submitting}
+      open={open}
+      onOpenChange={handleOpenChange}
+    >
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Solicitar eliminacion de cuenta</DialogTitle>
@@ -390,9 +398,9 @@ export default function InternalAccountDeletionRequestDialog({
         ) : null}
 
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={submitting} onClick={() => handleOpenChange(false)}>
+          <DialogClose asChild><Button type="button" variant="outline" disabled={submitting}>
             Cerrar
-          </Button>
+          </Button></DialogClose>
           {preview?.can_request === true ? (
             <Button type="button" disabled={!canSubmit} onClick={handleSubmit} className="gap-2">
               {submitting ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
@@ -401,6 +409,6 @@ export default function InternalAccountDeletionRequestDialog({
           ) : null}
         </DialogFooter>
       </DialogContent>
-    </Dialog>
+    </UnsavedChangesDialog>
   );
 }

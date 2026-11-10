@@ -342,7 +342,18 @@ describe('presentación responsive del catálogo de servicios', () => {
     const inactiveRow = screen.getByText('Barba ejecutiva').closest('[role="row"]');
     expect(within(inactiveRow).getByText('Inactivo')).toBeInTheDocument();
     expect(within(inactiveRow).getByText('Oculto')).toBeInTheDocument();
-    expect(within(inactiveRow).getByText('Informativo')).toBeInTheDocument();
+    expect(within(inactiveRow).queryByText('Informativo')).not.toBeInTheDocument();
+
+    const informative = service({
+      id_servicio: '13333333-3333-4333-8333-333333333333',
+      nombre_servicio: 'Consulta capilar', agendable: false,
+      tarifas: [{ id_tarifa: '43333333-3333-4333-8333-333333333333', id_sucursal: BRANCH_A, nombre_sucursal: 'MasterFade Centro', precio_hnl: 0, duracion_min: 30, buffer_min: 0, tarifa_activa: true, servicio_informativo: true }],
+    });
+    setServices([informative]);
+    catalogApiMock.listAdminServiciosAgrupados.mockResolvedValue({ data: { servicios: [informative] } });
+    fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH_A } });
+    const informativeRow = (await screen.findByText('Consulta capilar')).closest('[role="row"]');
+    expect(within(informativeRow).getByText('Informativo')).toBeInTheDocument();
   });
 
   test('mantiene acciones y confirmación destructiva existentes', async () => {

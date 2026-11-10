@@ -1,3 +1,4 @@
+import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Building2, CheckCircle2, MapPin, Pencil, Phone, Plus, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
@@ -14,6 +15,7 @@ import {
 import { Button } from '../../../components/ui/button.jsx';
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogFooter,
   DialogHeader,
@@ -814,7 +816,7 @@ export default function AdminSucursalesPage() {
         />
       ) : null}
 
-      <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
+      <UnsavedChangesDialog values={formValues} saving={formLoading} open={formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>{editingId ? 'Editar sucursal' : 'Nueva sucursal'}</DialogTitle>
@@ -827,13 +829,13 @@ export default function AdminSucursalesPage() {
           ) : null}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => handleFormOpenChange(false)} disabled={formLoading}>Cancelar</Button>
+            <DialogClose asChild><Button variant="outline" disabled={formLoading}>Cancelar</Button></DialogClose>
             <Button onClick={handleSubmit} disabled={formLoading} className="min-w-[110px]">
               {formLoading ? 'Guardando...' : editingId ? 'Actualizar' : 'Crear sucursal'}
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </UnsavedChangesDialog>
 
       <ActionConfirmDialog
         open={Boolean(confirmTarget)}

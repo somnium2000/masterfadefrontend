@@ -152,7 +152,7 @@ export default function ClienteDashboardPage() {
   const { error: notifyError } = notifications;
   const { isAuthenticated, isHydrated, isHydrating, logout } = useAuth();
   const outletContext = useOutletContext() || {};
-  const { refreshClienteProfile } = outletContext;
+  const { refreshClienteProfile, startNewAppointment } = outletContext;
 
   const [loading, setLoading] = useState(true);
   const [profileData, setProfileData] = useState(null);
@@ -256,7 +256,7 @@ export default function ClienteDashboardPage() {
       notifications.info('El agendamiento estara disponible proximamente.', { dedupeKey: 'cliente-booking-disabled' });
       return;
     }
-    navigate('/agendar');
+    void startNewAppointment?.();
   }
 
   if ((!canLoadDashboard && isHydrating) || loading) {
@@ -308,6 +308,7 @@ export default function ClienteDashboardPage() {
           <button
             type="button"
             onClick={handleBookingAction}
+            disabled={!CLIENT_BOOKING_ENABLED}
             title={CLIENT_BOOKING_ENABLED ? undefined : 'El agendamiento estara disponible proximamente.'}
             className={[
               'text-xs font-semibold uppercase tracking-[0.08em]',
@@ -328,6 +329,7 @@ export default function ClienteDashboardPage() {
                 gridClassName="grid grid-cols-1 gap-3 sm:grid-cols-2"
                 compactControls
                 showHeaderTag={false}
+                enableSwipe
                 renderItem={(item) => (
                   <article className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
                     <p className="text-sm font-semibold text-[var(--mf-text)]">{item.nombre_servicio}</p>
@@ -339,6 +341,7 @@ export default function ClienteDashboardPage() {
                     <button
                       type="button"
                       onClick={handleBookingAction}
+                      disabled={!CLIENT_BOOKING_ENABLED}
                       title={CLIENT_BOOKING_ENABLED ? undefined : 'El agendamiento estara disponible proximamente.'}
                       className={[
                         'mt-3 inline-flex h-8 items-center justify-center rounded-lg border px-3 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors',
@@ -369,6 +372,7 @@ export default function ClienteDashboardPage() {
                   <button
                     type="button"
                     onClick={handleBookingAction}
+                    disabled={!CLIENT_BOOKING_ENABLED}
                     title={CLIENT_BOOKING_ENABLED ? undefined : 'El agendamiento estara disponible proximamente.'}
                     className={[
                       'mt-3 inline-flex h-8 items-center justify-center rounded-lg border px-3 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors',

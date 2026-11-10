@@ -1,7 +1,8 @@
 // src/components/layout/DashboardLayout.jsx
 // Layout principal con sidebar colapsable + topbar con submenús dinámicos
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import * as Drawer from '@radix-ui/react-dialog';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     House, Users, Scissors, Building2, CalendarDays, Shield, BarChart3,
@@ -13,6 +14,7 @@ import ThemeSwitcher from '../theme/ThemeSwitcher.jsx';
 import { getUserDisplayName, useAuth } from '../../context/AuthContext.jsx';
 import { getRoleLabel, resolveHomePath } from '../../features/home/lib/roleRouting.js';
 import PremiumBottomNav from '../navigation/PremiumBottomNav.jsx';
+import './NavigationHeader.css';
 
 // ── Definición de módulos del sidebar ────────────────────────────────────────────────────────
 export function buildNavModules(basePath, role, roles = []) {
@@ -107,10 +109,12 @@ export function buildNavModules(basePath, role, roles = []) {
             label: 'Inicio',
             icon: House,
             path: basePath,
-            subItems: [
-                { id: 'dashboard', label: 'Dashboard', path: basePath },
-                { id: 'kpis', label: 'KPIs', path: `${basePath}/kpis` },
-            ],
+            subItems: role === 'super_admin'
+                ? [{ id: 'dashboard', label: 'Dashboard', path: basePath }]
+                : [
+                    { id: 'dashboard', label: 'Dashboard', path: basePath },
+                    { id: 'kpis', label: 'KPIs', path: `${basePath}/kpis` },
+                ],
         },
         {
             id: 'personas',
@@ -267,7 +271,7 @@ function SidebarItem({ module, isActive, isCollapsed, onClick }) {
             whileTap={{ scale: 0.97 }}
             title={isCollapsed ? module.label : undefined}
             className={`
-                group relative flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left text-sm font-medium
+                mf-focus-ring group relative flex min-h-11 w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left text-sm font-medium
                 transition-all duration-200 overflow-hidden
                 ${isActive
                     ? 'border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]'
@@ -310,7 +314,7 @@ function SidebarItem({ module, isActive, isCollapsed, onClick }) {
                 key={item.id}
                 type="button"
                 onClick={() => onClick(item)}
-                className="ml-4 rounded-xl border border-transparent px-3 py-2 text-left text-xs text-[var(--mf-text-2)] transition-colors hover:border-[var(--mf-nav-border)] hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-accent)]"
+                className="mf-focus-ring ml-4 min-h-11 rounded-xl border border-transparent px-3 py-2 text-left text-xs text-[var(--mf-text-2)] transition-colors hover:border-[var(--mf-nav-border)] hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-accent)]"
             >
                 {item.label}
             </button>
@@ -324,7 +328,7 @@ function TopbarSubMenu({ subItems, currentPath }) {
     const navigate = useNavigate();
     if (!subItems || subItems.length === 0) return null;
     return (
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
+        <nav aria-label="Opciones del módulo" className="mf-header-submenu flex items-center gap-1.5 overflow-x-auto p-1">
             {subItems.map((item) => {
                 const isActive = item.exact
                     ? normalizePath(currentPath) === normalizePath(item.path)
@@ -336,7 +340,7 @@ function TopbarSubMenu({ subItems, currentPath }) {
                         aria-current={isActive ? 'page' : undefined}
                         onClick={() => navigate(item.path)}
                         className={`
-                            relative whitespace-nowrap rounded-full px-4 py-1.5 text-xs font-semibold tracking-wide
+                            mf-focus-ring relative min-h-11 min-w-11 whitespace-nowrap rounded-xl px-3 text-xs font-semibold tracking-wide
                             transition-all duration-200 shrink-0
                             ${isActive
                                 ? 'bg-[var(--mf-accent)] text-[var(--mf-accent-text)] shadow-[var(--mf-shadow-accent)]'
@@ -348,7 +352,7 @@ function TopbarSubMenu({ subItems, currentPath }) {
                     </button>
                 );
             })}
-        </div>
+        </nav>
     );
 }
 
@@ -374,6 +378,18 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+    useEffect(() => {
+        if (!mobileMenuOpen || !window.matchMedia) return undefined;
+
+        const desktop = window.matchMedia('(min-width: 64rem)');
+        const closeOnDesktop = () => {
+            if (desktop.matches) setMobileMenuOpen(false);
+        };
+
+        desktop.addEventListener('change', closeOnDesktop);
+        return () => desktop.removeEventListener('change', closeOnDesktop);
+    }, [mobileMenuOpen]);
+
     const basePath = String(basePathOverride || '').trim()
         || (currentRole === 'barbero' ? '/home/barbero' : resolvedHomePath);
     const modules = buildNavModules(basePath, currentRole, roles);
@@ -389,7 +405,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
             navigate(mod.path);
         }
         setMobileMenuOpen(false);
-    }, [navigate]);
+    }, [navigate, setMobileMenuOpen]);
 
     async function handleLogout() {
         await logout();
@@ -430,6 +446,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                 { id: 'sucursales', label: 'Sucursales', icon: Building2, onClick: () => navigate(`${basePath}/sucursales`) },
                 { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout },
             ];
+    const ActiveModuleIcon = activeModule?.icon;
     const mobileSideItems = currentRole === 'barbero' ? mobileItems : mobileItems.slice(0, 4);
 
     return (
@@ -456,7 +473,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                                         animate={{ opacity: 1, x: 0 }}
                                         exit={{ opacity: 0, x: -10 }}
                                         transition={{ duration: 0.2 }}
-                                        className="absolute inset-y-0 left-0 right-11 flex items-center justify-center"
+                                        className="absolute inset-y-0 left-0 right-13 flex items-center justify-center"
                                     >
                                         <MasterfadeLogo variant="sidebar" />
                                     </motion.div>
@@ -466,7 +483,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                             <button
                                 type="button"
                                 onClick={() => setIsCollapsed(!isCollapsed)}
-                                className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)] transition-colors hover:border-[var(--mf-btn-border)] hover:text-[var(--mf-accent)]"
+                                className="mf-header-control mf-focus-ring ml-auto px-0"
                                 title={isCollapsed ? 'Expandir sidebar' : 'Colapsar sidebar'}
                             >
                                 {isCollapsed
@@ -504,7 +521,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                                             type="button"
                                             onClick={handleAccountDeletionRequest}
                                             title="Solicitar eliminacion de cuenta"
-                                            className="flex h-9 w-full items-center justify-center rounded-xl text-[var(--mf-text-2)] transition-colors hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-accent)]"
+                                            className="mf-focus-ring flex min-h-11 w-full items-center justify-center rounded-xl text-[var(--mf-text-2)] transition-colors hover:bg-[var(--mf-btn-bg)] hover:text-[var(--mf-accent)]"
                                         >
                                             <UserRound size={17} strokeWidth={1.9} />
                                         </button>
@@ -513,7 +530,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                                         type="button"
                                         onClick={handleLogout}
                                         title="Cerrar sesión"
-                                        className="flex h-9 w-full items-center justify-center rounded-xl text-[var(--mf-accent)] transition-colors hover:bg-[var(--mf-btn-bg)]"
+                                        className="mf-focus-ring flex min-h-11 w-full items-center justify-center rounded-xl text-[var(--mf-accent)] transition-colors hover:bg-[var(--mf-btn-bg)]"
                                     >
                                         <LogOut size={17} strokeWidth={1.9} />
                                     </button>
@@ -527,7 +544,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                                         <button
                                             type="button"
                                             onClick={handleAccountDeletionRequest}
-                                            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] text-xs font-semibold text-[var(--mf-text)] transition-colors hover:border-[var(--mf-btn-border)] hover:bg-[var(--mf-btn-bg)]"
+                                            className="mf-focus-ring mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] text-xs font-semibold text-[var(--mf-text)] transition-colors hover:border-[var(--mf-btn-border)] hover:bg-[var(--mf-btn-bg)]"
                                         >
                                             <UserRound size={14} strokeWidth={1.9} />
                                             Solicitar eliminacion de cuenta
@@ -536,7 +553,7 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                                     <button
                                         type="button"
                                         onClick={handleLogout}
-                                        className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-xs font-semibold text-[var(--mf-accent)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_70%,white_12%)]"
+                                        className="mf-focus-ring mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-xs font-semibold text-[var(--mf-accent)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_70%,white_12%)]"
                                     >
                                         <LogOut size={14} strokeWidth={1.9} />
                                         Cerrar sesión
@@ -551,38 +568,22 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
                 <div className="flex min-h-screen flex-1 flex-col min-w-0">
 
                     {/* ── Topbar ─────────────────────────────────────────────────────────────── */}
-                    <header className="sticky top-0 z-30 border-b border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-bg)_82%,transparent)] backdrop-blur-xl">
-                        <div className="flex items-center gap-4 px-6 py-3">
-                            {/* Módulo activo */}
-                            <div className="flex items-center gap-2 shrink-0">
-                                {activeModule && (() => {
-                                    const Icon = activeModule.icon;
-                                    return <Icon size={16} strokeWidth={2} className="text-[var(--mf-accent)]" />;
-                                })()}
-                                <span className="text-sm font-semibold text-[var(--mf-text)]">
-                                    {activeModule?.label}
-                                </span>
+                    <header className="sticky top-0 z-30 border-b border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_96%,transparent)] px-6 py-3 shadow-[var(--mf-shadow-soft)] backdrop-blur-xl">
+                        <div className="flex min-w-0 items-center gap-3">
+                            <div className="flex shrink-0 items-center gap-2 text-sm font-semibold">
+                                {ActiveModuleIcon && <ActiveModuleIcon size={17} aria-hidden="true" className="text-[var(--mf-accent)]" />}
+                                {activeModule?.label}
                             </div>
 
-                            {/* Divisor */}
-                            {activeModule?.subItems && (
-                                <div className="h-4 w-px bg-[var(--mf-nav-border)] shrink-0" />
-                            )}
-
-                            {/* Submenú pills dinámicos */}
-                            <div className="flex-1 min-w-0">
-                                <TopbarSubMenu
-                                    subItems={activeModule?.subItems}
-                                    currentPath={location.pathname}
-                                />
+                            <div className="min-w-0 flex-1">
+                                <TopbarSubMenu subItems={activeModule?.subItems} currentPath={location.pathname} />
                             </div>
 
-                            {/* Right actions */}
-                            <div className="flex items-center gap-3 shrink-0 ml-auto">
-                                <div className="hidden md:block rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1.5 text-xs text-[var(--mf-text-2)]">
+                            <div className="flex shrink-0 items-center gap-3">
+                                <p title={displayName} className="max-w-[12rem] truncate border-l border-[var(--mf-nav-border)] pl-3 text-xs text-[var(--mf-text-2)]">
                                     {displayName}
-                                </div>
-                                <ThemeSwitcher />
+                                </p>
+                                <ThemeSwitcher labelClassName="sr-only xl:not-sr-only" />
                             </div>
                         </div>
                     </header>
@@ -594,121 +595,96 @@ export default function DashboardLayout({ pageRole, basePathOverride = '' }) {
             </div>
 
             {/* ── MOBILE LAYOUT ──────────────────────────────────────────────────────────── */}
-            <div className="mf-page-gradient min-h-screen pb-[100px] lg:hidden">
-                <div className="mf-mobile-frame mf-screen-pad mf-safe-top">
-                    <header className="flex min-w-0 items-start justify-between gap-2 pt-3">
-                        <MasterfadeLogo variant="topbar" className="shrink min-w-0" />
-                        <div className="flex shrink-0 items-center gap-2">
-                            <ThemeSwitcher
-                                showLabel
-                                labelClassName="w-[70px] whitespace-normal text-right leading-[1.05]"
-                                buttonClassName="h-10 w-10 rounded-lg"
-                            />
-                            <button
-                                type="button"
-                                aria-label="Abrir menú"
-                                onClick={() => setMobileMenuOpen(true)}
-                                className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)]"
-                            >
-                                <Menu size={18} />
-                            </button>
-                        </div>
-                    </header>
+            <Drawer.Root open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+                <div className="mf-page-gradient min-h-screen pb-[100px] lg:hidden">
+                    <div className="mf-mobile-frame mf-screen-pad mf-safe-top">
+                        <header className="mf-header-surface mt-3 p-3">
+                            <MasterfadeLogo variant="navigation" className="border-b border-[var(--mf-nav-border)] pb-2.5" />
+                            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex min-w-0 flex-[1_1_80px] items-center gap-2 text-sm font-semibold [overflow-wrap:anywhere]">
+                                    {ActiveModuleIcon && <ActiveModuleIcon size={17} aria-hidden="true" className="shrink-0 text-[var(--mf-accent)]" />}
+                                    {activeModule?.label}
+                                </div>
+                                <div className="mf-header-controls ml-auto">
+                                    <ThemeSwitcher labelClassName="sr-only sm:not-sr-only" />
+                                    <Drawer.Trigger type="button" aria-label="Abrir menú" className="mf-header-control mf-focus-ring">
+                                        <Menu size={18} aria-hidden="true" />
+                                        <span>Menú</span>
+                                    </Drawer.Trigger>
+                                </div>
+                            </div>
+                            {activeModule?.subItems && (
+                                <div className="mt-2 border-t border-[var(--mf-nav-border)] pt-1.5">
+                                    <TopbarSubMenu subItems={activeModule.subItems} currentPath={location.pathname} />
+                                </div>
+                            )}
+                        </header>
 
-                    {/* Mobile topbar submenú */}
-                    {activeModule?.subItems && (
-                        <div className="mt-4 overflow-x-auto scrollbar-hide">
-                            <TopbarSubMenu
-                                subItems={activeModule.subItems}
-                                currentPath={location.pathname}
-                            />
+                        <div className="mt-6">
+                            <Outlet />
                         </div>
-                    )}
-
-                    <div className="mt-6">
-                        <Outlet />
                     </div>
+
+                    <Drawer.Portal>
+                        <Drawer.Overlay className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" />
+                        <Drawer.Content
+                            aria-describedby={undefined}
+                            className="fixed inset-y-0 left-0 z-50 flex w-[min(300px,100%)] flex-col overflow-y-auto border-r border-[var(--mf-nav-border)] bg-[var(--mf-bg-2)] px-4 py-5 motion-safe:data-[state=open]:animate-in motion-safe:data-[state=open]:slide-in-from-left"
+                        >
+                            <Drawer.Title className="sr-only">Menú de navegación</Drawer.Title>
+                            <div className="mb-4 flex items-center justify-between gap-3 border-b border-[var(--mf-nav-border)] pb-3">
+                                <MasterfadeLogo variant="sidebar" className="min-w-0" />
+                                <Drawer.Close type="button" aria-label="Cerrar menú" className="mf-header-control mf-focus-ring">
+                                    <X size={18} aria-hidden="true" />
+                                </Drawer.Close>
+                            </div>
+
+                            <nav aria-label="Módulos" className="flex flex-1 flex-col gap-1 p-1">
+                                {modules.map((mod) => (
+                                    <SidebarItem
+                                        key={mod.id}
+                                        module={mod}
+                                        isActive={activeModule?.id === mod.id}
+                                        isCollapsed={false}
+                                        onClick={handleModuleClick}
+                                    />
+                                ))}
+                            </nav>
+
+                            <div className="mt-4 rounded-[20px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-4">
+                                <p className="text-xs text-[var(--mf-text-2)] truncate">{displayName}</p>
+                                <p className="mt-1 text-xs text-[var(--mf-accent)]">{getRoleLabel(currentRole)}</p>
+                                {canAccessInternalAccountDeletion ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleAccountDeletionRequest}
+                                        className="mf-focus-ring mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] text-xs font-semibold text-[var(--mf-text)]"
+                                    >
+                                        <UserRound size={14} strokeWidth={1.9} />
+                                        Solicitar eliminacion de cuenta
+                                    </button>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    onClick={handleLogout}
+                                    className="mf-focus-ring mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-xs font-semibold text-[var(--mf-accent)]"
+                                >
+                                    <LogOut size={14} strokeWidth={1.9} />
+                                    Cerrar sesión
+                                </button>
+                            </div>
+                        </Drawer.Content>
+                    </Drawer.Portal>
+
+                    <PremiumBottomNav
+                        className="lg:hidden"
+                        activeId={activeModule?.id || 'inicio'}
+                        sideItems={mobileSideItems}
+                        fabItem={currentRole === 'barbero' ? undefined : { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout }}
+                        mobilePreset={currentRole === 'barbero' ? 'barber' : 'default'}
+                    />
                 </div>
-
-                {/* Mobile drawer menu */}
-                <AnimatePresence>
-                    {mobileMenuOpen && (
-                        <>
-                            <motion.div
-                                key="overlay"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                onClick={() => setMobileMenuOpen(false)}
-                                className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
-                            />
-                            <motion.div
-                                key="drawer"
-                                initial={{ x: '-100%' }}
-                                animate={{ x: 0 }}
-                                exit={{ x: '-100%' }}
-                                transition={{ type: 'spring', stiffness: 320, damping: 32 }}
-                                className="fixed inset-y-0 left-0 z-50 w-[280px] flex flex-col border-r border-[var(--mf-nav-border)] bg-[var(--mf-bg-2)] px-4 py-6"
-                            >
-                                <div className="flex items-center justify-between mb-6">
-                                    <MasterfadeLogo variant="compact" />
-                                    <button
-                                        type="button"
-                                        aria-label="Cerrar menú"
-                                        onClick={() => setMobileMenuOpen(false)}
-                                        className="flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)]"
-                                    >
-                                        <X size={15} />
-                                    </button>
-                                </div>
-
-                                <nav className="flex flex-col gap-1 flex-1 overflow-y-auto">
-                                    {modules.map((mod) => (
-                                        <SidebarItem
-                                            key={mod.id}
-                                            module={mod}
-                                            isActive={activeModule?.id === mod.id}
-                                            isCollapsed={false}
-                                            onClick={handleModuleClick}
-                                        />
-                                    ))}
-                                </nav>
-
-                                <div className="mt-4 rounded-[20px] border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_84%,transparent)] p-4">
-                                    <p className="text-xs text-[var(--mf-text-2)] truncate">{displayName}</p>
-                                    <p className="mt-1 text-xs text-[var(--mf-accent)]">{getRoleLabel(currentRole)}</p>
-                                    {canAccessInternalAccountDeletion ? (
-                                        <button
-                                            type="button"
-                                            onClick={handleAccountDeletionRequest}
-                                            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-card)] text-xs font-semibold text-[var(--mf-text)]"
-                                        >
-                                            <UserRound size={14} strokeWidth={1.9} />
-                                            Solicitar eliminacion de cuenta
-                                        </button>
-                                    ) : null}
-                                    <button
-                                        type="button"
-                                        onClick={handleLogout}
-                                        className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-xs font-semibold text-[var(--mf-accent)]"
-                                    >
-                                        <LogOut size={14} strokeWidth={1.9} />
-                                        Cerrar sesión
-                                    </button>
-                                </div>
-                            </motion.div>
-                        </>
-                    )}
-                </AnimatePresence>
-
-                <PremiumBottomNav
-                    className="lg:hidden"
-                    activeId={activeModule?.id || 'inicio'}
-                    sideItems={mobileSideItems}
-                    fabItem={currentRole === 'barbero' ? undefined : { id: 'salir', label: 'Salir', icon: LogOut, onClick: handleLogout }}
-                    mobilePreset={currentRole === 'barbero' ? 'barber' : 'default'}
-                />
-            </div>
+            </Drawer.Root>
         </div>
     );
 }

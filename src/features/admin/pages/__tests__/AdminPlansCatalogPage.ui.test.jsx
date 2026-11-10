@@ -505,7 +505,10 @@ describe("catálogo responsive de planes VIP", () => {
     fireEvent.click(screen.getByRole("button", { name: "Nuevo plan maestro" }));
     let dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "Datos del plan maestro" })).toBeInTheDocument();
-    expect(within(dialog).getByText("Ofertas iniciales por sucursal")).toBeInTheDocument();
+    expect(within(dialog).getByText("Ofertas iniciales por sucursal *")).toBeInTheDocument();
+    expect(within(dialog).getByText("Selecciona al menos una sucursal donde se ofrecera inicialmente este plan.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "Beneficios incluidos *" })).toBeInTheDocument();
+    expect(within(dialog).getByText("Agrega al menos un beneficio: servicio o cortesía.")).toBeInTheDocument();
     fireEvent.click(within(dialog).getAllByRole("button", { name: "Cerrar" })[0]);
 
     fireEvent.click(screen.getByRole("button", { name: "Gestionar ofertas" }));
@@ -544,7 +547,7 @@ describe("catálogo responsive de planes VIP", () => {
     fireEvent.click(screen.getByRole("button", { name: "Editar maestro" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "Datos del plan maestro" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("heading", { name: "Beneficios incluidos" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "Beneficios incluidos *" })).toBeInTheDocument();
     expect(within(dialog).getByLabelText("Nombre del plan *")).toHaveValue("Plan VIP 1");
     expect(within(dialog).getByLabelText("Periodo")).toHaveValue("Mensual");
   });

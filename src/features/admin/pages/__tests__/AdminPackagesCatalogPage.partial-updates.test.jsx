@@ -74,6 +74,18 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
+test('creación identifica los mínimos obligatorios de ofertas y servicios sin cambiar el envío', async () => {
+  render(<AdminPackagesCatalogPage />);
+  await screen.findByText('Paquete base');
+  fireEvent.click(screen.getByRole('button', { name: 'Nuevo maestro' }));
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByText('Ofertas iniciales por sucursal *')).toBeInTheDocument();
+  expect(within(dialog).getByText('Selecciona al menos una sucursal donde se ofrecera inicialmente este paquete.')).toBeInTheDocument();
+  expect(within(dialog).getByText('Servicios incluidos *')).toBeInTheDocument();
+  expect(within(dialog).getByText('Agrega al menos 2 servicios distintos.')).toBeInTheDocument();
+  expect(packagesApi.createAdminPaquete).not.toHaveBeenCalled();
+});
+
 test('QA06: errores desconocidos no exponen detalles técnicos', async () => {
   packagesApi.updateAdminPaquete.mockRejectedValue({ data: { error: { message: 'SQL INTERNAL_SYNTHETIC password=secret' } } });
   const dialog = await openMasterEditor();

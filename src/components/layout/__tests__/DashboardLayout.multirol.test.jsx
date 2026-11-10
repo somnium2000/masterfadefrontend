@@ -51,11 +51,26 @@ test.each(['admin', 'super_admin', 'cliente', 'barbero', 'security_admin'])('rol
   if (role === 'cliente') expect(modules.map(item => item.id)).toEqual(['inicio']);
 });
 
+test('Super Admin conserva solo Dashboard en Inicio y Admin conserva KPIs', () => {
+  const superInicio = buildNavModules('/home/super', 'super_admin', ['super_admin']).find(item => item.id === 'inicio');
+  const adminInicio = buildNavModules('/home/admin', 'admin', ['admin']).find(item => item.id === 'inicio');
+  expect(superInicio.subItems.map(item => item.label)).toEqual(['Dashboard']);
+  expect(adminInicio.subItems.map(item => item.label)).toEqual(['Dashboard', 'KPIs']);
+});
+
 test('root y roles de pantalla sin claims operativos no añaden accesos combinados', () => {
   for (const roles of [['root', 'admin', 'barbero'], ['barbero'], ['admin'], []]) {
     expect(buildNavModules('/home/admin', 'admin', roles).some(item => item.id === 'mi-espacio-barbero')).toBe(false);
   }
   expect(buildNavModules('/home/security', 'security_admin', ['root']).map(item => item.id)).toEqual(['seguridad']);
+});
+
+test('Auditoria multirrol aparece exclusivamente cuando los claims incluyen root', () => {
+  const withRoot = buildNavModules('/home/security', 'security_admin', ['cliente', 'security_admin', 'root']);
+  const withoutRoot = buildNavModules('/home/security', 'security_admin', ['admin', 'super_admin', 'security_admin']);
+
+  expect(withRoot[0].subItems.map(item => item.id)).toContain('seg-alertas');
+  expect(withoutRoot[0].subItems.map(item => item.id)).not.toContain('seg-alertas');
 });
 
 function Panels() {
@@ -71,7 +86,7 @@ test.each([['admin'], ['super_admin']])('logo sidebar %s reserva espacio para el
   session.roles = [role];
   render(view(adminPath(session.roles)));
   const sidebarLogo = document.querySelector('[data-logo-variant="sidebar"]');
-  expect(sidebarLogo.parentElement).toHaveClass('left-0', 'right-11', 'justify-center');
+  expect(sidebarLogo.parentElement).toHaveClass('left-0', 'right-13', 'justify-center');
   fireEvent.click(screen.getByRole('button', { name: 'Colapsar sidebar' }));
   expect(document.querySelector('[data-logo-variant="sidebar"]')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Expandir sidebar' })).toBeInTheDocument();
@@ -103,8 +118,7 @@ test('móvil: drawer comparte módulos, cierra al navegar y permite regresar', a
   session.roles = ['super_admin', 'admin', 'barbero'];
   render(view('/home/super'));
   fireEvent.click(screen.getByRole('button', { name: 'Abrir menú' }));
-  const close = screen.getByRole('button', { name: 'Cerrar menú' });
-  const drawer = close.parentElement.parentElement;
+  const drawer = screen.getByRole('dialog', { name: 'Menú de navegación' });
   expect(within(drawer).getAllByRole('button', { name: 'Mi espacio Barbero' })).toHaveLength(1);
   for (const name of ['Inicio Barbero', 'Mi Calendario', 'Mi Perfil Barbero']) {
     expect(within(drawer).getAllByRole('button', { name })).toHaveLength(1);
@@ -114,12 +128,12 @@ test('móvil: drawer comparte módulos, cierra al navegar y permite regresar', a
   fireEvent.click(within(drawer).getByRole('button', { name: 'Mi espacio Barbero' }));
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Cerrar menú' })).not.toBeInTheDocument());
   fireEvent.click(screen.getByRole('button', { name: 'Abrir menú' }));
-  const barberDrawer = screen.getByRole('button', { name: 'Cerrar menú' }).parentElement.parentElement;
+  const barberDrawer = screen.getByRole('dialog', { name: 'Menú de navegación' });
   fireEvent.click(within(barberDrawer).getByRole('button', { name: 'Calendario' }));
   expect(screen.getByTestId('location')).toHaveTextContent('/home/barbero/citas');
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Cerrar menú' })).not.toBeInTheDocument());
   fireEvent.click(screen.getByRole('button', { name: 'Abrir menú' }));
-  const calendarDrawer = screen.getByRole('button', { name: 'Cerrar menú' }).parentElement.parentElement;
+  const calendarDrawer = screen.getByRole('dialog', { name: 'Menú de navegación' });
   expect(within(calendarDrawer).getByRole('button', { name: 'Calendario' })).toHaveAttribute('aria-current', 'page');
   fireEvent.click(within(calendarDrawer).getByRole('button', { name: 'Volver a Administración' }));
   expect(screen.getByTestId('location').textContent).toBe('/home/super');
@@ -136,7 +150,7 @@ test('claims actualizados eliminan accesos combinados en sidebar y drawer abiert
   session.roles = ['admin', 'barbero'];
   const rendered = render(view('/home/admin'));
   fireEvent.click(screen.getByRole('button', { name: 'Abrir menú' }));
-  expect(screen.getAllByRole('button', { name: 'Mi espacio Barbero' })).toHaveLength(2);
+  expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mi espacio Barbero' })).toBeInTheDocument();
   session.roles = ['admin'];
   rendered.rerender(view('/home/admin'));
   expect(screen.queryByRole('button', { name: 'Mi espacio Barbero' })).not.toBeInTheDocument();
@@ -149,4 +163,16 @@ test('revocar admin en panel barbero elimina regreso sin conservar claims anteri
   session.roles = ['barbero'];
   rendered.rerender(view('/home/barbero'));
   expect(screen.queryByRole('button', { name: 'Volver a Administración' })).not.toBeInTheDocument();
+});
+
+test('el menú móvil recibe foco y devuelve el foco al botón al cerrar con Escape', async () => {
+  session.roles = ['barbero'];
+  render(view('/home/barbero'));
+  const trigger = screen.getByRole('button', { name: 'Abrir menú' });
+  fireEvent.click(trigger);
+  const dialog = screen.getByRole('dialog', { name: 'Menú de navegación' });
+  expect(within(dialog).getByRole('button', { name: 'Cerrar menú' })).toHaveFocus();
+  fireEvent.keyDown(dialog, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(trigger).toHaveFocus();
 });

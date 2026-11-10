@@ -42,29 +42,45 @@ test('términos siguen obligatorios y el error tiene un único anuncio asociado 
   expect(mocks.warning).not.toHaveBeenCalled();
 });
 
-test.each([' ', 'Enter'])('revelar con %s oculta al soltar o perder foco en ambos campos', (key) => {
+test('visibilidad alterna de forma independiente y conserva valores, puntero y foco', () => {
   mount();
-  const buttons = screen.getAllByRole('button', { name: 'Mantén presionado para ver la contraseña' });
-  const inputs = [screen.getByLabelText('Contraseña', { exact: true }), screen.getByLabelText('Confirmar contraseña')];
-  buttons.forEach((button, index) => {
-    fireEvent.keyDown(button, { key });
-    expect(inputs[index]).toHaveAttribute('type', 'text');
-    fireEvent.keyUp(button, { key });
-    expect(inputs[index]).toHaveAttribute('type', 'password');
-    fireEvent.keyDown(button, { key });
-    fireEvent.blur(button);
-    expect(inputs[index]).toHaveAttribute('type', 'password');
-  });
+  const password = screen.getByLabelText('Contraseña', { exact: true });
+  const confirmation = screen.getByLabelText('Confirmar contraseña');
+  fireEvent.change(password, { target: { value: 'SoloLocal9!' } });
+  fireEvent.change(confirmation, { target: { value: 'SoloLocal9!' } });
+  const showPassword = screen.getByRole('button', { name: 'Mostrar contraseña' });
+  const showConfirmation = screen.getByRole('button', { name: 'Mostrar confirmación de contraseña' });
+  expect(password).toHaveAttribute('type', 'password');
+  expect(confirmation).toHaveAttribute('type', 'password');
+  expect(showPassword).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(showPassword);
+  expect(password).toHaveAttribute('type', 'text');
+  expect(confirmation).toHaveAttribute('type', 'password');
+  expect(password).toHaveValue('SoloLocal9!');
+  const hidePassword = screen.getByRole('button', { name: 'Ocultar contraseña' });
+  fireEvent.pointerUp(hidePassword);
+  fireEvent.blur(hidePassword);
+  expect(password).toHaveAttribute('type', 'text');
+  fireEvent.click(hidePassword);
+  expect(password).toHaveAttribute('type', 'password');
+  fireEvent.click(showConfirmation);
+  expect(confirmation).toHaveAttribute('type', 'text');
+  expect(password).toHaveAttribute('type', 'password');
+  expect(confirmation).toHaveValue('SoloLocal9!');
   expect(mocks.post).not.toHaveBeenCalled();
 });
 
-test('puntero conserva revelado temporal y cancelación', () => {
+test.each(['Enter', ' '])('botón estándar conserva activación por teclado con %s sin enviar', (key) => {
   mount();
-  const button = screen.getAllByRole('button', { name: 'Mantén presionado para ver la contraseña' })[0];
+  const button = screen.getByRole('button', { name: 'Mostrar contraseña' });
   const input = screen.getByLabelText('Contraseña', { exact: true });
-  fireEvent.pointerDown(button); expect(input).toHaveAttribute('type', 'text');
-  fireEvent.pointerUp(button); expect(input).toHaveAttribute('type', 'password');
-  fireEvent.pointerDown(button); fireEvent.pointerCancel(button); expect(input).toHaveAttribute('type', 'password');
+  button.focus();
+  fireEvent.keyDown(button, { key });
+  fireEvent.keyUp(button, { key });
+  fireEvent.click(button);
+  expect(input).toHaveAttribute('type', 'text');
+  expect(button).toHaveAttribute('type', 'button');
+  expect(mocks.post).not.toHaveBeenCalled();
 });
 
 test('error de red se anuncia una sola vez y libera el formulario', async () => {

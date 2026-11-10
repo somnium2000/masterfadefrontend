@@ -8,6 +8,14 @@ const DialogTrigger = DialogPrimitive.Trigger
 const DialogPortal = DialogPrimitive.Portal
 const DialogClose = DialogPrimitive.Close
 
+function isTouchPrimaryDevice() {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false
+  return Boolean(
+    Number(navigator.maxTouchPoints || 0) > 0
+    || window.matchMedia?.("(pointer: coarse)")?.matches
+  )
+}
+
 // Overlay con blur â€” identico en mobile y desktop
 const DialogOverlay = React.forwardRef(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
@@ -31,11 +39,27 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
  * - Mobile (< sm): aparece desde abajo como bottom sheet con 24px radius en top
  * - Desktop (sm+): modal centrado con slide+zoom y 24px radius uniforme
  */
-const DialogContent = React.forwardRef(({ className, children, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
+const DialogContent = React.forwardRef(({ className, children, onOpenAutoFocus, ...props }, ref) => {
+  const contentRef = React.useRef(null)
+  const setContentRef = React.useCallback((node) => {
+    contentRef.current = node
+    if (typeof ref === "function") ref(node)
+    else if (ref) ref.current = node
+  }, [ref])
+
+  const handleOpenAutoFocus = React.useCallback((event) => {
+    onOpenAutoFocus?.(event)
+    if (event.defaultPrevented || !isTouchPrimaryDevice()) return
+    event.preventDefault()
+    contentRef.current?.focus({ preventScroll: true })
+  }, [onOpenAutoFocus])
+
+  return (
+    <DialogPortal>
+      <DialogOverlay />
+      <DialogPrimitive.Content
+      ref={setContentRef}
+      onOpenAutoFocus={handleOpenAutoFocus}
       className={cn(
         // Posicionamiento base
         "fixed z-50 w-full",
@@ -72,9 +96,10 @@ const DialogContent = React.forwardRef(({ className, children, ...props }, ref) 
         <X className="h-3.5 w-3.5 text-[var(--mf-text-2)]" />
         <span className="sr-only">Cerrar</span>
       </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-))
+      </DialogPrimitive.Content>
+    </DialogPortal>
+  )
+})
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
 const DialogHeader = ({ className, ...props }) => (

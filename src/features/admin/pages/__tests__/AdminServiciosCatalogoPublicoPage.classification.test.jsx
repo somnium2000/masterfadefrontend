@@ -21,7 +21,7 @@ beforeEach(() => {
     { id_sucursal: 'A', nombre_sucursal: 'Centro' }, { id_sucursal: 'B', nombre_sucursal: 'Norte' },
   ] });
   api.getPublicCatalog.mockResolvedValue({ services: [
-    service('Reservable', true), service('Informativo', false, true),
+    service('Reservable', true), { ...service('Informativo', false, true), precio_hnl: 0 },
     service('No reservable', false, false, 20), service('Sin confirmar', undefined, false, 5),
   ], packages: [{ id_paquete: 'P', nombre_paquete: 'Combo', precio_hnl: 300, items: [] }] });
   api.listPublicCatalogPlans.mockResolvedValue({ plans: [{ id_plan: 'VIP', nombre_plan: 'Plan VIP', precio_hnl: 500 }] });
@@ -43,15 +43,13 @@ test('clasifica servicios por el contrato sin duplicar y conserva datos y orden'
   expect(within(booked).getByText('Reservable')).toBeInTheDocument();
   expect(within(booked).queryByText('No reservable')).not.toBeInTheDocument();
   expect(within(booked).queryByText('Sin confirmar')).not.toBeInTheDocument();
-  const unavailable = screen.getByRole('heading', { name: 'Servicios no disponibles para agendar' }).closest('section');
-  const cards = within(unavailable).getAllByRole('article');
-  expect(cards[0]).toHaveTextContent('Sin confirmar');
-  expect(cards[1]).toHaveTextContent('No reservable');
-  expect(cards[1]).toHaveTextContent('Detalle No reservable');
-  expect(cards[1]).toHaveTextContent('Precio: L 123.00');
-  expect(cards[1]).toHaveTextContent('Duración: 25 min');
   const informative = screen.getByRole('heading', { name: 'Servicios informativos' }).closest('section');
   expect(within(informative).getByText('Informativo')).toBeInTheDocument();
+  expect(within(informative).getByText('No reservable')).toBeInTheDocument();
+  expect(within(informative).getByText('Sin confirmar')).toBeInTheDocument();
+  expect(within(informative).getByText('Precio: Consultar precio')).toBeInTheDocument();
+  expect(within(informative).getAllByText('Precio: L 123.00')).toHaveLength(2);
+  expect(screen.queryByRole('heading', { name: 'Servicios no disponibles para agendar' })).not.toBeInTheDocument();
   expect(screen.getAllByText('No reservable')).toHaveLength(1);
   expect(screen.getByText('Combo')).toBeInTheDocument();
   expect(screen.getByText('Plan VIP')).toBeInTheDocument();

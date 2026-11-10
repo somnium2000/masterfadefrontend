@@ -51,6 +51,7 @@ import AdminReportesConcurrenciaPage from './features/admin/pages/AdminReportesC
 import AdminAgendamientoCitasPage from './features/admin/pages/AdminAgendamientoCitasPage.jsx';
 import AdminAgendamientoHistorialPage from './features/admin/pages/AdminAgendamientoHistorialPage.jsx';
 import UnderConstructionPage from './features/admin/pages/UnderConstructionPage.jsx';
+import SuperAdminDashboardPage from './features/admin/pages/SuperAdminDashboardPage.jsx';
 import AdminMasterPuntosPage from './features/admin/pages/AdminMasterPuntosPage.jsx';
 import AdminServiciosCatalogoPublicoPage from './features/admin/pages/AdminServiciosCatalogoPublicoPage.jsx';
 import AdminSeguridadAlertasPage from './features/admin/pages/AdminSeguridadAlertasPage.jsx';
@@ -59,6 +60,8 @@ import AdminSeguridadSesionesPage from './features/admin/pages/AdminSeguridadSes
 import AdminSeguridadUsuariosPage from './features/admin/pages/AdminSeguridadUsuariosPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
+import BookingUnavailablePage from './features/public/pages/BookingUnavailablePage.jsx';
+import { PUBLIC_BOOKING_ENABLED } from './features/public/lib/publicBookingFeatureFlags.js';
 
 const PublicBookingFlow = lazy(() => import('./features/public/booking/PublicBookingFlow.jsx'));
 const PublicBookingBarberosStep = lazy(() => import('./features/public/booking/PublicBookingBarberosStep.jsx'));
@@ -155,7 +158,7 @@ function App() {
         element={
           <RouteErrorBoundary>
             <BookingSuspense>
-              <PublicBookingFlow />
+              {PUBLIC_BOOKING_ENABLED ? <PublicBookingFlow /> : <BookingUnavailablePage />}
             </BookingSuspense>
           </RouteErrorBoundary>
         }
@@ -242,8 +245,8 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<UnderConstructionPage title="Inicio" />} />
-        <Route path="kpis" element={<UnderConstructionPage title="KPIs" subtitle="Indicadores clave de rendimiento" />} />
+        <Route index element={<RouteErrorBoundary><SuperAdminDashboardPage /></RouteErrorBoundary>} />
+        <Route path="kpis" element={<Navigate to="/home/super" replace />} />
         {/* Personas */}
         <Route path="empleados" element={<RouteErrorBoundary><AdminEmpleadosPage /></RouteErrorBoundary>} />
         <Route path="clientes" element={<RouteErrorBoundary><AdminClientesPage /></RouteErrorBoundary>} />

@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Waves } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../lib/utils.js';
 
 function resolvePageSize(pageSizeByViewport) {
@@ -22,7 +22,7 @@ function chunkItems(items, pageSize) {
   return chunks;
 }
 
-function CarouselActionButton({ onClick, icon, label, disabled = false, compact = false }) {
+function CarouselActionButton({ onClick, icon, label, disabled = false, compact = false, iconOnly = false }) {
   return (
     <button
       type="button"
@@ -42,9 +42,11 @@ function CarouselActionButton({ onClick, icon, label, disabled = false, compact 
       )}
     >
       {icon}
-      <span className={cn('text-xs font-semibold uppercase tracking-[0.08em]', compact ? 'hidden lg:inline' : 'hidden sm:inline')}>
-        {label}
-      </span>
+      {iconOnly ? null : (
+        <span className={cn('text-xs font-semibold uppercase tracking-[0.08em]', compact ? 'hidden lg:inline' : 'hidden sm:inline')}>
+          {label}
+        </span>
+      )}
     </button>
   );
 }
@@ -57,14 +59,18 @@ export default function CardsCarousel({
   pageSizeByViewport,
   gridClassName = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3',
   compactControls = false,
+  iconOnlyControls = false,
   showHeaderTag = true,
   showViewBadge = true,
   resetKey = null,
+  enableSwipe = false,
 }) {
   const reducedMotion = useReducedMotion();
   const [pageSize, setPageSize] = useState(() => resolvePageSize(pageSizeByViewport));
   const [pageIndex, setPageIndex] = useState(0);
   const [direction, setDirection] = useState(0);
+  const touchGestureRef = useRef(null);
+  const suppressClickRef = useRef(false);
 
   useEffect(() => {
     const onResize = () => setPageSize(resolvePageSize(pageSizeByViewport));
@@ -107,6 +113,44 @@ export default function CardsCarousel({
     });
   };
 
+  const handleTouchStart = (event) => {
+    if (!enableSwipe || event.touches.length !== 1) {
+      touchGestureRef.current = null;
+      return;
+    }
+    const touch = event.touches[0];
+    touchGestureRef.current = { startX: touch.clientX, startY: touch.clientY, lastX: touch.clientX, lastY: touch.clientY };
+  };
+
+  const handleTouchMove = (event) => {
+    if (!enableSwipe || !touchGestureRef.current || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    touchGestureRef.current.lastX = touch.clientX;
+    touchGestureRef.current.lastY = touch.clientY;
+  };
+
+  const handleTouchEnd = (event) => {
+    const gesture = touchGestureRef.current;
+    touchGestureRef.current = null;
+    if (!enableSwipe || !gesture) return;
+    const touch = event.changedTouches?.[0];
+    const endX = Number.isFinite(touch?.clientX) ? touch.clientX : gesture.lastX;
+    const endY = Number.isFinite(touch?.clientY) ? touch.clientY : gesture.lastY;
+    const deltaX = endX - gesture.startX;
+    const deltaY = endY - gesture.startY;
+    if (Math.abs(deltaX) < 48 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.25) return;
+    suppressClickRef.current = true;
+    window.setTimeout(() => { suppressClickRef.current = false; }, 0);
+    movePage(deltaX < 0 ? 1 : -1);
+  };
+
+  const handleClickCapture = (event) => {
+    if (!suppressClickRef.current) return;
+    suppressClickRef.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
   return (
     <section
       className={cn(
@@ -144,6 +188,7 @@ export default function CardsCarousel({
                 icon={<ChevronLeft size={15} strokeWidth={2.1} />}
                 disabled={isFirstPage}
                 compact={compactControls}
+                iconOnly={iconOnlyControls}
               />
               <CarouselActionButton
                 label="Siguiente"
@@ -151,13 +196,22 @@ export default function CardsCarousel({
                 icon={<ChevronRight size={15} strokeWidth={2.1} />}
                 disabled={isLastPage}
                 compact={compactControls}
+                iconOnly={iconOnlyControls}
               />
             </div>
           )}
         </div>
       ) : null}
 
-      <div className="relative z-10 min-h-[220px]">
+      <div
+        className={cn('relative z-10 min-h-[220px]', enableSwipe && 'touch-pan-y')}
+        data-testid="cards-carousel-swipe-region"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={() => { touchGestureRef.current = null; }}
+        onClickCapture={handleClickCapture}
+      >
         <AnimatePresence custom={direction} mode="wait">
           <motion.div
             key={`carousel-page-${safePageIndex}`}

@@ -24,7 +24,7 @@ test('un único main y h1, sin incluir la navegación inferior', () => {
   expect(within(main).getByRole('heading', { level: 1 })).toHaveTextContent('MASTERFADE');
   expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   expect(main).not.toContainElement(screen.getByRole('navigation'));
-  expect(screen.getByRole('button', { name: 'Agendar', exact: true })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Pausado', exact: true })).toBeInTheDocument();
 });
 
 test('contraste y foco quedan delimitados a Landing, incluida su navegación', () => {
@@ -61,25 +61,28 @@ test('los destinos existentes de Landing se conservan sin ejecutar operaciones d
     ['Planes de Membresía VIP', '/membresias-vip'],
     ['Promociones', '/promociones'],
     ['Iniciar sesión', '/login'],
-    ['Agendar Cita', '/agendar/barberos'],
-    ['Agendar', '/agendar/barberos'],
     ['Inicio', '/'],
   ]) {
     fireEvent.click(screen.getAllByRole('button', { name, exact: true })[0]);
     expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent(destination);
   }
+  for (const button of screen.getAllByRole('button', { name: 'Reservas pausadas', exact: true })) {
+    expect(button).toBeDisabled();
+  }
+  expect(screen.getByRole('button', { name: 'Pausado', exact: true })).toBeDisabled();
 });
 
 test('CTA entran desde abajo en orden, finalizan visibles y conservan interacción', async () => {
   render(<ThemeProvider><MemoryRouter><LandingPage /></MemoryRouter></ThemeProvider>);
-  for (const label of ['Agendar Cita', 'Barberos', 'Planes de Membresía VIP']) {
+  for (const label of ['Reservas pausadas', 'Barberos', 'Planes de Membresía VIP']) {
     for (const button of screen.getAllByRole('button', { name: label, exact: true })) {
       expect(button).toHaveStyle({ opacity: '0', transform: 'translateY(18px)' });
-      expect(button).toBeEnabled();
+      if (label === 'Reservas pausadas') expect(button).toBeDisabled();
+      else expect(button).toBeEnabled();
     }
   }
   await waitFor(() => {
-    for (const label of ['Agendar Cita', 'Barberos', 'Planes de Membresía VIP']) {
+    for (const label of ['Reservas pausadas', 'Barberos', 'Planes de Membresía VIP']) {
       for (const button of screen.getAllByRole('button', { name: label, exact: true })) {
         expect(button).toBeVisible();
         expect(button).toHaveStyle({ opacity: '1', transform: 'none' });

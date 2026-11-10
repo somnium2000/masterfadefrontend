@@ -807,7 +807,7 @@ export default function AdminClientesPage() {
               </p>
             </div>
             <div>
-              <Label className="mf-label">DNI</Label>
+              <Label className="mf-label">DNI *</Label>
               <Input className="mf-input mt-1" value={formValues.dni} onChange={(e) => setFormValues((p) => ({ ...p, dni: e.target.value }))} />
             </div>
             <div>
@@ -815,7 +815,7 @@ export default function AdminClientesPage() {
               <Input className="mf-input mt-1" value={formValues.rtn} onChange={(e) => setFormValues((p) => ({ ...p, rtn: e.target.value }))} />
             </div>
             <div>
-              <Label className="mf-label">Telefono</Label>
+              <Label className="mf-label">Telefono *</Label>
               <Input className="mf-input mt-1" value={formValues.telefono_principal} onChange={(e) => setFormValues((p) => ({ ...p, telefono_principal: e.target.value }))} />
             </div>
             <div className="sm:col-span-2">

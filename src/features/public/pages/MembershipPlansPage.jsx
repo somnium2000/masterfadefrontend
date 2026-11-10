@@ -17,9 +17,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import MasterfadeLogo from "../../../components/branding/MasterfadeLogo.jsx";
+import PublicNavigationHeader from '../../../components/layout/PublicNavigationHeader.jsx';
 import PremiumBottomNav from "../../../components/navigation/PremiumBottomNav.jsx";
-import ThemeSwitcher from "../../../components/theme/ThemeSwitcher.jsx";
 import { useAuth } from "../../../context/AuthContext.jsx";
 import { useNotifications } from "../../../context/NotificationsContext.jsx";
 import { listPublicCatalogBranches, listPublicPlansByBranch } from "../lib/catalogApi.js";
@@ -285,6 +284,7 @@ export default function MembershipPlansPage() {
   const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [purchaseErrorMessage, setPurchaseErrorMessage] = useState("");
   const [purchaseCompleted, setPurchaseCompleted] = useState(false);
+  const [purchaseConfirmation, setPurchaseConfirmation] = useState(null);
   const [purchasePendingConfirmation, setPurchasePendingConfirmation] = useState(false);
 
   const scrollRef = useRef(null);
@@ -301,6 +301,7 @@ export default function MembershipPlansPage() {
       setPurchaseModalOpen(false);
       setPurchaseOrderSummary(null);
       setMembershipPaymentIntent(null);
+      setPurchaseConfirmation(null);
       setPurchaseStep("summary");
       setPurchaseLoading(false);
       setPurchaseErrorMessage("");
@@ -367,6 +368,7 @@ export default function MembershipPlansPage() {
   }
 
   const resetPurchaseFlow = useCallback(() => {
+    setPurchaseConfirmation(null);
     setPurchaseStep("summary");
     setPurchaseOrderSummary(null);
     setMembershipPaymentIntent(null);
@@ -430,13 +432,22 @@ export default function MembershipPlansPage() {
         : [];
       validBranchIdsRef.current = new Set(nextBranches.map((branch) => String(branch.id_sucursal).trim()));
       setBranches(nextBranches);
+      if (nextBranches.length === 1) {
+        const onlyBranchId = String(nextBranches[0].id_sucursal).trim();
+        selectedBranchRef.current = onlyBranchId;
+        setSelectedBranchId(onlyBranchId);
+        setPlans([]);
+        setStatus("loading");
+        void loadPlansByBranch(onlyBranchId);
+        return;
+      }
       setStatus(nextBranches.length ? "idle" : "noBranches");
     } catch {
       if (!isMountedRef.current || requestId !== branchRequestRef.current) return;
       setErrorMessage("No se pudieron cargar las sucursales.");
       setStatus("branchesError");
     }
-  }, []);
+  }, [loadPlansByBranch]);
 
   const loadMembershipState = useCallback(async () => {
     const requestId = ++membershipRequestRef.current;
@@ -665,11 +676,11 @@ export default function MembershipPlansPage() {
         return;
       }
       if (!isCurrent()) return;
+      setPurchaseConfirmation(paymentResult);
       setPurchaseCompleted(true);
       setPurchaseStep("success");
       await loadMembershipState();
       if (!isCurrent()) return;
-      notifications.success("Pago confirmado. Tu plan ya esta activo.");
     } catch (error) {
       if (!isCurrent()) return;
       if (isPixelPayUncertainError(error)) {
@@ -688,6 +699,7 @@ export default function MembershipPlansPage() {
     const normalized = String(result?.normalized_status || "PENDIENTE").toUpperCase();
     if (normalized === "PAGADO") {
       setPurchasePendingConfirmation(false);
+      setPurchaseConfirmation(result);
       setPurchaseCompleted(true);
       setPurchaseStep("success");
       setPurchaseErrorMessage("");
@@ -733,25 +745,16 @@ export default function MembershipPlansPage() {
   return (
     <div className="mf-page-gradient min-h-screen pb-[100px]">
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 pb-10 pt-4 sm:px-8">
-        <header className="flex items-start justify-between gap-6">
-          <button
-            type="button"
-            onClick={() => navigate("/")}
-            className="inline-flex items-center gap-2 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-4 py-2 text-sm text-[var(--mf-text)] transition-colors duration-200 hover:bg-[color:color-mix(in_srgb,var(--mf-btn-bg)_70%,white_12%)]"
-          >
-            <House size={16} strokeWidth={1.8} />
-            <span>Volver al inicio</span>
-          </button>
-          <ThemeSwitcher />
-        </header>
+        <PublicNavigationHeader onHome={() => navigate('/')} />
 
         <main className="mx-auto mt-8 w-full max-w-4xl">
           <div className="flex flex-col items-center text-center">
-            <MasterfadeLogo variant="publicPromotions" className="-my-6 sm:-my-8 md:-my-10" />
-            <p className="mt-8 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Membresias VIP</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Membresias VIP</p>
             <h1 className="mf-font-display mt-4 text-[42px] leading-[0.92] text-[var(--mf-text)]">Eleva tu Estilo Cada Mes</h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--mf-text-2)]">
-              Selecciona la sucursal donde usaras tu plan y completa tu compra en minutos.
+              {branches.length === 1
+                ? "Explora los planes disponibles y completa tu compra en minutos."
+                : "Selecciona la sucursal donde usaras tu plan y completa tu compra en minutos."}
             </p>
             {isClienteSession ? (
               <span className="mt-4 inline-flex items-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs font-semibold tracking-[0.08em] text-[var(--mf-accent)]">
@@ -764,6 +767,7 @@ export default function MembershipPlansPage() {
             ) : null}
           </div>
 
+          {branches.length > 1 ? (
           <div className="mf-glass-surface mt-6 overflow-hidden rounded-[26px] border border-[var(--mf-btn-border)]/80 p-4 sm:p-5">
             <div className="relative flex flex-col items-center gap-3 text-center">
               <div className="max-w-xl">
@@ -803,6 +807,7 @@ export default function MembershipPlansPage() {
               })}
             </div>
           </div>
+          ) : null}
 
           {!selectedBranchId && status === "idle" ? (
             <div className="mf-glass-surface mt-8 rounded-[28px] p-6 text-center">
@@ -910,6 +915,7 @@ export default function MembershipPlansPage() {
         errorMessage={purchaseErrorMessage}
         disableClose={purchaseLoading || purchasePendingConfirmation}
         pendingConfirmation={purchasePendingConfirmation}
+        paymentConfirmation={purchaseConfirmation}
         onCancel={cancelPurchaseFlow}
         onContinueToPayment={handleContinueToPayment}
         onConfirmPayment={handleConfirmPayment}

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Eye, EyeOff } from 'lucide-react';
 import { http } from '../../../services/httpClient.js';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import './LoginPage.css';
+import './RegisterPage.css';
 
 export default function GuestRegistrationConfirmPage() {
   const [link] = useState(() => {
@@ -13,6 +15,8 @@ export default function GuestRegistrationConfirmPage() {
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const lock = useRef(false);
   const request = useRef(null);
   useEffect(() => () => request.current?.abort(), []);
@@ -33,7 +37,7 @@ export default function GuestRegistrationConfirmPage() {
         acepta_terminos: true, consentimiento_marketing: fields.consentimiento_marketing === 'on' },
       { skipCsrf: true, sensitiveBody: true, skipAuthInvalidation: true, signal: controller.signal });
       if (controller.signal.aborted) return;
-      form.reset(); setDone(true);
+      form.reset(); setShowPassword(false); setShowConfirmPassword(false); setDone(true);
       window.history.replaceState(null, '', window.location.pathname);
     } catch (failure) {
       if (controller.signal.aborted) return;
@@ -53,9 +57,21 @@ export default function GuestRegistrationConfirmPage() {
             <p>Confirma tu correo eligiendo tu contraseña final. No se incorporarán reservas anteriores.</p>
             <label>Nombre<input className="mf-input" name="nombres" required maxLength={120} autoComplete="given-name" disabled={loading} /></label>
             <label>Apellido<input className="mf-input" name="apellidos" required maxLength={120} autoComplete="family-name" disabled={loading} /></label>
-            <label>Contraseña final<input className="mf-input" name="contrasena" type="password" required minLength={8} maxLength={120} autoComplete="new-password" disabled={loading} /></label>
+            <label htmlFor="guest_register_password">Contraseña final</label>
+            <div className="mf-register-input-wrap">
+              <input id="guest_register_password" className="mf-input mf-register-input mf-register-input-password" name="contrasena" type={showPassword ? 'text' : 'password'} required minLength={8} maxLength={120} autoComplete="new-password" disabled={loading} />
+              <button type="button" className="mf-register-password-peek" aria-label={showPassword ? 'Ocultar contraseña final' : 'Mostrar contraseña final'} title={showPassword ? 'Ocultar contraseña final' : 'Mostrar contraseña final'} aria-pressed={showPassword} disabled={loading} onClick={() => setShowPassword((visible) => !visible)}>
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
             <p>Mínimo 8 caracteres, mayúscula, minúscula y número.</p>
-            <label>Confirmar contraseña<input className="mf-input" name="confirmar_contrasena" type="password" required autoComplete="new-password" disabled={loading} /></label>
+            <label htmlFor="guest_register_password_confirm">Confirmar contraseña</label>
+            <div className="mf-register-input-wrap">
+              <input id="guest_register_password_confirm" className="mf-input mf-register-input mf-register-input-password" name="confirmar_contrasena" type={showConfirmPassword ? 'text' : 'password'} required autoComplete="new-password" disabled={loading} />
+              <button type="button" className="mf-register-password-peek" aria-label={showConfirmPassword ? 'Ocultar confirmación de contraseña' : 'Mostrar confirmación de contraseña'} title={showConfirmPassword ? 'Ocultar confirmación de contraseña' : 'Mostrar confirmación de contraseña'} aria-pressed={showConfirmPassword} disabled={loading} onClick={() => setShowConfirmPassword((visible) => !visible)}>
+                {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
             <label className="mf-checkbox"><input type="checkbox" name="acepta_terminos" required disabled={loading} />Acepto términos y condiciones para crear mi cuenta.</label>
             <label className="mf-checkbox"><input type="checkbox" name="consentimiento_marketing" disabled={loading} />Acepto recibir comunicaciones comerciales.</label>
             {error ? <p role="alert">{error}</p> : null}

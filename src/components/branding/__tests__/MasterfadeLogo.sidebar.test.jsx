@@ -15,15 +15,15 @@ afterEach(() => {
   state.theme = 'dark';
 });
 
-test('sidebar usa recursos recortados con ancho visual y proporcion propios', () => {
-  const { rerender } = render(<MasterfadeLogo variant="sidebar" />);
+test.each([['sidebar', 'w-[180px]'], ['navigation', 'w-[clamp(190px,52vw,226px)]']])('%s usa recursos oficiales recortados en ambos temas', (variant, width) => {
+  const { rerender } = render(<MasterfadeLogo variant={variant} />);
   const wrapper = screen.getByRole('img', { name: 'Masterfade script logo' });
-  expect(wrapper).toHaveClass('w-[180px]', 'max-w-full');
+  expect(wrapper).toHaveClass(width, 'max-w-full');
   expect(wrapper).toHaveStyle({ aspectRatio: '1221 / 349' });
   expect(screen.getByAltText('Masterfade').getAttribute('src')).toContain('masterfade-script-sidebar-light.png');
 
   state.theme = 'light';
-  rerender(<MasterfadeLogo variant="sidebar" />);
+  rerender(<MasterfadeLogo variant={variant} />);
   expect(screen.getByAltText('Masterfade').getAttribute('src')).toContain('masterfade-script-sidebar-dark.png');
 });
 

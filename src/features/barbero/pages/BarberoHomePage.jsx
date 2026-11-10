@@ -109,6 +109,17 @@ function getServiceSummary(appointment) {
   return `${names[0]} + ${names[1]} +${names.length - 2}`;
 }
 
+function ClientPreferencesDisclosure({ appointment }) {
+  const preferences = String(appointment?.preferencias_corte || '').trim();
+  if (!preferences) return null;
+  return (
+    <details className="mt-3 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-3 py-2">
+      <summary className="cursor-pointer text-xs font-semibold text-[var(--mf-accent)]">Preferencias del cliente</summary>
+      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--mf-text-2)]">{preferences}</p>
+    </details>
+  );
+}
+
 function formatRelativeStart(isoValue, nowMs) {
   const diffMinutes = Math.round((toTimestamp(isoValue) - nowMs) / 60000);
   if (diffMinutes <= 0) return 'En curso';
@@ -172,6 +183,7 @@ function AppointmentCard({ appointment, nowMs }) {
           ) : null}
         </div>
       </div>
+      <ClientPreferencesDisclosure appointment={appointment} />
     </article>
   );
 }
@@ -194,6 +206,7 @@ function UpcomingAppointmentCard({ appointment, nowMs }) {
           <p className="mt-2 text-xs text-[var(--mf-text-2)]">{formatRelativeStart(appointment?.inicio_at, nowMs)}</p>
         </div>
       </div>
+      <ClientPreferencesDisclosure appointment={appointment} />
     </article>
   );
 }

@@ -28,7 +28,8 @@ beforeEach(() => {
     fieldErrors: {}, servicesScrollRef: { current: null }, syncServicesScrollState: vi.fn(),
     isPastSlotForToday: () => false, onSelectTime: vi.fn(), titularState: {},
     slotSuggestions: [], allowCompanions: true, canAddCompanionBlock: true, maxCompanions: 2,
-    addCompanionBlock: vi.fn(),
+    addCompanionBlock: vi.fn(), setMonth: vi.fn(), onSelectDay: vi.fn(), fetchAvailability: vi.fn(),
+    canGoPrevMonth: true, selectedBranchId: 'branch', maxPromotionsPerBooking: 2,
   };
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -63,4 +64,86 @@ test('companion slots keep titular/overlap restrictions without re-ranking', () 
   expect(flow.onSelectTime).not.toHaveBeenCalled();
   fireEvent.click(buttons[2]);
   expect(flow.onSelectTime).toHaveBeenCalledWith('09:30', true);
+});
+
+test('promotion card stays selectable without prior services when its target exists', () => {
+  const flow = context.current;
+  flow.selectedServices = [];
+  flow.serviceIds = [];
+  flow.selectPromotion = vi.fn();
+  flow.promotions = [{
+    id_promocion: 'promotion',
+    titulo: 'Promo directa',
+    aplica_a: 'servicio',
+    mecanica: 'porcentaje',
+    valor_descuento: 10,
+    id_servicio_objetivo: 'service',
+    servicio_objetivo_nombre: 'QA',
+  }];
+
+  render(<PublicBookingAgendaStep />);
+  fireEvent.click(screen.getByRole('button', { name: 'Promociones' }));
+  const promotionCard = screen.getByRole('button', { name: /Promo directa/ });
+  expect(promotionCard.disabled).toBe(false);
+  fireEvent.click(promotionCard);
+  expect(flow.selectPromotion).toHaveBeenCalledWith('promotion');
+});
+
+test('unavailable promotion target disables the card without changing selection', () => {
+  const flow = context.current;
+  flow.selectPromotion = vi.fn();
+  flow.promotions = [{
+    id_promocion: 'promotion-missing',
+    titulo: 'Promo no disponible',
+    aplica_a: 'servicio',
+    id_servicio_objetivo: 'missing',
+    servicio_objetivo_nombre: 'Servicio ausente',
+  }];
+
+  render(<PublicBookingAgendaStep />);
+  fireEvent.click(screen.getByRole('button', { name: 'Promociones' }));
+  const promotionCard = screen.getByRole('button', { name: /Promo no disponible/ });
+  expect(promotionCard.disabled).toBe(true);
+  expect(promotionCard.getAttribute('title')).toContain('no está disponible');
+  fireEvent.click(promotionCard);
+  expect(flow.selectPromotion).not.toHaveBeenCalled();
+});
+
+test.each([
+  ['light', 1280],
+  ['dark', 390],
+])('calendar loading uses branded spinner and blocks dates in %s mode at %ipx', (theme, width) => {
+  document.documentElement.classList.toggle('dark', theme === 'dark');
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  context.current.availabilityLoading = true;
+
+  const { container } = render(<PublicBookingAgendaStep />);
+  expect(screen.getByText('Buscando fechas disponibles...')).toBeTruthy();
+  expect(screen.getByAltText('Masterfade cargando')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Mes anterior' }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Mes siguiente' }).disabled).toBe(true);
+  expect(container.querySelectorAll('.citas-day-btn')).toHaveLength(0);
+});
+
+test('calendar restores dates, handles month navigation and preserves retry error', () => {
+  const flow = context.current;
+  flow.availabilityLoading = false;
+  flow.availabilityError = 'No pudimos cargar las fechas.';
+  flow.availabilityMap = {
+    '2026-10-14': {
+      disponible: true,
+      primer_horario_disponible: '08:00',
+      barberos_disponibles: 1,
+    },
+  };
+
+  render(<PublicBookingAgendaStep />);
+  expect(screen.queryByText('Buscando fechas disponibles...')).toBeNull();
+  expect(screen.getByRole('alert').textContent).toContain('No pudimos cargar las fechas.');
+  fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+  expect(flow.fetchAvailability).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Mes siguiente' }));
+  expect(flow.setMonth).toHaveBeenCalledWith(1);
+  fireEvent.click(screen.getByRole('button', { name: '2026-10-14 disponible' }));
+  expect(flow.onSelectDay).toHaveBeenCalledWith('2026-10-14', true);
 });
