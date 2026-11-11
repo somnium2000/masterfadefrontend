@@ -13,6 +13,7 @@ const BookingLayout = memo(function BookingLayout({
   onRetry,
   showBackToBarberos = false,
   onBackToBarberos,
+  onHome,
 }) {
   return (
     <div className="public-booking-page mf-page-gradient min-h-screen">
@@ -22,6 +23,7 @@ const BookingLayout = memo(function BookingLayout({
           booking
           homePath={homePath}
           homeLabel={homeLabel}
+          onHome={onHome}
           backControl={showBackToBarberos ? (
             <button type="button" className="mf-header-control mf-focus-ring" onClick={onBackToBarberos}>
               <ArrowLeft size={17} strokeWidth={1.8} aria-hidden="true" />

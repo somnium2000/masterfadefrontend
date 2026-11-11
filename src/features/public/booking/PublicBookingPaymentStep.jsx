@@ -291,6 +291,7 @@ export default function PublicBookingPaymentStep() {
     bookingBlocksSummary,
     selectedBranch,
     cancelBookingFlow,
+    registerPaymentNavigation,
     createPaymentIntentForHold,
     creatingPaymentIntent,
     goToConfirm,
@@ -320,6 +321,11 @@ export default function PublicBookingPaymentStep() {
   const [hostedLaunchConsumed, setHostedLaunchConsumed] = useState(false);
   const [paymentForm, setPaymentForm] = useState(INITIAL_PAYMENT_FORM);
   const [fieldErrors, setFieldErrors] = useState({});
+  const paymentFormDirty = Object.keys(INITIAL_PAYMENT_FORM).some(key => paymentForm[key] !== INITIAL_PAYMENT_FORM[key]);
+  useEffect(() => {
+    registerPaymentNavigation?.({ dirty: paymentFormDirty, processing: processingPayment || loadingIntent || creatingPaymentIntent });
+    return () => registerPaymentNavigation?.({ dirty: false, processing: false });
+  }, [registerPaymentNavigation, paymentFormDirty, processingPayment, loadingIntent, creatingPaymentIntent]);
   const reconciliationNotice = getPixelPayReconciliationNotice(paymentResult);
   const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(() => {
     if (typeof window === 'undefined') return TODO_PAGO_SIMULATION_SCENARIOS[0].value;
@@ -546,13 +552,15 @@ export default function PublicBookingPaymentStep() {
   };
 
   const handleReturnToConfirm = async () => {
-    resetSensitiveFields();
-    setFieldErrors({});
-    await goToConfirm();
+    if (paymentRestoring) {
+      await cancelBookingFlow('payment_summary');
+      return;
+    }
+    const navigated = await goToConfirm();
+    if (navigated) resetFormState();
   };
 
   const handleCancelFlow = async () => {
-    resetFormState();
     await cancelBookingFlow('payment_step');
   };
 

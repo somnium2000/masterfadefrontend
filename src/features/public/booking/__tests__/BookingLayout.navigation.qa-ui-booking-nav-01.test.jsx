@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import BookingLayout from '../components/BookingLayout.jsx';
+afterEach(cleanup);
 
 vi.mock('../../../../components/branding/MasterfadeLogo.jsx', () => ({
   default: ({ variant, className }) => (
@@ -33,6 +34,11 @@ function renderLayout(props = {}) {
 }
 
 describe('BookingLayout navigation header', () => {
+  it('Volver a MasterFade delega en la salida del flujo sin usar un enlace directo', () => {
+    const onHome=vi.fn();renderLayout({homeLabel:'Volver a MasterFade',onHome});
+    fireEvent.click(screen.getByRole('button',{name:'Volver a MasterFade'}));expect(onHome).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('link',{name:'Volver a MasterFade'})).not.toBeInTheDocument();
+  });
   it('uses the official navigation logo and keeps home and theme controls accessible', () => {
     renderLayout({ homePath: '/home/cliente', homeLabel: 'Inicio MasterFade' });
 

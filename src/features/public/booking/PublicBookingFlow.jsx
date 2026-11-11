@@ -379,6 +379,10 @@ export default function PublicBookingFlow() {
   const [profilePersistModal, setProfilePersistModal] = useState({ open: false, kind: '' });
   const [cancelBookingModal, setCancelBookingModal] = useState({ open: false, source: '' });
   const [cancelBookingProcessing, setCancelBookingProcessing] = useState(false);
+  const [paymentNavigation, setPaymentNavigation] = useState({ dirty: false, processing: false });
+  const registerPaymentNavigation = useCallback((next) => {
+    setPaymentNavigation(current => current.dirty === next.dirty && current.processing === next.processing ? current : next);
+  }, []);
   const [profileIncompleteState, setProfileIncompleteState] = useState({ message: '', missingFields: [] });
 
   const [rewardBookingContext, setRewardBookingContext] = useState(() => readRewardBookingContext());
@@ -2063,6 +2067,7 @@ const agendaAutoLoadKeyRef = useRef('');
     isPendingPaymentResumeRoute,
     paymentConfirmed: paymentResult?.booking_confirmed === true,
     holdResult,
+    hasCheckoutContext: Boolean(holdResult || paymentIntent?.id_intent),
     availabilityError,
     barbersLoading,
   });
@@ -2123,17 +2128,21 @@ const agendaAutoLoadKeyRef = useRef('');
 
   const executeCancelBooking = useCallback(async () => {
     const groupId = String(holdResult?.id_grupo_cita || '').trim();
-    if (groupId && paymentIntent?.id_intent && !paymentResult?.booking_confirmed) {
-      notifications.info('El pago ya fue iniciado. Verifica el estado del pago antes de cancelar la reserva temporal.', {
-        dedupeKey: 'public-booking-cancel-payment-started',
-      });
-      return false;
+    if (paymentNavigation.processing) return false;
+    if (paymentResult?.booking_confirmed) {
+      navigate(BOOKING_ROUTES.success, { replace: true });
+      return true;
+    }
+    if (paymentIntent?.id_intent || pendingResumeContext?.id_intent) {
+      notifications.info('Conservamos el contexto del pago. Verifica su resultado antes de reintentar; salir no cancela el pago ni confirma una cancelación.', { dedupeKey: 'public-booking-exit-preserve-payment' });
+      navigate(homePath, { replace: true });
+      return true;
     }
     if (groupId) {
       try {
         await releaseHold();
       } catch {
-        notifications.warning('No se pudo liberar la reserva temporal en este momento, pero se canceló el flujo local.', {
+        notifications.warning('No se pudo confirmar la liberación de la reserva temporal. Puede mantenerse hasta su vencimiento.', {
           dedupeKey: 'public-booking-release-hold-warning',
         });
       }
@@ -2154,7 +2163,7 @@ const agendaAutoLoadKeyRef = useRef('');
     holderProfileHydratedRef.current = false;
     resetAvailabilityData();
     setSlotConflict(null);
-    navigate(BOOKING_ROUTES.home, { replace: true });
+    navigate(homePath, { replace: true });
     return true;
   }, [
     clearHoldLocalState,
@@ -2165,6 +2174,9 @@ const agendaAutoLoadKeyRef = useRef('');
     notifications,
     paymentIntent?.id_intent,
     paymentResult?.booking_confirmed,
+    paymentNavigation.processing,
+    pendingResumeContext?.id_intent,
+    homePath,
     releaseHold,
     resetAvailabilityData,
     setContextError,
@@ -3261,6 +3273,20 @@ const agendaAutoLoadKeyRef = useRef('');
   }, [buildContactValidationPayload, handleContactValidationError, notifications]);
 
   const goToConfirm = useCallback(async () => {
+    if (location.pathname.startsWith(BOOKING_ROUTES.payment)) {
+      if (paymentNavigation.processing) return false;
+      if (paymentResult?.booking_confirmed) {
+        navigate(BOOKING_ROUTES.success, { replace: true });
+        return true;
+      }
+      const status = String(paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || '').toLowerCase();
+      if (hasUnresolvedPaymentEvidence(paymentResult) || hasUnresolvedPaymentEvidence(paymentIntent) || ['processing', 'procesando', 'confirmando'].includes(status)) {
+        requestCancelBooking('payment_summary');
+        return false;
+      }
+      navigate(BOOKING_ROUTES.confirm);
+      return true;
+    }
     if (holdSubmitting) return false;
     if (bookingMode === 'loading') {
       notifications.info('Estamos verificando tu sesion antes de continuar.', {
@@ -3288,6 +3314,11 @@ const agendaAutoLoadKeyRef = useRef('');
     return true;
   }, [
     allBlocksComplete,
+    location.pathname,
+    paymentNavigation.processing,
+    paymentResult,
+    paymentIntent,
+    requestCancelBooking,
     blocksToSubmitSummary,
     bookingBlockingReason,
     bookingMode,
@@ -4055,6 +4086,7 @@ const agendaAutoLoadKeyRef = useRef('');
       rewardBranchMismatch,
       cancelRewardRedemptionUsage,
       cancelBookingFlow,
+      registerPaymentNavigation,
       branchList,
       canAddCompanionBlock,
       canUseClienteHold,
@@ -4204,6 +4236,7 @@ const agendaAutoLoadKeyRef = useRef('');
       rewardBranchMismatch,
       cancelRewardRedemptionUsage,
       cancelBookingFlow,
+      registerPaymentNavigation,
       branchList,
       canAddCompanionBlock,
       canUseClienteHold,
@@ -4322,6 +4355,10 @@ const agendaAutoLoadKeyRef = useRef('');
     <BookingLayout
       homePath={homePath}
       homeLabel={homeLabel}
+      onHome={() => {
+        if (holdResult || paymentIntent?.id_intent || pendingResumeContext?.id_intent || paymentNavigation.dirty || paymentNavigation.processing) requestCancelBooking('home');
+        else navigate(homePath);
+      }}
       loading={contextLoading}
       error={contextError}
       onRetry={fetchContext}
@@ -4381,9 +4418,13 @@ const agendaAutoLoadKeyRef = useRef('');
         >
           <DialogContent className="sm:max-w-md booking-cancel-modal">
             <DialogHeader>
-              <DialogTitle>Cancelar agendamiento</DialogTitle>
+              <DialogTitle>¿Salir del pago o agendamiento?</DialogTitle>
               <DialogDescription>
-                Se perderán los datos seleccionados y se liberará la reserva temporal si existe.
+                {paymentNavigation.processing
+                  ? 'El pago se está procesando o verificando. Espera el resultado antes de salir; no vuelvas a iniciar el cobro.'
+                  : paymentIntent?.id_intent || pendingResumeContext?.id_intent
+                    ? 'Salir no cancela el pago ni la reserva. Conservaremos la recuperación: verifica el resultado antes de volver a pagar.'
+                    : 'Se perderán los datos introducidos y se intentará liberar la reserva temporal si existe.'}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -4393,7 +4434,7 @@ const agendaAutoLoadKeyRef = useRef('');
                 onClick={closeCancelBookingModal}
                 disabled={cancelBookingProcessing}
               >
-                Continuar agendando
+                {location.pathname.startsWith(BOOKING_ROUTES.payment) ? 'Continuar pagando' : 'Continuar agendando'}
               </Button>
               <Button
                 type="button"
@@ -4401,9 +4442,9 @@ const agendaAutoLoadKeyRef = useRef('');
                 onClick={() => {
                   void confirmCancelBooking();
                 }}
-                disabled={cancelBookingProcessing || holdSubmitting}
+                disabled={cancelBookingProcessing || holdSubmitting || paymentNavigation.processing}
               >
-                {cancelBookingProcessing ? 'Cancelando...' : 'Cancelar agendamiento'}
+                {cancelBookingProcessing ? 'Saliendo...' : 'Salir'}
               </Button>
             </DialogFooter>
           </DialogContent>
