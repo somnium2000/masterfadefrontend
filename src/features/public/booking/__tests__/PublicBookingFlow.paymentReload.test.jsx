@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React, { useEffect, useMemo, useRef } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { PublicBookingProvider } from '../BookingFlowContext.jsx';
@@ -56,6 +56,7 @@ vi.mock('../publicBookingApi.js', () => ({
 function PaymentReloadHarness({
   holdPricing = null,
   bookingBlocksSummary = [PLACEHOLDER_BOOKING_BLOCK],
+  browserNavigation = false,
 } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -139,6 +140,10 @@ function PaymentReloadHarness({
   return (
     <>
       <output data-testid="pathname">{location.pathname}</output>
+      {browserNavigation && <>
+        <button onClick={() => navigate(-1)}>Atrás navegador</button>
+        <button onClick={() => navigate(1)}>Adelante navegador</button>
+      </>}
       <PublicBookingProvider value={{
         bookingBlocksSummary,
         cancelBookingFlow: vi.fn(),
@@ -164,7 +169,7 @@ function PaymentReloadHarness({
         paymentRestoring,
         paymentCanExecuteSale,
       }}>
-        <PublicBookingPaymentStep />
+        {(!browserNavigation || location.pathname === '/agendar/pagar') && <PublicBookingPaymentStep />}
       </PublicBookingProvider>
     </>
   );
@@ -216,6 +221,35 @@ function fillPixelPayForm() {
 }
 
 describe('PublicBookingFlow payment hard reload integration', () => {
+  test('Atrás y Adelante durante Sale conservan seguimiento y no envían un segundo cobro', async () => {
+    writeStandardContext();
+    getPublicPaymentStatus.mockResolvedValue({
+      id_grupo_cita: GROUP_ID, id_intent: INTENT_ID,
+      estado_intent_codigo: 'link_generado', booking_confirmed: false, monto_hnl: 1,
+    });
+    let finish;
+    salePublicPixelPay.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    render(<MemoryRouter initialEntries={['/resumen', `/agendar/pagar?id_grupo_cita=${GROUP_ID}&id_intent=${INTENT_ID}&titular_email=${EMAIL}`]}>
+      <PaymentReloadHarness browserNavigation />
+    </MemoryRouter>);
+    await screen.findByLabelText('Numero de tarjeta');
+    fillPixelPayForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' }));
+    await waitFor(() => expect(salePublicPixelPay).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Atrás navegador' }));
+    expect(screen.getByTestId('pathname').textContent).toBe('/resumen');
+    expect(screen.queryByLabelText('Numero de tarjeta')).toBeNull();
+    expect(sessionStorage.getItem('masterfade.publicBookingPayment.v1')).toContain(INTENT_ID);
+    fireEvent.click(screen.getByRole('button', { name: 'Adelante navegador' }));
+    await screen.findByLabelText('Numero de tarjeta');
+    fillPixelPayForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' }));
+    await act(async () => { finish({ id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, estado_intent_codigo: 'pendiente_confirmacion', pending_confirmation: true, booking_confirmed: false, monto_hnl: 1 }); });
+    await screen.findByText('Tu pago requiere verificación. No vuelvas a realizar el pago.');
+    expect(salePublicPixelPay).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText('Numero de tarjeta')).toBeNull();
+    expect(sessionStorage.getItem('masterfade.publicBookingPayment.v1')).toContain(INTENT_ID);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay');

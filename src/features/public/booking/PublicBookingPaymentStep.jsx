@@ -923,7 +923,7 @@ export default function PublicBookingPaymentStep() {
                 Volver al resumen
               </Button>
               <Button className="w-full sm:w-auto" variant="ghost" onClick={handleCancelFlow} disabled={processingPayment || loadingIntent}>
-                Cancelar reserva
+                {paymentIntent?.id_intent || paymentRestoring ? 'Salir del pago' : 'Cancelar reserva'}
               </Button>
             </BookingActions>
 

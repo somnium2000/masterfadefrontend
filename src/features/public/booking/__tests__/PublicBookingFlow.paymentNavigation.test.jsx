@@ -45,7 +45,7 @@ test.each([320,390,768,1440])('Inicio con tarjeta conserva formulario al continu
  let dialog=await screen.findByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:'Continuar pagando'}));
  expect(screen.getByLabelText('CVV')).toHaveValue('123');
  expect(screen.getByLabelText('Numero de tarjeta')).toHaveValue('4111 1111 1111 1111');
- fireEvent.click(screen.getByRole('button',{name:'Cancelar reserva'}));dialog=await screen.findByRole('dialog');
+ fireEvent.click(screen.getByRole('button',{name:'Salir del pago'}));dialog=await screen.findByRole('dialog');
  fireEvent.click(within(dialog).getByRole('button',{name:'Salir'}));await screen.findByText('Landing');
  expect(mocks.release).not.toHaveBeenCalled();expect(mocks.clear).not.toHaveBeenCalled();
  expect(sessionStorage.getItem(KEY)).toContain(INTENT);expect(JSON.stringify({...sessionStorage,...localStorage})).not.toContain('123');
@@ -72,6 +72,15 @@ test('pago confirmado nunca libera hold al intentar salir',async()=>{
  mocks.data.paymentResult={...mocks.data.paymentResult,booking_confirmed:true};mount();
  fireEvent.click(screen.getByRole('button',{name:'Salida de prueba'}));fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Salir'}));
  await screen.findByText('Éxito');expect(mocks.release).not.toHaveBeenCalled();
+});
+test.each([false,true])('Inicio con pago confirmado navega directamente sin cancelar (cliente=%s)',async cliente=>{
+ mocks.data.paymentResult={...mocks.data.paymentResult,booking_confirmed:true};
+ if(cliente){mocks.data.homePath='/home/cliente';Object.assign(auth,{user:{id_usuario:'U',cliente_id:'C'},roles:['cliente'],isAuthenticated:true});}
+ mount();fireEvent.click(screen.getByRole('button',{name:'Inicio'}));
+ await screen.findByText(cliente?'Cliente':'Landing');
+ expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+ expect(mocks.release).not.toHaveBeenCalled();expect(mocks.clear).not.toHaveBeenCalled();
+ expect(sessionStorage.getItem(KEY)).toContain(INTENT);
 });
 test('atras de navegador vuelve al resumen sin cancelar el pago',async()=>{
  mount();fireEvent.click(screen.getByRole('button',{name:'Atrás navegador'}));await screen.findByText('Resumen');expect(mocks.release).not.toHaveBeenCalled();expect(sessionStorage.getItem(KEY)).toContain(INTENT);

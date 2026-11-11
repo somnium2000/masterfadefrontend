@@ -4356,6 +4356,10 @@ const agendaAutoLoadKeyRef = useRef('');
       homePath={homePath}
       homeLabel={homeLabel}
       onHome={() => {
+        if (paymentResult?.booking_confirmed) {
+          navigate(homePath);
+          return;
+        }
         if (holdResult || paymentIntent?.id_intent || pendingResumeContext?.id_intent || paymentNavigation.dirty || paymentNavigation.processing) requestCancelBooking('home');
         else navigate(homePath);
       }}
