@@ -26,13 +26,11 @@ function formatDateTime(value) {
   if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
-  return new Intl.DateTimeFormat('es-HN', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  return new Intl.DateTimeFormat('es-HN', { timeZone: 'America/Tegucigalpa', dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
-function isUpcoming(cita) {
-  const date = new Date(cita?.inicio_at || 0);
-  return Number.isFinite(date.getTime()) && date.getTime() >= Date.now();
-}
+const ACTIVE_STATES = new Set(['en_espera', 'pendiente_pago', 'confirmada', 'en_salon', 'en_atencion']);
+const HISTORY_STATES = new Set(['completada', 'cancelada', 'cancelada_por_cliente', 'expirada', 'no_show', 'anulada']);
 
 function normalizeEstado(value) {
   return String(value || '').trim().toLowerCase();
@@ -225,7 +223,8 @@ export default function ClienteHistorialCitasPage() {
     setLoading(true);
     try {
       const payload = await listClienteCitas();
-      setCitas(Array.isArray(payload?.citas) ? payload.citas : []);
+      const rows = Array.isArray(payload?.citas) ? payload.citas : [];
+      setCitas([...new Map(rows.map((cita) => [cita.id_cita, cita])).values()]);
     } catch (error) {
       if (Number(error?.status) === 401) {
         logout();
@@ -363,12 +362,12 @@ export default function ClienteHistorialCitasPage() {
   const upcoming = useMemo(
     () => citas.filter((item) => {
       const estado = normalizeEstado(item?.estado_cita_codigo);
-      return isUpcoming(item) && ['confirmada', 'en_salon', 'en_atencion'].includes(estado);
+      return ACTIVE_STATES.has(estado);
     }),
     [citas]
   );
   const history = useMemo(
-    () => citas.filter((item) => normalizeEstado(item?.estado_cita_codigo) === 'completada'),
+    () => citas.filter((item) => HISTORY_STATES.has(normalizeEstado(item?.estado_cita_codigo))),
     [citas]
   );
 
