@@ -156,11 +156,13 @@ export async function updateClienteMe(payload) {
   return normalizeResponsePayload(response);
 }
 
-export async function listClienteCitas(filters = {}) {
+export async function listClienteCitas(filters = {}, options) {
   const query = buildQuery(filters);
-  const response = await http.get(query ? `${CITA_BASE}?${query}` : CITA_BASE);
+  const url = query ? `${CITA_BASE}?${query}` : CITA_BASE;
+  const response = options ? await http.get(url, options) : await http.get(url);
   const payload = normalizeResponsePayload(response);
   return {
+    ...payload,
     citas: Array.isArray(payload?.citas) ? payload.citas : [],
   };
 }

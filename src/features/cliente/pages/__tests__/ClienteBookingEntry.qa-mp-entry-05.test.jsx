@@ -45,7 +45,7 @@ beforeEach(() => {
   startNewAppointment.mockReset(); navigate.mockReset();
   Object.values(api).forEach((mock) => mock.mockReset());
   api.getClienteMe.mockResolvedValue({ cliente: {}, profile_completion: { completion_percent: 100, is_complete: true } });
-  api.listClienteCitas.mockResolvedValue({ citas: [] });
+  api.listClienteCitas.mockResolvedValue({ citas: [], totals: { proximas: 0, historial: 0, total: 0, pendientes_pago: 0 }, pagination: { page: 1, limit: 5, total: 0, total_pages: 1, has_next: false, has_prev: false } });
   api.getClienteCitaPendiente.mockResolvedValue({ pendiente: null });
 });
 afterEach(cleanup);

@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAppointmentStatusLabel } from '../../../lib/appointmentStatus.js';
 import { CalendarDays, MapPin, Scissors, Wallet } from 'lucide-react';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
@@ -197,6 +197,12 @@ function CitasList({ items, onOpenDetail }) {
 }
 
 export default function ClienteHistorialCitasPage() {
+  const { user } = useAuth();
+  // AM: Una nueva identidad nunca reutiliza páginas, detalles ni borradores del Cliente anterior.
+  return <ClienteHistorialCitasContent key={user?.id_usuario || 'anonymous'} />;
+}
+
+function ClienteHistorialCitasContent() {
   const { booking: CLIENT_BOOKING_ENABLED } = usePrivateCommerce();
   const navigate = useNavigate();
   const { startNewAppointment } = useOutletContext() || {};
@@ -207,6 +213,16 @@ export default function ClienteHistorialCitasPage() {
   const [loading, setLoading] = useState(true);
   const [citas, setCitas] = useState([]);
   const [activeTab, setActiveTab] = useState('proximas');
+  const [pages, setPages] = useState({ proximas: 1, historial: 1 });
+  const [totals, setTotals] = useState({ proximas: 0, historial: 0, total: 0, pendientes_pago: 0 });
+  const [pagination, setPagination] = useState(null);
+  const [listError, setListError] = useState('');
+  const listRequest = useRef(null);
+  const listGeneration = useRef(0);
+  const page = pages[activeTab];
+  const requestKey = `${activeTab}:${page}`;
+  const latestListKey = useRef(requestKey);
+  latestListKey.current = requestKey;
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedCita, setSelectedCita] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -223,26 +239,45 @@ export default function ClienteHistorialCitasPage() {
 
   const loadCitas = useCallback(async () => {
     if (!canLoad) return;
+    listRequest.current?.abort();
+    const controller = new AbortController();
+    listRequest.current = controller;
+    const generation = ++listGeneration.current;
+    const current = () => !controller.signal.aborted && generation === listGeneration.current && latestListKey.current === requestKey;
     setLoading(true);
+    setListError('');
     try {
-      const payload = await listClienteCitas();
+      const payload = await listClienteCitas({ apartado: activeTab, page, limit: 5 }, {
+        signal: controller.signal, cache: false, dedupe: false,
+      });
+      if (!current()) return;
+      if (!payload?.pagination || !payload?.totals) throw new Error('Incomplete pagination');
+      const metadata = payload.pagination;
+      setTotals(payload.totals);
+      if (metadata.page !== page) {
+        setPages(prev => ({ ...prev, [activeTab]: metadata.page }));
+        return;
+      }
       const rows = Array.isArray(payload?.citas) ? payload.citas : [];
-      setCitas([...new Map(rows.map((cita) => [cita.id_cita, cita])).values()]);
+      setCitas([...new Map(rows.map(cita => [cita.id_cita, cita])).values()]);
+      setPagination({ ...metadata, key: requestKey });
     } catch (error) {
+      if (!current()) return;
       if (Number(error?.status) === 401) {
         logout();
         navigate('/login', { replace: true });
         return;
       }
-      notifications.error(error?.data?.error?.message || error?.message || 'No se pudo cargar tu historial de citas.');
+      setListError('No fue posible cargar tus citas. Inténtalo de nuevo.');
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
-  }, [canLoad, logout, navigate, notifications]);
+  }, [canLoad, logout, navigate, activeTab, page, requestKey]);
 
   useEffect(() => {
-    if (!canLoad) return;
+    if (!canLoad) return undefined;
     void loadCitas();
+    return () => { listRequest.current?.abort(); };
   }, [canLoad, loadCitas]);
 
   const loadPendingReservation = useCallback(async ({ openModal = false } = {}) => {
@@ -366,10 +401,6 @@ export default function ClienteHistorialCitasPage() {
     navigate(location.pathname, { replace: true, state: null });
   }, [canLoad, handleOpenPending, location.pathname, location.state, navigate]);
 
-  const pendingPaymentAnomalies = useMemo(
-    () => citas.filter((item) => normalizeEstado(item?.estado_cita_codigo) === 'pendiente_pago'),
-    [citas]
-  );
   const upcoming = useMemo(
     () => citas.filter((item) => {
       const estado = normalizeEstado(item?.estado_cita_codigo);
@@ -447,23 +478,50 @@ export default function ClienteHistorialCitasPage() {
 
           <div className="mt-4 flex flex-wrap gap-2">
             <span className="inline-flex rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
-              Próximas: <strong className="ml-1 text-[var(--mf-text)]">{upcoming.length}</strong>
+              Próximas: <strong className="ml-1 text-[var(--mf-text)]">{totals.proximas}</strong>
             </span>
             <span className="inline-flex rounded-full border border-[var(--mf-nav-border)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
-              Historial: <strong className="ml-1 text-[var(--mf-text)]">{history.length}</strong>
+              Historial: <strong className="ml-1 text-[var(--mf-text)]">{totals.historial}</strong>
             </span>
             <span className="inline-flex rounded-full border border-[var(--mf-nav-border)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
-              Total: <strong className="ml-1 text-[var(--mf-text)]">{citas.length}</strong>
+              Total: <strong className="ml-1 text-[var(--mf-text)]">{totals.total}</strong>
             </span>
           </div>
         </section>
 
-        {loading || (!canLoad && isHydrating) ? (
-          <div className="space-y-3">
-            {Array.from({ length: 3 }).map((_, idx) => <div key={idx} className="mf-skeleton h-28 rounded-2xl" />)}
-          </div>
-        ) : (
-          <>
+        <div className="space-y-3">
+          <div className="inline-flex rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab('proximas')}
+              aria-label={`Próximas (${totals.proximas})`}
+              aria-pressed={activeTab === 'proximas'}
+              className={[
+                'rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
+                activeTab === 'proximas'
+                  ? 'bg-[var(--mf-accent)] text-black'
+                  : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]',
+              ].join(' ')}
+            >
+              Próximas ({totals.proximas})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('historial')}
+              aria-label={`Historial (${totals.historial})`}
+              aria-pressed={activeTab === 'historial'}
+              className={[
+                'rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
+                activeTab === 'historial'
+                  ? 'bg-[var(--mf-accent)] text-black'
+                  : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]',
+              ].join(' ')}
+            >
+              Historial ({totals.historial})
+            </button>
+              </div>
+        </div>
+
             {pendingData ? (
               <section className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
                 <p className="font-semibold">Detectamos citas pendientes de pago. Si esto no corresponde, contacta al equipo de MasterFade.</p>
@@ -489,10 +547,10 @@ export default function ClienteHistorialCitasPage() {
                   </button>
                 </div>
               </section>
-            ) : pendingPaymentAnomalies.length ? (
+            ) : totals.pendientes_pago ? (
               <section className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
                 <p className="font-semibold">Detectamos citas pendientes de pago. Si esto no corresponde, contacta al equipo de MasterFade.</p>
-                <p className="mt-1 text-amber-100/90">Citas detectadas: {pendingPaymentAnomalies.length}</p>
+                <p className="mt-1 text-amber-100/90">Citas detectadas: {totals.pendientes_pago}</p>
                 <div className="mt-3">
                   <button
                     type="button"
@@ -506,34 +564,25 @@ export default function ClienteHistorialCitasPage() {
               </section>
             ) : null}
 
-            <section className="space-y-3">
-              <div className="inline-flex rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-1">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('proximas')}
-                  className={[
-                    'rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
-                    activeTab === 'proximas'
-                      ? 'bg-[var(--mf-accent)] text-black'
-                      : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]',
-                  ].join(' ')}
-                >
-                  Próximas ({upcoming.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('historial')}
-                  className={[
-                    'rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
-                    activeTab === 'historial'
-                      ? 'bg-[var(--mf-accent)] text-black'
-                      : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]',
-                  ].join(' ')}
-                >
-                  Historial ({history.length})
-                </button>
-              </div>
+        {loading || (!canLoad && isHydrating) || (!listError && canLoad && pagination?.key !== requestKey) ? (
+          <div className="space-y-3">
+            {Array.from({ length: 3 }).map((_, idx) => <div key={idx} className="mf-skeleton h-28 rounded-2xl" />)}
+          </div>
+        ) : listError ? (
+          <section role="alert" className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 text-sm">
+            <p>{listError}</p>
+            <button type="button" className="mt-3 min-h-11 rounded-xl border border-[var(--mf-btn-border)] px-4" onClick={() => void loadCitas()}>Reintentar</button>
+          </section>
+        ) : (
+          <>
 
+
+            <section className="space-y-3">
+              <nav aria-label="Paginación de citas" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-2 text-sm">
+                <button type="button" disabled={!pagination?.has_prev} className="min-h-11 rounded-lg border border-[var(--mf-btn-border)] px-3 disabled:opacity-40" onClick={() => setPages(prev => ({ ...prev, [activeTab]: page - 1 }))}>Anterior</button>
+                <span role="status" aria-live="polite">Página {page} de {pagination?.total_pages || 1}</span>
+                <button type="button" disabled={!pagination?.has_next} className="min-h-11 rounded-lg border border-[var(--mf-btn-border)] px-3 disabled:opacity-40" onClick={() => setPages(prev => ({ ...prev, [activeTab]: page + 1 }))}>Siguiente</button>
+              </nav>
               {activeTab === 'proximas' ? (
                 upcoming.length ? (
                   <CitasList items={upcoming} onOpenDetail={handleOpenDetail} />
