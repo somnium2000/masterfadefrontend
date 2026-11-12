@@ -25,6 +25,7 @@ vi.mock('../../../../lib/catalogSync.js', () => ({
 }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => navigate }));
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => auth }));
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ vipPurchase: flags.enabled }) }));
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => notifications }));
 vi.mock('../../../cliente/lib/clienteApi.js', () => payment);
 vi.mock('../../lib/vipMembershipFeatureFlags.js', () => ({

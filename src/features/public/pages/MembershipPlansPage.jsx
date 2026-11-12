@@ -23,9 +23,9 @@ import { useAuth } from "../../../context/AuthContext.jsx";
 import { useNotifications } from "../../../context/NotificationsContext.jsx";
 import { listPublicCatalogBranches, listPublicPlansByBranch } from "../lib/catalogApi.js";
 import {
-  VIP_MEMBERSHIPS_PURCHASE_ENABLED,
   VIP_MEMBERSHIPS_PURCHASE_LOCK_MESSAGE,
 } from "../lib/vipMembershipFeatureFlags.js";
+import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
 import { subscribeCatalogSync } from "../../../lib/catalogSync.js";
 import { getPlanCategoryTheme, normalizePlanCategory } from "../../plans/lib/planCategoryTheme.js";
 import {
@@ -248,6 +248,7 @@ function PlanCard({
 }
 
 export default function MembershipPlansPage() {
+  const { vipPurchase: VIP_MEMBERSHIPS_PURCHASE_ENABLED } = usePrivateCommerce();
   const navigate = useNavigate();
   const { isAuthenticated, roles = [], user, clienteId, isHydrating, isHydrated } = useAuth();
   const notifications = useNotifications();
@@ -336,7 +337,7 @@ export default function MembershipPlansPage() {
       setPurchaseStep("payment");
       setPurchaseModalOpen(true);
     }
-  }, [purchaseIdentity, isAuthenticated, isHydrating, isHydrated]);
+  }, [purchaseIdentity, isAuthenticated, isHydrating, isHydrated, VIP_MEMBERSHIPS_PURCHASE_ENABLED]);
 
   function getPurchaseAttempt(offerId) {
     const current = purchaseAttemptRef.current;
@@ -619,6 +620,7 @@ export default function MembershipPlansPage() {
   }
 
   async function handleContinueToPayment() {
+    if (!VIP_MEMBERSHIPS_PURCHASE_ENABLED) return;
     const orderId = String(purchaseOrderSummary?.id_order || "").trim();
     if (!orderId || purchaseLoading) return;
     const generation = purchaseGenerationRef.current;
@@ -650,6 +652,7 @@ export default function MembershipPlansPage() {
   }
 
   async function handleConfirmPayment(paymentDetails = {}) {
+    if (!VIP_MEMBERSHIPS_PURCHASE_ENABLED) return;
     if (purchaseLoading || purchaseCompleted || purchasePendingConfirmation) return;
     const paymentIntentId = String(membershipPaymentIntent?.id_payment_intent || "").trim();
     if (!paymentIntentId) {
@@ -717,7 +720,7 @@ export default function MembershipPlansPage() {
   }, [loadMembershipState]);
 
   useMembershipPaymentPolling({
-    active: purchasePendingConfirmation,
+    active: purchasePendingConfirmation && VIP_MEMBERSHIPS_PURCHASE_ENABLED,
     idPaymentIntent: membershipPaymentIntent?.id_payment_intent,
     queryStatus: queryMembershipPaymentStatus,
     onResult: handleMembershipPollResult,
@@ -903,7 +906,7 @@ export default function MembershipPlansPage() {
       </div>
 
       <PlanPurchaseFlowDialog
-        open={purchaseModalOpen}
+        open={purchaseModalOpen && VIP_MEMBERSHIPS_PURCHASE_ENABLED}
         onOpenChange={(next) => {
           if (!next) resetPurchaseFlow();
           else setPurchaseModalOpen(true);

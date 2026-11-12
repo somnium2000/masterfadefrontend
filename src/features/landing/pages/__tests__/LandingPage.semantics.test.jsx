@@ -1,17 +1,40 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { cwd } from 'node:process';
 import LandingPage from '../LandingPage.jsx';
 import { ThemeProvider } from '../../../../context/ThemeContext.jsx';
+const eligibility = vi.hoisted(() => ({ booking: true }));
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => eligibility }));
+beforeEach(() => { eligibility.booking = true; });
+
+test('elegibilidad negativa bloquea citas y conserva acceso al catálogo VIP', () => {
+  eligibility.booking = false;
+  render(<ThemeProvider><MemoryRouter><LandingPage /><LocationProbe /></MemoryRouter></ThemeProvider>);
+  for (const button of screen.getAllByRole('button', { name: 'Agendar Cita', exact: true })) {
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+  }
+  expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent('/');
+  fireEvent.click(screen.getAllByRole('button', { name: 'Planes de Membresía VIP', exact: true })[0]);
+  expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent('/membresias-vip');
+});
 
 afterEach(() => {
+  eligibility.booking = false;
   cleanup();
   window.localStorage.removeItem('mf_theme_variant');
+});
+
+test('solo elegibilidad positiva del backend abre la entrada privada', () => {
+  eligibility.booking = true;
+  render(<ThemeProvider><MemoryRouter><LandingPage /><LocationProbe /></MemoryRouter></ThemeProvider>);
+  fireEvent.click(screen.getAllByRole('button', { name: 'Agendar Cita', exact: true })[0]);
+  expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent('/agendar/barberos');
 });
 
 function LocationProbe() {

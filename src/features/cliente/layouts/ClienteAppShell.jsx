@@ -8,7 +8,8 @@ import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { getUserDisplayName, useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
 import { getClienteMe, getClientePuntosResumen } from '../lib/clienteApi.js';
-import { CLIENT_BOOKING_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
+import { CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
+import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
 
 const CLIENT_NAV_ITEMS = [
   { id: 'inicio', label: 'Inicio', path: '/home/cliente', icon: Home },
@@ -43,6 +44,7 @@ function resolveSectionTitle(pathname) {
 }
 
 export default function ClienteAppShell() {
+  const { booking: CLIENT_BOOKING_ENABLED } = usePrivateCommerce();
   const navigate = useNavigate();
   const location = useLocation();
   const notifications = useNotifications();
@@ -194,7 +196,7 @@ export default function ClienteAppShell() {
         newAppointmentRequestRef.current = null;
       }
     }
-  }, [identity, navigate, notifications, notifyError]);
+  }, [identity, navigate, notifications, notifyError, CLIENT_BOOKING_ENABLED]);
 
   const outletContextValue = useMemo(
     () => ({ refreshClienteProfile, startNewAppointment }),

@@ -60,6 +60,7 @@ import AdminSeguridadSesionesPage from './features/admin/pages/AdminSeguridadSes
 import AdminSeguridadUsuariosPage from './features/admin/pages/AdminSeguridadUsuariosPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
+import usePrivateCommerce from './hooks/usePrivateCommerce.js';
 
 const PublicBookingFlow = lazy(() => import('./features/public/booking/PublicBookingFlow.jsx'));
 const PublicBookingBarberosStep = lazy(() => import('./features/public/booking/PublicBookingBarberosStep.jsx'));
@@ -128,6 +129,7 @@ function InternalAccountDeletionDashboardShell() {
 }
 
 function App() {
+  const privateCommerce = usePrivateCommerce();
   const location = useLocation();
   const { isAuthenticated, user, roles, branchIds, empresaId } = useAuth();
   const reportSessionKey = JSON.stringify({
@@ -156,7 +158,7 @@ function App() {
         element={
           <RouteErrorBoundary>
             <BookingSuspense>
-              <PublicBookingFlow />
+              {privateCommerce.booking ? <PublicBookingFlow /> : <p role="status" className="p-8 text-center">El agendamiento privado no está disponible para esta sesión.</p>}
             </BookingSuspense>
           </RouteErrorBoundary>
         }

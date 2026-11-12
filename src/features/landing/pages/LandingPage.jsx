@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
+import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
 
 const ease = [0.25, 0.46, 0.45, 0.94];
 const CTA_ENTRY_DELAYS = [0.65, 0.8, 0.95];
@@ -43,12 +44,13 @@ function BrandBlock({ desktop = false }) {
   );
 }
 
-function PrimaryCta({ icon: Icon, label, onClick, order = 0 }) {
+function PrimaryCta({ icon: Icon, label, onClick, disabled = false, order = 0 }) {
   const reducedMotion = useReducedMotion();
   return (
     <motion.button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       initial={reducedMotion ? false : { opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={reducedMotion ? { duration: 0 } : { duration: 0.6, delay: CTA_ENTRY_DELAYS[order], ease }}
@@ -87,9 +89,11 @@ function SecondaryCta({ icon: Icon, label, onClick, disabled = false, order = 0 
 }
 
 export default function LandingPage() {
+  const { booking: PUBLIC_BOOKING_ENABLED } = usePrivateCommerce();
   const navigate = useNavigate();
 
   function handleAgendar() {
+    if (!PUBLIC_BOOKING_ENABLED) return;
     navigate('/agendar/barberos');
   }
 
@@ -156,7 +160,7 @@ export default function LandingPage() {
                 </motion.p>
 
                 <div className="flex flex-col gap-3">
-                  <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} />
+                  <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} disabled={!PUBLIC_BOOKING_ENABLED} />
                   <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} order={1} />
                   <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} order={2} />
                 </div>
@@ -205,7 +209,7 @@ export default function LandingPage() {
             </motion.p>
 
             <div className="w-full max-w-[380px] space-y-3">
-              <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} />
+              <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} disabled={!PUBLIC_BOOKING_ENABLED} />
               <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} order={1} />
               <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} order={2} />
             </div>
@@ -226,7 +230,7 @@ export default function LandingPage() {
       <PremiumBottomNav
         activeId="inicio"
         sideItems={navItems}
-        fabItem={{ id: 'agendar', label: 'Agendar', icon: Plus, onClick: handleAgendar }}
+        fabItem={PUBLIC_BOOKING_ENABLED ? { id: 'agendar', label: 'Agendar', icon: Plus, onClick: handleAgendar } : null}
         isDesktop
       />
     </div>

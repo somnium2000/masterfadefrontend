@@ -19,6 +19,7 @@ import {
   retomarClienteCitaPendiente,
 } from '../lib/clienteApi.js';
 import { CLIENT_CITAS_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
+import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
 
 const PENDING_PAYMENT_CONTEXT_STORAGE_KEY = 'mf_pending_payment_context_v1';
 const BOOKING_PAYMENT_CONTEXT_STORAGE_KEY = 'masterfade.publicBookingPayment.v1';
@@ -196,6 +197,7 @@ function CitasList({ items, onOpenDetail }) {
 }
 
 export default function ClienteHistorialCitasPage() {
+  const { booking: CLIENT_BOOKING_ENABLED } = usePrivateCommerce();
   const navigate = useNavigate();
   const { startNewAppointment } = useOutletContext() || {};
   const location = useLocation();
@@ -273,10 +275,18 @@ export default function ClienteHistorialCitasPage() {
   }, [notifications]);
 
   const handleOpenPending = useCallback(async () => {
+    if (!CLIENT_BOOKING_ENABLED) {
+      notifications.info(CLIENT_LOCK_MESSAGE);
+      return;
+    }
     await loadPendingReservation({ openModal: true });
-  }, [loadPendingReservation]);
+  }, [loadPendingReservation, notifications, CLIENT_BOOKING_ENABLED]);
 
   const handleContinuePendingPayment = useCallback(async () => {
+    if (!CLIENT_BOOKING_ENABLED) {
+      notifications.info(CLIENT_LOCK_MESSAGE);
+      return;
+    }
     const groupId = String(pendingData?.id_grupo_cita || '').trim();
     if (!groupId) {
       notifications.warning('No encontramos una reserva pendiente vigente.');
@@ -314,7 +324,7 @@ export default function ClienteHistorialCitasPage() {
     } finally {
       setPendingSubmitting(false);
     }
-  }, [loadPendingReservation, navigate, notifications, pendingData?.id_grupo_cita, user?.email]);
+  }, [loadPendingReservation, navigate, notifications, pendingData?.id_grupo_cita, user?.email, CLIENT_BOOKING_ENABLED]);
 
   const handleDiscardPendingPayment = useCallback(async () => {
     const groupId = String(pendingData?.id_grupo_cita || '').trim();
@@ -427,6 +437,7 @@ export default function ClienteHistorialCitasPage() {
             <button
               type="button"
               onClick={() => void startNewAppointment?.()}
+              disabled={!CLIENT_BOOKING_ENABLED}
               className="mf-accent-gradient inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold"
             >
               <CalendarDays size={15} />
@@ -461,6 +472,7 @@ export default function ClienteHistorialCitasPage() {
                   <button
                     type="button"
                     onClick={handleOpenPending}
+                    disabled={!CLIENT_BOOKING_ENABLED}
                     className="inline-flex rounded-lg border border-amber-200/40 bg-amber-300/10 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:bg-amber-300/20"
                   >
                     Continuar pago
@@ -485,6 +497,7 @@ export default function ClienteHistorialCitasPage() {
                   <button
                     type="button"
                     onClick={handleOpenPending}
+                    disabled={!CLIENT_BOOKING_ENABLED}
                     className="inline-flex rounded-lg border border-amber-200/40 bg-amber-300/10 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:bg-amber-300/20"
                   >
                     Ver reserva pendiente
