@@ -242,6 +242,10 @@ function isLocalHostname(value) {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
 
+function isQaHostname(value) {
+  return String(value || '').trim().toLowerCase() === 'qa.masterfadeapp.com';
+}
+
 function readEnvFlag(value) {
   return String(value || '').trim().toLowerCase() === 'true';
 }
@@ -256,11 +260,14 @@ export function resolvePaymentSimulationAction({
   provider = import.meta.env.VITE_PAYMENT_PROVIDER || import.meta.env.VITE_PAYMENT_PROVIDER_CODE || '',
   mockEnabled = import.meta.env.VITE_ENABLE_MOCK_PAYMENT,
   simulatorEnabled = import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR,
+  qaSimulatorEnabled = import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION,
 } = {}) {
   const localHost = isLocalHostname(hostname);
+  const qaHost = isQaHostname(hostname);
   const normalizedProvider = normalizePaymentProvider(provider);
   const canUseMock = readEnvFlag(mockEnabled);
   const canUseSimulator = readEnvFlag(simulatorEnabled);
+  const canUseQaSimulator = readEnvFlag(qaSimulatorEnabled);
 
   let action = { canShow: false, type: null, provider: normalizedProvider, reason: 'host_not_allowed' };
   if (!normalizedProvider) {
@@ -275,6 +282,11 @@ export function resolvePaymentSimulationAction({
     } else {
       action = { canShow: false, type: null, provider: normalizedProvider, reason: 'local_payment_simulation_not_configured' };
     }
+  } else if (qaHost
+    && normalizedProvider === 'todopago'
+    && canUseSimulator
+    && canUseQaSimulator) {
+    action = { canShow: true, type: 'simulator', provider: normalizedProvider, reason: 'qa_todopago_simulator_enabled' };
   }
 
   return action;
