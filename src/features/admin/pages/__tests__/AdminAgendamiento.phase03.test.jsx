@@ -22,12 +22,92 @@ class Source {
 }
 const flush=async(ms=500)=>act(async()=>{await vi.advanceTimersByTimeAsync(ms);});
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
+async function dates(desde,hasta){
+ fireEvent.click(screen.getByRole('button',{name:/^Filtros/}));
+ fireEvent.change(screen.getByLabelText('Desde'),{target:{value:desde}});
+ fireEvent.change(screen.getByLabelText('Hasta'),{target:{value:hasta}});
+ fireEvent.click(screen.getByRole('button',{name:'Consultar fechas'}));await flush();
+}
 beforeEach(()=>{
  vi.useFakeTimers();vi.setSystemTime(new Date('2026-11-12T18:00:00Z'));localStorage.clear();sources=[];vi.stubGlobal('EventSource',Source);mock.roles=['admin'];
  mock.context.mockReset().mockResolvedValue({data:{sucursales:[{id_sucursal:'A',nombre_sucursal:'Sucursal A'}],barberos:[]}});
  mock.list.mockReset().mockResolvedValue({data:{citas:[]}});mock.search.mockReset();mock.save.mockReset().mockResolvedValue({data:{}});mock.notify.mockReset();
 });
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
+test.each([['admin','cards'],['super_admin','table']])('%s/%s: rango futuro, invitados, orden y acciones seguras',async(role,view)=>{
+ mock.roles=[role];localStorage.setItem('mf-view-agendamiento-citas',view);await mount();
+ expect(screen.getByText('Hoy — Honduras')).toBeTruthy();
+ const guest={...row('Invitado sin cuenta','confirmada','A','2026-11-15T15:00:00Z'),id_persona_cliente:null};
+ const holder=row('Titular','confirmada','A','2026-11-15T14:00:00Z');
+ mock.list.mockResolvedValue({data:{citas:[guest,holder,holder,row('Otra fecha','confirmada','A','2026-11-16T06:00:00Z')]}});
+ await dates('2026-11-15','2026-11-15');
+ expect(mock.list.mock.calls.at(-1)[0]).toMatchObject({fecha_desde:'2026-11-15',fecha_hasta:'2026-11-15',zona_horaria:'America/Tegucigalpa',page:1,limit:400});
+ expect(screen.getByText('Modo consulta — Honduras')).toBeTruthy();expect(screen.queryByText('Otra fecha',{exact:true})).toBeNull();
+ const surfaces=[...document.querySelectorAll(view==='cards'?'article h3':'tbody tr')];
+ expect(surfaces.length).toBeGreaterThan(0);
+ for(let i=0;i<surfaces.length;i+=2){expect(surfaces[i].textContent).toContain('Titular');expect(surfaces[i+1].textContent).toContain('Invitado sin cuenta');}
+ for(const button of screen.getAllByRole('button',{name:'Registrar llegada'})){expect(button.disabled).toBe(true);fireEvent.click(button);}
+ expect(screen.queryByRole('heading',{name:'Confirmar cambio de estado'})).toBeNull();
+ expect(screen.getAllByRole('button',{name:'Reagendación de emergencia'}).length).toBeGreaterThan(0);
+ fireEvent.click(screen.getByRole('button',{name:'Volver a hoy'}));await flush();
+ expect(mock.list.mock.calls.at(-1)[0]).toMatchObject({fecha_desde:'2026-11-12',fecha_hasta:'2026-11-12'});
+ expect(screen.queryByText('Invitado sin cuenta',{exact:true})).toBeNull();
+});
+test('fechas vacías e invertidas no consultan; aplicar mismas fechas no borra los resultados',async()=>{
+ mock.list.mockResolvedValue({data:{citas:[row('Hoy')]}});await mount();await flush();mock.list.mockClear();
+ await dates('','2026-11-15');expect(screen.getByRole('alert').textContent).toContain('fecha válida');expect(mock.list).not.toHaveBeenCalled();
+ fireEvent.change(screen.getByLabelText('Desde'),{target:{value:'2026-11-16'}});
+ fireEvent.click(screen.getByRole('button',{name:'Consultar fechas'}));await flush();
+ expect(screen.getByRole('alert').textContent).toContain('posterior');expect(mock.list).not.toHaveBeenCalled();
+ fireEvent.change(screen.getByLabelText('Desde'),{target:{value:'2026-11-12'}});fireEvent.change(screen.getByLabelText('Hasta'),{target:{value:'2026-11-12'}});
+ fireEvent.click(screen.getByRole('button',{name:'Consultar fechas'}));await flush();
+ expect(screen.getAllByText('Hoy',{exact:true}).length).toBeGreaterThan(0);expect(mock.list).not.toHaveBeenCalled();
+});
+test('recupera todas las páginas, distingue fechas y no publica un resultado parcial fallido',async()=>{
+ await mount();mock.list.mockImplementation(async({page})=>({data:{citas:page===1?[row('Día 15','confirmada','A','2026-11-15T14:00:00Z')]:[row('Día 16','en_salon','A','2026-11-16T14:00:00Z')],pagination:{has_next:page===1}}}));
+ await dates('2026-11-15','2026-11-16');
+ expect(mock.list.mock.calls.at(-1)[0]).toMatchObject({page:2,fecha_hasta:'2026-11-16'});
+ expect(screen.getAllByText(/15\/11\/2026/).length).toBeGreaterThan(0);expect(screen.getAllByText(/16\/11\/2026/).length).toBeGreaterThan(0);
+ expect(screen.getAllByRole('button',{name:'Iniciar atención'}).every(b=>b.disabled)).toBe(true);
+ mock.list.mockImplementation(async({page})=>{if(page===2)throw new Error('No fue posible cargar las citas.');return {data:{citas:[row('Parcial')],pagination:{has_next:true}}};});
+ fireEvent.click(screen.getByRole('button',{name:'Actualizar'}));await flush();expect(screen.queryByText('Parcial',{exact:true})).toBeNull();
+ expect(screen.getByText('No fue posible cargar las citas.')).toBeTruthy();
+});
+test('rango conserva filtros en SSE y medianoche; respuesta de hoy obsoleta no lo reemplaza',async()=>{
+ await mount();const old=deferred();mock.list.mockReturnValueOnce(old.promise).mockResolvedValue({data:{citas:[row('Futura','confirmada','A','2026-11-15T14:00:00Z')]}});
+ sources.at(-1).emit('open');await flush();await dates('2026-11-15','2026-11-15');
+ await act(async()=>old.resolve({data:{citas:[row('Obsoleta')]}}));await flush();
+ expect(screen.queryByText('Obsoleta',{exact:true})).toBeNull();expect(screen.getAllByText('Futura',{exact:true}).length).toBeGreaterThan(0);
+ sources.at(-1).emit('error');sources.at(-1).emit('open');sources.at(-1).emit('ready');await flush();
+ expect(mock.list.mock.calls.at(-1)[0]).toMatchObject({fecha_desde:'2026-11-15',fecha_hasta:'2026-11-15'});
+ vi.setSystemTime(new Date('2026-11-13T06:00:01Z'));await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
+ expect(screen.getByText('Modo consulta — Honduras')).toBeTruthy();
+ fireEvent.click(screen.getByRole('button',{name:'Volver a hoy'}));await flush();
+ expect(mock.list.mock.calls.at(-1)[0]).toMatchObject({fecha_desde:'2026-11-13',fecha_hasta:'2026-11-13'});
+});
+test('405 resultados recuperados; no acepta un límite lleno sin metadatos',async()=>{
+ await mount();
+ const first=Array.from({length:400},(_,i)=>row('Pendiente '+i,'pendiente_pago','A','2026-11-15T14:00:00Z'));
+ const last=Array.from({length:5},(_,i)=>row('Última página '+i,'confirmada','A','2026-11-15T16:00:00Z'));
+ mock.list.mockImplementation(async({page})=>({data:{citas:page===1?first:last,pagination:{has_next:page===1}}}));
+ await dates('2026-11-15','2026-11-15');expect(screen.getByText('405 cita(s)')).toBeTruthy();
+ expect(screen.getAllByText('Última página 4',{exact:true}).length).toBeGreaterThan(0);
+ mock.list.mockResolvedValue({data:{citas:first}});fireEvent.click(screen.getByRole('button',{name:'Actualizar'}));await flush();
+ expect(screen.getByText('No fue posible recuperar el rango completo. Actualiza e inténtalo de nuevo.')).toBeTruthy();
+});
+test('una segunda página anterior no reemplaza el retorno a hoy',async()=>{
+ await mount();const pending=deferred();
+ mock.list.mockImplementation(({fecha_desde,page})=>fecha_desde==='2026-11-15'?(page===1?Promise.resolve({data:{citas:[row('Parcial futura')],pagination:{has_next:true}}}):pending.promise):Promise.resolve({data:{citas:[row('Hoy vigente')]}}));
+ await dates('2026-11-15','2026-11-15');fireEvent.click(screen.getByRole('button',{name:'Volver a hoy'}));await flush();
+ await act(async()=>pending.resolve({data:{citas:[row('Página obsoleta','confirmada','A','2026-11-15T14:00:00Z')],pagination:{has_next:false}}}));await flush();
+ expect(screen.queryByText('Página obsoleta',{exact:true})).toBeNull();expect(screen.getAllByText('Hoy vigente',{exact:true}).length).toBeGreaterThan(0);
+});
+test.each([['confirmada','Registrar llegada'],['en_salon','Iniciar atención'],['en_atencion','Finalizar atención']])('%s: operación de hoy habilitada y futura bloqueada',async(state,label)=>{
+ mock.list.mockResolvedValue({data:{citas:[row('Operativa',state)]}});await mount();
+ expect(screen.getAllByRole('button',{name:label}).every(b=>!b.disabled)).toBe(true);
+ mock.list.mockResolvedValue({data:{citas:[row('Consulta futura',state,'A','2026-11-15T14:00:00Z')]}});
+ await dates('2026-11-15','2026-11-15');expect(screen.getAllByRole('button',{name:label}).every(b=>b.disabled)).toBe(true);
+});
 async function mount(){render(<MemoryRouter><Page/></MemoryRouter>);await flush();}
 async function lookup(cita){
  mock.search.mockResolvedValue({data:{reservas:[{id_grupo_cita:'G',codigo_reserva:'ABCDE',citas:[cita]}]}});
@@ -35,6 +115,10 @@ async function lookup(cita){
  fireEvent.click(screen.getByRole('button',{name:'Buscar',exact:true}));await flush();
  return screen.getByRole('dialog');
 }
+test('Buscar reserva conserva las operaciones autorizadas de una cita anterior aún activa',async()=>{
+ await mount();const dialog=await lookup(row('Antigua activa','en_salon','A','2026-11-10T16:00:00Z'));
+ expect(within(dialog).getByRole('button',{name:'Iniciar atención'}).disabled).toBe(false);
+});
 test.each(['en_espera','pendiente_pago','confirmada','en_salon','en_atencion'])('Buscar reserva: %s abre el formulario existente con cita futura y hora HN',async state=>{
  await mount();const dialog=await lookup(row('Futura',state,'A','2026-11-14T05:30:00Z'));
  fireEvent.click(within(dialog).getByRole('button',{name:'Reagendación de emergencia'}));await flush();
