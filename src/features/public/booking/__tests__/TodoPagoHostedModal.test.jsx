@@ -465,13 +465,44 @@ describe('integracion del shell TodoPago', () => {
     expect(screen.getByRole('button', { name: 'Ejecutar simulator' })).not.toBeNull();
   });
 
-  test.each(['qa.masterfadeapp.com', 'staging.masterfadeapp.com', 'masterfadeapp.com'])(
-    'bloquea el simulador fuera de localhost: %s',
+  test('habilita TodoPago simulado en el host QA solo con ambos flags explicitos', () => {
+    const action = resolvePaymentSimulationAction({
+      hostname: 'qa.masterfadeapp.com',
+      provider: 'todopago',
+      simulatorEnabled: 'true',
+      qaSimulatorEnabled: 'true',
+    });
+    expect(action).toMatchObject({
+      canShow: true,
+      type: 'simulator',
+      provider: 'todopago',
+      reason: 'qa_todopago_simulator_enabled',
+    });
+  });
+
+  test.each([
+    ['simulador general apagado', 'false', 'true'],
+    ['autorizacion QA apagada', 'true', 'false'],
+    ['ambos flags apagados', 'false', 'false'],
+  ])('bloquea QA cuando %s', (_scenario, simulatorEnabled, qaSimulatorEnabled) => {
+    const action = resolvePaymentSimulationAction({
+      hostname: 'qa.masterfadeapp.com',
+      provider: 'todopago',
+      simulatorEnabled,
+      qaSimulatorEnabled,
+    });
+    expect(action.canShow).toBe(false);
+    expect(action.reason).toBe('host_not_allowed');
+  });
+
+  test.each(['staging.masterfadeapp.com', 'masterfadeapp.com', 'qa.masterfadeapp.com.evil.test'])(
+    'bloquea el simulador fuera del host QA exacto: %s',
     (hostname) => {
       const action = resolvePaymentSimulationAction({
         hostname,
         provider: 'todopago',
         simulatorEnabled: 'true',
+        qaSimulatorEnabled: 'true',
       });
       expect(action.canShow).toBe(false);
       expect(action.reason).toBe('host_not_allowed');
