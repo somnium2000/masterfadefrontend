@@ -80,7 +80,7 @@ export default function PublicBookingConfirmStep() {
   const requiresOnlinePayment = Boolean(paymentRequired && totalToPay > 0);
   const totalLabel = paymentRequired ? 'Total a pagar' : 'Total a pagar en salón';
   const safeCoveredByPlan = Math.max(0, Number(coveredByPlan || 0));
-  const safeExtrasToPay = Math.max(0, Number(extrasToPay || 0));
+  const safeExtrasToPay = hasBackendTotal ? Math.max(0, Number(extrasToPay || 0)) : totalServiciosNeto;
   const hasPlanCoverage = safeCoveredByPlan > 0;
   const hasSaldoToPay = hasPlanCoverage && safeExtrasToPay > 0;
   const isFullyCoveredByPlan = hasPlanCoverage && safeExtrasToPay <= 0;
@@ -269,7 +269,7 @@ export default function PublicBookingConfirmStep() {
 
         <div className="public-booking-payment-note mt-4">
           <span>
-            ¿Tienes cuenta activa? Inicia sesión para acumular puntos por citas de acompañantes pagadas.
+            Los MasterPuntos se acreditan al completar las citas que califican, según las reglas vigentes.
           </span>
         </div>
 

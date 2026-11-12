@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import PublicBookingAgendaStep from '../PublicBookingAgendaStep.jsx';
 
 const context = vi.hoisted(() => ({ current: null }));
@@ -66,47 +66,16 @@ test('companion slots keep titular/overlap restrictions without re-ranking', () 
   expect(flow.onSelectTime).toHaveBeenCalledWith('09:30', true);
 });
 
-test('promotion card stays selectable without prior services when its target exists', () => {
-  const flow = context.current;
-  flow.selectedServices = [];
-  flow.serviceIds = [];
-  flow.selectPromotion = vi.fn();
-  flow.promotions = [{
-    id_promocion: 'promotion',
-    titulo: 'Promo directa',
-    aplica_a: 'servicio',
-    mecanica: 'porcentaje',
-    valor_descuento: 10,
-    id_servicio_objetivo: 'service',
-    servicio_objetivo_nombre: 'QA',
-  }];
-
-  render(<PublicBookingAgendaStep />);
-  fireEvent.click(screen.getByRole('button', { name: 'Promociones' }));
-  const promotionCard = screen.getByRole('button', { name: /Promo directa/ });
-  expect(promotionCard.disabled).toBe(false);
-  fireEvent.click(promotionCard);
-  expect(flow.selectPromotion).toHaveBeenCalledWith('promotion');
-});
-
-test('unavailable promotion target disables the card without changing selection', () => {
-  const flow = context.current;
-  flow.selectPromotion = vi.fn();
-  flow.promotions = [{
-    id_promocion: 'promotion-missing',
-    titulo: 'Promo no disponible',
-    aplica_a: 'servicio',
-    id_servicio_objetivo: 'missing',
-    servicio_objetivo_nombre: 'Servicio ausente',
-  }];
-
-  render(<PublicBookingAgendaStep />);
-  fireEvent.click(screen.getByRole('button', { name: 'Promociones' }));
-  const promotionCard = screen.getByRole('button', { name: /Promo no disponible/ });
-  expect(promotionCard.disabled).toBe(true);
-  expect(promotionCard.getAttribute('title')).toContain('no está disponible');
-  fireEvent.click(promotionCard);
-  expect(flow.selectPromotion).not.toHaveBeenCalled();
+test('primera entrega oculta Promociones sin ejecutar selección ni borrar datos existentes', () => {
+  context.current.promotions = [{id_promocion:'promotion',titulo:'Promo histórica'}];
+  context.current.selectPromotion = vi.fn();
+  render(<PublicBookingAgendaStep/>);
+  expect(screen.queryByRole('button',{name:'Promociones',exact:true})).toBeNull();
+  expect(context.current.promotions).toEqual([{id_promocion:'promotion',titulo:'Promo histórica'}]);
+  expect(context.current.selectPromotion).not.toHaveBeenCalled();
+  expect(screen.getByRole('button',{name:'Servicios',exact:true}).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(screen.getByRole('button',{name:'Paquetes',exact:true}));
+  expect(screen.getByRole('button',{name:'Paquetes',exact:true}).getAttribute('aria-pressed')).toBe('true');
 });
 
 test.each([
@@ -147,4 +116,22 @@ test('calendar restores dates, handles month navigation and preserves retry erro
   expect(flow.setMonth).toHaveBeenCalledWith(1);
   fireEvent.click(screen.getByRole('button', { name: '2026-10-14 disponible' }));
   expect(flow.onSelectDay).toHaveBeenCalledWith('2026-10-14', true);
+});
+
+test('fecha heredada enfoca datos sin competir con scroll de horarios; servicios no desplazan', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('requestAnimationFrame',fn=>setTimeout(fn,0));
+  vi.stubGlobal('cancelAnimationFrame',clearTimeout);
+  try {
+    const view=render(<PublicBookingAgendaStep/>);
+    const companion={id:'companion',idBarbero:'barber',selectedDate:context.current.selectedDate};
+    context.current={...context.current,activeBlockIndex:1,activeBlock:companion,bookingBlocks:[...context.current.bookingBlocks,companion],pendingCompanionFocusId:'companion',consumePendingCompanionFocus:vi.fn()};
+    const scroll=HTMLElement.prototype.scrollIntoView;scroll.mockClear();view.rerender(<PublicBookingAgendaStep/>);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(20);});
+    expect(document.activeElement.id).toBe('booking-contact-first-name');
+    expect(scroll.mock.instances.every(node=>node.classList.contains('public-booking-contact-card'))).toBe(true);
+    expect(context.current.consumePendingCompanionFocus).toHaveBeenCalledWith('companion');
+    scroll.mockClear();context.current={...context.current,pendingCompanionFocusId:'',serviceIds:['other']};view.rerender(<PublicBookingAgendaStep/>);
+    expect(scroll).not.toHaveBeenCalled();
+  } finally {vi.useRealTimers();vi.unstubAllGlobals();}
 });

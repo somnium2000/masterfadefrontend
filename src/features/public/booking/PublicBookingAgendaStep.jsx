@@ -368,6 +368,7 @@ export default function PublicBookingAgendaStep() {
 
   const hasSelectedDate = Boolean(selectedDate);
   const slotsSectionRef = useRef(null);
+  const previousScrollSelectionRef = useRef({ blockId: activeBlock?.id, date: selectedDate });
   const contactCardRef = useRef(null);
   const contactNameInputRef = useRef(null);
   const contactEmailInputRef = useRef(null);
@@ -597,9 +598,12 @@ export default function PublicBookingAgendaStep() {
   }, [bookingBlocks.length, services.length, servicesScrollRef, syncServicesScrollState]);
 
   useEffect(() => {
+    const previous = previousScrollSelectionRef.current;
+    previousScrollSelectionRef.current = { blockId: activeBlock?.id, date: selectedDate };
+    if (previous.blockId !== activeBlock?.id || previous.date === selectedDate || pendingCompanionFocusId) return;
     if (!selectedDate || !slotsSectionRef.current) return;
     slotsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [selectedDate]);
+  }, [activeBlock?.id, pendingCompanionFocusId, selectedDate]);
 
   useLayoutEffect(() => {
     if (!pendingCompanionFocusId) return;
@@ -910,6 +914,7 @@ export default function PublicBookingAgendaStep() {
           <div className="public-booking-selection-tabs">
             <Button
               type="button"
+              aria-pressed={effectiveCatalogTab === 'services'}
               variant={effectiveCatalogTab === 'services' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCatalogTab('services')}
@@ -918,6 +923,7 @@ export default function PublicBookingAgendaStep() {
             </Button>
             <Button
               type="button"
+              aria-pressed={effectiveCatalogTab === 'packages'}
               variant={effectiveCatalogTab === 'packages' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCatalogTab('packages')}
@@ -925,14 +931,7 @@ export default function PublicBookingAgendaStep() {
             >
               Paquetes
             </Button>
-            <Button
-              type="button"
-              variant={catalogTab === 'promotions' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setCatalogTab('promotions')}
-            >
-              Promociones
-            </Button>
+
           </div>
 
           <div className="citas-services-scroll scrollbar-hide" ref={servicesScrollRef}>

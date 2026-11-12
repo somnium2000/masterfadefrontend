@@ -171,3 +171,16 @@ describe('useBookingAvailability invalidacion SSE', () => {
     expect(onSelectedSlotUnavailable).toHaveBeenCalledTimes(1);
   });
 });
+
+test('cambiar servicios/integrante descarta horarios obsoletos y no duplica consultas',async()=>{
+  let finish;
+  apiMock.listPublicAgendaHorarios.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;})).mockResolvedValue({data:{horarios:[{hora:'11:00',disponible:true}],duracion_total_min:30}});
+  const lists={a:['svc-1'],b:['svc-2']},noop=vi.fn(),month={from:'2030-06-01',to:'2030-06-30'};
+  const {result,rerender,unmount}=renderHook(({key})=>useBookingAvailability({selectedBranchId:BRANCH_A,activeBlockBarberId:BARBER_A,effectiveSelectionType:'services',effectiveSelectedServiceIdsForAgenda:lists[key],selectedPackageId:'',selectedDate:'2030-06-15',selectedTime:'',monthRange:month,selectionCacheKey:key,bookingBlocksFingerprint:key,minBookingDateKey:'2030-06-15',effectiveActiveBlockIndex:key==='a'?0:1,updateBlockAtIndex:noop,setAvailabilityError:noop,notifyError:noop}),{initialProps:{key:'a'}});
+  await act(async()=>{await vi.advanceTimersByTimeAsync(500);});rerender({key:'b'});
+  await act(async()=>{await vi.advanceTimersByTimeAsync(500);});
+  await act(async()=>finish({data:{horarios:[{hora:'10:00',disponible:true}],duracion_total_min:60}}));
+  expect(result.current.slots.some(s=>s.hora==='11:00'&&s.disponible)).toBe(true);
+  expect(result.current.slots.some(s=>s.hora==='10:00'&&s.disponible)).toBe(false);
+  expect(apiMock.listPublicAgendaHorarios).toHaveBeenCalledTimes(2);unmount();vi.useRealTimers();
+});

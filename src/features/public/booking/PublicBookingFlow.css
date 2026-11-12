@@ -614,7 +614,8 @@
 }
 
 .public-booking-agenda-secondary-cta {
-  margin-top: -2px;
+  margin-top: 12px;
+  gap: 16px;
   align-items: flex-end;
 }
 
@@ -1196,4 +1197,27 @@
   .public-booking-barber-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* AM: Dorado oficial también en tema claro; controles separados y táctiles. */
+.public-booking-selection-tabs {
+  display: flex;
+  gap: 12px;
+  margin-block: 16px;
+}
+
+.public-booking-selection-tabs > button {
+  min-height: 44px;
+  flex: 1;
+  border: 1px solid var(--mf-nav-border);
+}
+
+.public-booking-selection-tabs > button[aria-pressed="true"] {
+  background: #c9a96e;
+  color: #17130b;
+  border-color: #c9a96e;
+}
+
+.public-booking-contact-card {
+  scroll-margin-top: 112px;
 }
