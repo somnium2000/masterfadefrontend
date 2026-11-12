@@ -136,7 +136,7 @@ function getAppointmentTone(code) {
   if (['confirmada', 'completada'].includes(status)) return 'positive';
   if (['en_salon', 'en_atencion'].includes(status)) return 'info';
   if (['en_espera', 'pendiente_pago', 'expirada'].includes(status)) return 'warning';
-  if (status === 'no_show') return 'negative';
+  if (['no_show', 'cancelada', 'cancelada_por_cliente', 'anulada'].includes(status)) return 'negative';
   return 'neutral';
 }
 
@@ -464,7 +464,7 @@ function ClienteHistorialCitasContent() {
 
   return (
     <>
-      <div className="space-y-5">
+      <div className="client-citas-page space-y-4">
         <section className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -483,17 +483,9 @@ function ClienteHistorialCitasContent() {
             </button>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            <span className="inline-flex rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
-              Próximas: <strong className="ml-1 text-[var(--mf-text)]">{totals.proximas}</strong>
-            </span>
-            <span className="inline-flex rounded-full border border-[var(--mf-nav-border)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
-              Historial: <strong className="ml-1 text-[var(--mf-text)]">{totals.historial}</strong>
-            </span>
-            <span className="inline-flex rounded-full border border-[var(--mf-nav-border)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
-              Total: <strong className="ml-1 text-[var(--mf-text)]">{totals.total}</strong>
-            </span>
-          </div>
+          <p className="mt-3 text-xs text-[var(--mf-text-2)]">
+            Total: <strong className="text-[var(--mf-text)]">{totals.total}</strong> citas
+          </p>
         </section>
 
         <div className="space-y-3">
@@ -585,10 +577,10 @@ function ClienteHistorialCitasContent() {
 
 
             <section className="space-y-3">
-              <nav aria-label="Paginación de citas" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-2 text-sm">
-                <button type="button" disabled={!pagination?.has_prev} className="min-h-11 rounded-lg border border-[var(--mf-btn-border)] px-3 disabled:opacity-40" onClick={() => setPages(prev => ({ ...prev, [activeTab]: page - 1 }))}>Anterior</button>
+              <nav aria-label="Paginación de citas" className="client-citas-pagination">
+                <button type="button" disabled={!pagination?.has_prev} onClick={() => setPages(prev => ({ ...prev, [activeTab]: page - 1 }))}>Anterior</button>
                 <span role="status" aria-live="polite">Página {page} de {pagination?.total_pages || 1}</span>
-                <button type="button" disabled={!pagination?.has_next} className="min-h-11 rounded-lg border border-[var(--mf-btn-border)] px-3 disabled:opacity-40" onClick={() => setPages(prev => ({ ...prev, [activeTab]: page + 1 }))}>Siguiente</button>
+                <button type="button" disabled={!pagination?.has_next} onClick={() => setPages(prev => ({ ...prev, [activeTab]: page + 1 }))}>Siguiente</button>
               </nav>
               {activeTab === 'proximas' ? (
                 upcoming.length ? (
