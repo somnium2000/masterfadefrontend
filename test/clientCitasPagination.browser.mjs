@@ -22,8 +22,8 @@ for(const engine of ['chromium','webkit'])for(const width of [390,768,1440])for(
    if(p==='/v1/commerce/eligibility')data={booking:false,vipPurchase:false};
    if(p==='/v1/citas'){
     queries.push(Object.fromEntries(q));if(!q.get('apartado'))data={citas:rows};else{
-     const section=q.get('apartado'),source=section==='proximas'?rows.slice(0,56).reverse():rows.slice(56,56+historyCount).reverse(),total=source.length,total_pages=Math.max(1,Math.ceil(total/5)),n=Math.min(Number(q.get('page')||1),total_pages);
-     data={citas:source.slice((n-1)*5,n*5),totals:{proximas:56,historial:historyCount,total:56+historyCount,pendientes_pago:11},pagination:{apartado:section,page:n,limit:5,total,total_pages,has_next:n<total_pages,has_prev:n>1}};
+     const section=q.get('apartado'),source=section==='proximas'?rows.slice(0,56).reverse():rows.slice(56,56+historyCount).reverse(),total=source.length,total_pages=Math.max(1,Math.ceil(total/4)),n=Math.min(Number(q.get('page')||1),total_pages);
+     data={citas:source.slice((n-1)*4,n*4),totals:{proximas:56,historial:historyCount,total:56+historyCount,pendientes_pago:11},pagination:{apartado:section,page:n,limit:4,total,total_pages,has_next:n<total_pages,has_prev:n>1}};
     }
    }
    if(p==='/v1/citas/pendiente')data={pendiente:null};
@@ -33,12 +33,12 @@ for(const engine of ['chromium','webkit'])for(const width of [390,768,1440])for(
   const ready=async text=>{await page.getByText(text,{exact:true}).waitFor();await page.locator('.client-cita-card').filter({visible:true}).first().waitFor();};
   const cards=()=>page.locator('.client-cita-card').filter({visible:true});
   const next=async text=>{await page.getByRole('button',{name:'Siguiente',exact:true}).click();await ready(text);};
-  await page.goto(base+'/home/cliente/citas');await ready('Página 1 de 12');assert.equal(await cards().count(),5);
+  await page.goto(base+'/home/cliente/citas');await ready('Página 1 de 14');assert.equal(await cards().count(),4);
   assert.equal(await page.getByRole('button',{name:'Nueva cita'}).isDisabled(),true);
-  await next('Página 2 de 12');await next('Página 3 de 12');assert.equal(await cards().count(),5);
-  await page.getByRole('button',{name:'Historial (41)'}).click();await ready('Página 1 de 9');await next('Página 2 de 9');
-  await page.getByRole('button',{name:'Próximas (56)'}).click();await ready('Página 3 de 12');
-  await page.getByRole('button',{name:'Anterior',exact:true}).click();await ready('Página 2 de 12');assert.equal(await cards().count(),5);
+  await next('Página 2 de 14');await next('Página 3 de 14');assert.equal(await cards().count(),4);
+  await page.getByRole('button',{name:'Historial (41)'}).click();await ready('Página 1 de 11');await next('Página 2 de 11');
+  await page.getByRole('button',{name:'Próximas (56)'}).click();await ready('Página 3 de 14');
+  await page.getByRole('button',{name:'Anterior',exact:true}).click();await ready('Página 2 de 14');assert.equal(await cards().count(),4);
   await page.getByRole('button',{name:/Ver detalle completo de la cita en Próxima 51 del/}).click();const d=page.getByRole('dialog');await d.getByText(/Estado: En espera/).waitFor();
   assert.doesNotMatch(await d.innerText(),/en_espera|pendiente_pago|en_atencion/);await d.getByRole('button',{name:'Cerrar',exact:true}).first().click();await d.waitFor({state:'detached'});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
@@ -46,7 +46,7 @@ for(const engine of ['chromium','webkit'])for(const width of [390,768,1440])for(
   historyCount=1;await page.getByRole('button',{name:'Historial (41)'}).click();await ready('Página 1 de 1');assert.equal(await cards().count(),1);
   assert.equal(await page.getByRole('button',{name:'Historial (1)'}).isVisible(),true);assert.equal(await page.getByRole('button',{name:'Siguiente',exact:true}).isDisabled(),true);
   assert.ok(queries.some(q=>q.apartado==='historial'&&q.page==='2'));assert.ok(queries.some(q=>q.apartado==='proximas'&&q.page==='3'));
-  assert.ok(queries.filter(q=>q.apartado).every(q=>q.limit==='5'));assert.equal(await page.locator('html').getAttribute('data-theme'),theme);
+  assert.ok(queries.filter(q=>q.apartado).every(q=>q.limit==='4'));assert.equal(await page.locator('html').getAttribute('data-theme'),theme);
   assert.deepEqual(errors,[]);assert.deepEqual(writes,[]);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  }catch(error){if(inspected)error.message+='\nBotones: '+JSON.stringify(await inspected.getByRole('button').allTextContents())+'\nContenido: '+(await inspected.locator('body').innerText()).slice(-2000);throw error;}finally{await browser.close();}
 });

@@ -24,7 +24,7 @@ for(const engine of ['chromium','webkit'])for(const width of [320,390,768,1024,1
    if(p==='/v1/auth/me')data={user:{id_usuario:'fixture',nombres:'Cliente fixture'},roles:['cliente'],cliente_id:'fixture'};
    if(p==='/v1/commerce/eligibility')data={booking:false,vipPurchase:false};
    if(p==='/v1/citas'){
-    if(!q.get('apartado'))data={citas:rows};else{const source=q.get('apartado')==='historial'?rows.slice(5):rows.slice(0,5),n=Number(q.get('page')||1);data={citas:source.slice((n-1)*5,n*5),totals:{proximas:5,historial:6,total:11,pendientes_pago:1},pagination:{apartado:q.get('apartado'),page:n,limit:5,total:source.length,total_pages:Math.ceil(source.length/5),has_next:n*5<source.length,has_prev:n>1}};}
+    if(!q.get('apartado'))data={citas:rows};else{const source=q.get('apartado')==='historial'?rows.slice(5):rows.slice(0,5),n=Number(q.get('page')||1);data={citas:source.slice((n-1)*4,n*4),totals:{proximas:5,historial:6,total:11,pendientes_pago:1},pagination:{apartado:q.get('apartado'),page:n,limit:4,total:source.length,total_pages:Math.ceil(source.length/4),has_next:n*4<source.length,has_prev:n>1}};}
    }
    if(p==='/v1/citas/pendiente')data={pendiente:null};
    if(p.startsWith('/v1/citas/fixture-')){details.push(p);data={cita:rows.find(r=>p.endsWith('/'+r.id_cita)),detalles:[]};}
@@ -47,7 +47,7 @@ for(const engine of ['chromium','webkit'])for(const width of [320,390,768,1024,1
    assert.equal(columns,gridWidth>=800?2:1);if(columns===2)assert.ok(Math.abs(result[0].bounds.height-result[1].bounds.height)<1);
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   };
-  await page.goto(base+'/home/cliente/citas');await ready('Página 1 de 1');assert.equal(await cards.count(),5);assert.deepEqual(details,[]);
+  await page.goto(base+'/home/cliente/citas');await ready('Página 1 de 2');assert.equal(await cards.count(),4);assert.deepEqual(details,[]);
   await cards.first().getByText('L 0.00',{exact:true}).waitFor();await cards.nth(1).getByText('L 1250.50',{exact:true}).waitFor();
   assert.match(await cards.first().innerText(),/15 nov.*11:30|15 nov.*23:30/i);assert.doesNotMatch(await cards.first().innerText(),/Gratis|Pagado|Pago recibido/i);
   await layout();const evidence=path.join(process.env.TEMP,'mf-client-citas-cards-evidence');await mkdir(evidence,{recursive:true});
@@ -60,11 +60,12 @@ for(const engine of ['chromium','webkit'])for(const width of [320,390,768,1024,1
    await page.waitForFunction(n=>n===document.activeElement,await action.elementHandle(),{timeout:1000});
   }
   assert.deepEqual(details,rows.slice(0,3).map(r=>'/v1/citas/'+r.id_cita));
-  await page.getByRole('button',{name:'Historial (6)'}).click();await ready('Página 1 de 2');assert.equal(await cards.count(),5);
-  await cards.nth(2).getByText('Cancelada por el cliente',{exact:true}).waitFor();await cards.last().getByText('No asistió',{exact:true}).waitFor();await layout();
+  await page.getByRole('button',{name:'Siguiente',exact:true}).click();await ready('Página 2 de 2');await cards.getByText('En atención',{exact:true}).waitFor();await page.getByRole('button',{name:'Anterior',exact:true}).click();await ready('Página 1 de 2');
+  await page.getByRole('button',{name:'Historial (6)'}).click();await ready('Página 1 de 2');assert.equal(await cards.count(),4);
+  await cards.nth(2).getByText('Cancelada por el cliente',{exact:true}).waitFor();await layout();
   await page.evaluate(()=>window.scrollTo({top:0,behavior:'instant'}));await page.screenshot({path:path.join(evidence,`${engine}-${width}-${theme}-historial.png`),fullPage:true});
-  await page.getByRole('button',{name:'Siguiente',exact:true}).click();await ready('Página 2 de 2');assert.equal(await cards.count(),1);await cards.getByText('Anulada',{exact:true}).waitFor();
-  await page.getByRole('button',{name:'Próximas (5)'}).click();await ready('Página 1 de 1');await page.getByRole('button',{name:'Historial (6)'}).click();await ready('Página 2 de 2');
+  await page.getByRole('button',{name:'Siguiente',exact:true}).click();await ready('Página 2 de 2');assert.equal(await cards.count(),2);await cards.getByText('No asistió',{exact:true}).waitFor();await cards.getByText('Anulada',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Próximas (5)'}).click();await ready('Página 1 de 2');await page.getByRole('button',{name:'Historial (6)'}).click();await ready('Página 2 de 2');
   assert.equal(await page.getByRole('button',{name:'Nueva cita'}).isDisabled(),true);assert.deepEqual(writes,[]);assert.deepEqual(errors,[]);
  }finally{await browser.close();}
 });

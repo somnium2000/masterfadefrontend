@@ -253,7 +253,7 @@ function ClienteHistorialCitasContent() {
     setLoading(true);
     setListError('');
     try {
-      const payload = await listClienteCitas({ apartado: activeTab, page, limit: 5 }, {
+      const payload = await listClienteCitas({ apartado: activeTab, page, limit: 4 }, {
         signal: controller.signal, cache: false, dedupe: false,
       });
       if (!current()) return;

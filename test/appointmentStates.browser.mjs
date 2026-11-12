@@ -22,7 +22,7 @@ for(const width of [390,1440])for(const theme of ['light','dark'])for(const role
    if(p.endsWith('/operativas/contexto'))data={sucursales:[{id_sucursal:A,nombre_sucursal:'Sucursal fixture'}],barberos:[],estados:labels.map(([estado_cita_codigo])=>({estado_cita_codigo,descripcion:estado_cita_codigo}))};
    if(p.endsWith('/citas/historial')){queries.push(Object.fromEntries(q));const filtered=q.get('estado')?rows.filter(r=>r.estado_cita_codigo===q.get('estado')):rows;const n=Number(q.get('page')||1),limit=Number(q.get('limit')||9);data={citas:filtered.slice((n-1)*limit,n*limit),pagination:{page:n,limit,total:filtered.length,total_pages:Math.ceil(filtered.length/limit),has_next:n*limit<filtered.length,has_prev:n>1}};}
    if(p==='/v1/citas'){
-    if(!q.get('apartado'))data={citas:rows};else{const source=q.get('apartado')==='historial'?rows.slice(5):rows.slice(0,5),n=Number(q.get('page')||1);data={citas:source.slice((n-1)*5,n*5),totals:{proximas:5,historial:6,total:11,pendientes_pago:1},pagination:{page:n,limit:5,total:source.length,total_pages:Math.ceil(source.length/5),has_next:n*5<source.length,has_prev:n>1}};}
+    if(!q.get('apartado'))data={citas:rows};else{const source=q.get('apartado')==='historial'?rows.slice(5):rows.slice(0,5),n=Number(q.get('page')||1);data={citas:source.slice((n-1)*4,n*4),totals:{proximas:5,historial:6,total:11,pendientes_pago:1},pagination:{page:n,limit:4,total:source.length,total_pages:Math.ceil(source.length/4),has_next:n*4<source.length,has_prev:n>1}};}
    }
    if(p==='/v1/citas/pendiente')data={pendiente:null};
    if(p.startsWith('/v1/citas/fixture-'))data={cita:rows.find(r=>p.endsWith('/'+r.id_cita)),detalles:[]};
@@ -40,10 +40,11 @@ for(const width of [390,1440])for(const theme of ['light','dark'])for(const role
   const shot=async suffix=>{await page.evaluate(()=>window.scrollTo({top:0,left:0,behavior:'instant'}));await page.screenshot({path:path.join(evidence,`${role}-${width}-${theme}${suffix}.png`),fullPage:true});};
   if(role==='cliente'){
    await page.goto(base+'/home/cliente/citas');await page.getByRole('button',{name:'Próximas (5)',exact:true}).waitFor();
-   for(const [,label]of labels.slice(0,5))await visible(label).waitFor();
+   for(const [,label]of labels.slice(0,4))await visible(label).waitFor();
+   await page.getByRole('button',{name:'Siguiente',exact:true}).click();await visible('En atención').waitFor();
    await page.getByRole('button',{name:'Historial (6)',exact:true}).click();
-   for(const [,label]of labels.slice(5,10))await visible(label).waitFor();
-   await shot('');await page.getByRole('button',{name:/Ver detalle completo de la cita en Sucursal fixture 8 del/}).click();await page.getByRole('dialog').getByText(/Estado: Cancelada por el cliente/).waitFor();await close();await page.getByRole('button',{name:'Siguiente',exact:true}).click();await visible('Anulada').waitFor();
+   for(const [,label]of labels.slice(5,9))await visible(label).waitFor();
+   await shot('');await page.getByRole('button',{name:/Ver detalle completo de la cita en Sucursal fixture 8 del/}).click();await page.getByRole('dialog').getByText(/Estado: Cancelada por el cliente/).waitFor();await close();await page.getByRole('button',{name:'Siguiente',exact:true}).click();await visible('No asistió').waitFor();await visible('Anulada').waitFor();
   }else if(role==='barbero'){
    await page.goto(base+'/home/barbero');for(const [,label]of labels.slice(0,5))await visible(label).waitFor();await shot('');
   }else{
