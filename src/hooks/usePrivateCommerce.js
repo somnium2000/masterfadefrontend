@@ -20,7 +20,7 @@ export default function usePrivateCommerce() {
         });
         if (!controller.signal.aborted && current === generation) setConfirmed({ identity, data: response?.data });
       } catch {
-        if (!controller.signal.aborted && current === generation) setConfirmed(null);
+        if (!controller.signal.aborted && current === generation) setConfirmed({ identity, data: null });
       }
     };
     void refresh();
@@ -29,5 +29,6 @@ export default function usePrivateCommerce() {
   }, [identity]);
   // AM: A previous user's eligibility must never survive logout or identity changes.
   const data = identity && confirmed?.identity === identity ? confirmed.data : null;
-  return { booking: data?.booking === true, vipPurchase: data?.vipPurchase === true };
+  return { booking: data?.booking === true, vipPurchase: data?.vipPurchase === true,
+    checking: Boolean(identity && confirmed?.identity !== identity) };
 }
