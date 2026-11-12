@@ -37,7 +37,8 @@ import {
 } from "../lib/clienteApi.js";
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
 import useMembershipPaymentPolling from "../../plans/hooks/useMembershipPaymentPolling.js";
-import { CLIENT_LOCK_MESSAGE, CLIENT_PLAN_PURCHASE_ENABLED } from "../lib/clientFeatureFlags.js";
+import { CLIENT_LOCK_MESSAGE } from "../lib/clientFeatureFlags.js";
+import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
 import { getPixelPayCustomerMessage, isPixelPayUncertainError } from "../../payments/pixelPayPresentation.js";
 
 const PIXELPAY_PENDING_MESSAGE = getPixelPayCustomerMessage({ pending_confirmation: true });
@@ -360,6 +361,7 @@ function PlanCard({
 }
 
 export default function ClientePlanesPage() {
+  const { vipPurchase: CLIENT_PLAN_PURCHASE_ENABLED } = usePrivateCommerce();
   const { user, clienteId } = useAuth();
   const notifications = useNotifications();
   const { error: notifyError, success: notifySuccess, warning: notifyWarning } = notifications;
@@ -463,7 +465,7 @@ export default function ClientePlanesPage() {
     setPurchaseErrorMessage(PIXELPAY_PENDING_MESSAGE);
     setPurchaseStep("payment");
     setPurchaseModalOpen(true);
-  }, [purchaseIdentity]);
+  }, [purchaseIdentity, CLIENT_PLAN_PURCHASE_ENABLED]);
 
   async function handleBranchChange(event) {
     const nextBranchId = String(event.target.value || "").trim();
@@ -688,7 +690,7 @@ export default function ClientePlanesPage() {
   }, [branchId, fetchMembershipState, fetchPlans]);
 
   useMembershipPaymentPolling({
-    active: purchasePendingConfirmation,
+    active: purchasePendingConfirmation && CLIENT_PLAN_PURCHASE_ENABLED,
     idPaymentIntent: membershipPaymentIntent?.id_payment_intent,
     queryStatus: queryMembershipPaymentStatus,
     onResult: handleMembershipPollResult,
@@ -1097,7 +1099,7 @@ export default function ClientePlanesPage() {
       )}
 
       <PlanPurchaseFlowDialog
-        open={purchaseModalOpen}
+        open={purchaseModalOpen && CLIENT_PLAN_PURCHASE_ENABLED}
         onOpenChange={(next) => {
           if (!next) resetPurchaseFlow();
           else setPurchaseModalOpen(true);

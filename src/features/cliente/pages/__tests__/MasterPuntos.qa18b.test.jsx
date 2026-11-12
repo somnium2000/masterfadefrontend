@@ -12,6 +12,7 @@ const notices = vi.hoisted(() => ({ info: vi.fn(), success: vi.fn(), error: vi.f
 const navigate = vi.hoisted(() => vi.fn());
 const route = vi.hoisted(() => ({ search: '', pathname: '/home/cliente' }));
 const flags = vi.hoisted(() => ({ CLIENT_BOOKING_ENABLED: true, CLIENT_LOCK_MESSAGE: 'Proximamente...' }));
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ booking: flags.CLIENT_BOOKING_ENABLED }) }));
 vi.mock('../../lib/clienteApi.js', () => api);
 vi.mock('../../lib/clientFeatureFlags.js', () => flags);
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => auth }));

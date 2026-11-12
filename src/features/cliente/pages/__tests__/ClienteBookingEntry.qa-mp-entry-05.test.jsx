@@ -7,6 +7,7 @@ import ClienteHistorialCitasPage from '../ClienteHistorialCitasPage.jsx';
 
 const startNewAppointment = vi.hoisted(() => vi.fn());
 const navigate = vi.hoisted(() => vi.fn());
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ booking: true }) }));
 const api = vi.hoisted(() => ({
   descartarClienteCitaPendiente: vi.fn(),
   getClienteCitaDetalle: vi.fn(),

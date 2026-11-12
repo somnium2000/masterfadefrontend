@@ -19,7 +19,8 @@ import {
   getClientePuntosResumen,
   redeemClientePuntosReward,
 } from '../lib/clienteApi.js';
-import { CLIENT_BOOKING_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
+import { CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
+import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
 
 const DEFAULT_REWARD_TARGET = 10;
 const REWARD_BOOKING_CONTEXT_STORAGE_KEY = 'mf_reward_redeem_context_v1';
@@ -237,6 +238,7 @@ function resolveContributionWidths(summary) {
 }
 
 export default function ClienteCourtesyRouteSection() {
+  const { booking: CLIENT_BOOKING_ENABLED } = usePrivateCommerce();
   const location = useLocation();
   const navigate = useNavigate();
   const notifications = useNotifications();
@@ -432,7 +434,7 @@ export default function ClienteCourtesyRouteSection() {
   }
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !CLIENT_BOOKING_ENABLED) return;
     const searchParams = new URLSearchParams(location.search || '');
     const shouldAutoRedeem = normalizeText(searchParams.get('accion')).toLowerCase() === 'canjear';
     if (!shouldAutoRedeem) {
@@ -455,7 +457,7 @@ export default function ClienteCourtesyRouteSection() {
         dedupeKey: 'cliente-auto-open-redeem',
       });
     })();
-  }, [ready, handleOpenRedeemModal, loadSummary, location.search, navigate, notifications]);
+  }, [ready, handleOpenRedeemModal, loadSummary, location.search, navigate, notifications, CLIENT_BOOKING_ENABLED]);
 
   async function handleBranchChange(nextBranchId) {
     const generation = contextRef.current.generation;

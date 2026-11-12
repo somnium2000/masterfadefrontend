@@ -12,6 +12,7 @@ const navigate = vi.hoisted(() => vi.fn());
 const flags = vi.hoisted(() => ({ CLIENT_BOOKING_ENABLED: true, CLIENT_LOCK_MESSAGE: 'Proximamente...' }));
 vi.mock('../../lib/clienteApi.js', () => api);
 vi.mock('../../lib/clientFeatureFlags.js', () => flags);
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ booking: flags.CLIENT_BOOKING_ENABLED }) }));
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => auth }));
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => notices }));
 vi.mock('../../../public/lib/catalogApi.js', () => ({ listPublicCatalogBranches: branches }));

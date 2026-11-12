@@ -2,11 +2,14 @@
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import { CLIENT_LOCK_MESSAGE } from '../../lib/clientFeatureFlags.js';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 const auth = vi.hoisted(() => ({ logout: vi.fn() }));
 const nav = vi.hoisted(() => vi.fn());
 const notices = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn() }));
 const outlet = vi.hoisted(() => ({ current: {} }));
+const pilot = vi.hoisted(() => ({ booking: true }));
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => pilot }));
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => auth, getUserDisplayName: user => user?.id_usuario || '' }));
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => notices }));
 vi.mock('../../../../config/supabaseClient.js', () => ({ supabase: null }));
@@ -28,6 +31,7 @@ function pointsResponse(balance, target = 10, status = 200) {
   };
 }
 beforeEach(async () => {
+  pilot.booking = true;
   vi.resetModules(); Object.assign(auth, { user: { id_usuario: 'synthetic-A' }, isAuthenticated: true, isHydrated: true, isHydrating: false });
   auth.logout.mockReset().mockResolvedValue({ ok: true, logged_out: true }); nav.mockReset(); notices.error.mockReset(); notices.info.mockReset(); invalidation = vi.fn();
   fetchMock = vi.fn(async url => {
@@ -37,6 +41,14 @@ beforeEach(async () => {
   }); vi.stubGlobal('fetch', fetchMock);
   httpClient = await import('../../../../services/httpClient.js'); clienteApi = await import('../../lib/clienteApi.js'); httpClient.registerSessionInvalidationHandler(invalidation);
   Page = (await import('../../layouts/ClienteAppShell.jsx')).default;
+});
+
+test('piloto denegado conserva perfil y navegación pero no inicia una cita', async () => {
+  pilot.booking = false;
+  await ready();
+  expect(screen.queryByRole('button', { name: 'Nueva cita' })).toBeNull();
+  expect(screen.getByRole('button', { name: CLIENT_LOCK_MESSAGE })).toBeDisabled();
+  expect(nav).not.toHaveBeenCalled();
 });
 afterEach(() => { cleanup(); httpClient.registerSessionInvalidationHandler(null); httpClient.abortInFlightRequests(); vi.unstubAllGlobals(); });
 async function ready() { const view = render(<Page />); await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1)); return view; }
