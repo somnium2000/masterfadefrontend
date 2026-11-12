@@ -17,7 +17,8 @@ import {
   listClienteCitas,
   retomarClienteCitaPendiente,
 } from '../lib/clienteApi.js';
-import { CLIENT_BOOKING_ENABLED, CLIENT_CITAS_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
+import { CLIENT_CITAS_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
+import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
 
 const PENDING_PAYMENT_CONTEXT_STORAGE_KEY = 'mf_pending_payment_context_v1';
 const BOOKING_PAYMENT_CONTEXT_STORAGE_KEY = 'masterfade.publicBookingPayment.v1';
@@ -197,6 +198,7 @@ function CitasList({ items, onOpenDetail }) {
 }
 
 export default function ClienteHistorialCitasPage() {
+  const { booking: CLIENT_BOOKING_ENABLED } = usePrivateCommerce();
   const navigate = useNavigate();
   const { startNewAppointment } = useOutletContext() || {};
   const location = useLocation();
@@ -278,7 +280,7 @@ export default function ClienteHistorialCitasPage() {
       return;
     }
     await loadPendingReservation({ openModal: true });
-  }, [loadPendingReservation, notifications]);
+  }, [loadPendingReservation, notifications, CLIENT_BOOKING_ENABLED]);
 
   const handleContinuePendingPayment = useCallback(async () => {
     if (!CLIENT_BOOKING_ENABLED) {
@@ -322,7 +324,7 @@ export default function ClienteHistorialCitasPage() {
     } finally {
       setPendingSubmitting(false);
     }
-  }, [loadPendingReservation, navigate, notifications, pendingData?.id_grupo_cita, user?.email]);
+  }, [loadPendingReservation, navigate, notifications, pendingData?.id_grupo_cita, user?.email, CLIENT_BOOKING_ENABLED]);
 
   const handleDiscardPendingPayment = useCallback(async () => {
     const groupId = String(pendingData?.id_grupo_cita || '').trim();

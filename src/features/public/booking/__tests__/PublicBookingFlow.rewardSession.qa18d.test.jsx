@@ -31,6 +31,7 @@ vi.mock('../../../admin/lib/adminReportesApi.js', () => ({ setAdminReportesSessi
 const api = vi.hoisted(() => ({ getClientePuntosResumen: vi.fn(), getClienteMe: vi.fn(), redeemClientePuntosReward: vi.fn() }));
 vi.mock('../../../cliente/lib/clienteApi.js', () => api);
 vi.mock('../../../cliente/lib/clientFeatureFlags.js', () => ({ CLIENT_BOOKING_ENABLED: true, CLIENT_LOCK_MESSAGE: 'Proximamente...' }));
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ booking: true }) }));
 vi.mock('../../lib/catalogApi.js', () => ({ listPublicCatalogBranches: async () => ({ branches: [{ id_sucursal: 'A', nombre_sucursal: 'Suyapa' }] }) }));
 const KEY = 'mf_reward_redeem_context_v1';
 let latest, actor, fetchMock, hydration;
@@ -64,6 +65,19 @@ async function prepare() {
   fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' })); await screen.findByRole('button', { name: /Servicio QA\s*Seleccionado/ });
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' })); await screen.findByText('Recompensa S'); return view;
 }
+
+test('piloto: selección explícita prepara recompensa y llega al flujo real de reserva', async () => {
+  render(<App />);
+  await act(async () => { await latest.hydrateSession(); });
+  await screen.findByText('Saldo total');
+  fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' }));
+  const option = await screen.findByRole('button', { name: 'Servicio QA' });
+  expect(option).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(option);
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));
+  await screen.findByText('Recompensa S');
+  expect(api.redeemClientePuntosReward).toHaveBeenCalledExactlyOnceWith({ id_servicio: 'S', id_sucursal: 'A' });
+});
 test('A prepara, navega y consume su contexto con metadatos solo locales', async () => {
   await prepare(); expect(JSON.parse(sessionStorage.getItem(KEY))).toMatchObject(context());
   expect(api.redeemClientePuntosReward).toHaveBeenCalledExactlyOnceWith({ id_servicio: 'S', id_sucursal: 'A' });

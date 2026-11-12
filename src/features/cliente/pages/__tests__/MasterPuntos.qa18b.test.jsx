@@ -12,6 +12,7 @@ const notices = vi.hoisted(() => ({ info: vi.fn(), success: vi.fn(), error: vi.f
 const navigate = vi.hoisted(() => vi.fn());
 const route = vi.hoisted(() => ({ search: '', pathname: '/home/cliente' }));
 const flags = vi.hoisted(() => ({ CLIENT_BOOKING_ENABLED: true, CLIENT_LOCK_MESSAGE: 'Proximamente...' }));
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ booking: flags.CLIENT_BOOKING_ENABLED, checking: flags.checking }) }));
 vi.mock('../../lib/clienteApi.js', () => api);
 vi.mock('../../lib/clientFeatureFlags.js', () => flags);
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => auth }));
@@ -23,11 +24,30 @@ const summary = (balance = 12, owner = 'A') => ({ saldo_total: balance, puntos_t
 const branchData = { branches: [{ id_sucursal: 'A', nombre_sucursal: 'Suyapa' }, { id_sucursal: 'B', nombre_sucursal: 'City Mall' }] };
 const redemption = { data: { canje_context_token: 'synthetic-context-only', id_servicio_canje: 'S', id_sucursal: 'A', servicio_nombre: 'Servicio QA' } };
 beforeEach(() => {
+  flags.checking = false;
   Object.assign(auth, { user: { id_usuario: 'user-A', cliente_id: 'client-A' }, isAuthenticated: true, isHydrated: true, isHydrating: false });
   Object.values(api).forEach(mock => mock.mockReset()); Object.values(notices).forEach(mock => mock.mockReset()); navigate.mockReset();
   api.getClientePuntosResumen.mockResolvedValue(summary()); api.getClienteMe.mockResolvedValue({ cliente: { id_sucursal_preferida: 'A' } }); api.redeemClientePuntosReward.mockResolvedValue(redemption);
   branches.mockReset().mockResolvedValue(branchData); flags.CLIENT_BOOKING_ENABLED = true; sessionStorage.clear();
   route.search = ''; route.pathname = '/home/cliente';
+});
+
+test('piloto main: enlace de recompensa espera elegibilidad antes de seleccionar y preparar el canje', async () => {
+  route.search = '?accion=canjear';
+  flags.checking = true;
+  flags.CLIENT_BOOKING_ENABLED = false;
+  const view = await ready();
+  expect(navigate).not.toHaveBeenCalled();
+  expect(branches).not.toHaveBeenCalled();
+  flags.checking = false;
+  flags.CLIENT_BOOKING_ENABLED = true;
+  view.rerender(<Points />);
+  const option = await screen.findByRole('button', { name: 'Servicio QA' });
+  expect(option).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(option);
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' }));
+  await waitFor(() => expect(api.redeemClientePuntosReward).toHaveBeenCalledExactlyOnceWith({ id_servicio: 'S', id_sucursal: 'A' }));
+  expect(navigate).toHaveBeenCalledWith('/agendar?modo=canje');
 });
 afterEach(cleanup);
 async function ready() { const view = render(<Points />); await screen.findByText('MOV-A'); return view; }

@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
-import { PUBLIC_BOOKING_ENABLED, PUBLIC_BOOKING_LOCK_MESSAGE } from '../../public/lib/publicBookingFeatureFlags.js';
+import { PUBLIC_BOOKING_LOCK_MESSAGE } from '../../public/lib/publicBookingFeatureFlags.js';
+import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
 
 const ease = [0.25, 0.46, 0.45, 0.94];
 const CTA_ENTRY_DELAYS = [0.65, 0.8, 0.95];
@@ -90,6 +91,7 @@ function SecondaryCta({ icon: Icon, label, onClick, disabled = false, order = 0 
 }
 
 export default function LandingPage() {
+  const { booking: PUBLIC_BOOKING_ENABLED } = usePrivateCommerce();
   const navigate = useNavigate();
 
   function handleAgendar() {

@@ -11,6 +11,7 @@ const payment = vi.hoisted(() => ({ getClientePlanEstado: vi.fn(), createMembers
   queryMembershipPaymentStatus: vi.fn() }));
 vi.mock('../../lib/catalogApi.js', () => api);
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => state.auth }));
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ vipPurchase: true }) }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn() }) }));
 vi.mock('../../../cliente/lib/clienteApi.js', () => payment);
