@@ -1,5 +1,6 @@
 ﻿import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { operationalDay, compareAppointmentStart as sortCitasByStart } from '../lib/adminAppointmentOrdering.js';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -73,9 +74,6 @@ const CONTAINER_META = {
 
 const VISIBLE_OPERATIONAL_STATES = ['confirmada', 'en_salon', 'en_atencion'];
 
-function sortCitasByStart(a, b) {
-  return new Date(a?.inicio_at || '').getTime() - new Date(b?.inicio_at || '').getTime();
-}
 
 function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
@@ -270,30 +268,10 @@ function buildFilterParams(filters, search) {
   const params = {};
   if (filters.idSucursal !== 'all') params.id_sucursal = filters.idSucursal;
   if (filters.idBarbero !== 'all') params.id_empleado_barbero = filters.idBarbero;
-  if (filters.fechaDesde) params.fecha_desde = filters.fechaDesde;
-  if (filters.fechaHasta) params.fecha_hasta = filters.fechaHasta;
   if (search.trim()) params.q = search.trim();
   return params;
 }
 
-function toTimestamp(value) {
-  const parsed = new Date(value || '');
-  const ts = parsed.getTime();
-  return Number.isFinite(ts) ? ts : 0;
-}
-
-function compareOperationalByProximity(a, b, nowMs) {
-  const aMs = toTimestamp(a?.inicio_at);
-  const bMs = toTimestamp(b?.inicio_at);
-  const aDiff = aMs - nowMs;
-  const bDiff = bMs - nowMs;
-  const aIsUpcoming = aDiff >= 0;
-  const bIsUpcoming = bDiff >= 0;
-
-  if (aIsUpcoming !== bIsUpcoming) return aIsUpcoming ? -1 : 1;
-  if (aIsUpcoming && bIsUpcoming) return aDiff - bDiff;
-  return bDiff - aDiff;
-}
 
 function joinEventUrl(baseUrl, path) {
   const base = String(baseUrl || '').trim();
@@ -376,6 +354,11 @@ export default function AdminAgendamientoCitasPage() {
   const [batchPickerLoadingId, setBatchPickerLoadingId] = useState('');
   const batchBusy = batchSaving || batchLoading || Boolean(batchPickerLoadingId);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const operationalDate = operationalDay(nowMs);
+  const citasDelDia = useMemo(
+    () => citas.filter(item => operationalDay(item.inicio_at) === operationalDate),
+    [citas, operationalDate]
+  );
   const [activeMobileContainer, setActiveMobileContainer] = useState('confirmada');
   const fetchInFlightRef = useRef(false);
   const pendingRefreshRef = useRef(false);
@@ -412,6 +395,18 @@ export default function AdminAgendamientoCitasPage() {
     const timerId = window.setInterval(() => setNowMs(Date.now()), 30000);
     return () => window.clearInterval(timerId);
   }, []);
+  useEffect(() => {
+    const nextDay = new Date(operationalDate + 'T00:00:00-06:00').getTime() + 86400000;
+    const timer = window.setTimeout(() => setNowMs(Date.now()), Math.max(1, nextDay - Date.now()));
+    const update = () => setNowMs(Date.now());
+    window.addEventListener('focus', update);
+    document.addEventListener('visibilitychange', update);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('focus', update);
+      document.removeEventListener('visibilitychange', update);
+    };
+  }, [operationalDate]);
 
   const activeFilterCount = useMemo(
     () => Object.values(filters).filter((value) => value !== 'all' && value !== '').length + (search.trim() ? 1 : 0),
@@ -419,22 +414,22 @@ export default function AdminAgendamientoCitasPage() {
   );
 
   const citasConfirmadas = useMemo(
-    () => citas
+    () => citasDelDia
       .filter((item) => String(item?.estado_cita_codigo || '').toLowerCase() === 'confirmada')
-      .sort((a, b) => compareOperationalByProximity(a, b, nowMs)),
-    [citas, nowMs]
+      .sort(sortCitasByStart),
+    [citasDelDia]
   );
   const citasEnSalon = useMemo(
-    () => citas
+    () => citasDelDia
       .filter((item) => String(item?.estado_cita_codigo || '').toLowerCase() === 'en_salon')
-      .sort((a, b) => compareOperationalByProximity(a, b, nowMs)),
-    [citas, nowMs]
+      .sort(sortCitasByStart),
+    [citasDelDia]
   );
   const citasEnAtencion = useMemo(
-    () => citas
+    () => citasDelDia
       .filter((item) => String(item?.estado_cita_codigo || '').toLowerCase() === 'en_atencion')
-      .sort((a, b) => compareOperationalByProximity(a, b, nowMs)),
-    [citas, nowMs]
+      .sort(sortCitasByStart),
+    [citasDelDia]
   );
   const containerItemsByKey = useMemo(
     () => ({
@@ -506,8 +501,8 @@ export default function AdminAgendamientoCitasPage() {
   }, [selectedSucursalId, sucursales]);
 
   const hiddenOperationalCount = useMemo(
-    () => citas.filter((item) => ['en_espera', 'pendiente_pago'].includes(String(item?.estado_cita_codigo || '').toLowerCase())).length,
-    [citas]
+    () => citasDelDia.filter((item) => ['en_espera', 'pendiente_pago'].includes(String(item?.estado_cita_codigo || '').toLowerCase())).length,
+    [citasDelDia]
   );
 
   const canManageEmergency = useMemo(() => {
@@ -563,6 +558,9 @@ export default function AdminAgendamientoCitasPage() {
     setListError('');
     try {
       const params = buildFilterParams(filters, search);
+      params.fecha_desde = operationalDate;
+      params.fecha_hasta = operationalDate;
+      params.zona_horaria = 'America/Tegucigalpa';
       params.id_sucursal = selectedSucursalId;
       const operativasResponse = await listAdminCitasOperativas(params, {
         cache: false,
@@ -589,7 +587,7 @@ export default function AdminAgendamientoCitasPage() {
         }
       }
     }
-  }, [canOperateWithSucursal, filters, handleAuthError, isAuthenticated, search, selectedSucursalId]);
+  }, [canOperateWithSucursal, filters, handleAuthError, isAuthenticated, operationalDate, search, selectedSucursalId]);
   fetchCitasRef.current = fetchCitas;
   const scheduleLiveRefresh = useCallback((options = {}) => {
     if (!isAuthenticated) return;
@@ -1128,7 +1126,7 @@ export default function AdminAgendamientoCitasPage() {
           <p className="text-sm text-[var(--mf-text-2)]">Gestiona confirmadas, en salón y en atención sin salir de la operación.</p>
         </div>
         <div className="admin-citas-header__status text-sm text-[var(--mf-text-2)]" role="status">
-          <span className="font-semibold">{loading ? 'Cargando...' : `${citas.length} cita(s)`}</span>
+          <span className="font-semibold">{loading ? 'Cargando...' : `${citasDelDia.length} cita(s)`}</span>
           {liveStatusLabel ? <span>{liveStatusLabel}</span> : null}
         </div>
         <div className="admin-citas-header__branch rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
@@ -1253,7 +1251,7 @@ export default function AdminAgendamientoCitasPage() {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Filtros de Citas</DialogTitle>
-            <DialogDescription>Filtra la vista operativa por sucursal, barbero y rango de fechas.</DialogDescription>
+            <DialogDescription>Filtra las citas de hoy por sucursal y barbero. Consulta otras fechas en Buscar reserva o Historial.</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
@@ -1272,11 +1270,11 @@ export default function AdminAgendamientoCitasPage() {
             </div>
             <div>
               <Label className="mf-label">Desde</Label>
-              <Input type="date" className="mf-input mt-1" value={filters.fechaDesde} onChange={(event) => setFilters((prev) => ({ ...prev, fechaDesde: event.target.value }))} />
+              <Input type="date" className="mf-input mt-1" value={operationalDate} readOnly />
             </div>
             <div>
               <Label className="mf-label">Hasta</Label>
-              <Input type="date" className="mf-input mt-1" value={filters.fechaHasta} onChange={(event) => setFilters((prev) => ({ ...prev, fechaHasta: event.target.value }))} />
+              <Input type="date" className="mf-input mt-1" value={operationalDate} readOnly />
             </div>
           </div>
           <DialogFooter>
