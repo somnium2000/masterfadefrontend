@@ -1,6 +1,8 @@
 import { motion } from 'framer-motion';
 import {
   CalendarDays,
+  Crown,
+  ArrowUpRight,
   Building2,
   CheckCircle2,
   Clock3,
@@ -14,7 +16,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import PublicNavigationHeader from '../../../components/layout/PublicNavigationHeader.jsx';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
@@ -22,8 +24,10 @@ import {
   listPublicCatalogBranches,
   listPublicCatalogPackages,
   listPublicCatalogServices,
+  listPublicPlansByBranch,
 } from '../lib/catalogApi.js';
 import { subscribeCatalogSync } from '../../../lib/catalogSync.js';
+import { getPlanCategoryTheme } from '../../plans/lib/planCategoryTheme.js';
 
 function formatPriceHnl(value) {
   const amount = Number(value);
@@ -134,6 +138,34 @@ function PackageCard({ item }) {
   );
 }
 
+function VipPlanCard({ plan }) {
+  const theme = getPlanCategoryTheme(plan.categoria_nivel);
+  const benefits = (Array.isArray(plan.beneficios) ? plan.beneficios : [])
+    .filter(benefit => benefit?.nombre && Number(benefit.cantidad) > 0);
+  const hasCategory = Number.isInteger(Number(plan.categoria_nivel)) && Number(plan.categoria_nivel) >= 1 && Number(plan.categoria_nivel) <= 5;
+  return (
+    <article className="flex min-w-0 flex-col rounded-[24px] border p-5 sm:p-6" style={{ background: theme.cardGradient, borderColor: theme.cardBorder, boxShadow: theme.glow }}>
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--mf-text-2)]">{hasCategory ? theme.label : 'Categoría no disponible'}</p>
+      <h3 className="mf-font-display mt-2 break-words text-[28px] leading-tight text-[var(--mf-text)] [overflow-wrap:anywhere]">{plan.nombre_plan}</h3>
+      {plan.descripcion ? <p className="mt-3 break-words text-sm leading-6 text-[var(--mf-text-2)]">{plan.descripcion}</p> : null}
+      <div className="mt-4 flex items-start gap-2 border-y border-[var(--mf-nav-border)] py-3 text-sm text-[var(--mf-text)]">
+        <CalendarDays size={16} className="mt-0.5 shrink-0 text-[var(--mf-accent)]" aria-hidden="true" />
+        <span className="min-w-0 break-words">Vigencia: {plan.periodo_membresia_label || 'Consultar vigencia'}</span>
+      </div>
+      <div className="mt-4 flex-1">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Beneficios incluidos</p>
+        {benefits.length ? <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--mf-text)]">
+          {benefits.map((benefit, index) => <li key={index} className="flex items-start gap-2">
+            <CheckCircle2 size={15} className="mt-1 shrink-0 text-[var(--mf-accent)]" aria-hidden="true" />
+            <span className="min-w-0 break-words [overflow-wrap:anywhere]">{Number(benefit.cantidad)} × {benefit.nombre}</span>
+          </li>)}
+        </ul> : <p className="mt-3 text-sm text-[var(--mf-text-2)]">Consulta los beneficios del plan.</p>}
+      </div>
+      <p className="mt-5 border-t border-[var(--mf-nav-border)] pt-4 text-2xl font-semibold text-[var(--mf-text)]">{formatPriceHnl(plan.precio_hnl)}</p>
+    </article>
+  );
+}
+
 function CatalogSection({ icon: Icon, title, eyebrow, items, emptyMessage, children }) {
   const scrollRef = useRef(null);
   // AM: Solo mostramos controles de carrusel cuando hay mas de 3 tarjetas.
@@ -238,6 +270,7 @@ export default function ServicesPage() {
   const validBranchIdsRef = useRef(new Set());
   const catalogRequestRef = useRef(0);
   const branchRequestRef = useRef(0);
+  const plansRequestRef = useRef(0);
   const [status, setStatus] = useState('loading');
   const [branches, setBranches] = useState([]);
   const [selectedBranchId, setSelectedBranchId] = useState('');
@@ -245,10 +278,34 @@ export default function ServicesPage() {
   const [packages, setPackages] = useState([]);
   const [servicesError, setServicesError] = useState(false);
   const [packagesError, setPackagesError] = useState(false);
+  const [plans, setPlans] = useState([]);
+  const [plansStatus, setPlansStatus] = useState('idle');
 
   const invalidatePendingRequests = useCallback(() => {
     ++catalogRequestRef.current;
     ++branchRequestRef.current;
+    ++plansRequestRef.current;
+  }, []);
+
+  const loadPlans = useCallback(async ({ branchId = selectedBranchRef.current } = {}) => {
+    if (!branchId || !validBranchIdsRef.current.has(branchId) || branchId !== selectedBranchRef.current) return;
+    const requestId = ++plansRequestRef.current;
+    const isCurrent = () => isMountedRef.current && requestId === plansRequestRef.current
+      && branchId === selectedBranchRef.current;
+    setPlans([]);
+    setPlansStatus('loading');
+    try {
+      const payload = await listPublicPlansByBranch(branchId);
+      if (!isCurrent()) return;
+      const rows = Array.isArray(payload?.plans) ? payload.plans : [];
+      setPlans(rows.filter(plan => plan?.id_plan && plan.activo !== false
+        && (!plan.id_sucursal || plan.id_sucursal === branchId)
+        && Number.isFinite(Number(plan.precio_hnl)) && Number(plan.precio_hnl) > 0));
+      setPlansStatus('success');
+    } catch {
+      if (!isCurrent()) return;
+      setPlansStatus('error');
+    }
   }, []);
 
   const loadCatalog = useCallback(async ({ silent = false, branchId = selectedBranchRef.current } = {}) => {
@@ -278,6 +335,9 @@ export default function ServicesPage() {
   const loadBranches = useCallback(async () => {
     const requestId = ++branchRequestRef.current;
     ++catalogRequestRef.current;
+    ++plansRequestRef.current;
+    setPlans([]);
+    setPlansStatus('idle');
     setStatus('loading');
     setServicesError(false);
     setPackagesError(false);
@@ -296,6 +356,7 @@ export default function ServicesPage() {
       setPackages([]);
       if (initialBranchId) {
         void loadCatalog({ branchId: initialBranchId });
+        void loadPlans({ branchId: initialBranchId });
       } else {
         setStatus('noBranches');
       }
@@ -309,7 +370,7 @@ export default function ServicesPage() {
       setPackages([]);
       setStatus('branchesError');
     }
-  }, [loadCatalog]);
+  }, [loadCatalog, loadPlans]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -322,6 +383,7 @@ export default function ServicesPage() {
       if (!active || !isMountedRef.current) return;
       // AM: Refresco silencioso para reflejar cambios admin sin recargar toda la vista publica.
       void loadCatalog({ silent: true, branchId: selectedBranchRef.current });
+      void loadPlans({ branchId: selectedBranchRef.current });
     });
 
     return () => {
@@ -330,13 +392,16 @@ export default function ServicesPage() {
       invalidatePendingRequests();
       unsubscribe();
     };
-  }, [invalidatePendingRequests, loadBranches, loadCatalog]);
+  }, [invalidatePendingRequests, loadBranches, loadCatalog, loadPlans]);
 
   function handleBranchChange(nextBranchId) {
     // AM: Evita refrescos redundantes al pulsar la misma sucursal activa.
     if (!validBranchIdsRef.current.has(nextBranchId) || nextBranchId === selectedBranchRef.current) return;
     // AM: Mantiene seleccion de sucursal y refresca catalogo sin recargar la pantalla completa.
     ++catalogRequestRef.current;
+    ++plansRequestRef.current;
+    setPlans([]);
+    setPlansStatus('loading');
     selectedBranchRef.current = nextBranchId;
     setSelectedBranchId(nextBranchId);
     setServices([]);
@@ -345,6 +410,7 @@ export default function ServicesPage() {
     setPackagesError(false);
     setStatus('loading');
     void loadCatalog({ branchId: nextBranchId });
+    void loadPlans({ branchId: nextBranchId });
   }
 
   function handleAgendar() {
@@ -439,6 +505,22 @@ export default function ServicesPage() {
               <Building2 size={13} strokeWidth={1.8} />
               <span>Sucursal activa: {branches[0]?.nombre_sucursal}</span>
             </p>
+          ) : null}
+
+          {selectedBranchId ? (
+            <section aria-labelledby="services-vip-heading" className="mf-glass-surface mt-8 rounded-[28px] border border-[var(--mf-btn-border)] p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Crown size={21} aria-hidden="true" /></span>
+                  <div className="min-w-0"><p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Experiencia VIP</p><h2 id="services-vip-heading" className="mf-font-display text-[30px] leading-tight text-[var(--mf-text)]">Membresías VIP</h2></div>
+                </div>
+                <Link to="/membresias-vip" className="mf-accent-gradient inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold text-[var(--mf-accent-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--mf-accent)]">Ver membresías VIP<ArrowUpRight size={16} aria-hidden="true" /></Link>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-[var(--mf-text-2)]">Planes y beneficios disponibles en la sucursal seleccionada.</p>
+              {plansStatus === 'loading' ? <p role="status" className="mt-5 text-sm text-[var(--mf-text-2)]">Cargando membresías VIP…</p> : null}
+              {plansStatus === 'error' ? <CatalogLoadError message="No se pudieron cargar las membresías VIP de esta sucursal." onRetry={() => void loadPlans()} /> : null}
+              {plansStatus === 'success' ? plans.length ? <div className="mt-5 grid min-w-0 gap-4 sm:grid-cols-2">{plans.map(plan => <VipPlanCard key={plan.id_plan_sucursal || plan.id_plan} plan={plan} />)}</div> : <p role="status" className="mt-5 rounded-2xl border border-[var(--mf-nav-border)] p-4 text-sm text-[var(--mf-text-2)]">No hay membresías VIP disponibles en esta sucursal.</p> : null}
+            </section>
           ) : null}
 
           {status === 'loading' ? (
