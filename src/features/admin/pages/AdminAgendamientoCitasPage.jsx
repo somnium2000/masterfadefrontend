@@ -73,6 +73,7 @@ const CONTAINER_META = {
 };
 
 const VISIBLE_OPERATIONAL_STATES = ['confirmada', 'en_salon', 'en_atencion'];
+const EMERGENCY_STATES = ['en_espera', 'pendiente_pago', ...VISIBLE_OPERATIONAL_STATES];
 
 
 function extractMessage(err) {
@@ -125,12 +126,12 @@ function extractSafeEstadoMessage(err) {
 function toInputDateTime(isoValue) {
   const parsed = new Date(isoValue || '');
   if (Number.isNaN(parsed.getTime())) return '';
-  const adjusted = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000);
-  return adjusted.toISOString().slice(0, 16);
+  const time = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Tegucigalpa', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(parsed);
+  return `${operationalDay(parsed)}T${time}`;
 }
 
 function toIsoDateTime(localValue) {
-  const parsed = new Date(String(localValue || '').trim());
+  const parsed = new Date(`${String(localValue || '').trim()}-06:00`);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toISOString();
 }
@@ -138,16 +139,13 @@ function toIsoDateTime(localValue) {
 function formatDateTime(isoValue) {
   const parsed = new Date(isoValue || '');
   if (Number.isNaN(parsed.getTime())) return '-';
-  return new Intl.DateTimeFormat('es-HN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(parsed);
+  return new Intl.DateTimeFormat('es-HN', { timeZone: 'America/Tegucigalpa', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(parsed);
 }
 
 function toDateKey(isoValue) {
   const parsed = new Date(isoValue || '');
   if (Number.isNaN(parsed.getTime())) return '';
-  const y = parsed.getFullYear();
-  const m = String(parsed.getMonth() + 1).padStart(2, '0');
-  const d = String(parsed.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return operationalDay(parsed);
 }
 
 function buildSlotsForPicker(payload) {
@@ -567,6 +565,8 @@ export default function AdminAgendamientoCitasPage() {
         cache: false,
         dedupe: !force,
       });
+      // AM: Una respuesta anterior no debe reponer citas de otra sucursal, filtro o jornada.
+      if (fetchCitasRef.current !== fetchCitas) return;
       const operativas = Array.isArray((operativasResponse?.data ?? operativasResponse)?.citas) ? (operativasResponse?.data ?? operativasResponse).citas : [];
       const byId = new Map();
       operativas.forEach((item) => {
@@ -574,7 +574,7 @@ export default function AdminAgendamientoCitasPage() {
       });
       setCitas(Array.from(byId.values()).sort(sortCitasByStart));
     } catch (err) {
-      if (isAbortError(err)) return;
+      if (fetchCitasRef.current !== fetchCitas || isAbortError(err)) return;
       if (handleAuthError(err)) return;
       setListError(mapAdminCitasErrorMessage(err));
     } finally {
@@ -593,20 +593,21 @@ export default function AdminAgendamientoCitasPage() {
   const scheduleLiveRefresh = useCallback((options = {}) => {
     if (!isAuthenticated) return;
     if (!canOperateWithSucursal) return;
-    const { immediate = false } = options;
+    const { immediate = false, silent = true } = options;
     if (liveRefreshTimeoutRef.current) {
       window.clearTimeout(liveRefreshTimeoutRef.current);
       liveRefreshTimeoutRef.current = null;
     }
     const runRefresh = () => {
-      void fetchCitas({ silent: true, force: true });
+      liveRefreshTimeoutRef.current = null;
+      void fetchCitasRef.current?.({ silent, force: true });
     };
     if (immediate) {
       runRefresh();
       return;
     }
     liveRefreshTimeoutRef.current = window.setTimeout(runRefresh, LIVE_REFRESH_DEBOUNCE_MS);
-  }, [canOperateWithSucursal, fetchCitas, isAuthenticated]);
+  }, [canOperateWithSucursal, isAuthenticated]);
   const handleManualRefresh = useCallback(() => {
     void fetchCitas({ silent: false, force: true });
   }, [fetchCitas]);
@@ -617,11 +618,9 @@ export default function AdminAgendamientoCitasPage() {
   useEffect(() => {
     if (!isAuthenticated) return undefined;
     if (!canOperateWithSucursal) return undefined;
-    const timer = setTimeout(() => {
-      void fetchCitas();
-    }, 260);
-    return () => clearTimeout(timer);
-  }, [canOperateWithSucursal, fetchCitas, isAuthenticated]);
+    scheduleLiveRefresh({ silent: false });
+    return () => window.clearTimeout(liveRefreshTimeoutRef.current);
+  }, [canOperateWithSucursal, fetchCitas, isAuthenticated, scheduleLiveRefresh]);
   useEffect(() => {
     if (!isAuthenticated || !canOperateWithSucursal || !selectedSucursalId) {
       setLiveStatus('idle');
@@ -631,13 +630,15 @@ export default function AdminAgendamientoCitasPage() {
     const source = new EventSource(buildOperationalEventsUrl(selectedSucursalId), { withCredentials: true });
     setLiveStatus('connecting');
 
-    source.onopen = () => {
+    let connected = false;
+    const resync = () => {
       setLiveStatus('connected');
+      if (connected) return;
+      connected = true;
+      scheduleLiveRefresh();
     };
-
-    source.addEventListener('ready', () => {
-      setLiveStatus('connected');
-    });
+    source.onopen = resync;
+    source.addEventListener('ready', resync);
 
     source.addEventListener('ping', () => {
       // Heartbeat del backend; no dispara refresh.
@@ -649,6 +650,7 @@ export default function AdminAgendamientoCitasPage() {
     });
 
     source.onerror = () => {
+      connected = false;
       setLiveStatus('reconnecting');
     };
 
@@ -750,6 +752,10 @@ export default function AdminAgendamientoCitasPage() {
   }
 
   function openSingleReschedule(cita) {
+    reservationRequest.current?.abort();
+    setReservationOpen(false);
+    setReservationResults(null);
+    setReservationLoading(false);
     setSingleTarget(cita);
     setSingleForm({ fecha_inicio_nueva: toInputDateTime(cita?.inicio_at), id_empleado_barbero_nuevo: '', motivo: 'Reagendación por emergencia operativa.' });
     setSinglePickerDate(toDateKey(cita?.inicio_at));
@@ -973,7 +979,7 @@ export default function AdminAgendamientoCitasPage() {
 
   function renderSecondaryActions(cita, options = {}) {
     const { compact = false } = options;
-    if (!canManageEmergency) return null;
+    if (!canManageEmergency || !canOperateOnCita(cita) || !EMERGENCY_STATES.includes(cita.estado_cita_codigo)) return null;
     return (
       <div className={`flex items-center ${compact ? 'justify-center' : 'justify-start'}`}>
         <Button type="button" size="sm" variant="ghost" className="gap-2 text-xs" onClick={() => openSingleReschedule(cita)}>
@@ -1247,7 +1253,7 @@ export default function AdminAgendamientoCitasPage() {
           <form onSubmit={lookupReservation} className="flex flex-wrap gap-2"><Label htmlFor="reservation-code" className="w-full">Código de reserva</Label><Input id="reservation-code" value={reservationCode} onChange={(event) => { reservationRequest.current?.abort(); setReservationLoading(false); setReservationCode(event.target.value.toUpperCase()); setReservationResults(null); }} maxLength={5} autoCapitalize="characters" autoComplete="off" className="min-w-0 flex-1" /><Button type="submit" disabled={reservationLoading}>{reservationLoading ? 'Buscando…' : 'Buscar'}</Button></form>
           <div role="status" aria-live="polite">{reservationError ? <p className="text-sm text-[var(--mf-text-2)]">{reservationError}</p> : null}{reservationResults?.length === 0 ? <p>No hay reservas coincidentes dentro de tu alcance.</p> : null}</div>
           {reservationResults?.length > 1 ? <p className="text-sm text-[var(--mf-text-2)]">El código coincide con varias reservas. Verifica titular y fecha.</p> : null}
-          {reservationResults?.map((group) => <section key={group.id_grupo_cita} className="rounded-2xl border border-[var(--mf-nav-border)] p-3"><h3 className="font-semibold text-[var(--mf-accent)]">Reserva {group.codigo_reserva}</h3>{group.citas.map((cita) => <div key={cita.id_cita} className="border-b border-[var(--mf-nav-border)] py-3 last:border-0"><p className="break-words font-semibold">{getAppointmentDisplayInfo(cita).aliasIntegrante}</p><p className="text-sm">Titular: {getAppointmentDisplayInfo(cita).titularNombre}</p><p className="text-sm">{formatDateTime(cita.inicio_at)} · {cita.nombre_barbero}</p><p className="text-sm">{getServicioResumen(cita)} · {STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</p>{VISIBLE_OPERATIONAL_STATES.includes(cita.estado_cita_codigo) ? <div className="mt-2">{renderItemActions(cita, { compact: true })}</div> : null}{renderCitaDetail(cita, false)}</div>)}</section>)}
+          {reservationResults?.map((group) => <section key={group.id_grupo_cita} className="rounded-2xl border border-[var(--mf-nav-border)] p-3"><h3 className="font-semibold text-[var(--mf-accent)]">Reserva {group.codigo_reserva}</h3>{group.citas.map((cita) => <div key={cita.id_cita} className="border-b border-[var(--mf-nav-border)] py-3 last:border-0"><p className="break-words font-semibold">{getAppointmentDisplayInfo(cita).aliasIntegrante}</p><p className="text-sm">Titular: {getAppointmentDisplayInfo(cita).titularNombre}</p><p className="text-sm">{formatDateTime(cita.inicio_at)} · {cita.nombre_barbero}</p><p className="text-sm">{getServicioResumen(cita)} · {STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</p>{VISIBLE_OPERATIONAL_STATES.includes(cita.estado_cita_codigo) ? <div className="mt-2">{renderItemActions(cita, { compact: true })}</div> : null}{renderSecondaryActions(cita)}{renderCitaDetail(cita, false)}</div>)}</section>)}
         </DialogContent>
       </Dialog>
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
