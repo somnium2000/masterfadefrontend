@@ -51,8 +51,9 @@ test.each([320,390,768,1440])('Inicio con tarjeta conserva formulario al continu
  expect(sessionStorage.getItem(KEY)).toContain(INTENT);expect(JSON.stringify({...sessionStorage,...localStorage})).not.toContain('123');
  expect(JSON.stringify({...sessionStorage,...localStorage})).not.toContain('4111111111111111');expect(screen.queryByLabelText('CVV')).not.toBeInTheDocument();
 });
-test('volver al resumen no revalida contactos ni elimina el intento',async()=>{
- mount();fireEvent.click(screen.getByRole('button',{name:'Volver al resumen'}));await screen.findByText('Resumen');
+test('volver al resumen recuperado no muestra datos incompletos ni elimina el intento',async()=>{
+ mount();fireEvent.click(screen.getByRole('button',{name:'Volver al resumen'}));await screen.findByRole('dialog');
+ expect(screen.queryByText('Resumen')).not.toBeInTheDocument();
  expect(mocks.release).not.toHaveBeenCalled();expect(sessionStorage.getItem(KEY)).toContain(INTENT);
 });
 test('Inicio desde tarjeta vacia sin hold o intento sale directamente',async()=>{

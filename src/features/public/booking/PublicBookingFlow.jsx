@@ -3280,7 +3280,7 @@ const agendaAutoLoadKeyRef = useRef('');
         return true;
       }
       const status = String(paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || '').toLowerCase();
-      if (hasUnresolvedPaymentEvidence(paymentResult) || hasUnresolvedPaymentEvidence(paymentIntent) || ['processing', 'procesando', 'confirmando'].includes(status)) {
+      if (!allBlocksComplete || hasUnresolvedPaymentEvidence(paymentResult) || hasUnresolvedPaymentEvidence(paymentIntent) || ['processing', 'procesando', 'confirmando'].includes(status)) {
         requestCancelBooking('payment_summary');
         return false;
       }
@@ -4005,23 +4005,18 @@ const agendaAutoLoadKeyRef = useRef('');
 
     const searchParams = new URLSearchParams(location.search || '');
     const groupIdFromUrl = String(searchParams.get('id_grupo_cita') || '').trim();
-    const restoredContext = restorePaymentContext(
-      holdResult?.id_grupo_cita
-      || pendingResumeContext?.id_grupo_cita
-      || groupIdFromUrl
-      || '',
-      pendingResumeContext
-    );
     const { groupId, intentId } = resolvePaymentExecutionContext({
       holdResult: holdResult || { id_grupo_cita: groupIdFromUrl },
       paymentIntent,
-      pendingResumeContext: restoredContext || pendingResumeContext,
+      pendingResumeContext,
     });
     if (!groupId || !intentId) return;
 
     const checkKey = `${location.pathname}|${location.search}|${groupId}|${intentId}`;
     if (paymentReturnStatusCheckRef.current === checkKey) return;
     paymentReturnStatusCheckRef.current = checkKey;
+    // AM: Restaurar cambia paymentIntent; reclamar primero evita reentrar en el efecto.
+    restorePaymentContext(groupId, pendingResumeContext);
 
     const isProviderReturn = isSuccessRoute
       || searchParams.has('provider_intent_id')
