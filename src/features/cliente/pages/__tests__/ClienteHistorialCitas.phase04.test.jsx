@@ -28,11 +28,27 @@ beforeEach(()=>{
 const dataset=(n,m)=>[...Array.from({length:n},(_,i)=>({...row('confirmada','2020-11-15T14:00:00Z'),id_cita:'P'+i,nombre_sucursal:'Próxima '+i})),...Array.from({length:m},(_,i)=>({...row('completada','2026-11-15T14:00:00Z'),id_cita:'H'+i,nombre_sucursal:'Histórica '+i}))];
 const pageReady=()=>screen.findByRole('navigation',{name:'Paginación de citas'});
 const next=async()=>{fireEvent.click(screen.getByRole('button',{name:'Siguiente',exact:true}));await pageReady();};
+test.each([['membresia','Membresía',0,[]],['cortesia','Cortesía',0,[{nombre_servicio:'Corte cabello'}]],['cortesia_acompanantes','Cortesía + acompañantes',150,[]],['pago_normal','Pago normal',1250.5,[{nombre_servicio:'Corte cabello'},{nombre_servicio:'Barba'}]]])('tarjeta de cuatro áreas: %s, importe %s y detalle bajo demanda',async(tipo,label,amount,services)=>{
+ const branch='MasterFade Boulevard Suyapa · Sucursal con nombre extenso',barber='Fernando Miranda · Profesional con nombre extenso';
+ rows=[{...row('cancelada_por_cliente','2026-11-16T05:30:00Z'),nombre_sucursal:branch,nombre_barbero:barber,tipo_cita_visual:tipo,tipo_cita_label:label,total_pagar_hnl:amount,servicios:services}];
+ await mount();fireEvent.click(screen.getByRole('button',{name:'Historial (1)'}));await pageReady();
+ const card=screen.getByRole('article',{name:'Cita en '+branch});
+ expect([...card.children].map(node=>node.tagName)).toEqual(['HEADER','DIV','DIV','FOOTER']);
+ expect(card.querySelector('h2').textContent).toBe(branch);
+ expect(card.textContent).toContain('Cancelada por el cliente');expect(card.textContent).toContain(label);
+ expect(card.textContent).toContain(barber);expect(card.textContent).toContain('L '+amount.toFixed(2));
+ expect(card.textContent).toMatch(/15 nov.*11:30|15 nov.*23:30/i);expect(card.textContent).not.toMatch(/Gratis|Pagado|Pago recibido/i);
+ expect(card.querySelectorAll('button')).toHaveLength(1);expect(card.querySelector('button button')).toBeNull();
+ const detailUrl='/v1/citas/cancelada_por_cliente';expect(fixture.get).not.toHaveBeenCalledWith(detailUrl);
+ fireEvent.click(card.querySelector('button'));await screen.findByRole('heading',{name:'Detalle de cita'});
+ await waitFor(()=>expect(fixture.get).toHaveBeenCalledWith(detailUrl));
+ expect(fixture.get.mock.calls.filter(([url])=>url===detailUrl)).toHaveLength(1);
+});
 test('páginas independientes 41/56, regreso y ajuste al desaparecer la última',async()=>{
  rows=dataset(41,56);await mount();for(let i=0;i<2;i++)await next();
- expect(screen.getByText('Página 3 de 9')).toBeTruthy();expect(screen.getAllByText('Próxima 10',{exact:true})).toHaveLength(2);
+ expect(screen.getByText('Página 3 de 9')).toBeTruthy();expect(screen.getAllByText('Próxima 10',{exact:true})).toHaveLength(1);
  fireEvent.click(screen.getByRole('button',{name:'Historial (56)'}));await pageReady();for(let i=0;i<11;i++)await next();
- expect(screen.getByText('Página 12 de 12')).toBeTruthy();expect(screen.getAllByText('Histórica 55',{exact:true})).toHaveLength(2);
+ expect(screen.getByText('Página 12 de 12')).toBeTruthy();expect(screen.getAllByText('Histórica 55',{exact:true})).toHaveLength(1);
  fireEvent.click(screen.getByRole('button',{name:'Próximas (41)'}));await pageReady();expect(screen.getByText('Página 3 de 9')).toBeTruthy();
  fireEvent.click(screen.getByRole('button',{name:'Anterior'}));await pageReady();expect(screen.getByText('Página 2 de 9')).toBeTruthy();
  rows=dataset(41,6);fireEvent.click(screen.getByRole('button',{name:'Historial (56)'}));await pageReady();
@@ -51,7 +67,7 @@ test('cambio rápido de pestaña aborta la petición y descarta su respuesta obs
  fireEvent.click(screen.getByRole('button',{name:'Siguiente'}));await waitFor(()=>expect(finish).toBeTypeOf('function'));
  fireEvent.click(screen.getByRole('button',{name:'Historial (6)'}));await pageReady();expect(signal.aborted).toBe(true);
  await act(async()=>finish({data:{...listResult('/v1/citas?apartado=proximas&page=2'),citas:[{...rows[0],nombre_sucursal:'Respuesta obsoleta'}]}}));
- expect(screen.queryByText('Respuesta obsoleta')).toBeNull();expect(screen.getAllByText('Histórica 0',{exact:true})).toHaveLength(2);
+ expect(screen.queryByText('Respuesta obsoleta')).toBeNull();expect(screen.getAllByText('Histórica 0',{exact:true})).toHaveLength(1);
  fixture.get.mockImplementation(async url=>respond(url));fireEvent.click(screen.getByRole('button',{name:'Próximas (6)'}));await pageReady();expect(screen.getByText('Página 2 de 2')).toBeTruthy();
 });
 test('error de página no parece vacío, permite reintentar y conserva los contadores',async()=>{
@@ -67,7 +83,7 @@ test('otra identidad reinicia páginas y descarta los datos del Cliente anterior
  fireEvent.click(screen.getByRole('button',{name:'Siguiente'}));await waitFor(()=>expect(finish).toBeTypeOf('function'));
  auth.user={id_usuario:'B'};rows=[{...dataset(1,0)[0],nombre_sucursal:'Cliente B'}];view.rerender(<MemoryRouter><Page/></MemoryRouter>);await pageReady();
  await act(async()=>finish({data:{...listResult('/v1/citas?apartado=proximas&page=1'),citas:[{...rows[0],nombre_sucursal:'Cliente A obsoleto'}]}}));
- expect(screen.getByText('Página 1 de 1')).toBeTruthy();expect(screen.queryByText('Cliente A obsoleto')).toBeNull();expect(screen.getAllByText('Cliente B',{exact:true})).toHaveLength(2);
+ expect(screen.getByText('Página 1 de 1')).toBeTruthy();expect(screen.queryByText('Cliente A obsoleto')).toBeNull();expect(screen.getAllByText('Cliente B',{exact:true})).toHaveLength(1);
 });
 test('comercio privado denegado permite consultar sin reanudar ni iniciar reservas',async()=>{
  rows=dataset(6,0);fixture.get.mockImplementation(async url=>url==='/v1/commerce/eligibility'?{data:{booking:false,vipPurchase:false}}:url.endsWith('/pendiente')?{data:{pendiente:{id_grupo_cita:'group',citas:[]}}}:respond(url));await mount();
@@ -96,16 +112,16 @@ async function mount(){render(<MemoryRouter initialEntries={['/citas']}><Routes>
 for(const date of ['2020-11-13T05:30:00Z','2040-11-13T05:30:00Z'])test('11 estados sin pérdidas ni duplicados, hora HN: '+date,async()=>{
  rows=[...active,...history].map(s=>row(s,date));rows=[...rows,...rows];await mount();
  expect(screen.getByRole('button',{name:'Próximas (5)'})).toBeTruthy();expect(screen.getByRole('button',{name:'Historial (6)'})).toBeTruthy();
- for(const state of active)expect(screen.getAllByText('Reserva '+state,{exact:true})).toHaveLength(2);
+ for(const state of active)expect(screen.getAllByText('Reserva '+state,{exact:true})).toHaveLength(1);
  for(const state of history)expect(screen.queryByText('Reserva '+state,{exact:true})).toBeNull();
- fireEvent.click(screen.getAllByText('Reserva en_atencion',{exact:true})[0]);
+ fireEvent.click(screen.getByText('Reserva en_atencion',{exact:true}).closest('article').querySelector('button'));
  await screen.findByRole('heading',{name:'Detalle de cita'});await waitFor(()=>expect(screen.getByRole('dialog').textContent).toContain('Estado: En atención'));
  expect(screen.getByRole('dialog').textContent).toMatch(/12 nov.*11:30|12 nov.*23:30/i);
  fireEvent.click(screen.getByRole('button',{name:'Cerrar',exact:true}));
  fireEvent.click(screen.getByRole('button',{name:'Historial (6)'}));await screen.findByRole('navigation',{name:'Paginación de citas'});
- for(const state of history.slice(0,5))expect(screen.getAllByText('Reserva '+state,{exact:true})).toHaveLength(2);
+ for(const state of history.slice(0,5))expect(screen.getAllByText('Reserva '+state,{exact:true})).toHaveLength(1);
  for(const state of active)expect(screen.queryByText('Reserva '+state,{exact:true})).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'Siguiente'}));await screen.findByText('Página 2 de 2');expect(screen.getAllByText('Reserva anulada',{exact:true})).toHaveLength(2);
+ fireEvent.click(screen.getByRole('button',{name:'Siguiente'}));await screen.findByText('Página 2 de 2');expect(screen.getAllByText('Reserva anulada',{exact:true})).toHaveLength(1);
  expect(fixture.get).toHaveBeenCalledWith(expect.stringContaining('apartado=historial'),expect.objectContaining({cache:false,dedupe:false}));
 });
 test.each([
@@ -116,8 +132,8 @@ test.each([
 ])('Cliente: %s legible en tarjeta y detalle; contrato intacto',async(code,label)=>{
  rows=[{...row(code,'2026-11-15T14:00:00Z'),nombre_sucursal:'Sucursal fixture'}];await mount();
  if(history.includes(code)){fireEvent.click(screen.getByRole('button',{name:'Historial (1)'}));await screen.findByRole('navigation',{name:'Paginación de citas'});}
- expect(screen.getAllByText(label,{exact:true})).toHaveLength(2);
- fireEvent.click(screen.getAllByText('Sucursal fixture',{exact:true})[0]);
+ expect(screen.getAllByText(label,{exact:true})).toHaveLength(1);
+ fireEvent.click(screen.getByText('Sucursal fixture',{exact:true}).closest('article').querySelector('button'));
  await waitFor(()=>expect(screen.getByRole('dialog').textContent).toContain('Estado: '+label));
  expect(fixture.get).toHaveBeenCalledWith('/v1/citas/'+code);
  expect(rows[0].estado_cita_codigo).toBe(code);

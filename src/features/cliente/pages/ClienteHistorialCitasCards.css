@@ -1,0 +1,230 @@
+.client-citas-list {
+  container: client-citas / inline-size;
+}
+
+.client-citas-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+
+.client-cita-card {
+  --cita-positive: #a5dfc1;
+  --cita-info: #acd8eb;
+  --cita-warning: #edcf99;
+  --cita-negative: #f2b4ba;
+  container: cita-card / inline-size;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--mf-nav-border);
+  border-radius: 24px;
+  background: var(--mf-card);
+  color: var(--mf-text);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--mf-text) 4%, transparent);
+  transition: border-color 180ms ease;
+}
+
+[data-theme='light'] .client-cita-card {
+  --cita-positive: #24624a;
+  --cita-info: #255b78;
+  --cita-warning: #795017;
+  --cita-negative: #963d49;
+}
+
+.client-cita-card:hover,
+.client-cita-card:focus-within {
+  border-color: color-mix(in srgb, var(--mf-accent) 60%, var(--mf-nav-border));
+}
+
+.client-cita-card__identity {
+  padding: 20px;
+  background: color-mix(in srgb, var(--mf-accent) 5%, var(--mf-card));
+}
+
+.client-cita-card__branch {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.client-cita-card__location-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--mf-nav-border);
+  border-radius: 12px;
+  background: var(--mf-card);
+  color: var(--mf-accent);
+}
+
+.client-cita-card__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--mf-text-2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  line-height: 1.6;
+  text-transform: uppercase;
+}
+
+.client-cita-card__eyebrow svg {
+  flex: none;
+}
+
+.client-cita-card__title {
+  margin-top: 4px;
+  font-size: 25px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.client-cita-card__date {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--mf-nav-border);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.client-cita-card__date > svg {
+  flex: none;
+  color: var(--mf-accent);
+}
+
+.client-cita-card__date p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.client-cita-card__date p > span {
+  display: block;
+}
+
+.client-cita-card__indicators {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 8px;
+  padding: 16px 20px;
+  border-block: 1px solid var(--mf-nav-border);
+  background: color-mix(in srgb, var(--mf-text) 2%, var(--mf-card));
+}
+
+.client-cita-card__badge {
+  --cita-tone: var(--mf-text-2);
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--cita-tone) 30%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--cita-tone) 8%, var(--mf-card));
+  color: var(--cita-tone);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.client-cita-card__badge[data-tone='positive'] { --cita-tone: var(--cita-positive); }
+.client-cita-card__badge[data-tone='info'] { --cita-tone: var(--cita-info); }
+.client-cita-card__badge[data-tone='warning'] { --cita-tone: var(--cita-warning); }
+.client-cita-card__badge[data-tone='negative'] { --cita-tone: var(--cita-negative); }
+.client-cita-card__badge--type { font-weight: 500; }
+
+.client-cita-card__operations {
+  flex: 1;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 20px;
+}
+
+.client-cita-card__modules {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.client-cita-card__module {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--mf-nav-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--mf-text) 3%, var(--mf-card));
+}
+
+.client-cita-card__module--amount {
+  background: color-mix(in srgb, var(--mf-accent) 6%, var(--mf-card));
+}
+
+.client-cita-card__barber {
+  margin-top: 9px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.client-cita-card__amount {
+  margin-top: 5px;
+  font-size: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.client-cita-card__services {
+  color: var(--mf-text-2);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.client-cita-card__services > span { margin-bottom: 4px; }
+
+.client-cita-card__footer {
+  border-top: 1px solid var(--mf-nav-border);
+  background: color-mix(in srgb, var(--mf-accent) 3%, var(--mf-card));
+}
+
+.client-cita-card__action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 16px 20px;
+  border-radius: 0 0 23px 23px;
+  color: var(--mf-accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  transition: background 180ms ease;
+}
+
+.client-cita-card__action:hover { background: color-mix(in srgb, var(--mf-accent) 7%, transparent); }
+.client-cita-card__action:focus-visible { outline: 2px solid var(--mf-accent); outline-offset: -5px; }
+.client-cita-card__action svg { flex: none; }
+
+@container client-citas (min-width: 800px) {
+  .client-citas-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@container cita-card (min-width: 400px) {
+  .client-cita-card__modules { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .client-cita-card, .client-cita-card__action { transition: none; }
+}

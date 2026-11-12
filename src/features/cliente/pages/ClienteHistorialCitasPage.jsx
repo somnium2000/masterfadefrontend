@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAppointmentStatusLabel } from '../../../lib/appointmentStatus.js';
-import { CalendarDays, MapPin, Scissors, Wallet } from 'lucide-react';
+import { ArrowUpRight, CalendarDays, MapPin, Scissors, Wallet } from 'lucide-react';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import {
   Dialog,
@@ -20,6 +20,7 @@ import {
 } from '../lib/clienteApi.js';
 import { CLIENT_CITAS_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
 import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
+import './ClienteHistorialCitasCards.css';
 
 const PENDING_PAYMENT_CONTEXT_STORAGE_KEY = 'mf_pending_payment_context_v1';
 const BOOKING_PAYMENT_CONTEXT_STORAGE_KEY = 'masterfade.publicBookingPayment.v1';
@@ -130,69 +131,73 @@ function resolveServiceSummary(cita) {
   return extras > 0 ? `${first} +${extras} más` : first;
 }
 
+function getAppointmentTone(code) {
+  const status = normalizeEstado(code);
+  if (['confirmada', 'completada'].includes(status)) return 'positive';
+  if (['en_salon', 'en_atencion'].includes(status)) return 'info';
+  if (['en_espera', 'pendiente_pago', 'expirada'].includes(status)) return 'warning';
+  if (status === 'no_show') return 'negative';
+  return 'neutral';
+}
+
 function CitaCard({ cita, onOpenDetail }) {
   const serviceSummary = resolveServiceSummary(cita);
   const tipoChip = resolveTipoCitaChip(cita?.tipo_cita_visual, cita?.tipo_cita_label);
+  const branchName = cita.nombre_sucursal || 'Sucursal';
+  const dateTime = formatDateTime(cita.inicio_at);
+  const typeTone = { membresia: 'info', cortesia: 'positive', cortesia_acompanantes: 'positive', pendiente_pago: 'warning' }[cita?.tipo_cita_visual] || 'neutral';
 
   return (
-    <button
-      type="button"
-      onClick={() => onOpenDetail(cita)}
-      className="mf-glass-surface w-full rounded-[18px] border border-[var(--mf-nav-border)] p-3 text-left transition-colors hover:border-[var(--mf-btn-border)]"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="space-y-1">
-          <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--mf-text)]">
-            <MapPin size={14} className="shrink-0 text-[var(--mf-accent)]" />
-            <span className="leading-none">{cita.nombre_sucursal || 'Sucursal'}</span>
-          </p>
-          <p className="mt-1 text-xs text-[var(--mf-text-2)]">{formatDateTime(cita.inicio_at)}</p>
+    <article className="client-cita-card" aria-label={`Cita en ${branchName}`}>
+      <header className="client-cita-card__identity">
+        <div className="client-cita-card__branch">
+          <span className="client-cita-card__location-icon"><MapPin size={19} aria-hidden="true" /></span>
+          <div className="min-w-0">
+            <p className="client-cita-card__eyebrow">Sucursal</p>
+            <h2 className="mf-font-display client-cita-card__title">{branchName}</h2>
+          </div>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <span className="mf-badge mf-badge-gold">{getAppointmentStatusLabel(cita.estado_cita_codigo)}</span>
-          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${tipoChip.className}`}>
-            {tipoChip.label}
-          </span>
+        <div className="client-cita-card__date">
+          <CalendarDays size={16} aria-hidden="true" />
+          <p><span className="client-cita-card__eyebrow">Fecha y hora · Honduras</span><span>{dateTime}</span></p>
         </div>
+      </header>
+
+      <div className="client-cita-card__indicators" aria-label="Estado y tipo de reserva">
+        <span className="client-cita-card__badge" data-tone={getAppointmentTone(cita.estado_cita_codigo)}>{getAppointmentStatusLabel(cita.estado_cita_codigo)}</span>
+        <span className="client-cita-card__badge client-cita-card__badge--type" data-tone={typeTone}>{tipoChip.label}</span>
       </div>
 
-      <dl className="mt-3 grid grid-cols-1 gap-2 text-xs text-[var(--mf-text-2)] sm:grid-cols-2">
-        <div className="flex items-center gap-2">
-          <Scissors size={14} className="shrink-0 text-[var(--mf-accent)]" />
-          <span>{cita.nombre_barbero || 'Barbero por definir'}</span>
+      <div className="client-cita-card__operations">
+        <div className="client-cita-card__modules">
+          <div className="client-cita-card__module">
+            <p className="client-cita-card__eyebrow"><Scissors size={14} aria-hidden="true" />Tu barbero</p>
+            <p className="client-cita-card__barber">{cita.nombre_barbero || 'Barbero por definir'}</p>
+          </div>
+          <div className="client-cita-card__module client-cita-card__module--amount">
+            <p className="client-cita-card__eyebrow"><Wallet size={14} aria-hidden="true" />Importe de la cita</p>
+            <p className="client-cita-card__amount">{formatMoney(cita.total_pagar_hnl)}</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Wallet size={14} className="shrink-0 text-[var(--mf-accent)]" />
-          <span>{formatMoney(cita.total_pagar_hnl)}</span>
-        </div>
-        <div className="sm:col-span-2">
-          {serviceSummary ? (
-            <p className="text-[var(--mf-text-2)]">{serviceSummary}</p>
-          ) : (
-            <span className="text-[var(--mf-accent)] underline underline-offset-2">Ver servicios en detalle</span>
-          )}
-        </div>
-      </dl>
-    </button>
+        {serviceSummary ? <p className="client-cita-card__services"><span className="client-cita-card__eyebrow">Servicios</span>{serviceSummary}</p> : null}
+      </div>
+
+      <footer className="client-cita-card__footer">
+        <button type="button" onClick={event => onOpenDetail(cita, event.currentTarget)} className="client-cita-card__action" aria-label={`Ver detalle completo de la cita en ${branchName} del ${dateTime}`}>
+          <span>Ver detalle completo</span><ArrowUpRight size={18} aria-hidden="true" />
+        </button>
+      </footer>
+    </article>
   );
 }
 
 function CitasList({ items, onOpenDetail }) {
   return (
-    <>
-      <div className="hidden max-h-[34rem] overflow-y-auto pr-1 sm:block">
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {items.map((cita) => <CitaCard key={cita.id_cita} cita={cita} onOpenDetail={onOpenDetail} />)}
-        </div>
+    <div className="client-citas-list">
+      <div className="client-citas-grid">
+        {items.map(cita => <CitaCard key={cita.id_cita} cita={cita} onOpenDetail={onOpenDetail} />)}
       </div>
-      <div className="max-h-[30rem] space-y-2 overflow-y-auto pr-1 sm:hidden">
-        {items.map((cita) => (
-          <div key={cita.id_cita} className="w-full">
-            <CitaCard cita={cita} onOpenDetail={onOpenDetail} />
-          </div>
-        ))}
-      </div>
-    </>
+    </div>
   );
 }
 
@@ -224,6 +229,7 @@ function ClienteHistorialCitasContent() {
   const latestListKey = useRef(requestKey);
   latestListKey.current = requestKey;
   const [detailOpen, setDetailOpen] = useState(false);
+  const detailTriggerRef = useRef(null);
   const [selectedCita, setSelectedCita] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
@@ -413,9 +419,10 @@ function ClienteHistorialCitasContent() {
     [citas]
   );
 
-  const handleOpenDetail = useCallback(async (cita) => {
+  const handleOpenDetail = useCallback(async (cita, trigger) => {
     const citaId = String(cita?.id_cita || '').trim();
     if (!citaId) return;
+    detailTriggerRef.current = trigger;
     setSelectedCita(cita);
     setDetailOpen(true);
     setDetailLoading(true);
@@ -750,7 +757,13 @@ function ClienteHistorialCitasContent() {
       </Dialog>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl" onCloseAutoFocus={event => {
+          // AM: El detalle controlado restaura el foco a la acción de la tarjeta que lo abrió.
+          if (detailTriggerRef.current?.isConnected) {
+            event.preventDefault();
+            detailTriggerRef.current.focus({ preventScroll: true });
+          }
+        }}>
           <DialogHeader>
             <DialogTitle>Detalle de cita</DialogTitle>
             <DialogDescription>

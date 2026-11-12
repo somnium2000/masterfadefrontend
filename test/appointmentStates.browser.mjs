@@ -43,7 +43,7 @@ for(const width of [390,1440])for(const theme of ['light','dark'])for(const role
    for(const [,label]of labels.slice(0,5))await visible(label).waitFor();
    await page.getByRole('button',{name:'Historial (6)',exact:true}).click();
    for(const [,label]of labels.slice(5,10))await visible(label).waitFor();
-   await shot('');await visible('Sucursal fixture 8').click();await page.getByRole('dialog').getByText(/Estado: Cancelada por el cliente/).waitFor();await close();await page.getByRole('button',{name:'Siguiente',exact:true}).click();await visible('Anulada').waitFor();
+   await shot('');await page.getByRole('button',{name:/Ver detalle completo de la cita en Sucursal fixture 8 del/}).click();await page.getByRole('dialog').getByText(/Estado: Cancelada por el cliente/).waitFor();await close();await page.getByRole('button',{name:'Siguiente',exact:true}).click();await visible('Anulada').waitFor();
   }else if(role==='barbero'){
    await page.goto(base+'/home/barbero');for(const [,label]of labels.slice(0,5))await visible(label).waitFor();await shot('');
   }else{

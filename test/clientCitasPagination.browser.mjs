@@ -30,8 +30,8 @@ for(const engine of ['chromium','webkit'])for(const width of [390,768,1440])for(
    if(/^\/v1\/citas\/[ph]\d+$/.test(p))data={cita:rows.find(r=>p.endsWith('/'+r.id_cita)),detalles:[]};
    await route.fulfill({json:{ok:true,data}});
   });
-  const ready=async text=>{await page.getByText(text,{exact:true}).waitFor();await page.locator('button.mf-glass-surface').filter({visible:true}).first().waitFor();};
-  const cards=()=>page.locator('button.mf-glass-surface').filter({visible:true});
+  const ready=async text=>{await page.getByText(text,{exact:true}).waitFor();await page.locator('.client-cita-card').filter({visible:true}).first().waitFor();};
+  const cards=()=>page.locator('.client-cita-card').filter({visible:true});
   const next=async text=>{await page.getByRole('button',{name:'Siguiente',exact:true}).click();await ready(text);};
   await page.goto(base+'/home/cliente/citas');await ready('Página 1 de 12');assert.equal(await cards().count(),5);
   assert.equal(await page.getByRole('button',{name:'Nueva cita'}).isDisabled(),true);
@@ -39,7 +39,7 @@ for(const engine of ['chromium','webkit'])for(const width of [390,768,1440])for(
   await page.getByRole('button',{name:'Historial (41)'}).click();await ready('Página 1 de 9');await next('Página 2 de 9');
   await page.getByRole('button',{name:'Próximas (56)'}).click();await ready('Página 3 de 12');
   await page.getByRole('button',{name:'Anterior',exact:true}).click();await ready('Página 2 de 12');assert.equal(await cards().count(),5);
-  await page.getByText('Próxima 51',{exact:true}).filter({visible:true}).click();const d=page.getByRole('dialog');await d.getByText(/Estado: En espera/).waitFor();
+  await page.getByRole('button',{name:/Ver detalle completo de la cita en Próxima 51 del/}).click();const d=page.getByRole('dialog');await d.getByText(/Estado: En espera/).waitFor();
   assert.doesNotMatch(await d.innerText(),/en_espera|pendiente_pago|en_atencion/);await d.getByRole('button',{name:'Cerrar',exact:true}).first().click();await d.waitFor({state:'detached'});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   const evidence=path.join(process.env.TEMP,'mf-client-citas-pagination-evidence');await mkdir(evidence,{recursive:true});await page.evaluate(()=>window.scrollTo({top:0,behavior:'instant'}));await page.screenshot({path:path.join(evidence,`${engine}-${width}-${theme}.png`),fullPage:true});

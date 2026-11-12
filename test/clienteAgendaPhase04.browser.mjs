@@ -26,7 +26,7 @@ for(const engine of ['chromium','webkit'])for(const width of [390,1440])test(eng
   await page.goto(base+'/home/cliente/citas');await page.getByRole('button',{name:'Próximas (5)',exact:true}).waitFor();
   for(const s of active){await page.getByText('Reserva '+s,{exact:true}).filter({visible:true}).waitFor();assert.equal(await page.getByText('Reserva '+s,{exact:true}).filter({visible:true}).count(),1);}
   for(const s of history)assert.equal(await page.getByText('Reserva '+s,{exact:true}).count(),0);
-  await page.getByText('Reserva en_atencion',{exact:true}).filter({visible:true}).click();
+  await page.getByRole('button',{name:/Ver detalle completo de la cita en Reserva en_atencion del/}).click();
   const dialog=page.getByRole('dialog');await dialog.getByText('Estado:',{exact:true}).waitFor();
   assert.match(await dialog.innerText(),/12 nov.*11:30|12 nov.*23:30/i);
   await dialog.getByRole('button',{name:'Cerrar',exact:true}).click();await dialog.waitFor({state:'detached'});
