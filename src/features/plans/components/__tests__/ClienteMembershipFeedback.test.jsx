@@ -6,7 +6,7 @@ import ClientePlanesPage from '../../../cliente/pages/ClientePlanesPage.jsx';
 const mocks = vi.hoisted(() => ({
   dialog: null, poll: null,
   notifications: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
-  api: { getClientePlanEstado: vi.fn(), createMembershipOrder: vi.fn(), createMembershipPaymentIntent: vi.fn(), confirmMembershipPayment: vi.fn(), queryMembershipPaymentStatus: vi.fn(), cancelClientePlanBySubscription: vi.fn() },
+  api: { getClientePlanEstado: vi.fn(), listClientePlanConsumos: vi.fn().mockResolvedValue({consumos:[],pagination:{page:1,total:0,total_pages:1,limit:5}}), createMembershipOrder: vi.fn(), createMembershipPaymentIntent: vi.fn(), confirmMembershipPayment: vi.fn(), queryMembershipPaymentStatus: vi.fn(), cancelClientePlanBySubscription: vi.fn() },
 }));
 const BRANCH = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => ({ user: { id_usuario: 'user-a', cliente_id: 'client-a' }, clienteId: 'client-a' }) }));

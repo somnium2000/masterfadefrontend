@@ -9,8 +9,6 @@ import {
   Trophy,
   CheckCircle2,
   Clock3,
-  ShieldCheck,
-  WalletCards,
   AlertTriangle,
 } from "lucide-react";
 import { useNotifications } from "../../../context/NotificationsContext.jsx";
@@ -34,6 +32,7 @@ import {
   createMembershipOrder,
   createMembershipPaymentIntent,
   getClientePlanEstado,
+  listClientePlanConsumos,
   queryMembershipPaymentStatus,
 } from "../lib/clienteApi.js";
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
@@ -163,14 +162,6 @@ function formatPlanAcquisitionDate(value) {
     month: "long",
     day: "2-digit",
   });
-}
-
-function isOperationalMembershipConsumption(entry) {
-  if (!entry || typeof entry !== "object") return false;
-  if (entry.invalidado) return false;
-  const sourceKind = String(entry.source_kind || "").trim().toLowerCase();
-  if (sourceKind && sourceKind !== "appointment_completed") return false;
-  return true;
 }
 
 function toBenefitItems(rawBenefits) {
@@ -380,6 +371,12 @@ export default function ClientePlanesPage() {
   const [plans, setPlans] = useState([]);
   const [membershipState, setMembershipState] = useState(null);
   const [membershipLoading, setMembershipLoading] = useState(true);
+  const [historyQuery, setHistoryQuery] = useState({ page: 1, subscription: "" });
+  const [consumptionPage, setConsumptionPage] = useState(null);
+  const [consumptionLoading, setConsumptionLoading] = useState(true);
+  const [consumptionError, setConsumptionError] = useState("");
+  const [historyRefresh, setHistoryRefresh] = useState(0);
+  const consumptionCursorRef = useRef(null);
   const [cancelingSubscriptionId, setCancelingSubscriptionId] = useState("");
   const [loadingPlanOfferId, setLoadingPlanOfferId] = useState("");
 
@@ -767,11 +764,31 @@ export default function ClientePlanesPage() {
     [membershipState]
   );
   const activePlan = activePlans[0] || null;
-  const operationalCoverageActive = isPlanOperationalForCoverage(activePlan);
-  const operationalHistory = useMemo(
-    () => (Array.isArray(membershipState?.historial_consumos) ? membershipState.historial_consumos : []).filter(isOperationalMembershipConsumption),
-    [membershipState?.historial_consumos]
-  );
+  useEffect(() => {
+    if (!membershipState) return undefined;
+    const controller = new AbortController();
+    let current = true;
+    setConsumptionLoading(true);
+    setConsumptionError("");
+    // AM: Conservar la página ajustada por el servidor sin repetir la consulta.
+    const cursor = consumptionCursorRef.current;
+    const page = cursor?.query === historyQuery && cursor.identity === purchaseIdentity ? cursor.page : historyQuery.page;
+    listClientePlanConsumos({ page, id_suscripcion: historyQuery.subscription || undefined }, { signal: controller.signal })
+      .then(payload => {
+        if (!current) return;
+        consumptionCursorRef.current = { query: historyQuery, identity: purchaseIdentity, page: payload.pagination.page };
+        setConsumptionPage(payload);
+      })
+      .catch(error => { if (current && error?.name !== "AbortError") setConsumptionError("No se pudieron cargar los consumos. Intenta nuevamente."); })
+      .finally(() => { if (current) setConsumptionLoading(false); });
+    return () => { current = false; controller.abort(); };
+  }, [historyQuery, historyRefresh, membershipState, purchaseIdentity]);
+
+  useEffect(() => {
+    if (historyQuery.subscription && !activePlans.some(plan => plan.id_suscripcion === historyQuery.subscription)) {
+      setHistoryQuery({ page: 1, subscription: "" });
+    }
+  }, [activePlans, historyQuery.subscription]);
   const activePlanByBranch = useMemo(() => {
     const map = new Map();
     activePlans.forEach((plan) => {
@@ -827,54 +844,15 @@ export default function ClientePlanesPage() {
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Estado de membresía</p>
             <h2 className="mf-font-display mt-2 text-2xl text-[var(--mf-text)]">
-              {membershipLoading
-                ? "Consultando plan..."
-                : activePlan?.nombre_plan || "Sin plan activo"}
+              {membershipLoading ? "Consultando plan..." : activePlans.length > 1 ? "Tus membresías" : activePlan?.nombre_plan || membershipState?.ultimo_plan?.nombre_plan || "Sin plan activo"}
             </h2>
-            <p className="mt-1 text-sm text-[var(--mf-text-2)]">
-              {membershipLoading
-                ? "Estamos validando tu estado actual."
-                : activePlan
-                  ? `Vigente hasta ${new Date(activePlan.fin_at).toLocaleDateString("es-HN", { timeZone: "America/Tegucigalpa" })}.`
-                  : "Adquiere un plan para desbloquear coberturas automáticas en tu agendamiento."}
-            </p>
+            {!membershipLoading && !activePlans.length && membershipState?.ultimo_plan ? <p className="mt-2 text-sm text-[var(--mf-text-2)]">{MEMBERSHIP_STATUS_LABELS[membershipState?.estado_plan] || "Sin plan activo"}</p> : null}
           </div>
-          <div className="flex flex-wrap gap-2">
-            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs font-semibold text-[var(--mf-accent)]">
-              <ShieldCheck size={13} />
-              Suscripción: {MEMBERSHIP_STATUS_LABELS[membershipState?.estado_plan] || "Sin plan"}
-            </span>
-            <span className={[
-              "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold",
-              operationalCoverageActive
-                ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-200"
-                : "border-amber-300/30 bg-amber-500/10 text-amber-100",
-            ].join(" ")}>
-              <Shield size={13} />
-              Cobertura: {operationalCoverageActive ? "Operativo" : "No operativo para cobertura"}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs font-semibold text-[var(--mf-text-2)]">
-              <WalletCards size={13} />
-              Titular: {Number(membershipState?.masterpuntos?.titular || 0)}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-full border border-cyan-400/40 bg-cyan-500/10 px-3 py-1 text-xs font-semibold text-cyan-200">
-              <Sparkles size={13} />
-              Integrantes: {Number(membershipState?.masterpuntos?.integrante || 0)}
-            </span>
-            <Button type="button" variant="outline" size="sm" className="min-h-[30px] px-3 text-xs" onClick={() => setCoverageInfoOpen(true)}>
-              Información
-            </Button>
-          </div>
+          <Button type="button" variant="outline" className="min-h-11" onClick={() => setCoverageInfoOpen(true)}>Información</Button>
         </div>
 
         {activePlans.length ? (
           <>
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-              <span className="inline-flex rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100">
-                Planes activos: {activePlans.length}
-              </span>
-            </div>
-
             <div className="mt-4 space-y-4">
               {activePlans.map((plan) => {
                 const planBranchId = String(plan?.id_sucursal_contratada || "").trim();
@@ -887,24 +865,24 @@ export default function ClientePlanesPage() {
                 return (
                   <article key={plan.id_suscripcion} className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="text-base font-semibold text-[var(--mf-text)]">{plan?.nombre_plan || "Plan activo"}</h3>
+                      {activePlans.length > 1 ? <h3 className="text-lg font-semibold text-[var(--mf-text)]">{plan?.nombre_plan || "Plan activo"}</h3> : null}
                       <div className="flex flex-wrap items-center justify-end gap-2">
-                        <span className="inline-flex rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100">
-                          Suscripción: {MEMBERSHIP_STATUS_LABELS[plan?.estado_visible] || plan?.estado_visible || "Activa"}
+                        <span className="inline-flex rounded-full border border-amber-300/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-800 dark:text-amber-100">
+                          {MEMBERSHIP_STATUS_LABELS[plan?.estado_visible] || plan?.estado_visible || "Activa"}
                         </span>
                         <span className={[
                           "inline-flex rounded-full border px-3 py-1 text-xs font-semibold",
                           planOperational
-                            ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-200"
+                            ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
                             : "border-amber-300/30 bg-amber-500/10 text-amber-100",
                         ].join(" ")}>
-                          Cobertura: {planOperational ? "Operativo" : "No operativo para cobertura"}
+                          {planOperational ? "Beneficios disponibles" : "Beneficios no disponibles"}
                         </span>
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          className="min-h-[34px] px-3 text-xs"
+                          className="min-h-11 px-3 text-xs"
                           disabled={Boolean(cancelingSubscriptionId && cancelingSubscriptionId !== plan.id_suscripcion)}
                           onClick={() => {
                             handleOpenCancelPlanDialog(plan, planBranchName);
@@ -915,7 +893,7 @@ export default function ClientePlanesPage() {
                       </div>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
                       <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
                         <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Sucursal</p>
                         <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">{planBranchName}</p>
@@ -928,40 +906,11 @@ export default function ClientePlanesPage() {
                           {plan?.fin_at ? new Date(plan.fin_at).toLocaleDateString("es-HN", { timeZone: "America/Tegucigalpa" }) : "N/D"}
                         </p>
                       </div>
-                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Tiempo restante</p>
-                        <p className="mt-1 text-sm font-semibold text-[var(--mf-text)]">
-                          <Clock3 className="mr-1 inline-block" size={14} />
-                          {Number(plan?.tiempo_restante?.dias || 0)} d - {Number(plan?.tiempo_restante?.horas || 0)} h
-                        </p>
-                      </div>
                     </div>
-
-                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
-                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Servicios restantes</p>
-                        <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
-                          {Number(plan?.remanentes?.totales?.servicios_restantes || 0)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Servicios incluidos</p>
-                        <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
-                          {Number(plan?.remanentes?.totales?.servicios_total || 0)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesías restantes</p>
-                        <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
-                          {Number(plan?.remanentes?.totales?.cortesias_restantes || 0)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Cortesías incluidas</p>
-                        <p className="mt-1 text-lg font-semibold text-[var(--mf-text)]">
-                          {Number(plan?.remanentes?.totales?.cortesias_total || 0)}
-                        </p>
-                      </div>
+                    <p className="mt-2 inline-flex items-center gap-1 text-sm text-[var(--mf-text-2)]"><Clock3 size={14}/>{Number(plan?.tiempo_restante?.dias || 0)} días y {Number(plan?.tiempo_restante?.horas || 0)} horas restantes</p>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <p className="rounded-xl border border-[var(--mf-nav-border)] p-3 text-sm text-[var(--mf-text)]">Servicios disponibles: <strong>{Number(plan?.remanentes?.totales?.servicios_restantes || 0)} de {Number(plan?.remanentes?.totales?.servicios_total || 0)}</strong></p>
+                      <p className="rounded-xl border border-[var(--mf-nav-border)] p-3 text-sm text-[var(--mf-text)]">Cortesías disponibles: <strong>{Number(plan?.remanentes?.totales?.cortesias_restantes || 0)} de {Number(plan?.remanentes?.totales?.cortesias_total || 0)}</strong></p>
                     </div>
 
                     <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -1010,28 +959,32 @@ export default function ClientePlanesPage() {
           ) : null
         )}
 
-        {!membershipLoading && operationalHistory.length > 0 ? (
-          <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-accent)]">
-              Últimos consumos del plan
-            </p>
-            <ul className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)]">
-              {operationalHistory
-                .slice(0, 5)
-                .map((entry) => (
-                <li key={entry.id_consumo} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] px-3 py-2">
-                  <span className="text-[var(--mf-text)]">
-                    {entry?.item_tipo === "cortesia" ? "Cortesía" : "Servicio"} - {entry.item_nombre}
-                  </span>
-                  <div className="text-right text-xs text-[var(--mf-text-2)]">
-                    <p>{formatConsumptionDate(entry.created_at)}</p>
-                    <p>{entry.nombre_sucursal || "Sucursal no disponible"}</p>
-                    {entry.nombre_usuario_ejecutor ? <p>Por: {entry.nombre_usuario_ejecutor}</p> : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
+        {!membershipLoading ? (
+          <section className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4" aria-labelledby="plan-consumptions-title">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 id="plan-consumptions-title" className="font-semibold text-[var(--mf-text)]">Últimos consumos del plan</h3>
+              <Button type="button" variant="outline" className="min-h-11" disabled={consumptionLoading} onClick={() => setHistoryRefresh(value => value + 1)}>Actualizar consumos</Button>
+            </div>
+            {activePlans.length > 1 ? <div className="mt-3"><label htmlFor="consumption-subscription" className="mf-label">Plan consultado</label><select id="consumption-subscription" className="mf-select min-h-11 w-full" value={historyQuery.subscription} onChange={event => setHistoryQuery({ page: 1, subscription: event.target.value })}>
+              <option value="">Todos los planes activos</option>
+              {activePlans.map(plan => <option key={plan.id_suscripcion} value={plan.id_suscripcion}>{plan.nombre_plan} — {plan.sucursal_nombre || branches.find(branch => branch.id_sucursal === plan.id_sucursal_contratada)?.nombre_sucursal || "Sucursal"}</option>)}
+            </select></div> : null}
+            {consumptionLoading ? <p role="status" className="mt-3 text-sm text-[var(--mf-text-2)]">Cargando consumos...</p> : consumptionError ? <div role="alert" className="mt-3 text-sm text-[var(--mf-text)]"><p>{consumptionError}</p><Button type="button" variant="outline" className="mt-2 min-h-11" onClick={() => setHistoryRefresh(value => value + 1)}>Reintentar consumos</Button></div> : <>
+              {consumptionPage?.consumos?.length ? <ul className="mt-3 space-y-2 text-sm text-[var(--mf-text-2)]">
+                {consumptionPage.consumos.map(entry => <li key={entry.id_consumo} className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-[var(--mf-nav-border)] p-3">
+                  <div className="min-w-0 break-words"><p className="text-[var(--mf-text)]">{entry.item_tipo === "cortesia" ? "Cortesía" : "Servicio"} — {entry.item_nombre}</p><p>{entry.nombre_plan || "Plan"} · {entry.nombre_sucursal || "Sucursal no disponible"}</p><p>Cantidad: {entry.cantidad}</p>{entry.nombre_usuario_ejecutor ? <p>Por: {entry.nombre_usuario_ejecutor}</p> : null}</div>
+                  <p className="text-xs">{formatConsumptionDate(entry.created_at)}</p>
+                </li>)}
+              </ul> : <p className="mt-3 text-sm text-[var(--mf-text-2)]">No hay consumos del plan para mostrar.</p>}
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <p role="status" className="text-sm text-[var(--mf-text-2)]">Página {consumptionPage?.pagination?.page || 1} de {consumptionPage?.pagination?.total_pages || 1} · {consumptionPage?.pagination?.total || 0} consumos</p>
+                <div className="flex gap-3">
+                  <Button type="button" variant="outline" className="min-h-11" disabled={(consumptionPage?.pagination?.page || 1) <= 1} onClick={() => setHistoryQuery(prev => ({ ...prev, page: consumptionPage.pagination.page - 1 }))}>Anterior</Button>
+                  <Button type="button" variant="outline" className="min-h-11" disabled={(consumptionPage?.pagination?.page || 1) >= (consumptionPage?.pagination?.total_pages || 1)} onClick={() => setHistoryQuery(prev => ({ ...prev, page: consumptionPage.pagination.page + 1 }))}>Siguiente</Button>
+                </div>
+              </div>
+            </>}
+          </section>
         ) : null}
 
         {!membershipLoading && isExpiredMembership ? (
@@ -1229,7 +1182,7 @@ export default function ClientePlanesPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" onClick={() => setCoverageInfoOpen(false)}>Entendido</Button>
+            <Button type="button" className="min-h-11" onClick={() => setCoverageInfoOpen(false)}>Entendido</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

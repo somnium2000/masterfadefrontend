@@ -165,6 +165,13 @@ export async function listClienteCitas(filters = {}) {
   };
 }
 
+export async function listClientePlanConsumos(params = {}, options = {}) {
+  const response = await http.get(`${BASE}/planes/consumos?${buildQuery({ ...params, limit: 5 })}`, {
+    cache: false, dedupe: false, ...options,
+  });
+  return normalizeResponsePayload(response);
+}
+
 export async function getClientePlanEstado() {
   const response = await http.get(`${BASE}/planes/estado`);
   return normalizeResponsePayload(response);
