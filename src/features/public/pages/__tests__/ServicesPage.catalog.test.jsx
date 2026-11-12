@@ -503,3 +503,60 @@ test('Servicios conserva el botón central pausado y no permite entrar a reserva
   fireEvent.click(fab);
   expect(navigate).not.toHaveBeenCalled();
 });
+
+describe('VIP compacto y detalle informativo', () => {
+  test('resume beneficios largos y conserva íntegros descripción, cantidades y nombres en detalle', async () => {
+    const longName = 'Corte especializado con tratamiento, asesoría personalizada y acabado profesional para cada cliente';
+    const benefits = [
+      { tipo: 'servicio', nombre: longName, cantidad: 3 },
+      { tipo: 'cortesia', nombre: 'Bebida de cortesía', cantidad: 1 },
+      { tipo: 'servicio', nombre: 'Tratamiento adicional completo', cantidad: 4 },
+    ];
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [{ ...plan(), beneficios: benefits }] });
+    render(<ServicesPage />);
+    await screen.findByText('VIP Centro');
+    const card = within(vipSection()).getByRole('article');
+    expect(within(card).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(card).getByText('+ 1 beneficio más')).toBeInTheDocument();
+    expect(within(card).queryByText(`3 × ${longName}`)).not.toBeInTheDocument();
+    expect(screen.queryByText('Cuidado personal y atención premium')).not.toBeInTheDocument();
+    const open = within(card).getByRole('button', { name: 'Ver detalle de VIP Centro' });
+    fireEvent.click(open);
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByRole('heading', { name: 'VIP Centro' })).toBeInTheDocument();
+    expect(dialog.getByText('Cuidado personal y atención premium')).toBeInTheDocument();
+    expect(dialog.getByText('L 950.00')).toBeInTheDocument();
+    for (const benefit of benefits) expect(dialog.getByText(`${benefit.cantidad} × ${benefit.nombre}`)).toBeInTheDocument();
+    expect(dialog.queryByRole('button', { name: /comprar|agendar|adquirir/i })).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', code: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(api.listPublicPlansByBranch).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  test('abre el plan seleccionado sin mezclar beneficios de otra oferta', async () => {
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan(), { ...plan('VIP especial'), beneficios: [{ nombre: 'Beneficio exclusivo', cantidad: 2 }] }] });
+    render(<ServicesPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver detalle de VIP especial' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByText('2 × Beneficio exclusivo')).toBeInTheDocument();
+    expect(dialog.queryByText('2 × Corte premium')).not.toBeInTheDocument();
+  });
+
+  test('conserva los patrones y controles originales del carrusel de Servicios', async () => {
+    api.listPublicCatalogServices.mockResolvedValue({ services: ['Uno', 'Dos', 'Tres', 'Cuatro'].map(name => service(name)) });
+    render(<ServicesPage />);
+    const section = (await screen.findByRole('heading', { name: 'Servicios agendables' })).closest('section');
+    const previous = within(section).getByRole('button', { name: 'Desplazar a la izquierda' });
+    const next = within(section).getByRole('button', { name: 'Desplazar a la derecha' });
+    expect(previous).toBeEnabled();
+    expect(next).toBeEnabled();
+    expect(next).toHaveClass('h-10', 'w-10');
+    expect(next.parentElement).toHaveClass('hidden', 'sm:flex');
+    const track = section.querySelector('.overflow-x-auto');
+    expect(track).toHaveClass('snap-mandatory', '[scrollbar-width:none]', '[&::-webkit-scrollbar]:hidden');
+    expect(track).not.toHaveAttribute('id', 'services-vip-plans');
+    expect(within(section).getAllByRole('article')).toHaveLength(4);
+    expect(within(section).getAllByRole('article')[0]).toHaveClass('w-[85vw]', 'lg:w-[calc((100%-2rem)/3)]');
+  });
+});

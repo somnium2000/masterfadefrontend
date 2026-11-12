@@ -10,22 +10,23 @@ const engines = createRequire(import.meta.url)(process.env.MASTERFADE_PLAYWRIGHT
 const base = process.env.MASTERFADE_BROWSER_URL || 'http://127.0.0.1:4189';
 const branchA = '11111111-1111-4111-8111-111111111111';
 const branchB = '22222222-2222-4222-8222-222222222222';
-const evidence = path.join(process.env.TEMP || process.cwd(), 'mf-landing-vip-hotfix-evidence');
+const evidence = path.join(process.env.TEMP || process.cwd(), 'mf-vip-design02-evidence');
 
 for (const engine of ['chromium', 'webkit']) {
-  for (const width of [366, 1440]) {
+  for (const width of [366, 390, 768, 1440]) {
     for (const theme of ['dark', 'light']) {
-      test(`${engine} ${width} ${theme}: FAB habilitado/pausado y carrusel VIP 1/2/4/5`, {
+      test(`${engine} ${width} ${theme}: FAB habilitado/pausado y VIP compacto 1/2/3/5`, {
         skip: !existsSync(engines[engine].executablePath()), timeout: 90000,
       }, async () => {
         const browser = await engines[engine].launch();
         try {
-          const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width === 366, isMobile: width === 366 });
+          const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 640, isMobile: width < 640 });
           const page = await context.newPage();
           page.setDefaultTimeout(10000);
           await page.addInitScript(value => localStorage.setItem('mf_theme_variant', value), theme);
           const errors = [], writes = [], planBranches = [];
-          let empty = false, planCount = 2, bookingEnabled = false;
+          let empty = false, planCount = 2, bookingEnabled = false, longBenefits = false;
+          const longName = 'Tratamiento y asesoría personalizada con todos los beneficios de cuidado profesional para cada cliente';
           page.on('pageerror', error => errors.push(error.message));
           page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
           await page.route('**/v1/**', async route => {
@@ -52,9 +53,9 @@ for (const engine of ['chromium', 'webkit']) {
               data = { planes: empty ? [] : Array.from({ length: planCount }, (_, offset) => offset + 1).map(index => ({
                 id_plan: `plan-${index}`, id_plan_sucursal: `oferta-${name}-${index}`, id_sucursal: branch,
                 nombre_plan: `VIP ${name} ${index}`, categoria_nivel: index === 1 ? 2 : 5,
-                descripcion: 'Una experiencia de cuidado personal con beneficios exclusivos.',
+                descripcion: longBenefits ? longName.repeat(4) : 'Una experiencia de cuidado personal con beneficios exclusivos.',
                 periodo_membresia_codigo: 'mensual', periodo_membresia_label: 'Mensual', precio_hnl: index * 950,
-                beneficios: [
+                beneficios: longBenefits ? Array.from({ length: 6 }, (_, n) => ({ tipo: 'servicio', nombre: `${longName} ${n + 1}`, cantidad: n + 1 })) : [
                   { tipo: 'servicio', nombre: 'Corte premium', cantidad: index + 1 },
                   { tipo: 'cortesia', nombre: 'Bebida de cortesía', cantidad: 1 },
                 ],
@@ -110,7 +111,7 @@ for (const engine of ['chromium', 'webkit']) {
             await page.evaluate(() => window.dispatchEvent(new CustomEvent('mf:catalog-sync')));
           };
           const scrollPosition = () => track.evaluate(node => node.scrollLeft);
-          const waitPosition = async expected => page.waitForFunction(target => Math.abs(document.getElementById('services-vip-plans').scrollLeft - target) < 2, expected);
+          const waitPosition = async expected => page.waitForFunction(target => Math.abs(document.getElementById('services-vip-plans').scrollLeft - target) < 1, expected);
           await vip.getByText('VIP Centro 1', { exact: true }).waitFor();
           await page.getByText('Corte Centro', { exact: true }).waitFor();
           assert.deepEqual(await page.getByRole('heading', { level: 2 }).allTextContents(), [
@@ -125,7 +126,7 @@ for (const engine of ['chromium', 'webkit']) {
           assert.equal(await central().isDisabled(), true);
           await central().dispatchEvent('click');
           assert.equal(new URL(page.url()).pathname, '/servicios');
-          for (const count of [1, 2, 4, 5]) {
+          for (const count of [1, 2, 3, 5]) {
             planCount = count;
             await resync();
             await page.waitForFunction(n => document.querySelectorAll('#services-vip-plans article').length === n, count);
@@ -136,14 +137,22 @@ for (const engine of ['chromium', 'webkit']) {
               overflow: node.scrollWidth > node.clientWidth + 1,
               max: node.scrollWidth - node.clientWidth,
               snap: getComputedStyle(node).scrollSnapType,
+              scrollbar: getComputedStyle(node).scrollbarWidth,
+              webkitScrollbar: getComputedStyle(node, '::-webkit-scrollbar').display,
+              cardHeight: node.querySelector('article').getBoundingClientRect().height,
               innerOverflow: [...node.querySelectorAll('*')].filter(el => el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1).map(el => el.tagName),
             }));
             assert.equal(await vip.getByRole('article').count(), count);
-            assert.ok(Math.abs(layout.cardWidth - (width === 366 ? layout.width : (layout.width - 16) / 2)) < 2, JSON.stringify({ count, layout }));
+            const visibleCards = width < 640 ? 1 : width < 1024 ? 2 : 3;
+            const expectedWidth = visibleCards === 1 ? Math.min(layout.width, 320) : (layout.width - (visibleCards - 1) * 16) / visibleCards;
+            assert.ok(Math.abs(layout.cardWidth - expectedWidth) < 2, JSON.stringify({ count, layout }));
+            assert.ok(layout.cardHeight < 400, `Tarjeta compacta: ${layout.cardHeight}`);
+            assert.equal(layout.scrollbar, 'none');
+            assert.equal(layout.webkitScrollbar, 'none');
             assert.ok(layout.top.every(top => Math.abs(top - layout.top[0]) < 1));
             assert.equal(layout.snap, 'x mandatory');
             assert.deepEqual(layout.innerOverflow, []);
-            assert.equal(layout.overflow, count > (width === 366 ? 1 : 2));
+            assert.equal(layout.overflow, count > visibleCards);
             assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
             if (layout.overflow) {
               await next.waitFor();
@@ -152,13 +161,30 @@ for (const engine of ['chromium', 'webkit']) {
               assert.equal(await previous.isDisabled(), true);
               assert.equal(await next.isEnabled(), true);
               for (const button of [previous, next]) assert.ok(await button.evaluate(node => node.getBoundingClientRect().height >= 44 && node.getBoundingClientRect().width >= 44));
+              const headingBounds = await page.getByRole('heading', { name: 'Membresías VIP', exact: true }).boundingBox(), arrowBounds = await next.boundingBox();
+              assert.ok(Math.abs(arrowBounds.y + arrowBounds.height / 2 - headingBounds.y - headingBounds.height / 2) < 24);
+              assert.ok(arrowBounds.x > headingBounds.x + headingBounds.width);
               await next.focus();
               await page.keyboard.press('Enter');
-              await waitPosition(Math.min(layout.max, layout.cardWidth + 16));
+              await waitPosition(Math.min(layout.max, (layout.cardWidth + 16) * (width >= 1024 ? 3 : 1)));
               assert.equal(await previous.isEnabled(), true);
               await previous.click();
               await waitPosition(0);
-              if (width === 366 && engine === 'chromium') {
+              await track.evaluate(node => node.scrollTo({ left: 0, behavior: 'instant' }));
+              await waitPosition(0);
+              for (let step = 0; step < count && await scrollPosition() < layout.max - 1; step++) {
+                const expected = Math.min(layout.max, await scrollPosition() + (layout.cardWidth + 16) * (width >= 1024 ? 3 : 1));
+                await next.click();
+                await waitPosition(expected);
+              }
+              await waitPosition(layout.max);
+              await page.waitForFunction(() => document.querySelector('[aria-label="Membresía VIP siguiente"]').disabled);
+              assert.equal(await next.isDisabled(), true);
+              if (width < 640 && engine === 'chromium') {
+                await track.evaluate(node => node.scrollTo({ left: 0, behavior: 'instant' }));
+                await waitPosition(0);
+              }
+              if (width < 640 && engine === 'chromium') {
                 await track.scrollIntoViewIfNeeded();
                 const bounds = await track.boundingBox();
                 const session = await context.newCDPSession(page);
@@ -181,26 +207,35 @@ for (const engine of ['chromium', 'webkit']) {
                   requestAnimationFrame(check);
                 }));
               }
-              await track.evaluate(node => node.scrollTo({ left: 0, behavior: 'instant' }));
-              await waitPosition(0);
-              for (let step = 0; step < count && await scrollPosition() < layout.max - 1; step++) {
-                const expected = Math.min(layout.max, await scrollPosition() + layout.cardWidth + 16);
-                await next.click();
-                await waitPosition(expected);
-              }
-              await waitPosition(layout.max);
-              await page.waitForFunction(() => document.querySelector('[aria-label="Membresía VIP siguiente"]').disabled);
-              assert.equal(await next.isDisabled(), true);
+
             } else {
               assert.equal(await next.count(), 0);
               assert.equal(await previous.count(), 0);
             }
-            const lastPrice = vip.getByRole('article').last().locator('p').last();
+            const lastPrice = vip.getByRole('article').last().locator('p').filter({ hasText: /^L [0-9]/ });
             await lastPrice.scrollIntoViewIfNeeded();
+            await lastPrice.evaluate(node => window.scrollBy({ top: node.getBoundingClientRect().top - innerHeight / 2, behavior: 'instant' }));
             const bounds = await lastPrice.boundingBox(), navBounds = await page.getByRole('navigation').boundingBox();
             assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= navBounds.y, 'Precio accesible sobre la barra inferior');
-            await page.screenshot({ path: path.join(evidence, `${engine}-${width}-${theme}-${count}-plans.png`) });
+            await page.evaluate(() => window.scrollTo({ top: document.querySelector('[aria-labelledby="services-vip-heading"]').getBoundingClientRect().top + scrollY - 16, behavior: 'instant' }));
+            await page.screenshot({ path: path.join(evidence, `after-${engine}-${width}-${theme}-${count}.png`) });
           }
+          longBenefits = true;
+          await resync();
+          await vip.getByText('+ 4 beneficios más', { exact: true }).first().waitFor();
+          const detailButton = vip.getByRole('button', { name: 'Ver detalle de VIP Centro 1', exact: true });
+          await detailButton.click();
+          const dialog = page.getByRole('dialog');
+          await dialog.getByText(longName.repeat(4), { exact: true }).waitFor();
+          assert.equal(await dialog.getByRole('listitem').count(), 6);
+          for (let n = 1; n <= 6; n++) await dialog.getByText(`${n} × ${longName} ${n}`, { exact: true }).waitFor();
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+          assert.ok(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+          await page.screenshot({ path: path.join(evidence, `after-${engine}-${width}-${theme}-detail.png`) });
+          await page.keyboard.press('Escape');
+          await dialog.waitFor({ state: 'detached' });
+          await page.waitForFunction(node => document.activeElement === node, await detailButton.elementHandle());
+          longBenefits = false;
           await page.getByRole('button', { name: 'Norte', exact: true }).click();
           await vip.getByText('VIP Norte 1', { exact: true }).waitFor();
           await page.getByText('Corte Norte', { exact: true }).waitFor();

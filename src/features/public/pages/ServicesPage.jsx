@@ -29,6 +29,7 @@ import {
 } from '../lib/catalogApi.js';
 import { subscribeCatalogSync } from '../../../lib/catalogSync.js';
 import { getPlanCategoryTheme } from '../../plans/lib/planCategoryTheme.js';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../../../components/ui/dialog.jsx';
 
 function formatPriceHnl(value) {
   const amount = Number(value);
@@ -144,42 +145,60 @@ function VipPlanCard({ plan }) {
   const benefits = (Array.isArray(plan.beneficios) ? plan.beneficios : [])
     .filter(benefit => benefit?.nombre && Number(benefit.cantidad) > 0);
   const hasCategory = Number.isInteger(Number(plan.categoria_nivel)) && Number(plan.categoria_nivel) >= 1 && Number(plan.categoria_nivel) <= 5;
+  const category = hasCategory ? theme.label : 'Categoría no disponible';
+  const period = plan.periodo_membresia_label || 'Consultar vigencia';
   return (
-    <article className="flex w-full min-w-0 shrink-0 snap-start flex-col rounded-[24px] border p-5 sm:p-6 lg:w-[calc((100%-1rem)/2)]" style={{ background: theme.cardGradient, borderColor: theme.cardBorder, boxShadow: theme.glow }}>
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--mf-text-2)]">{hasCategory ? theme.label : 'Categoría no disponible'}</p>
-      <h3 className="mf-font-display mt-2 break-words text-[28px] leading-tight text-[var(--mf-text)] [overflow-wrap:anywhere]">{plan.nombre_plan}</h3>
-      {plan.descripcion ? <p className="mt-3 break-words text-sm leading-6 text-[var(--mf-text-2)]">{plan.descripcion}</p> : null}
-      <div className="mt-4 flex items-start gap-2 border-y border-[var(--mf-nav-border)] py-3 text-sm text-[var(--mf-text)]">
-        <CalendarDays size={16} className="mt-0.5 shrink-0 text-[var(--mf-accent)]" aria-hidden="true" />
-        <span className="min-w-0 break-words">Vigencia: {plan.periodo_membresia_label || 'Consultar vigencia'}</span>
+    <article data-catalog-card="true" className="flex w-full max-w-[320px] min-w-0 shrink-0 snap-start flex-col rounded-[24px] border p-4 sm:w-[calc((100%-1rem)/2)] sm:max-w-[360px] lg:w-[calc((100%-2rem)/3)] lg:max-w-[320px]" style={{ background: theme.cardGradient, borderColor: theme.cardBorder, boxShadow: theme.glow }}>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-text-2)]">{category}</p>
+      <h3 className="mf-font-display mt-1 break-words text-[22px] leading-tight text-[var(--mf-text)] [overflow-wrap:anywhere]">{plan.nombre_plan}</h3>
+      <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-[var(--mf-text-2)]"><CalendarDays size={14} className="mt-0.5 shrink-0 text-[var(--mf-accent)]" aria-hidden="true" /><span className="min-w-0 break-words">Vigencia: {period}</span></p>
+      <p className="mt-2 text-xl font-semibold text-[var(--mf-text)]">{formatPriceHnl(plan.precio_hnl)}</p>
+      <div className="mt-3 flex-1 border-t border-[var(--mf-nav-border)] pt-3">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--mf-text-2)]">Beneficios incluidos</p>
+        {benefits.length ? <ul className="mt-2 space-y-1.5 text-xs leading-5 text-[var(--mf-text)]">
+          {benefits.slice(0, 2).map((benefit, index) => {
+            const name = String(benefit.nombre);
+            return <li key={index} className="flex items-start gap-1.5"><CheckCircle2 size={13} className="mt-1 shrink-0 text-[var(--mf-accent)]" aria-hidden="true" /><span className="min-w-0 [overflow-wrap:anywhere]">{Number(benefit.cantidad)} × {name.length > 64 ? `${name.slice(0, 61).trimEnd()}…` : name}</span></li>;
+          })}
+        </ul> : <p className="mt-2 text-xs leading-5 text-[var(--mf-text-2)]">Consulta los beneficios del plan.</p>}
+        {benefits.length > 2 ? <p className="mt-1 text-xs text-[var(--mf-text-2)]">+ {benefits.length - 2} {benefits.length === 3 ? 'beneficio más' : 'beneficios más'}</p> : null}
       </div>
-      <div className="mt-4 flex-1">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--mf-text-2)]">Beneficios incluidos</p>
-        {benefits.length ? <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--mf-text)]">
-          {benefits.map((benefit, index) => <li key={index} className="flex items-start gap-2">
-            <CheckCircle2 size={15} className="mt-1 shrink-0 text-[var(--mf-accent)]" aria-hidden="true" />
-            <span className="min-w-0 break-words [overflow-wrap:anywhere]">{Number(benefit.cantidad)} × {benefit.nombre}</span>
-          </li>)}
-        </ul> : <p className="mt-3 text-sm text-[var(--mf-text-2)]">Consulta los beneficios del plan.</p>}
-      </div>
-      <p className="mt-5 border-t border-[var(--mf-nav-border)] pt-4 text-2xl font-semibold text-[var(--mf-text)]">{formatPriceHnl(plan.precio_hnl)}</p>
+      <Dialog>
+        <DialogTrigger asChild><button type="button" aria-label={`Ver detalle de ${plan.nombre_plan}`} className="mf-focus-ring mt-3 flex min-h-11 items-center justify-between gap-2 rounded-lg border-t border-[var(--mf-nav-border)] text-xs font-semibold text-[var(--mf-accent)]">Ver detalle del plan<ArrowUpRight size={15} aria-hidden="true" /></button></DialogTrigger>
+        <DialogContent className="max-h-[85dvh] overflow-y-auto [overflow-wrap:anywhere] [&>button]:h-11 [&>button]:w-11">
+          <DialogHeader className="pr-10"><DialogTitle>{plan.nombre_plan}</DialogTitle><DialogDescription>Información del plan en la sucursal seleccionada.</DialogDescription></DialogHeader>
+          <div className="space-y-4 text-sm text-[var(--mf-text)]">
+            <p>{category} · Vigencia: {period}</p>
+            <p className="text-xl font-semibold">{formatPriceHnl(plan.precio_hnl)}</p>
+            {plan.descripcion ? <p className="whitespace-pre-line leading-6 text-[var(--mf-text-2)]">{plan.descripcion}</p> : null}
+            <p className="font-semibold">Beneficios incluidos</p>
+            {benefits.length ? <ul className="space-y-3 leading-6">{benefits.map((benefit, index) => <li key={index} className="flex items-start gap-2"><CheckCircle2 size={15} className="mt-1 shrink-0 text-[var(--mf-accent)]" aria-hidden="true" /><span>{Number(benefit.cantidad)} × {benefit.nombre}</span></li>)}</ul> : <p>Consulta los beneficios del plan.</p>}
+          </div>
+        </DialogContent>
+      </Dialog>
     </article>
   );
 }
 
-function VipPlanCarousel({ plans }) {
-  const trackRef = useRef(null);
+function VipPlanCarousel({ plans, status, onRetry }) {
+  return <CatalogSection vip icon={Crown} title="Membresías VIP" eyebrow="Experiencia VIP" items={plans} status={status} onRetry={onRetry} emptyMessage="No hay membresías VIP disponibles en esta sucursal.">{plans.map(plan => <VipPlanCard key={plan.id_plan_sucursal || plan.id_plan} plan={plan} />)}</CatalogSection>;
+}
+
+function CatalogSection({ icon: Icon, title, eyebrow, items, emptyMessage, children, vip = false, status = 'success', onRetry }) {
+  const scrollRef = useRef(null);
+  // AM: VIP detecta desbordamiento; los demás catálogos conservan su umbral original.
   const [position, setPosition] = useState({ overflow: false, previous: false, next: false });
+  const showCarouselControls = vip ? status === 'success' && items.length > 0 && position.overflow : items.length > 3;
 
   useEffect(() => {
-    const track = trackRef.current;
+    if (!vip || status !== 'success') return undefined;
+    const track = scrollRef.current;
     if (!track) return undefined;
     const updatePosition = () => {
-      const remaining = track.scrollWidth - track.clientWidth - track.scrollLeft;
       const next = {
         overflow: track.scrollWidth > track.clientWidth + 1,
         previous: track.scrollLeft > 1,
-        next: remaining > 1,
+        next: track.scrollWidth - track.clientWidth - track.scrollLeft > 1,
       };
       setPosition(current => current.overflow === next.overflow
         && current.previous === next.previous && current.next === next.next ? current : next);
@@ -188,8 +207,8 @@ function VipPlanCarousel({ plans }) {
     const frame = requestAnimationFrame(updatePosition);
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(updatePosition) : null;
     observer?.observe(track);
-    const firstCard = track.querySelector('article');
-    if (firstCard) observer?.observe(firstCard);
+    const card = track.querySelector('[data-catalog-card="true"]');
+    if (card) observer?.observe(card);
     track.addEventListener('scroll', updatePosition, { passive: true });
     window.addEventListener('resize', updatePosition);
     return () => {
@@ -198,36 +217,7 @@ function VipPlanCarousel({ plans }) {
       track.removeEventListener('scroll', updatePosition);
       window.removeEventListener('resize', updatePosition);
     };
-  }, [plans]);
-
-  const scroll = direction => {
-    const track = trackRef.current;
-    if (!track) return;
-    const cardWidth = track.querySelector('article')?.getBoundingClientRect().width || track.clientWidth;
-    const gap = Number.parseFloat(window.getComputedStyle(track).columnGap) || 16;
-    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    track.scrollBy({ left: direction * (cardWidth + gap), behavior: reducedMotion ? 'auto' : 'smooth' });
-  };
-
-  return (
-    <div className="mt-5 min-w-0">
-      {position.overflow ? (
-        <div className="mb-3 flex justify-end gap-2">
-          <button type="button" aria-label="Membresía VIP anterior" aria-controls="services-vip-plans" disabled={!position.previous} onClick={() => scroll(-1)} className="mf-focus-ring flex h-11 w-11 items-center justify-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text)] disabled:opacity-40"><ChevronLeft size={20} aria-hidden="true" /></button>
-          <button type="button" aria-label="Membresía VIP siguiente" aria-controls="services-vip-plans" disabled={!position.next} onClick={() => scroll(1)} className="mf-focus-ring flex h-11 w-11 items-center justify-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text)] disabled:opacity-40"><ChevronRight size={20} aria-hidden="true" /></button>
-        </div>
-      ) : null}
-      <div ref={trackRef} id="services-vip-plans" role="region" aria-label="Planes de membresías VIP" aria-roledescription="carrusel" tabIndex={0} className="mf-focus-ring flex min-w-0 snap-x snap-mandatory gap-4 overflow-x-auto overflow-y-hidden scroll-smooth py-1 motion-reduce:scroll-auto">
-        {plans.map(plan => <VipPlanCard key={plan.id_plan_sucursal || plan.id_plan} plan={plan} />)}
-      </div>
-    </div>
-  );
-}
-
-function CatalogSection({ icon: Icon, title, eyebrow, items, emptyMessage, children }) {
-  const scrollRef = useRef(null);
-  // AM: Solo mostramos controles de carrusel cuando hay mas de 3 tarjetas.
-  const showCarouselControls = items.length > 3;
+  }, [vip, items, status]);
 
   const handleScroll = (direction) => {
     if (!scrollRef.current) return;
@@ -243,37 +233,41 @@ function CatalogSection({ icon: Icon, title, eyebrow, items, emptyMessage, child
     const step = (cardWidth + gap) * cardsPerStep;
     const scrollAmount = direction === 'left' ? -step : step;
 
-    track.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    track.scrollBy({ left: scrollAmount, behavior: vip && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   };
 
   return (
-    <section className="mt-8">
+    <section className="mt-8" aria-labelledby={vip ? 'services-vip-heading' : undefined}>
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+        <div className={vip ? 'flex min-w-0 flex-1 items-center gap-3' : 'flex items-center gap-3'}>
           <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]">
             <Icon size={18} strokeWidth={1.9} />
           </div>
-          <div>
+          <div className={vip ? 'min-w-0' : undefined}>
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">{eyebrow}</p>
-            <h2 className="mf-font-display text-[26px] leading-[1.1] text-[var(--mf-text)] sm:text-[30px] sm:leading-none">{title}</h2>
+            <h2 id={vip ? 'services-vip-heading' : undefined} className={`mf-font-display ${vip ? 'text-[24px]' : 'text-[26px]'} leading-[1.1] text-[var(--mf-text)] sm:text-[30px] sm:leading-none`}>{title}</h2>
           </div>
         </div>
 
         {showCarouselControls && (
-          <div className="hidden shrink-0 items-center gap-2 sm:flex">
+          <div className={vip ? 'flex shrink-0 items-center gap-2' : 'hidden shrink-0 items-center gap-2 sm:flex'}>
             <button
               type="button"
               onClick={() => handleScroll('left')}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)]"
-              aria-label="Desplazar a la izquierda"
+              className={`flex ${vip ? 'h-11 w-11 disabled:opacity-40' : 'h-10 w-10'} items-center justify-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)] ${vip ? 'mf-focus-ring' : ''}`}
+              disabled={vip ? !position.previous : undefined}
+              aria-controls={vip ? 'services-vip-plans' : undefined}
+              aria-label={vip ? 'Membresía VIP anterior' : 'Desplazar a la izquierda'}
             >
               <ChevronLeft size={20} strokeWidth={1.5} />
             </button>
             <button
               type="button"
               onClick={() => handleScroll('right')}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)]"
-              aria-label="Desplazar a la derecha"
+              className={`flex ${vip ? 'h-11 w-11 disabled:opacity-40' : 'h-10 w-10'} items-center justify-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text)] transition-colors hover:border-[var(--mf-accent)] hover:text-[var(--mf-accent)] ${vip ? 'mf-focus-ring' : ''}`}
+              disabled={vip ? !position.next : undefined}
+              aria-controls={vip ? 'services-vip-plans' : undefined}
+              aria-label={vip ? 'Membresía VIP siguiente' : 'Desplazar a la derecha'}
             >
               <ChevronRight size={20} strokeWidth={1.5} />
             </button>
@@ -281,9 +275,14 @@ function CatalogSection({ icon: Icon, title, eyebrow, items, emptyMessage, child
         )}
       </div>
 
-      {items.length > 0 ? (
+      {vip ? (
+        <Link to="/membresias-vip" className="mf-focus-ring mt-2 inline-flex min-h-11 items-center gap-1.5 rounded-lg text-sm font-semibold text-[var(--mf-accent)] underline-offset-4 hover:underline">Ver membresías VIP<ArrowUpRight size={15} aria-hidden="true" /></Link>
+      ) : null}
+      {vip && status === 'loading' ? <p role="status" className="mt-4 text-sm text-[var(--mf-text-2)]">Cargando membresías VIP…</p>
+        : vip && status === 'error' ? <CatalogLoadError message="No se pudieron cargar las membresías VIP de esta sucursal." onRetry={onRetry} />
+        : items.length > 0 ? (
         <div className="relative mt-5">
-          {showCarouselControls ? (
+          {showCarouselControls && !vip ? (
             <>
               <div className="pointer-events-none absolute inset-y-0 left-0 z-[1] hidden w-14 bg-gradient-to-r from-[var(--mf-bg)]/85 via-[var(--mf-bg)]/35 to-transparent blur-[1px] lg:block" />
               <div className="pointer-events-none absolute inset-y-0 right-0 z-[1] hidden w-14 bg-gradient-to-l from-[var(--mf-bg)]/85 via-[var(--mf-bg)]/35 to-transparent blur-[1px] lg:block" />
@@ -291,13 +290,18 @@ function CatalogSection({ icon: Icon, title, eyebrow, items, emptyMessage, child
           ) : null}
           <div
             ref={scrollRef}
-            className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-6 pt-2 [-ms-overflow-style:none] [scrollbar-width:none] scroll-smooth [&::-webkit-scrollbar]:hidden"
+            id={vip ? 'services-vip-plans' : undefined}
+            role={vip ? 'region' : undefined}
+            aria-label={vip ? 'Planes de membresías VIP' : undefined}
+            aria-roledescription={vip ? 'carrusel' : undefined}
+            tabIndex={vip ? 0 : undefined}
+            className={`flex snap-x snap-mandatory gap-4 overflow-x-auto pb-6 pt-2 [-ms-overflow-style:none] [scrollbar-width:none] scroll-smooth [&::-webkit-scrollbar]:hidden ${vip ? 'mf-focus-ring min-w-0 overflow-y-hidden motion-reduce:scroll-auto' : ''}`}
           >
             {children}
           </div>
         </div>
       ) : (
-        <div className="mf-glass-surface mt-5 rounded-[24px] p-5 text-sm leading-6 text-[var(--mf-text-2)]">
+        <div role={vip ? 'status' : undefined} className="mf-glass-surface mt-5 rounded-[24px] p-5 text-sm leading-6 text-[var(--mf-text-2)]">
           {emptyMessage}
         </div>
       )}
@@ -567,21 +571,7 @@ export default function ServicesPage() {
             </p>
           ) : null}
 
-          {selectedBranchId ? (
-            <section aria-labelledby="services-vip-heading" className="mf-glass-surface mt-8 rounded-[28px] border border-[var(--mf-btn-border)] p-5 sm:p-6">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]"><Crown size={21} aria-hidden="true" /></span>
-                  <div className="min-w-0"><p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--mf-accent)]">Experiencia VIP</p><h2 id="services-vip-heading" className="mf-font-display text-[30px] leading-tight text-[var(--mf-text)]">Membresías VIP</h2></div>
-                </div>
-                <Link to="/membresias-vip" className="mf-accent-gradient inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold text-[var(--mf-accent-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--mf-accent)]">Ver membresías VIP<ArrowUpRight size={16} aria-hidden="true" /></Link>
-              </div>
-              <p className="mt-3 text-sm leading-6 text-[var(--mf-text-2)]">Planes y beneficios disponibles en la sucursal seleccionada.</p>
-              {plansStatus === 'loading' ? <p role="status" className="mt-5 text-sm text-[var(--mf-text-2)]">Cargando membresías VIP…</p> : null}
-              {plansStatus === 'error' ? <CatalogLoadError message="No se pudieron cargar las membresías VIP de esta sucursal." onRetry={() => void loadPlans()} /> : null}
-              {plansStatus === 'success' ? plans.length ? <VipPlanCarousel plans={plans} /> : <p role="status" className="mt-5 rounded-2xl border border-[var(--mf-nav-border)] p-4 text-sm text-[var(--mf-text-2)]">No hay membresías VIP disponibles en esta sucursal.</p> : null}
-            </section>
-          ) : null}
+          {selectedBranchId ? <VipPlanCarousel plans={plans} status={plansStatus} onRetry={() => void loadPlans()} /> : null}
 
           {status === 'loading' ? (
             <div className="mf-glass-surface mt-8 rounded-[28px] p-6 text-center">
