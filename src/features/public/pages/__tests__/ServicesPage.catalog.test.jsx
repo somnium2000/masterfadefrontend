@@ -14,6 +14,8 @@ const api = vi.hoisted(() => ({
 }));
 const sync = vi.hoisted(() => ({ callback: null, unsubscribe: vi.fn() }));
 const navigate = vi.hoisted(() => vi.fn());
+const eligibility = vi.hoisted(() => ({ booking: true }));
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => eligibility }));
 
 vi.mock('../../lib/catalogApi.js', () => api);
 vi.mock('../../../../lib/catalogSync.js', () => ({
@@ -27,7 +29,7 @@ vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => ({ isAuth
 vi.mock('../../../../components/branding/MasterfadeLogo.jsx', () => ({ default: () => null }));
 vi.mock('../../../../components/theme/ThemeSwitcher.jsx', () => ({ default: () => null }));
 vi.mock('../../../../components/navigation/PremiumBottomNav.jsx', () => ({
-  default: ({ fabItem }) => <button type="button" onClick={fabItem.onClick}>{fabItem.label}</button>,
+  default: ({ fabItem }) => <button type="button" onClick={fabItem.onClick} disabled={fabItem.disabled}>{fabItem.label}</button>,
 }));
 
 const branches = [
@@ -54,6 +56,7 @@ const catalogCalls = () => [...api.listPublicCatalogServices.mock.calls, ...api.
 beforeEach(() => {
   Object.values(api).forEach((mock) => mock.mockReset());
   navigate.mockReset();
+  eligibility.booking = true;
   sync.callback = null;
   sync.unsubscribe.mockReset();
   api.listPublicCatalogBranches.mockResolvedValue({ branches });
@@ -360,7 +363,8 @@ describe('membresías VIP como primera sección informativa', () => {
     expect(vip.getByText('2 × Corte premium')).toBeInTheDocument();
     expect(vip.getByText('1 × Bebida de cortesía')).toBeInTheDocument();
     expect(vip.getByRole('link', { name: 'Ver membresías VIP' })).toHaveAttribute('href', '/membresias-vip');
-    expect(vip.queryByRole('button')).not.toBeInTheDocument();
+    expect(vip.queryByRole('button', { name: /comprar|adquirir|agendar/i })).not.toBeInTheDocument();
+    expect(vip.getByRole('region', { name: 'Planes de membresías VIP' })).toHaveAttribute('tabindex', '0');
     expect(screen.getAllByRole('heading', { level: 2 }).map(node => node.textContent)).toEqual([
       'Membresías VIP', 'Servicios agendables', 'Servicios informativos', 'Combos / Paquetes',
     ]);
@@ -488,4 +492,14 @@ describe('membresías VIP como primera sección informativa', () => {
     expect(screen.queryByText('VIP Centro')).not.toBeInTheDocument();
     expect(sync.unsubscribe).toHaveBeenCalledTimes(1);
   });
+});
+
+test('Servicios conserva el botón central pausado y no permite entrar a reservar', async () => {
+  eligibility.booking = false;
+  render(<ServicesPage />);
+  await screen.findByText('Corte A');
+  const fab = screen.getByRole('button', { name: 'Pausado', exact: true });
+  expect(fab).toBeDisabled();
+  fireEvent.click(fab);
+  expect(navigate).not.toHaveBeenCalled();
 });

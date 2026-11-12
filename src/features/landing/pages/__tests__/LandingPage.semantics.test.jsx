@@ -15,10 +15,14 @@ beforeEach(() => { eligibility.booking = true; });
 test('elegibilidad negativa bloquea citas y conserva acceso al catálogo VIP', () => {
   eligibility.booking = false;
   render(<ThemeProvider><MemoryRouter><LandingPage /><LocationProbe /></MemoryRouter></ThemeProvider>);
-  for (const button of screen.getAllByRole('button', { name: 'Agendar Cita', exact: true })) {
+  for (const button of screen.getAllByRole('button', { name: 'Reservas pausadas', exact: true })) {
     expect(button).toBeDisabled();
     fireEvent.click(button);
   }
+  const central = screen.getByRole('button', { name: 'Pausado', exact: true });
+  expect(central).toBeDisabled();
+  expect(central.querySelector('svg')).toBeInTheDocument();
+  fireEvent.click(central);
   expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent('/');
   fireEvent.click(screen.getAllByRole('button', { name: 'Planes de Membresía VIP', exact: true })[0]);
   expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent('/membresias-vip');
@@ -129,3 +133,13 @@ test('recargas repetidas siempre completan la entrada de los CTA', async () => {
     view.unmount();
   }
 }, 10000);
+
+test('retirada de elegibilidad conserva el botón central y bloquea la navegación', () => {
+  const view = render(<ThemeProvider><MemoryRouter><LandingPage /><LocationProbe /></MemoryRouter></ThemeProvider>);
+  expect(screen.getByRole('button', { name: 'Agendar', exact: true })).toBeEnabled();
+  eligibility.booking = false;
+  view.rerender(<ThemeProvider><MemoryRouter><LandingPage /><LocationProbe /></MemoryRouter></ThemeProvider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Pausado', exact: true }));
+  expect(screen.getByRole('button', { name: 'Pausado', exact: true })).toBeDisabled();
+  expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent('/');
+});

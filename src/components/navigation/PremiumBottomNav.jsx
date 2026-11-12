@@ -72,7 +72,7 @@ export default function PremiumBottomNav({
   isDesktop = false,
   mobilePreset = 'default',
 }) {
-  const hasFab = Boolean(fabItem?.icon && typeof fabItem?.onClick === 'function');
+  const hasFab = Boolean(fabItem?.icon && (fabItem.disabled || typeof fabItem?.onClick === 'function'));
   const FabIcon = fabItem?.icon;
   const items = Array.isArray(sideItems) ? sideItems : [];
   const compactBarberPreset = mobilePreset === 'barber';
@@ -102,9 +102,10 @@ export default function PremiumBottomNav({
               <div className={`${compactBarberPreset ? 'mx-1.5' : 'mx-1 min-[360px]:mx-2'} flex shrink-0 flex-col items-center`}>
                 <motion.button
                   type="button"
-                  whileHover={{ scale: 1.08, y: -2 }}
-                  whileTap={{ scale: 0.92 }}
-                  onClick={fabItem.onClick}
+                  whileHover={fabItem.disabled ? undefined : { scale: 1.08, y: -2 }}
+                  whileTap={fabItem.disabled ? undefined : { scale: 0.92 }}
+                  onClick={fabItem.disabled ? undefined : fabItem.onClick}
+                  disabled={fabItem.disabled}
                   className={fabClass}
                   aria-label={fabItem.label}
                 >

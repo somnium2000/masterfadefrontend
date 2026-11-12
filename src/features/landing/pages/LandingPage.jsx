@@ -160,7 +160,7 @@ export default function LandingPage() {
                 </motion.p>
 
                 <div className="flex flex-col gap-3">
-                  <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} disabled={!PUBLIC_BOOKING_ENABLED} />
+                  <PrimaryCta icon={CalendarDays} label={PUBLIC_BOOKING_ENABLED ? 'Agendar Cita' : 'Reservas pausadas'} onClick={handleAgendar} disabled={!PUBLIC_BOOKING_ENABLED} />
                   <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} order={1} />
                   <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} order={2} />
                 </div>
@@ -209,7 +209,7 @@ export default function LandingPage() {
             </motion.p>
 
             <div className="w-full max-w-[380px] space-y-3">
-              <PrimaryCta icon={CalendarDays} label="Agendar Cita" onClick={handleAgendar} disabled={!PUBLIC_BOOKING_ENABLED} />
+              <PrimaryCta icon={CalendarDays} label={PUBLIC_BOOKING_ENABLED ? 'Agendar Cita' : 'Reservas pausadas'} onClick={handleAgendar} disabled={!PUBLIC_BOOKING_ENABLED} />
               <SecondaryCta icon={Users} label="Barberos" onClick={() => navigate('/barberos')} order={1} />
               <SecondaryCta icon={Crown} label="Planes de Membresía VIP" onClick={() => navigate('/membresias-vip')} order={2} />
             </div>
@@ -230,7 +230,7 @@ export default function LandingPage() {
       <PremiumBottomNav
         activeId="inicio"
         sideItems={navItems}
-        fabItem={PUBLIC_BOOKING_ENABLED ? { id: 'agendar', label: 'Agendar', icon: Plus, onClick: handleAgendar } : null}
+        fabItem={{ id: 'agendar', label: PUBLIC_BOOKING_ENABLED ? 'Agendar' : 'Pausado', icon: Plus, onClick: handleAgendar, disabled: !PUBLIC_BOOKING_ENABLED }}
         isDesktop
       />
     </div>

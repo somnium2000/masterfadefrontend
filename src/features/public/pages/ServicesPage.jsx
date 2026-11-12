@@ -20,6 +20,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import PublicNavigationHeader from '../../../components/layout/PublicNavigationHeader.jsx';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
+import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
 import {
   listPublicCatalogBranches,
   listPublicCatalogPackages,
@@ -144,7 +145,7 @@ function VipPlanCard({ plan }) {
     .filter(benefit => benefit?.nombre && Number(benefit.cantidad) > 0);
   const hasCategory = Number.isInteger(Number(plan.categoria_nivel)) && Number(plan.categoria_nivel) >= 1 && Number(plan.categoria_nivel) <= 5;
   return (
-    <article className="flex min-w-0 flex-col rounded-[24px] border p-5 sm:p-6" style={{ background: theme.cardGradient, borderColor: theme.cardBorder, boxShadow: theme.glow }}>
+    <article className="flex w-full min-w-0 shrink-0 snap-start flex-col rounded-[24px] border p-5 sm:p-6 lg:w-[calc((100%-1rem)/2)]" style={{ background: theme.cardGradient, borderColor: theme.cardBorder, boxShadow: theme.glow }}>
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--mf-text-2)]">{hasCategory ? theme.label : 'Categoría no disponible'}</p>
       <h3 className="mf-font-display mt-2 break-words text-[28px] leading-tight text-[var(--mf-text)] [overflow-wrap:anywhere]">{plan.nombre_plan}</h3>
       {plan.descripcion ? <p className="mt-3 break-words text-sm leading-6 text-[var(--mf-text-2)]">{plan.descripcion}</p> : null}
@@ -163,6 +164,63 @@ function VipPlanCard({ plan }) {
       </div>
       <p className="mt-5 border-t border-[var(--mf-nav-border)] pt-4 text-2xl font-semibold text-[var(--mf-text)]">{formatPriceHnl(plan.precio_hnl)}</p>
     </article>
+  );
+}
+
+function VipPlanCarousel({ plans }) {
+  const trackRef = useRef(null);
+  const [position, setPosition] = useState({ overflow: false, previous: false, next: false });
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return undefined;
+    const updatePosition = () => {
+      const remaining = track.scrollWidth - track.clientWidth - track.scrollLeft;
+      const next = {
+        overflow: track.scrollWidth > track.clientWidth + 1,
+        previous: track.scrollLeft > 1,
+        next: remaining > 1,
+      };
+      setPosition(current => current.overflow === next.overflow
+        && current.previous === next.previous && current.next === next.next ? current : next);
+    };
+    track.scrollLeft = 0;
+    const frame = requestAnimationFrame(updatePosition);
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(updatePosition) : null;
+    observer?.observe(track);
+    const firstCard = track.querySelector('article');
+    if (firstCard) observer?.observe(firstCard);
+    track.addEventListener('scroll', updatePosition, { passive: true });
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      track.removeEventListener('scroll', updatePosition);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [plans]);
+
+  const scroll = direction => {
+    const track = trackRef.current;
+    if (!track) return;
+    const cardWidth = track.querySelector('article')?.getBoundingClientRect().width || track.clientWidth;
+    const gap = Number.parseFloat(window.getComputedStyle(track).columnGap) || 16;
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    track.scrollBy({ left: direction * (cardWidth + gap), behavior: reducedMotion ? 'auto' : 'smooth' });
+  };
+
+  return (
+    <div className="mt-5 min-w-0">
+      {position.overflow ? (
+        <div className="mb-3 flex justify-end gap-2">
+          <button type="button" aria-label="Membresía VIP anterior" aria-controls="services-vip-plans" disabled={!position.previous} onClick={() => scroll(-1)} className="mf-focus-ring flex h-11 w-11 items-center justify-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text)] disabled:opacity-40"><ChevronLeft size={20} aria-hidden="true" /></button>
+          <button type="button" aria-label="Membresía VIP siguiente" aria-controls="services-vip-plans" disabled={!position.next} onClick={() => scroll(1)} className="mf-focus-ring flex h-11 w-11 items-center justify-center rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text)] disabled:opacity-40"><ChevronRight size={20} aria-hidden="true" /></button>
+        </div>
+      ) : null}
+      <div ref={trackRef} id="services-vip-plans" role="region" aria-label="Planes de membresías VIP" aria-roledescription="carrusel" tabIndex={0} className="mf-focus-ring flex min-w-0 snap-x snap-mandatory gap-4 overflow-x-auto overflow-y-hidden scroll-smooth py-1 motion-reduce:scroll-auto">
+        {plans.map(plan => <VipPlanCard key={plan.id_plan_sucursal || plan.id_plan} plan={plan} />)}
+      </div>
+    </div>
   );
 }
 
@@ -265,6 +323,7 @@ function CatalogLoadError({ message, onRetry }) {
 export default function ServicesPage() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const { booking: PUBLIC_BOOKING_ENABLED } = usePrivateCommerce();
   const isMountedRef = useRef(true);
   const selectedBranchRef = useRef('');
   const validBranchIdsRef = useRef(new Set());
@@ -414,6 +473,7 @@ export default function ServicesPage() {
   }
 
   function handleAgendar() {
+    if (!PUBLIC_BOOKING_ENABLED) return;
     navigate('/agendar/barberos');
   }
 
@@ -519,7 +579,7 @@ export default function ServicesPage() {
               <p className="mt-3 text-sm leading-6 text-[var(--mf-text-2)]">Planes y beneficios disponibles en la sucursal seleccionada.</p>
               {plansStatus === 'loading' ? <p role="status" className="mt-5 text-sm text-[var(--mf-text-2)]">Cargando membresías VIP…</p> : null}
               {plansStatus === 'error' ? <CatalogLoadError message="No se pudieron cargar las membresías VIP de esta sucursal." onRetry={() => void loadPlans()} /> : null}
-              {plansStatus === 'success' ? plans.length ? <div className="mt-5 grid min-w-0 gap-4 sm:grid-cols-2">{plans.map(plan => <VipPlanCard key={plan.id_plan_sucursal || plan.id_plan} plan={plan} />)}</div> : <p role="status" className="mt-5 rounded-2xl border border-[var(--mf-nav-border)] p-4 text-sm text-[var(--mf-text-2)]">No hay membresías VIP disponibles en esta sucursal.</p> : null}
+              {plansStatus === 'success' ? plans.length ? <VipPlanCarousel plans={plans} /> : <p role="status" className="mt-5 rounded-2xl border border-[var(--mf-nav-border)] p-4 text-sm text-[var(--mf-text-2)]">No hay membresías VIP disponibles en esta sucursal.</p> : null}
             </section>
           ) : null}
 
@@ -605,7 +665,7 @@ export default function ServicesPage() {
       <PremiumBottomNav
         activeId="servicios"
         sideItems={navItems}
-        fabItem={{ id: 'agendar', label: 'Agendar', icon: Plus, onClick: handleAgendar }}
+        fabItem={{ id: 'agendar', label: PUBLIC_BOOKING_ENABLED ? 'Agendar' : 'Pausado', icon: Plus, onClick: handleAgendar, disabled: !PUBLIC_BOOKING_ENABLED }}
         isDesktop
       />
     </div>
