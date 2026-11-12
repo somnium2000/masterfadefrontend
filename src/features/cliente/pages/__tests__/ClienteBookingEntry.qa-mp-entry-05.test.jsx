@@ -10,6 +10,7 @@ const navigate = vi.hoisted(() => vi.fn());
 const flags = vi.hoisted(() => ({ CLIENT_BOOKING_ENABLED: false, CLIENT_CITAS_ENABLED: true, CLIENT_LOCK_MESSAGE: 'Agendamiento temporalmente no disponible' }));
 const location = vi.hoisted(() => ({ pathname:'/home/cliente/citas', state:null }));
 vi.mock('../../lib/clientFeatureFlags.js', () => flags);
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ booking: flags.CLIENT_BOOKING_ENABLED }) }));
 const api = vi.hoisted(() => ({
   descartarClienteCitaPendiente: vi.fn(),
   getClienteCitaDetalle: vi.fn(),

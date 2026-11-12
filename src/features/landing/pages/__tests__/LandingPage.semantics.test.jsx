@@ -1,17 +1,27 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { cwd } from 'node:process';
 import LandingPage from '../LandingPage.jsx';
 import { ThemeProvider } from '../../../../context/ThemeContext.jsx';
+const eligibility = vi.hoisted(() => ({ booking: false }));
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => eligibility }));
 
 afterEach(() => {
+  eligibility.booking = false;
   cleanup();
   window.localStorage.removeItem('mf_theme_variant');
+});
+
+test('solo elegibilidad positiva del backend abre la entrada privada', () => {
+  eligibility.booking = true;
+  render(<ThemeProvider><MemoryRouter><LandingPage /><LocationProbe /></MemoryRouter></ThemeProvider>);
+  fireEvent.click(screen.getAllByRole('button', { name: 'Agendar Cita', exact: true })[0]);
+  expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent('/agendar/barberos');
 });
 
 function LocationProbe() {

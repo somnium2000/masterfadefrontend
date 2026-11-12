@@ -24,9 +24,9 @@ import { useNotifications } from "../../../context/NotificationsContext.jsx";
 import { listPublicCatalogBranches, listPublicPlansByBranch } from "../lib/catalogApi.js";
 import {
   VIP_MEMBERSHIPS_ENABLED,
-  VIP_MEMBERSHIPS_PURCHASE_ENABLED,
   VIP_MEMBERSHIPS_PURCHASE_LOCK_MESSAGE,
 } from "../lib/vipMembershipFeatureFlags.js";
+import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
 import { subscribeCatalogSync } from "../../../lib/catalogSync.js";
 import { getPlanCategoryTheme, normalizePlanCategory } from "../../plans/lib/planCategoryTheme.js";
 import {
@@ -249,6 +249,9 @@ function PlanCard({
 }
 
 export default function MembershipPlansPage() {
+  const { vipPurchase: VIP_MEMBERSHIPS_PURCHASE_ENABLED } = usePrivateCommerce();
+  // AM: Preserve main's public pause; only backend eligibility opens the private catalog.
+  const catalogAvailable = VIP_MEMBERSHIPS_ENABLED || VIP_MEMBERSHIPS_PURCHASE_ENABLED;
   const navigate = useNavigate();
   const { isAuthenticated, roles = [], user, clienteId, isHydrating, isHydrated } = useAuth();
   const notifications = useNotifications();
@@ -337,7 +340,7 @@ export default function MembershipPlansPage() {
       setPurchaseStep("payment");
       setPurchaseModalOpen(true);
     }
-  }, [purchaseIdentity, isAuthenticated, isHydrating, isHydrated]);
+  }, [purchaseIdentity, isAuthenticated, isHydrating, isHydrated, VIP_MEMBERSHIPS_PURCHASE_ENABLED]);
 
   function getPurchaseAttempt(offerId) {
     const current = purchaseAttemptRef.current;
@@ -455,7 +458,7 @@ export default function MembershipPlansPage() {
     const generation = purchaseGenerationRef.current;
     const isCurrent = () => isMountedRef.current && requestId === membershipRequestRef.current
       && generation === purchaseGenerationRef.current && purchaseIdentityRef.current === purchaseIdentity;
-    if (!VIP_MEMBERSHIPS_ENABLED || !purchaseIdentity || isHydrating || isHydrated === false) {
+    if (!catalogAvailable || !purchaseIdentity || isHydrating || isHydrated === false) {
       setMembershipState(null);
       setMembershipLoading(false);
       return;
@@ -471,11 +474,11 @@ export default function MembershipPlansPage() {
     } finally {
       if (isCurrent()) setMembershipLoading(false);
     }
-  }, [purchaseIdentity, isHydrating, isHydrated]);
+  }, [purchaseIdentity, isHydrating, isHydrated, catalogAvailable]);
 
   useEffect(() => {
     isMountedRef.current = true;
-    if (!VIP_MEMBERSHIPS_ENABLED) return () => { isMountedRef.current = false; };
+    if (!catalogAvailable) return () => { isMountedRef.current = false; };
     let active = true;
     queueMicrotask(() => { if (active) void loadBranches(); });
 
@@ -495,7 +498,7 @@ export default function MembershipPlansPage() {
       planRequestRef.current += 1;
       unsubscribe();
     };
-  }, [loadBranches, loadPlansByBranch]);
+  }, [loadBranches, loadPlansByBranch, catalogAvailable]);
 
   useEffect(() => {
     void loadMembershipState();
@@ -621,6 +624,7 @@ export default function MembershipPlansPage() {
   }
 
   async function handleContinueToPayment() {
+    if (!VIP_MEMBERSHIPS_PURCHASE_ENABLED) return;
     const orderId = String(purchaseOrderSummary?.id_order || "").trim();
     if (!orderId || purchaseLoading) return;
     const generation = purchaseGenerationRef.current;
@@ -652,6 +656,7 @@ export default function MembershipPlansPage() {
   }
 
   async function handleConfirmPayment(paymentDetails = {}) {
+    if (!VIP_MEMBERSHIPS_PURCHASE_ENABLED) return;
     if (purchaseLoading || purchaseCompleted || purchasePendingConfirmation) return;
     const paymentIntentId = String(membershipPaymentIntent?.id_payment_intent || "").trim();
     if (!paymentIntentId) {
@@ -719,7 +724,7 @@ export default function MembershipPlansPage() {
   }, [loadMembershipState]);
 
   useMembershipPaymentPolling({
-    active: purchasePendingConfirmation,
+    active: purchasePendingConfirmation && VIP_MEMBERSHIPS_PURCHASE_ENABLED,
     idPaymentIntent: membershipPaymentIntent?.id_payment_intent,
     queryStatus: queryMembershipPaymentStatus,
     onResult: handleMembershipPollResult,
@@ -744,7 +749,7 @@ export default function MembershipPlansPage() {
     { id: "promociones", label: "Promociones", icon: Tag, onClick: () => navigate("/promociones") },
   ];
 
-  if (!VIP_MEMBERSHIPS_ENABLED) {
+  if (!catalogAvailable) {
     return (
       <div className="mf-page-gradient min-h-screen pb-[100px]">
         <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 pb-10 pt-4 sm:px-8">
@@ -926,7 +931,7 @@ export default function MembershipPlansPage() {
       </div>
 
       <PlanPurchaseFlowDialog
-        open={purchaseModalOpen}
+        open={purchaseModalOpen && VIP_MEMBERSHIPS_PURCHASE_ENABLED}
         onOpenChange={(next) => {
           if (!next) resetPurchaseFlow();
           else setPurchaseModalOpen(true);

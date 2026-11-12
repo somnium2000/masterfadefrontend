@@ -1,0 +1,52 @@
+name: Private Commerce Pilot
+on:
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pilot-checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Eligibility, customer entry, VIP and payment regressions
+        run: >-
+          npx vitest run src/hooks/usePrivateCommerce.test.jsx
+          src/features/cliente/pages/__tests__/ClienteAppShell.qa15.test.jsx
+          src/features/cliente/pages/__tests__/ClienteBookingEntry.qa-mp-entry-05.test.jsx
+          src/features/cliente/pages/__tests__/MasterPuntos.qa18b.test.jsx
+          src/features/cliente/pages/__tests__/MasterPuntos.qa18c.test.jsx
+          src/features/public/booking/__tests__/PublicBookingPaymentPresentation.test.jsx
+          src/features/public/booking/__tests__/PublicBookingFlow.paymentReload.test.jsx
+          src/features/public/pages/__tests__/MembershipPlansPage.catalog.test.jsx
+          src/features/public/pages/__tests__/MembershipPlansPage.identity.test.jsx
+          src/features/landing/pages/__tests__/LandingPage.semantics.test.jsx
+          --maxWorkers=2
+      - run: npm run lint
+      - run: npm run build
+      - run: git diff --check
+  original-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Preserve original failures and validate explicit-selection and Live form probes
+        run: >-
+          npx vitest run src/features/admin/pages/__tests__/AdminReportesAuthorization.test.js
+          src/features/cliente/pages/__tests__/ClienteAppShell.qa15.test.jsx
+          src/features/public/booking/__tests__/PublicBookingFlow.rewardSession.qa18d.test.jsx
+          src/features/public/booking/__tests__/TodoPagoHostedModal.test.jsx
+          --maxWorkers=2 --reporter=default --reporter=json --outputFile=baseline-contracts.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: original-contracts
+          path: baseline-contracts.json

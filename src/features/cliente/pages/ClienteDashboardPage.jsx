@@ -9,7 +9,8 @@ import ClienteSummaryCards from '../components/ClienteSummaryCards.jsx';
 import CardsCarousel from '../../../components/data/CardsCarousel.jsx';
 import { getClienteCitaDetalle, getClienteMe, listClienteCitas } from '../lib/clienteApi.js';
 import { listPublicCatalogServices } from '../../public/lib/catalogApi.js';
-import { CLIENT_BOOKING_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
+import { CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
+import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
 
 const UPCOMING_ALLOWED_STATUS = new Set(['confirmada']);
 const COMPLETED_APPOINTMENT_STATUS = new Set(['completada']);
@@ -147,6 +148,7 @@ async function resolveRecommendedServices(idSucursal = '') {
 }
 
 export default function ClienteDashboardPage() {
+  const { booking: CLIENT_BOOKING_ENABLED } = usePrivateCommerce();
   const navigate = useNavigate();
   const notifications = useNotifications();
   const { error: notifyError } = notifications;

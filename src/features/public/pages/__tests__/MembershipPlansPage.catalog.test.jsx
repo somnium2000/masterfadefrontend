@@ -25,6 +25,7 @@ vi.mock('../../../../lib/catalogSync.js', () => ({
 }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => navigate }));
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => auth }));
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ vipPurchase: flags.enabled }) }));
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => notifications }));
 vi.mock('../../../cliente/lib/clienteApi.js', () => payment);
 vi.mock('../../lib/vipMembershipFeatureFlags.js', () => ({
@@ -127,6 +128,30 @@ const orderSummary = () => ({
     precio_hnl: 975, beneficios: [{ tipo: 'servicio', nombre: 'Corte backend', cantidad: 4 }] },
   totales: { subtotal_hnl: 975, descuento_hnl: 0, total_hnl: 975, moneda_codigo: 'HNL' },
 });
+
+test('piloto main: elegibilidad tardia abre VIP con flag global apagado y prepara pago solo por seleccion manual', async () => {
+  flags.available = false;
+  flags.enabled = false;
+  authenticateCliente();
+  api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan('Plan A')] });
+  const view = render(<MembershipPlansPage />);
+  expect(screen.getByText('Temporalmente pausadas')).toBeInTheDocument();
+  expect(api.listPublicCatalogBranches).not.toHaveBeenCalled();
+  expect(payment.createMembershipOrder).not.toHaveBeenCalled();
+  flags.enabled = true;
+  view.rerender(<MembershipPlansPage />);
+  await select('Centro');
+  fireEvent.click(await screen.findByRole('button', { name: 'Quiero este plan' }));
+  await act(async () => {});
+  expect(payment.createMembershipOrder).toHaveBeenCalledExactlyOnceWith('Plan A-offer', { idempotencyKey: KEY1 });
+  expect(payment.createMembershipPaymentIntent).not.toHaveBeenCalled();
+  await act(async () => dialog.props.onContinueToPayment());
+  expect(payment.createMembershipPaymentIntent).toHaveBeenCalledExactlyOnceWith('orden-1');
+  expect(dialog.props.paymentIntent).toMatchObject({ id_payment_intent: 'intent-1' });
+  expect(dialog.props.step).toBe('payment');
+  expect(payment.confirmMembershipPayment).not.toHaveBeenCalled();
+  expect(flags.available).toBe(false);
+});
 async function renderPurchase({ strict = false } = {}) {
   authenticateCliente();
   api.listPublicPlansByBranch.mockImplementation((id) => Promise.resolve({ plans: id === A
@@ -139,6 +164,7 @@ async function renderPurchase({ strict = false } = {}) {
 
 test('muestra pausa VIP sin consultar catalogo ni estado del cliente', async () => {
   flags.available = false;
+  flags.enabled = false;
   render(<MembershipPlansPage />);
   expect(await screen.findByRole('heading', { name: 'Temporalmente pausadas' })).toBeInTheDocument();
   expect(screen.getByText(/planes VIP no están disponibles/i)).toBeInTheDocument();

@@ -61,7 +61,7 @@ import AdminSeguridadUsuariosPage from './features/admin/pages/AdminSeguridadUsu
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
 import BookingUnavailablePage from './features/public/pages/BookingUnavailablePage.jsx';
-import { PUBLIC_BOOKING_ENABLED } from './features/public/lib/publicBookingFeatureFlags.js';
+import usePrivateCommerce from './hooks/usePrivateCommerce.js';
 
 const PublicBookingFlow = lazy(() => import('./features/public/booking/PublicBookingFlow.jsx'));
 const PublicBookingBarberosStep = lazy(() => import('./features/public/booking/PublicBookingBarberosStep.jsx'));
@@ -130,6 +130,7 @@ function InternalAccountDeletionDashboardShell() {
 }
 
 function App() {
+  const privateCommerce = usePrivateCommerce();
   const location = useLocation();
   const { isAuthenticated, user, roles, branchIds, empresaId } = useAuth();
   const reportSessionKey = JSON.stringify({
@@ -158,7 +159,7 @@ function App() {
         element={
           <RouteErrorBoundary>
             <BookingSuspense>
-              {PUBLIC_BOOKING_ENABLED ? <PublicBookingFlow /> : <BookingUnavailablePage />}
+              {privateCommerce.booking ? <PublicBookingFlow /> : <BookingUnavailablePage />}
             </BookingSuspense>
           </RouteErrorBoundary>
         }

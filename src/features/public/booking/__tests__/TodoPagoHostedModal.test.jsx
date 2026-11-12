@@ -337,6 +337,22 @@ describe('TodoPagoHostedModal', () => {
 });
 
 describe('integracion del shell TodoPago', () => {
+  test('piloto: formulario Live vigente entrega un solo intento al adaptador simulado', async () => {
+    vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay');
+    vi.stubEnv('VITE_PIXELPAY_ENV', 'live');
+    vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'false');
+    const completePixelPayPayment = vi.fn().mockResolvedValue({ booking_confirmed: true });
+    bookingFlowMock.current = createBookingFlow({ completePixelPayPayment });
+    render(<PublicBookingPaymentStep />);
+    for (const [label, value] of [['Nombre del titular', 'CLIENTE QA'], ['Numero de tarjeta', '4111111111111111'],
+      ['Expiracion', '07/28'], ['CVV', '999'], ['Telefono de contacto', '99999999'],
+      ['Direccion de facturacion', 'Calle QA'], ['Ciudad', 'San Pedro Sula'], ['Departamento', 'HN-CR']]) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Pagar con PixelPay' }));
+    await waitFor(() => expect(completePixelPayPayment).toHaveBeenCalledTimes(1));
+    expect(completePixelPayPayment.mock.calls[0][0]).toMatchObject({ card: { expire: '2807' }, billing: { country: 'HN', state: 'HN-CR' } });
+  });
   test('PixelPay normal muestra su formulario sin contenido TodoPago', () => {
     vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay');
     vi.stubEnv('VITE_PIXELPAY_ENV', 'sandbox');
