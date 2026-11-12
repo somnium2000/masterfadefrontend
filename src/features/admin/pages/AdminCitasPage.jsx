@@ -1528,7 +1528,7 @@ export default function AdminCitasPage() {
       || !Number.isInteger(minSellable) || minSellable < 1 || minSellable > 240
     ) {
       notifications.warning(
-        'Verifica rangos: hold 1-120, no-show 1-240, buffer 0-120 y mínimo vendible 1-240.',
+        'Verifica rangos: hold 1-120, inasistencia 1-240, buffer 0-120 y mínimo vendible 1-240.',
         {
         dedupeKey: 'citas-params-invalid',
       }
@@ -2219,7 +2219,7 @@ export default function AdminCitasPage() {
 
             <div className="citas-param-row">
               <div className="citas-param-copy">
-                <h4>Tolerancia de no-show (minutos)</h4>
+                <h4>Tolerancia de inasistencia (minutos)</h4>
                 <p>Tiempo maximo de espera antes de marcar como ausente.</p>
               </div>
               <Input

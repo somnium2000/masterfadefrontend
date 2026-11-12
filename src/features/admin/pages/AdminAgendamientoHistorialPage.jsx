@@ -1,4 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+import { getAppointmentStatusLabel } from '../../../lib/appointmentStatus.js';
 import { useNavigate } from 'react-router-dom';
 import { CalendarRange, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { compareAppointmentHistory } from '../lib/adminAppointmentOrdering.js';
@@ -23,19 +24,6 @@ const FILTER_DEFAULTS = {
   fechaHasta: '',
 };
 const HISTORIAL_PAGE_SIZE = 9;
-
-const STATE_LABELS = {
-  en_espera: 'En espera',
-  pendiente_pago: 'Pendiente de pago',
-  confirmada: 'Confirmada',
-  en_salon: 'En salón',
-  en_atencion: 'En atención',
-  completada: 'Completada',
-  cancelada: 'Cancelada',
-  expirada: 'Expirada',
-  no_show: 'No show',
-  anulada: 'Anulada',
-};
 
 function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
@@ -343,7 +331,7 @@ export default function AdminAgendamientoHistorialPage() {
                   avatar={<CalendarRange size={16} />}
                   title={viewInfo.titularNombre}
                   subtitle={`${cita.nombre_barbero || 'Sin registrar'} · ${formatDateTime(cita.inicio_at)}`}
-                  badge={<span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>}
+                  badge={<span className={getStateBadgeClass(cita.estado_cita_codigo)}>{getAppointmentStatusLabel(cita.estado_cita_codigo)}</span>}
                   fields={[
                     { label: 'Sucursal', value: cita.nombre_sucursal || 'Sin registrar' },
                     { label: 'Integrante', value: viewInfo.aliasIntegrante },
@@ -387,7 +375,7 @@ export default function AdminAgendamientoHistorialPage() {
                         {formatDateTime(cita.inicio_at)}
                       </TableCell>
                       <TableCell className="text-center">
-                        <span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span>
+                        <span className={getStateBadgeClass(cita.estado_cita_codigo)}>{getAppointmentStatusLabel(cita.estado_cita_codigo)}</span>
                       </TableCell>
                       <TableCell className="text-right">{formatCurrencyHnl(cita.total_pagar_hnl)}</TableCell>
                       <TableCell className="text-right">
@@ -468,7 +456,7 @@ export default function AdminAgendamientoHistorialPage() {
               <Label className="mf-label">Estado</Label>
               <select className="mf-select mt-1" value={filters.estado} onChange={(event) => updateFilters({ estado: event.target.value })}>
                 <option value="all">Todos</option>
-                {estados.map((estado) => <option key={estado.estado_cita_codigo} value={estado.estado_cita_codigo}>{STATE_LABELS[estado.estado_cita_codigo] || estado.descripcion || estado.estado_cita_codigo}</option>)}
+                {estados.map((estado) => <option key={estado.estado_cita_codigo} value={estado.estado_cita_codigo}>{getAppointmentStatusLabel(estado.estado_cita_codigo)}</option>)}
               </select>
             </div>
             <div>
@@ -502,7 +490,7 @@ export default function AdminAgendamientoHistorialPage() {
               <p>Sucursal: <span className="text-[var(--mf-text)]">{detailDialog.cita?.nombre_sucursal || 'Sin registrar'}</span></p>
               <p>Barbero: <span className="text-[var(--mf-text)]">{detailDialog.cita?.nombre_barbero || 'Sin registrar'}</span></p>
               <p>Fecha y hora: <span className="text-[var(--mf-text)]">{formatDateTime(detailDialog.cita?.inicio_at)}</span></p>
-              <p>Estado: <span className="text-[var(--mf-text)]">{STATE_LABELS[detailDialog.cita?.estado_cita_codigo] || detailDialog.cita?.estado_cita_codigo || 'Sin registrar'}</span></p>
+              <p>Estado: <span className="text-[var(--mf-text)]">{getAppointmentStatusLabel(detailDialog.cita?.estado_cita_codigo)}</span></p>
               <p className="sm:col-span-2">Servicios: <span className="text-[var(--mf-text)]">{getServiciosResumen(detailDialog.cita)}</span></p>
               {getAppointmentDisplayInfo(detailDialog.cita).paqueteNombre ? <p className="sm:col-span-2">Paquete: <span className="text-[var(--mf-text)]">{getAppointmentDisplayInfo(detailDialog.cita).paqueteNombre}</span></p> : null}
               {getAppointmentDisplayInfo(detailDialog.cita).promocionesCount > 0 ? <p>Promociones: <span className="text-[var(--mf-text)]">{getAppointmentDisplayInfo(detailDialog.cita).promocionesCount}</span></p> : null}

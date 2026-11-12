@@ -1,4 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+import { getAppointmentStatusLabel } from '../../../lib/appointmentStatus.js';
 import { CalendarDays, MapPin, Scissors, Wallet } from 'lucide-react';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import {
@@ -147,7 +148,7 @@ function CitaCard({ cita, onOpenDetail }) {
           <p className="mt-1 text-xs text-[var(--mf-text-2)]">{formatDateTime(cita.inicio_at)}</p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className="mf-badge mf-badge-gold">{cita.estado_cita_codigo}</span>
+          <span className="mf-badge mf-badge-gold">{getAppointmentStatusLabel(cita.estado_cita_codigo)}</span>
           <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${tipoChip.className}`}>
             {tipoChip.label}
           </span>
@@ -711,7 +712,7 @@ export default function ClienteHistorialCitasPage() {
             <div className="space-y-3">
               <div className="grid grid-cols-1 gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3 text-sm text-[var(--mf-text-2)] sm:grid-cols-2">
                 <p><span className="font-semibold text-[var(--mf-text)]">Fecha y hora:</span> {formatDateTime(detailCita?.inicio_at)}</p>
-                <p><span className="font-semibold text-[var(--mf-text)]">Estado:</span> {detailCita?.estado_cita_codigo || '-'}</p>
+                <p><span className="font-semibold text-[var(--mf-text)]">Estado:</span> {getAppointmentStatusLabel(detailCita?.estado_cita_codigo)}</p>
                 <p><span className="font-semibold text-[var(--mf-text)]">Sucursal:</span> {detailCita?.nombre_sucursal || '-'}</p>
                 <p><span className="font-semibold text-[var(--mf-text)]">Barbero:</span> {detailCita?.nombre_barbero || '-'}</p>
                 <p><span className="font-semibold text-[var(--mf-text)]">Duración:</span> {Number(detailCita?.duracion_total_min || 0)} min</p>

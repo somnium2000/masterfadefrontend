@@ -36,6 +36,28 @@ beforeEach(() => {
   api.getAdminReportesDashboard.mockResolvedValue({ data: {} });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+test('reportes presenta Inasistencias y conserva la métrica no_show al filtrar', async () => {
+  const summary = Object.freeze({ id_empleado: 'barber-a', nombre_barbero: 'Barbero sintético', servicios_realizados: 7, no_show: 3 });
+  api.getAdminReportesContext.mockResolvedValue({ data: {
+    sucursales: [{ id_sucursal: 'A', nombre_sucursal: 'Sucursal A' }],
+    barberos: [{ id_empleado: 'barber-a', id_sucursal: 'A', nombre_barbero: 'Barbero sintético' }],
+    rango_default: { fechaDesde: '2026-10-01', fechaHasta: '2026-10-20' },
+  } });
+  api.getAdminReportesDashboard.mockResolvedValue({ data: {
+    validacion_datos: { barberos_scope: 1, citas_en_rango: 10, detalles_en_rango: 7 },
+    productividad_barberos: { resumen: [summary] },
+  } });
+  const view = render(<Page moduleType="barberos" />);
+  await waitFor(() => expect(api.getAdminReportesDashboard).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole('button', { name: 'Filtros' })); dates(view.container);
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'barber-a' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }));
+  expect(await screen.findByText('Inasistencias de clientes')).toBeInTheDocument();
+  expect(screen.getByText('Total de inasistencias del periodo')).toBeInTheDocument();
+  expect(view.container.textContent).not.toMatch(/no[-_ ]show|inacistencias/i);
+  expect(summary.no_show).toBe(3); expect(summary.servicios_realizados).toBe(7);
+  expect(api.getAdminReportesDashboard).toHaveBeenCalledWith(expect.objectContaining({ id_barbero: 'barber-a' }), expect.anything());
+});
 
 test('React StrictMode conserva carga vigente y muestra error seguro', async () => {
   api.getAdminReportesDashboard.mockRejectedValue(new Error('SQL secret diagnostic'));

@@ -1,3 +1,4 @@
+import { getAppointmentStatusLabel } from '../../../lib/appointmentStatus.js';
 import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -1953,12 +1954,12 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
             },
             {
               key: 'barberos_analitica_no_show_individual',
-              title: 'Inacistencias de Clientes',
-              subtitle: 'Total de no-show del barbero seleccionado en el periodo.',
+              title: `${getAppointmentStatusLabel('no_show', { metric: true })} de clientes`,
+              subtitle: 'Total de inasistencias del barbero seleccionado en el periodo.',
               primaryValue: hasAppointmentsInRange && noShowBarberTotal > 0
                 ? formatInteger(noShowBarberTotal)
                 : 'Sin datos',
-              primaryValueLabel: 'Total de Inacistencias del periodo',
+              primaryValueLabel: 'Total de inasistencias del periodo',
               rows: hasAppointmentsInRange && noShowBarberTotal > 0
                 ? [{ nombre_barbero: selectedBarberName, no_show: noShowBarberTotal }]
                 : [],
@@ -1966,7 +1967,7 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
               labelKey: 'nombre_barbero',
               formatValue: formatInteger,
               limit: 5,
-              emptyMessage: 'Sin no-show para el barbero seleccionado.',
+              emptyMessage: 'Sin inasistencias para el barbero seleccionado.',
             },
           ];
         } else {
@@ -1992,12 +1993,12 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
             },
             {
               key: 'barberos_analitica_no_show_por_barbero',
-              title: 'Inacistencias de Clientes',
-              subtitle: 'Comparativo de inacistencias por barbero (filtros activos).',
+              title: `${getAppointmentStatusLabel('no_show', { metric: true })} de clientes`,
+              subtitle: 'Comparativo de inasistencias por barbero (filtros activos).',
               primaryValue: hasAppointmentsInRange && totalNoShowPeriodo > 0
                 ? formatInteger(totalNoShowPeriodo)
                 : 'Sin datos',
-              primaryValueLabel: 'Total de Inacistencias del periodo',
+              primaryValueLabel: 'Total de inasistencias del periodo',
               rows: hasAppointmentsInRange && totalNoShowPeriodo > 0
                 ? noShowPorBarberoRows.filter((row) => toInt(row?.no_show) > 0)
                 : [],
@@ -2006,7 +2007,7 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
               formatValue: formatInteger,
               limit: 30,
               emptyMessage: hasBarberScope
-                ? 'Sin no-show registrados en el periodo filtrado.'
+                ? 'Sin inasistencias registradas en el periodo filtrado.'
                 : 'Sin barberos disponibles en el alcance actual.',
             },
           ];
@@ -2080,7 +2081,7 @@ export default function AdminReportesSubmodulePage({ moduleType = 'ingresos' }) 
           columns: [
             { key: 'nombre_barbero', label: 'Barbero' },
             { key: 'servicios_realizados', label: 'Servicios', render: (value) => formatInteger(value) },
-            { key: 'no_show', label: 'No-show', render: (value) => formatInteger(value) },
+            { key: 'no_show', label: getAppointmentStatusLabel('no_show', { metric: true }), render: (value) => formatInteger(value) },
           ],
         },
         barbersAnalysis: {

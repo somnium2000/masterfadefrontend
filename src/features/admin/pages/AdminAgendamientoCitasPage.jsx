@@ -1,4 +1,5 @@
 ﻿import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
+import { getAppointmentStatusLabel } from '../../../lib/appointmentStatus.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { operationalDay, compareAppointmentStart as sortCitasByStart } from '../lib/adminAppointmentOrdering.js';
 import { useNavigate } from 'react-router-dom';
@@ -52,19 +53,6 @@ const FILTER_DEFAULTS = {
 
 const LIVE_REFRESH_DEBOUNCE_MS = 180;
 const AGENDAMIENTO_SELECTED_SUCURSAL_KEY = 'masterfade.admin.agendamiento.selectedSucursalId';
-
-const STATE_LABELS = {
-  en_espera: 'En espera',
-  pendiente_pago: 'Pendiente de pago',
-  confirmada: 'Confirmada',
-  en_salon: 'En salón',
-  en_atencion: 'En atención',
-  completada: 'Completada',
-  cancelada: 'Cancelada',
-  expirada: 'Expirada',
-  no_show: 'No show',
-  anulada: 'Anulada',
-};
 
 const CONTAINER_META = {
   confirmada: { title: 'Confirmadas', subtitle: 'Pendientes de llegada al salón', accent: 'text-sky-300', border: 'border-sky-400/30', surface: 'bg-[color:color-mix(in_srgb,var(--mf-card)_88%,rgba(56,189,248,0.08))]' },
@@ -1062,7 +1050,7 @@ export default function AdminAgendamientoCitasPage() {
           <p>Barbero: <span className="text-[var(--mf-text)]">{cita.nombre_barbero || 'Sin registrar'}</span></p>
           <p>Sucursal: <span className="text-[var(--mf-text)]">{cita.nombre_sucursal || 'Sin registrar'}</span></p>
           <p>Fecha y hora: <span className="text-[var(--mf-text)]">{formatDateTime(cita.inicio_at)}</span></p>
-          <p>Estado: <span className="text-[var(--mf-text)]">{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo || 'Sin registrar'}</span></p>
+          <p>Estado: <span className="text-[var(--mf-text)]">{getAppointmentStatusLabel(cita.estado_cita_codigo)}</span></p>
           <p>Servicios: <span className="text-[var(--mf-text)]">{serviciosLegibles.length ? serviciosLegibles.join(' · ') : 'Sin servicios registrados'}</span></p>
           {viewInfo.paqueteNombre ? <p>Paquete: <span className="text-[var(--mf-text)]">{viewInfo.paqueteNombre}</span></p> : null}
           {viewInfo.promocionesCount > 0 ? <p>Promoción: <span className="text-[var(--mf-text)]">{viewInfo.promocionesCount} aplicada(s)</span></p> : null}
@@ -1104,7 +1092,7 @@ export default function AdminAgendamientoCitasPage() {
     return <div className="space-y-3">{items.map((cita) => {
       const info = getAppointmentDisplayInfo(cita);
       return <article key={cita.id_cita} className="min-w-0 rounded-[22px] border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm text-[var(--mf-text-2)]">Integrante</span><span className={getStateBadgeClass(cita.estado_cita_codigo)}>{STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</span></div>
+        <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm text-[var(--mf-text-2)]">Integrante</span><span className={getStateBadgeClass(cita.estado_cita_codigo)}>{getAppointmentStatusLabel(cita.estado_cita_codigo)}</span></div>
         <h3 className="mt-4 break-words text-base font-semibold text-[var(--mf-text)]">{info.aliasIntegrante}</h3>
         <p className="mt-1 text-base font-semibold text-[var(--mf-text)]">{formatCurrencyHnl(cita.total_pagar_hnl)}</p>
         {renderReservationCode(cita)}
@@ -1319,7 +1307,7 @@ export default function AdminAgendamientoCitasPage() {
           <form onSubmit={lookupReservation} className="flex flex-wrap gap-2"><Label htmlFor="reservation-code" className="w-full">Código de reserva</Label><Input id="reservation-code" value={reservationCode} onChange={(event) => { reservationRequest.current?.abort(); setReservationLoading(false); setReservationCode(event.target.value.toUpperCase()); setReservationResults(null); }} maxLength={5} autoCapitalize="characters" autoComplete="off" className="min-w-0 flex-1" /><Button type="submit" disabled={reservationLoading}>{reservationLoading ? 'Buscando…' : 'Buscar'}</Button></form>
           <div role="status" aria-live="polite">{reservationError ? <p className="text-sm text-[var(--mf-text-2)]">{reservationError}</p> : null}{reservationResults?.length === 0 ? <p>No hay reservas coincidentes dentro de tu alcance.</p> : null}</div>
           {reservationResults?.length > 1 ? <p className="text-sm text-[var(--mf-text-2)]">El código coincide con varias reservas. Verifica titular y fecha.</p> : null}
-          {reservationResults?.map((group) => <section key={group.id_grupo_cita} className="rounded-2xl border border-[var(--mf-nav-border)] p-3"><h3 className="font-semibold text-[var(--mf-accent)]">Reserva {group.codigo_reserva}</h3>{group.citas.map((cita) => <div key={cita.id_cita} className="border-b border-[var(--mf-nav-border)] py-3 last:border-0"><p className="break-words font-semibold">{getAppointmentDisplayInfo(cita).aliasIntegrante}</p><p className="text-sm">Titular: {getAppointmentDisplayInfo(cita).titularNombre}</p><p className="text-sm">{formatDateTime(cita.inicio_at)} · {cita.nombre_barbero}</p><p className="text-sm">{getServicioResumen(cita)} · {STATE_LABELS[cita.estado_cita_codigo] || cita.estado_cita_codigo}</p>{VISIBLE_OPERATIONAL_STATES.includes(cita.estado_cita_codigo) ? <div className="mt-2">{renderItemActions(cita, { compact: true })}</div> : null}{renderSecondaryActions(cita)}{renderCitaDetail(cita, false)}</div>)}</section>)}
+          {reservationResults?.map((group) => <section key={group.id_grupo_cita} className="rounded-2xl border border-[var(--mf-nav-border)] p-3"><h3 className="font-semibold text-[var(--mf-accent)]">Reserva {group.codigo_reserva}</h3>{group.citas.map((cita) => <div key={cita.id_cita} className="border-b border-[var(--mf-nav-border)] py-3 last:border-0"><p className="break-words font-semibold">{getAppointmentDisplayInfo(cita).aliasIntegrante}</p><p className="text-sm">Titular: {getAppointmentDisplayInfo(cita).titularNombre}</p><p className="text-sm">{formatDateTime(cita.inicio_at)} · {cita.nombre_barbero}</p><p className="text-sm">{getServicioResumen(cita)} · {getAppointmentStatusLabel(cita.estado_cita_codigo)}</p>{VISIBLE_OPERATIONAL_STATES.includes(cita.estado_cita_codigo) ? <div className="mt-2">{renderItemActions(cita, { compact: true })}</div> : null}{renderSecondaryActions(cita)}{renderCitaDetail(cita, false)}</div>)}</section>)}
         </DialogContent>
       </Dialog>
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>

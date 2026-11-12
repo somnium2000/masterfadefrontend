@@ -5,12 +5,13 @@ import { MemoryRouter } from 'react-router-dom';
 import Page from '../AdminAgendamientoCitasPage.jsx';
 import History from '../AdminAgendamientoHistorialPage.jsx';
 import { operationalDay, compareAppointmentStart, compareAppointmentHistory } from '../../lib/adminAppointmentOrdering.js';
+const labels=[['en_espera','En espera'],['pendiente_pago','Pendiente de pago'],['confirmada','Confirmada'],['en_salon','En salón'],['en_atencion','En atención'],['completada','Completada'],['cancelada','Cancelada'],['cancelada_por_cliente','Cancelada por el cliente'],['expirada','Expirada'],['no_show','No asistió'],['anulada','Anulada']];
 
 const mock = vi.hoisted(()=>({list:vi.fn(),history:vi.fn(),search:vi.fn(),notify:vi.fn()}));
 vi.mock('../../../../context/AuthContext.jsx',()=>({useAuth:()=>({isAuthenticated:true,invalidateSession:mock.notify})}));
 vi.mock('../../../../context/NotificationsContext.jsx',()=>({useNotifications:()=>({warning:mock.notify,error:mock.notify,success:mock.notify})}));
 vi.mock('../../lib/adminCitasApi.js',()=>({
-  getAdminCitasOperativasContexto:async()=>({data:{sucursales:[{id_sucursal:'branch',nombre_sucursal:'Sucursal'}],barberos:[]}}),
+  getAdminCitasOperativasContexto:async()=>({data:{sucursales:[{id_sucursal:'branch',nombre_sucursal:'Sucursal'}],barberos:[],estados:labels.map(([estado_cita_codigo])=>({estado_cita_codigo,descripcion:estado_cita_codigo}))}}),
   listAdminCitasOperativas:mock.list,searchAdminReservation:mock.search,
   listAdminCitasHistorial:mock.history,
   listAdminCitasAfectadasReagendacion:vi.fn(),listPublicAgendaHorarios:vi.fn(),
@@ -25,6 +26,22 @@ beforeEach(()=>{
 });
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
 const flush=async()=>{await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});};
+for(const view of ['cards','table'])test.each(labels)(view+': estado %s legible en historial, detalle y filtro',async(code,label)=>{
+ localStorage.setItem('mf-view-agendamiento-historial',view);
+ const cita=row('Cliente fixture','2026-11-15T14:00:00Z',code);
+ mock.history.mockReset().mockResolvedValue({data:{citas:[cita]}});
+ render(<MemoryRouter><History/></MemoryRouter>);await flush();
+ expect(screen.getAllByText(label,{exact:true}).length).toBeGreaterThan(0);
+ fireEvent.click(screen.getByRole('button',{name:'Ver detalle',exact:true}));await flush();
+ expect(screen.getByRole('dialog').textContent).toContain('Estado: '+label);
+ expect(screen.getByRole('dialog').textContent).not.toMatch(/no_show|en_salon|en_atencion|pendiente_pago|cancelada_por_cliente/);
+ fireEvent.click(screen.getAllByRole('button',{name:'Cerrar',exact:true})[0]);await flush();
+ fireEvent.click(screen.getByRole('button',{name:/^Filtros/}));
+ const select=[...document.querySelectorAll('select')].find(node=>[...node.options].some(option=>option.value==='no_show'));
+ for(const [value,text]of labels)expect([...select.options].find(option=>option.value===value).textContent).toBe(text);
+ fireEvent.change(select,{target:{value:code}});await flush();
+ expect(mock.history.mock.calls.at(-1)[0].estado).toBe(code);expect(cita.estado_cita_codigo).toBe(code);
+});
 
 test.each([['cards',390],['table',1440]])('%s a %ipx: orden de hoy, no ayer/mañana en todos los estados',async(view,width)=>{
   Object.defineProperty(window,'innerWidth',{value:width,configurable:true});

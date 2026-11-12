@@ -18,6 +18,16 @@ beforeEach(()=>{
   fixture.completed.mockReset().mockResolvedValue({data:{citas:[]}});
 });
 afterEach(()=>{cleanup();vi.useRealTimers();});
+test('insignias legibles conservan colores, códigos y conteo diario',async()=>{
+ const cases=[['confirmada','Confirmada','text-emerald-300'],['en_salon','En salón','text-amber-300'],['en_atencion','En atención','text-indigo-300'],['en_espera','En espera','text-sky-300'],['pendiente_pago','Pendiente de pago','text-[var(--mf-accent)]']];
+ const rows=cases.map(([state],i)=>row('Cliente '+i,state));fixture.list.mockResolvedValue({data:{citas:rows}});
+ render(<Page/>);await flush();expect(stats()).toEqual([5,0,5]);
+ for(const [,label,color]of cases){
+  const badges=screen.getAllByText(label,{exact:true});expect(badges.length).toBeGreaterThan(0);
+  expect(badges.some(node=>node.classList.contains(color))).toBe(true);
+ }
+ expect(rows.map(r=>r.estado_cita_codigo)).toEqual(cases.map(([state])=>state));
+});
 test('cuenta únicos de la jornada y del barbero: total = completadas + restantes',async()=>{
   const active=['confirmada','en_salon','en_atencion'].map(state=>row(state,state));
   const foreign=['confirmada','en_salon','en_atencion','completada'].flatMap(state=>[

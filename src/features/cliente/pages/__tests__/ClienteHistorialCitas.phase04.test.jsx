@@ -24,13 +24,28 @@ for(const date of ['2020-11-13T05:30:00Z','2040-11-13T05:30:00Z'])test('11 estad
  for(const state of active)expect(screen.getAllByText('Reserva '+state,{exact:true})).toHaveLength(2);
  for(const state of history)expect(screen.queryByText('Reserva '+state,{exact:true})).toBeNull();
  fireEvent.click(screen.getAllByText('Reserva en_atencion',{exact:true})[0]);
- await screen.findByRole('heading',{name:'Detalle de cita'});await waitFor(()=>expect(screen.getByRole('dialog').textContent).toContain('en_atencion'));
+ await screen.findByRole('heading',{name:'Detalle de cita'});await waitFor(()=>expect(screen.getByRole('dialog').textContent).toContain('Estado: En atención'));
  expect(screen.getByRole('dialog').textContent).toMatch(/12 nov.*11:30|12 nov.*23:30/i);
  fireEvent.click(screen.getByRole('button',{name:'Cerrar',exact:true}));
  fireEvent.click(screen.getByRole('button',{name:'Historial (6)'}));
  for(const state of history)expect(screen.getAllByText('Reserva '+state,{exact:true})).toHaveLength(2);
  for(const state of active)expect(screen.queryByText('Reserva '+state,{exact:true})).toBeNull();
  expect(fixture.get.mock.calls[0]).toEqual(['/v1/citas']);
+});
+test.each([
+ ['en_espera','En espera'],['pendiente_pago','Pendiente de pago'],['confirmada','Confirmada'],
+ ['en_salon','En salón'],['en_atencion','En atención'],['completada','Completada'],
+ ['cancelada','Cancelada'],['cancelada_por_cliente','Cancelada por el cliente'],
+ ['expirada','Expirada'],['no_show','No asistió'],['anulada','Anulada'],
+])('Cliente: %s legible en tarjeta y detalle; contrato intacto',async(code,label)=>{
+ rows=[{...row(code,'2026-11-15T14:00:00Z'),nombre_sucursal:'Sucursal fixture'}];await mount();
+ if(history.includes(code))fireEvent.click(screen.getByRole('button',{name:'Historial (1)'}));
+ expect(screen.getAllByText(label,{exact:true})).toHaveLength(2);
+ fireEvent.click(screen.getAllByText('Sucursal fixture',{exact:true})[0]);
+ await waitFor(()=>expect(screen.getByRole('dialog').textContent).toContain('Estado: '+label));
+ expect(fixture.get).toHaveBeenCalledWith('/v1/citas/'+code);
+ expect(rows[0].estado_cita_codigo).toBe(code);
+ expect(screen.getByRole('dialog').textContent).not.toMatch(/no_show|en_salon|en_atencion|pendiente_pago|cancelada_por_cliente/);
 });
 test('recuperación pendiente conserva intención existente y navegación',async()=>{
  rows=[row('pendiente_pago','2020-11-13T05:30:00Z')];
@@ -40,4 +55,16 @@ test('recuperación pendiente conserva intención existente y navegación',async
  fireEvent.click(screen.getAllByRole('button',{name:'Continuar pago'}).at(-1));await screen.findByText('Recuperación existente');
  expect(fixture.post).toHaveBeenCalledExactlyOnceWith('/v1/citas/pendiente/group/retomar',{});
  expect(JSON.parse(sessionStorage.getItem('mf_pending_payment_context_v1')).id_intent).toBe('existing');
+});
+test('cancelación pendiente conserva confirmación y código interno original',async()=>{
+ rows=[{...row('pendiente_pago','2026-11-15T14:00:00Z'),nombre_sucursal:'Sucursal fixture'}];
+ fixture.get.mockImplementation(async url=>({data:url.endsWith('/pendiente')?{pendiente:{id_grupo_cita:'group',citas:[],total_pendiente_hnl:100}}:{citas:rows}}));
+ fixture.post.mockResolvedValue({data:{}});await mount();
+ fireEvent.click(await screen.findByRole('button',{name:'Descartar reserva pendiente'}));
+ await screen.findByRole('heading',{name:'Reserva pendiente de pago'});
+ expect(fixture.post).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'Sí, descartar reserva'}));
+ await waitFor(()=>expect(fixture.post).toHaveBeenCalledExactlyOnceWith('/v1/citas/pendiente/group/descartar',{}));
+ expect(rows[0].estado_cita_codigo).toBe('pendiente_pago');
+ expect(fixture.notify).toHaveBeenCalledWith('Reserva pendiente descartada correctamente.');
 });
