@@ -76,3 +76,40 @@ test('fechas UTC distintas respetan Honduras; historial desempata por ID descend
   expect([...data].sort(compareAppointmentStart).map(x=>x.id_cita)).toEqual(['a','b','c']);
   expect([...data].sort(compareAppointmentHistory).map(x=>x.id_cita)).toEqual(['c','b','a']);
 });
+const serviceCases=[
+  ['un servicio', {servicios_detalle:[{nombre_servicio:'Corte cabello'}]}, ['Corte cabello']],
+  ['varios servicios y duplicados entre formatos', {
+    servicios_detalle:[{nombre_servicio:'Corte cabello'},{nombre_servicio:'Barba'},{nombre_servicio:'Lavado'}],
+    servicios_manual:[{nombre_servicio_snapshot:' Corte cabello '}],
+    servicios_extra:['Barba'],servicios_incluidos:[{nombre:'Lavado'}],
+  }, ['Corte cabello','Barba','Lavado']],
+  ['formato anterior', {
+    servicios_manual:[{nombre_servicio_snapshot:'Corte cabello'},{servicio_nombre:'Barba'}],
+    servicios_incluidos:['Lavado'],servicios_extra:[{nombre:'Corte cabello'}],
+  }, ['Corte cabello','Barba','Lavado']],
+  ['sin servicios', {servicios_detalle:null,servicios_manual:[],servicios_extra:null,servicios_incluidos:[]}, []],
+];
+for(const [view,width] of [['cards',390],['table',390],['cards',1440],['table',1440]]){
+  test.each(serviceCases)(view+' '+width+': %s en resumen y Ver detalle',async(_label,fields,names)=>{
+    Object.defineProperty(window,'innerWidth',{value:width,configurable:true});
+    localStorage.setItem('mf-view-agendamiento-citas',view);
+    mock.list.mockResolvedValue({data:{citas:[{
+      ...row('Reserva sintética','2026-11-12T14:00:00Z'),...fields,
+    }]}});
+    render(<MemoryRouter><Page/></MemoryRouter>);await flush();
+    const summary=names.length>1?names[0]+' + '+(names.length-1)+' más':names[0]||'Sin servicios registrados';
+    const surfaces=[...document.querySelectorAll(view==='cards'?'article':'tbody tr')];
+    expect(surfaces.length).toBeGreaterThan(0);
+    for(const surface of surfaces){
+      const detail=surface.querySelector('details');
+      expect(detail).not.toBeNull();
+      expect(detail.querySelector('summary').textContent).toBe('Ver detalle');
+      fireEvent.click(detail.querySelector('summary'));
+      const services=[...detail.querySelectorAll('p')].find(node=>node.textContent.startsWith('Servicios: '));
+      expect(services.querySelector('span').textContent).toBe(names.length?names.join(' · '):'Sin servicios registrados');
+      const compact=[...surface.querySelectorAll('p')].filter(node=>!node.closest('details')).map(node=>node.textContent);
+      expect(compact.some(text=>text===summary||text==='Servicio: '+summary)).toBe(true);
+      if(names.length)expect(surface.textContent).not.toContain('Sin servicios registrados');
+    }
+  });
+}

@@ -233,10 +233,11 @@ function getServicioNombre(item) {
 }
 
 function getServiciosLegibles(cita) {
+  const serviciosDetalle = Array.isArray(cita?.servicios_detalle) ? cita.servicios_detalle : [];
   const serviciosManual = Array.isArray(cita?.servicios_manual) ? cita.servicios_manual : [];
   const serviciosIncluidos = Array.isArray(cita?.servicios_incluidos) ? cita.servicios_incluidos : [];
   const serviciosExtra = Array.isArray(cita?.servicios_extra) ? cita.servicios_extra : [];
-  const servicios = [...serviciosManual, ...serviciosIncluidos, ...serviciosExtra];
+  const servicios = [...serviciosDetalle, ...serviciosManual, ...serviciosIncluidos, ...serviciosExtra];
   const nombres = servicios.map(getServicioNombre).filter(Boolean);
   return [...new Set(nombres)];
 }
@@ -1074,6 +1075,8 @@ export default function AdminAgendamientoCitasPage() {
                     <p className="font-semibold text-[var(--mf-accent)]">{cita.id_grupo_cita ? buildBookingShortCode(cita.id_grupo_cita, 5) : 'Sin grupo de reserva'}</p>
                     {viewInfo.titularNombre}
                     <p className="text-xs text-[var(--mf-text-2)]">{viewInfo.aliasIntegrante}</p>
+                    <p className="text-xs text-[var(--mf-text-2)]">{getServicioResumen(cita)}</p>
+                    {renderCitaDetail(cita, false)}
                     {cita.telefono_cliente ? <p className="text-xs text-[var(--mf-text-2)]">{cita.telefono_cliente}</p> : null}
                   </TableCell>
                   <TableCell>
