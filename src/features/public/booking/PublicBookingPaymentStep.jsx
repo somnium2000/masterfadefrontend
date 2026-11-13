@@ -1,5 +1,5 @@
 import { ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../../../components/ui/button.jsx';
 import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import { formatCurrencyHnl, formatDateOnly, formatTime12Hour, normalizeBookingPaymentUiState } from './bookingUtils.js';
@@ -20,6 +20,7 @@ const TODO_PAGO_SIMULATION_SCENARIOS = [
   { value: '1.56', label: 'CVV incorrecto (1.56)' },
   { value: '1.57', label: 'Timeout (1.57)' },
 ];
+const TODO_PAGO_APPROVED_SIMULATION_AMOUNT = TODO_PAGO_SIMULATION_SCENARIOS[0].value;
 const INITIAL_PAYMENT_FORM = {
   cardholderName: '',
   phone: '',
@@ -263,7 +264,7 @@ function normalizePaymentProvider(value) {
 }
 
 export function resolvePaymentSimulationAction({
-  hostname = typeof window !== 'undefined' ? window.location?.hostname : '',
+  hostname = typeof globalThis !== 'undefined' ? globalThis.location?.hostname : '',
   provider = import.meta.env.VITE_PAYMENT_PROVIDER || import.meta.env.VITE_PAYMENT_PROVIDER_CODE || '',
   mockEnabled = import.meta.env.VITE_ENABLE_MOCK_PAYMENT,
   simulatorEnabled = import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR,
@@ -297,6 +298,20 @@ export function resolvePaymentSimulationAction({
   }
 
   return action;
+}
+
+export function resolveQaVideoDemoMode({
+  hostname = typeof globalThis !== 'undefined' ? globalThis.location?.hostname : '',
+  provider = import.meta.env.VITE_PAYMENT_PROVIDER || import.meta.env.VITE_PAYMENT_PROVIDER_CODE || '',
+  simulatorEnabled = import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR,
+  qaSimulatorEnabled = import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION,
+  videoDemoEnabled = import.meta.env.VITE_QA_VIDEO_DEMO_MODE,
+} = {}) {
+  return isQaHostname(hostname)
+    && normalizePaymentProvider(provider) === 'todopago'
+    && readEnvFlag(simulatorEnabled)
+    && readEnvFlag(qaSimulatorEnabled)
+    && readEnvFlag(videoDemoEnabled);
 }
 
 function launchIsExpired(launch) {
@@ -334,6 +349,7 @@ export default function PublicBookingPaymentStep() {
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const paymentSubmissionInFlightRef = useRef(false);
   const [hostedModalOpen, setHostedModalOpen] = useState(false);
   const [hostedResultReceived, setHostedResultReceived] = useState(false);
   const [hostedModalError, setHostedModalError] = useState(null);
@@ -347,18 +363,20 @@ export default function PublicBookingPaymentStep() {
   }, [registerPaymentNavigation, paymentFormDirty, processingPayment, loadingIntent, creatingPaymentIntent]);
   const reconciliationNotice = getPixelPayReconciliationNotice(paymentResult);
   const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(() => {
-    if (typeof window === 'undefined') return TODO_PAGO_SIMULATION_SCENARIOS[0].value;
+    if (typeof window === 'undefined') return TODO_PAGO_APPROVED_SIMULATION_AMOUNT;
     try {
       const stored = String(window.sessionStorage.getItem(TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY) || '').trim();
       return TODO_PAGO_SIMULATION_SCENARIOS.some((scenario) => scenario.value === stored)
         ? stored
-        : TODO_PAGO_SIMULATION_SCENARIOS[0].value;
+        : TODO_PAGO_APPROVED_SIMULATION_AMOUNT;
     } catch {
-      return TODO_PAGO_SIMULATION_SCENARIOS[0].value;
+      return TODO_PAGO_APPROVED_SIMULATION_AMOUNT;
     }
   });
   const paymentSimulationAction = resolvePaymentSimulationAction();
   const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
+  const qaVideoDemoMode = resolveQaVideoDemoMode();
+  const usesProductionCheckoutDesign = isPixelPayProvider || qaVideoDemoMode;
   const pixelPayPresentation = getPixelPayPresentation();
   const paymentUiState = normalizeBookingPaymentUiState({
     paymentIntent,
@@ -529,7 +547,7 @@ export default function PublicBookingPaymentStep() {
   };
 
   const handleMockPay = async () => {
-    if (processingPayment || paymentRestoring || !paymentCanExecuteSale) return;
+    if (paymentSubmissionInFlightRef.current || processingPayment || paymentRestoring || !paymentCanExecuteSale) return;
     const validationErrors = validatePaymentForm(
       paymentForm,
       new Date(),
@@ -541,11 +559,15 @@ export default function PublicBookingPaymentStep() {
       return;
     }
 
+    paymentSubmissionInFlightRef.current = true;
     setProcessingPayment(true);
     try {
       if (typeof window !== 'undefined') {
         if (paymentSimulationAction.type === 'simulator') {
-          window.sessionStorage.setItem(TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY, selectedSimulationAmount);
+          window.sessionStorage.setItem(
+            TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY,
+            qaVideoDemoMode ? TODO_PAGO_APPROVED_SIMULATION_AMOUNT : selectedSimulationAmount,
+          );
         } else {
           window.sessionStorage.removeItem(TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY);
         }
@@ -571,6 +593,7 @@ export default function PublicBookingPaymentStep() {
       }
     } finally {
       resetSensitiveFields();
+      paymentSubmissionInFlightRef.current = false;
       setProcessingPayment(false);
     }
   };
@@ -600,10 +623,10 @@ export default function PublicBookingPaymentStep() {
   })();
 
   return (
-    <div className={`citas-confirm-wrap public-booking-payment-wrap ${isPixelPayProvider ? 'mf-checkout' : ''}`}>
+    <div className={`citas-confirm-wrap public-booking-payment-wrap ${usesProductionCheckoutDesign ? 'mf-checkout' : ''}`}>
       <div className="citas-surface p-3 sm:p-5">
-        {isPixelPayProvider ? (
-          <><PaymentCheckoutHero /><PaymentCheckoutSteps processing={processingPayment || pixelPayPendingConfirmation || paymentRestoring} confirmed={paymentResult?.booking_confirmed === true} /></>
+        {usesProductionCheckoutDesign ? (
+          <><PaymentCheckoutHero commercialPreview={qaVideoDemoMode} /><PaymentCheckoutSteps processing={processingPayment || pixelPayPendingConfirmation || paymentRestoring} confirmed={paymentResult?.booking_confirmed === true} /></>
         ) : (
         <BookingStepHeader
           title="Pasarela de pago segura"
@@ -617,7 +640,7 @@ export default function PublicBookingPaymentStep() {
           subtitleClassName="citas-selected-date mt-2"
         />
         )}
-        {!isPixelPayProvider ? (
+        {!usesProductionCheckoutDesign ? (
         <div className="mt-3 grid gap-2 sm:gap-3">
           <div className="public-booking-payment-note">
             <ShieldCheck size={14} />
@@ -652,9 +675,9 @@ export default function PublicBookingPaymentStep() {
 
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
           {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
-            <div className="public-booking-contact-card public-booking-payment-gateway-card">
+            <div className="public-booking-contact-card public-booking-payment-gateway-card" aria-busy={processingPayment}>
             <h4 className="citas-confirm-subtitle mt-4">
-              {paymentSimulationAction.type === 'pixelpay' ? 'Información de pago' : 'Datos para la simulacion'}
+              {qaVideoDemoMode ? 'Datos de pago' : paymentSimulationAction.type === 'pixelpay' ? 'Información de pago' : 'Datos para la simulacion'}
             </h4>
             <div className="public-booking-form-row mt-2">
               <label className="mf-label" htmlFor="pay-cardholder-name">Nombre del titular</label>
@@ -663,13 +686,14 @@ export default function PublicBookingPaymentStep() {
                 className="mf-input"
                 placeholder="Ej. Carlos Ramirez"
                 autoComplete="cc-name"
+                disabled={processingPayment}
                 value={paymentForm.cardholderName}
                 onChange={handleFieldChange('cardholderName')}
               />
               {fieldErrors.cardholderName ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.cardholderName}</p> : null}
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-card-number">Numero de tarjeta</label>
+              <label className="mf-label" htmlFor="pay-card-number">{qaVideoDemoMode ? 'Tarjeta de prueba' : 'Numero de tarjeta'}</label>
               <input
                 id="pay-card-number"
                 className="mf-input"
@@ -677,6 +701,7 @@ export default function PublicBookingPaymentStep() {
                 autoComplete="cc-number"
                 inputMode="numeric"
                 maxLength={23}
+                disabled={processingPayment}
                 value={paymentForm.cardNumber}
                 onChange={handleFieldChange('cardNumber')}
               />
@@ -689,13 +714,14 @@ export default function PublicBookingPaymentStep() {
             </div>
             <div className="mt-2 grid gap-3 md:grid-cols-2">
               <div className="public-booking-form-row">
-                <label className="mf-label" htmlFor="pay-expiry">Expiracion</label>
+                <label className="mf-label" htmlFor="pay-expiry">{qaVideoDemoMode ? 'Vencimiento' : 'Expiracion'}</label>
                 <input
                   id="pay-expiry"
                   className="mf-input"
                   placeholder="MM/AA"
                   autoComplete="cc-exp"
                   inputMode="numeric"
+                  disabled={processingPayment}
                   value={paymentForm.expiry}
                   onChange={handleFieldChange('expiry')}
                 />
@@ -711,6 +737,7 @@ export default function PublicBookingPaymentStep() {
                   autoComplete="cc-csc"
                   inputMode="numeric"
                   maxLength={4}
+                  disabled={processingPayment}
                   value={paymentForm.cvv}
                   onChange={handleFieldChange('cvv')}
                 />
@@ -718,7 +745,7 @@ export default function PublicBookingPaymentStep() {
               </div>
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-receipt-email">Correo del titular para comprobante</label>
+              <label className="mf-label" htmlFor="pay-receipt-email">{qaVideoDemoMode ? 'Correo para comprobante' : 'Correo del titular para comprobante'}</label>
               <input
                 id="pay-receipt-email"
                 className="mf-input"
@@ -730,13 +757,14 @@ export default function PublicBookingPaymentStep() {
               <p className="mt-1 text-xs text-[var(--mf-text-2)]">Se usa el correo ya validado del titular de la reserva.</p>
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-phone">Telefono de contacto</label>
+              <label className="mf-label" htmlFor="pay-phone">{qaVideoDemoMode ? 'Teléfono de contacto' : 'Telefono de contacto'}</label>
               <input
                 id="pay-phone"
                 className="mf-input"
                 placeholder="99999999"
                 autoComplete="tel"
                 inputMode="tel"
+                disabled={processingPayment}
                 value={paymentForm.phone}
                 onChange={handleFieldChange('phone')}
               />
@@ -746,18 +774,18 @@ export default function PublicBookingPaymentStep() {
               <>
                 <div className="public-booking-form-row mt-2">
                   <label className="mf-label" htmlFor="pay-billing-address">Direccion de facturacion</label>
-                  <input id="pay-billing-address" className="mf-input" autoComplete="street-address" value={paymentForm.billingAddress} onChange={handleFieldChange('billingAddress')} />
+                  <input id="pay-billing-address" className="mf-input" autoComplete="street-address" disabled={processingPayment} value={paymentForm.billingAddress} onChange={handleFieldChange('billingAddress')} />
                   {fieldErrors.billingAddress ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingAddress}</p> : null}
                 </div>
                 <div className="mf-checkout-billing mt-2 grid gap-3">
                   <div className="public-booking-form-row">
                     <label className="mf-label" htmlFor="pay-billing-city">Ciudad</label>
-                    <input id="pay-billing-city" className="mf-input" autoComplete="address-level2" value={paymentForm.billingCity} onChange={handleFieldChange('billingCity')} />
+                    <input id="pay-billing-city" className="mf-input" autoComplete="address-level2" disabled={processingPayment} value={paymentForm.billingCity} onChange={handleFieldChange('billingCity')} />
                     {fieldErrors.billingCity ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingCity}</p> : null}
                   </div>
                   <div className="public-booking-form-row">
                     <label className="mf-label" htmlFor="pay-billing-state">Departamento</label>
-                    <select id="pay-billing-state" className="mf-select" autoComplete="address-level1" value={paymentForm.billingState} onChange={handleFieldChange('billingState')}>
+                    <select id="pay-billing-state" className="mf-select" autoComplete="address-level1" disabled={processingPayment} value={paymentForm.billingState} onChange={handleFieldChange('billingState')}>
                       {HONDURAS_DEPARTMENTS.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
                     </select>
                     {fieldErrors.billingState ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingState}</p> : null}
@@ -771,18 +799,22 @@ export default function PublicBookingPaymentStep() {
               </>
             ) : null}
             <div className="mt-3 rounded-xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-3 text-xs leading-relaxed text-[var(--mf-text-2)]">
-              {paymentSimulationAction.type === 'pixelpay'
+              {qaVideoDemoMode
+                ? 'Usa únicamente datos de prueba. No ingreses una tarjeta real; la información se elimina al terminar.'
+                : paymentSimulationAction.type === 'pixelpay'
                 ? pixelPayPresentation.privacyNotice
                 : 'Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.'}
             </div>
             </div>
-          ) : isPixelPayProvider ? (
+          ) : usesProductionCheckoutDesign ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
               <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
                 <ShieldCheck size={30} className="text-[var(--mf-accent)]" />
-                <h4 className="citas-confirm-subtitle">{pixelPayPresentation.paymentTitle}</h4>
+                <h4 className="citas-confirm-subtitle">{qaVideoDemoMode ? 'Confirmando tu pago' : pixelPayPresentation.paymentTitle}</h4>
                 <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
-                  Estamos verificando el resultado del pago con PixelPay. No vuelvas a realizar el pago.
+                  {qaVideoDemoMode
+                    ? 'Estamos verificando el resultado del pago. No vuelvas a realizarlo.'
+                    : 'Estamos verificando el resultado del pago con PixelPay. No vuelvas a realizar el pago.'}
                 </p>
               </div>
             </div>
@@ -860,7 +892,7 @@ export default function PublicBookingPaymentStep() {
               <ShieldCheck size={14} />
               <span>{hostedStatusText}</span>
             </div>
-            {!paymentIntent?.id_intent ? (
+            {!paymentIntent?.id_intent && !qaVideoDemoMode ? (
               <Button className="mt-3 w-full gap-2 sm:w-auto" onClick={handleCreateIntent} disabled={loadingIntent || creatingPaymentIntent}>
                 {loadingIntent || creatingPaymentIntent ? <Loader2 size={16} className="animate-spin" /> : null}
                 Crear intento de pago
@@ -869,14 +901,15 @@ export default function PublicBookingPaymentStep() {
               <div className="mt-3 space-y-2 break-words text-sm leading-relaxed text-[var(--mf-text-2)] public-booking-payment-meta">
                 <p>Estado: {paymentUiState.text}</p>
                 <p>Monto: {paymentRestoring ? 'Verificando...' : formatCurrencyHnl(effectiveTotalToPay)}</p>
-                <p>Intent: {paymentIntent.id_intent}</p>
-                <p>Proveedor: {paymentSimulationAction.provider || 'no_configurado'}</p>
+                {!qaVideoDemoMode ? <p>Intent: {paymentIntent.id_intent}</p> : null}
+                {!qaVideoDemoMode ? <p>Proveedor: {paymentSimulationAction.provider || 'no_configurado'}</p> : null}
                 {reconciliationNotice ? (
                   <p role="status" className="rounded-lg border border-[var(--mf-warning)]/40 bg-[var(--mf-warning)]/10 p-3 font-medium text-[var(--mf-text-1)]">
                     {reconciliationNotice}
                   </p>
                 ) : null}
-                {paymentSimulationAction.canShow
+                {!qaVideoDemoMode
+                  && paymentSimulationAction.canShow
                   && paymentIntent.launch?.type === 'redirect'
                   && paymentIntent.launch?.action ? (
                   <a
@@ -902,16 +935,18 @@ export default function PublicBookingPaymentStep() {
                   Continuar con TodoPago
                 </Button>
               ) : null}
-              <Button
-                className="w-full sm:w-auto"
-                variant="outline"
-                onClick={handleVerifyPaymentStatus}
-                disabled={!paymentIntent?.id_intent || checkingPaymentStatus}
-              >
-                {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
-                Verificar estado del pago
-              </Button>
-              {paymentSimulationAction.canShow && paymentSimulationAction.type === 'simulator' ? (
+              {!qaVideoDemoMode ? (
+                <Button
+                  className="w-full sm:w-auto"
+                  variant="outline"
+                  onClick={handleVerifyPaymentStatus}
+                  disabled={!paymentIntent?.id_intent || checkingPaymentStatus}
+                >
+                  {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
+                  Verificar estado del pago
+                </Button>
+              ) : null}
+              {paymentSimulationAction.canShow && paymentSimulationAction.type === 'simulator' && !qaVideoDemoMode ? (
                 <div className="flex w-full min-w-0 flex-col gap-1 sm:min-w-[220px] sm:flex-1">
                   <label className="mf-label text-left text-[11px]" htmlFor="booking-simulator-scenario">
                     Escenario simulator
@@ -920,7 +955,7 @@ export default function PublicBookingPaymentStep() {
                     id="booking-simulator-scenario"
                     className="mf-select"
                     value={selectedSimulationAmount}
-                    onChange={(event) => setSelectedSimulationAmount(String(event.target.value || TODO_PAGO_SIMULATION_SCENARIOS[0].value))}
+                    onChange={(event) => setSelectedSimulationAmount(String(event.target.value || TODO_PAGO_APPROVED_SIMULATION_AMOUNT))}
                     disabled={processingPayment}
                   >
                     {TODO_PAGO_SIMULATION_SCENARIOS.map((scenario) => (
@@ -936,7 +971,11 @@ export default function PublicBookingPaymentStep() {
                   disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation || !paymentCanExecuteSale}
                 >
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
-                  {paymentSimulationAction.type === 'pixelpay'
+                  {processingPayment
+                    ? 'Procesando…'
+                    : qaVideoDemoMode
+                    ? 'Pagar'
+                    : paymentSimulationAction.type === 'pixelpay'
                     ? pixelPayPresentation.payButton
                     : paymentSimulationAction.type === 'simulator' ? 'Ejecutar simulator' : 'Simular pago exitoso'}
                 </Button>
@@ -951,7 +990,7 @@ export default function PublicBookingPaymentStep() {
               </Button>
             </BookingActions>
 
-        {!isPixelPayProvider ? (
+        {!usesProductionCheckoutDesign ? (
           <TodoPagoHostedModal
             open={hostedModalOpen}
             launch={paymentLaunch}

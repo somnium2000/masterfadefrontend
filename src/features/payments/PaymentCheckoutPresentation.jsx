@@ -1,26 +1,32 @@
 import { CreditCard, LockKeyhole, ShieldCheck } from 'lucide-react';
+import pixelPayLogo from '../../assets/branding/pixelpay-official.png';
 import { getPixelPayPresentation } from './pixelPayPresentation.js';
 import './paymentCheckout.css';
 
-export function PaymentCheckoutHero() {
-  const presentation = getPixelPayPresentation();
+export function PaymentCheckoutHero({ commercialPreview = false }) {
+  const presentation = getPixelPayPresentation(commercialPreview ? 'live' : undefined);
   return (
     <div className="mf-checkout-hero">
       <div>
         <p className="mf-checkout-eyebrow">Pago seguro con</p>
-        <h2 className="mf-checkout-brand">PixelPay</h2>
+        <h2 className="mf-checkout-brand">
+          <img className="mf-checkout-brand-logo" src={pixelPayLogo} alt="PixelPay" />
+        </h2>
+        {commercialPreview ? <span className="mf-checkout-demo-badge">Demostración QA · sin cobros reales</span> : null}
         {presentation.environment === 'sandbox' ? <span className="mf-checkout-environment">Sandbox · Entorno de pruebas (QA)</span> : null}
-        <p className="mf-checkout-intro">{presentation.intro}</p>
+        <p className="mf-checkout-intro">
+          {commercialPreview ? 'Completa tus datos para confirmar tu reserva de forma segura.' : presentation.intro}
+        </p>
         <ul className="mf-checkout-trust">
           <li><LockKeyhole size={17} />Transacción segura y encriptada</li>
-          <li><CreditCard size={17} />{presentation.environment === 'sandbox' ? 'Utiliza exclusivamente tarjetas de prueba' : 'Solo aceptamos tarjetas válidas'}</li>
+          <li><CreditCard size={17} />{commercialPreview || presentation.environment === 'sandbox' ? 'Utiliza exclusivamente una tarjeta de prueba' : 'Solo aceptamos tarjetas válidas'}</li>
           <li><ShieldCheck size={17} />Tus datos se procesan de forma segura</li>
         </ul>
       </div>
       <div className="mf-checkout-art" aria-hidden="true">
         <div className="mf-checkout-art-back" />
         <div className="mf-checkout-art-card">
-          <span className="mf-checkout-art-brand">PixelPay</span>
+          <img className="mf-checkout-art-brand-logo" src={pixelPayLogo} alt="" />
           <span className="mf-checkout-chip" />
           <span className="mf-checkout-dots">•••• &nbsp; •••• &nbsp; ••••</span>
           <span className="mf-checkout-art-caption">MASTERFADE</span>

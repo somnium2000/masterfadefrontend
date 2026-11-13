@@ -4,6 +4,7 @@ import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import PublicBookingPaymentStep, {
+  resolveQaVideoDemoMode,
   resolvePaymentSimulationAction,
 } from '../PublicBookingPaymentStep.jsx';
 import TodoPagoHostedModal, {
@@ -96,7 +97,9 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  window.sessionStorage.clear();
 });
 
 describe('TodoPagoHostedModal', () => {
@@ -361,7 +364,7 @@ describe('integracion del shell TodoPago', () => {
 
     render(<PublicBookingPaymentStep />);
 
-    expect(screen.getByText('PixelPay Sandbox: usa exclusivamente una tarjeta de prueba.')).not.toBeNull();
+    expect(screen.getByText('Procesa el pago directo mediante PixelPay Sandbox para el entorno QA.')).not.toBeNull();
     expect(screen.getByLabelText('Numero de tarjeta')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' })).not.toBeNull();
     expect(screen.queryByText(/TodoPago/i)).toBeNull();
@@ -375,7 +378,7 @@ describe('integracion del shell TodoPago', () => {
 
     render(<PublicBookingPaymentStep />);
 
-    expect(screen.getByText('Ingresa los datos de tu tarjeta para procesar el pago de forma segura.')).not.toBeNull();
+    expect(screen.getByText('Procesa tu pago de forma segura mediante PixelPay.')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Pagar con PixelPay' })).not.toBeNull();
     expect(screen.queryByText(/Sandbox/i)).toBeNull();
     expect(screen.queryByText(/tarjeta de prueba/i)).toBeNull();
@@ -461,7 +464,7 @@ describe('integracion del shell TodoPago', () => {
     render(<PublicBookingPaymentStep />);
 
     expect(screen.getByLabelText('Numero de tarjeta')).not.toBeNull();
-    expect(screen.getByText('TodoPago test')).not.toBeNull();
+    expect(screen.getByText('Simula la experiencia MasterFade/TodoPago localmente sin ejecutar un cobro real.')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Ejecutar simulator' })).not.toBeNull();
   });
 
@@ -498,6 +501,116 @@ describe('integracion del shell TodoPago', () => {
       provider: 'todopago',
       reason: 'qa_todopago_simulator_enabled',
     });
+  });
+
+  test('activa el modo video solo con host, proveedor y tres flags exactos', () => {
+    expect(resolveQaVideoDemoMode({
+      hostname: 'qa.masterfadeapp.com',
+      provider: 'todopago',
+      simulatorEnabled: 'true',
+      qaSimulatorEnabled: 'true',
+      videoDemoEnabled: 'true',
+    })).toBe(true);
+
+    const base = {
+      hostname: 'qa.masterfadeapp.com',
+      provider: 'todopago',
+      simulatorEnabled: 'true',
+      qaSimulatorEnabled: 'true',
+      videoDemoEnabled: 'true',
+    };
+    expect(resolveQaVideoDemoMode({ ...base, hostname: 'masterfadeapp.com' })).toBe(false);
+    expect(resolveQaVideoDemoMode({ ...base, hostname: 'qa.masterfadeapp.com.evil.test' })).toBe(false);
+    expect(resolveQaVideoDemoMode({ ...base, provider: 'pixelpay' })).toBe(false);
+    expect(resolveQaVideoDemoMode({ ...base, simulatorEnabled: 'false' })).toBe(false);
+    expect(resolveQaVideoDemoMode({ ...base, qaSimulatorEnabled: 'false' })).toBe(false);
+    expect(resolveQaVideoDemoMode({ ...base, videoDemoEnabled: 'false' })).toBe(false);
+  });
+
+  test('modo video reutiliza checkout premium, oculta controles tecnicos y fija el escenario aprobado', async () => {
+    vi.stubGlobal('location', { hostname: 'qa.masterfadeapp.com' });
+    vi.stubEnv('VITE_PAYMENT_PROVIDER', 'todopago');
+    vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'true');
+    vi.stubEnv('VITE_ENABLE_QA_PAYMENT_SIMULATION', 'true');
+    vi.stubEnv('VITE_QA_VIDEO_DEMO_MODE', 'true');
+    window.sessionStorage.setItem('masterfade.todopagoSimulation.amountHnl', '1.57');
+
+    let resolvePayment;
+    const completePaymentSimulation = vi.fn(() => new Promise((resolve) => { resolvePayment = resolve; }));
+    const completePixelPayPayment = vi.fn();
+    bookingFlowMock.current = createBookingFlow({
+      completePaymentSimulation,
+      completePixelPayPayment,
+      holdPricing: { subtotal_hnl: 300, cubierto_por_plan_hnl: 0, total_pagar_hnl: 300 },
+      holdTotalToPay: 300,
+      paymentIntent: {
+        id_intent: 'intent-video-demo',
+        monto_hnl: 300,
+        estado_intent_codigo: 'link_generado',
+      },
+    });
+
+    render(<PublicBookingPaymentStep />);
+
+    expect(screen.getByRole('img', { name: 'PixelPay' })).not.toBeNull();
+    expect(screen.getAllByText('Datos de pago')).toHaveLength(2);
+    expect(screen.queryByLabelText('Escenario simulator')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Verificar estado del pago' })).toBeNull();
+    expect(screen.queryByText('Intent: intent-video-demo')).toBeNull();
+    expect(screen.queryByText(/Proveedor:/)).toBeNull();
+    expect(screen.getByText('Demostración QA · sin cobros reales')).not.toBeNull();
+    expect(screen.getByText('Utiliza exclusivamente una tarjeta de prueba')).not.toBeNull();
+    expect(screen.getByText(/No ingreses una tarjeta real/)).not.toBeNull();
+    expect(screen.queryByText(/Intent:|Proveedor:|Escenario simulator|TodoPago/i)).toBeNull();
+    expect(screen.getAllByText('L 300.00').length).toBeGreaterThan(0);
+
+    const payButton = screen.getByRole('button', { name: 'Pagar' });
+    fireEvent.click(payButton);
+    expect(await screen.findByText('Ingresa el nombre del titular.')).not.toBeNull();
+    expect(completePaymentSimulation).not.toHaveBeenCalled();
+
+    for (const [label, value] of [
+      ['Nombre del titular', 'Cliente comercial'],
+      ['Tarjeta de prueba', '4111111111111111'],
+      ['Vencimiento', '12/40'],
+      ['CVV', '123'],
+      ['Teléfono de contacto', '99999999'],
+    ]) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    }
+
+    fireEvent.click(payButton);
+    fireEvent.click(payButton);
+
+    await waitFor(() => expect(completePaymentSimulation).toHaveBeenCalledTimes(1));
+    expect(completePaymentSimulation).toHaveBeenCalledWith({ provider: 'simulator' });
+    expect(completePixelPayPayment).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem('masterfade.todopagoSimulation.amountHnl')).toBe('1.00');
+    expect(screen.getByRole('button', { name: 'Procesando…' }).disabled).toBe(true);
+    expect(screen.getByLabelText('Tarjeta de prueba').disabled).toBe(true);
+
+    resolvePayment(true);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pagar' }).disabled).toBe(false));
+  });
+
+  test('modo video apagado conserva selector, verificacion y escenarios de rechazo y timeout en QA', () => {
+    vi.stubGlobal('location', { hostname: 'qa.masterfadeapp.com' });
+    vi.stubEnv('VITE_PAYMENT_PROVIDER', 'todopago');
+    vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'true');
+    vi.stubEnv('VITE_ENABLE_QA_PAYMENT_SIMULATION', 'true');
+    vi.stubEnv('VITE_QA_VIDEO_DEMO_MODE', 'false');
+    bookingFlowMock.current = createBookingFlow();
+
+    render(<PublicBookingPaymentStep />);
+
+    expect(screen.getByText('Datos para la simulacion')).not.toBeNull();
+    const selector = screen.getByLabelText('Escenario simulator');
+    expect(selector.querySelector('option[value="1.05"]')?.textContent).toContain('Rechazado');
+    expect(selector.querySelector('option[value="1.57"]')?.textContent).toContain('Timeout');
+    expect(screen.getByRole('button', { name: 'Ejecutar simulator' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Verificar estado del pago' })).not.toBeNull();
+    expect(screen.getByText('Intent: intent-payment-ui')).not.toBeNull();
+    expect(screen.getByText('Proveedor: todopago')).not.toBeNull();
   });
 
   test.each([
