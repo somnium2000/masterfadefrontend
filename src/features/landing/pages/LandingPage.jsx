@@ -5,10 +5,10 @@ import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
+import './LandingPage.css';
 
 const ease = [0.25, 0.46, 0.45, 0.94];
 const CTA_ENTRY_DELAYS = [0.65, 0.8, 0.95];
-const BG_URL = 'https://images.pexels.com/photos/5152514/pexels-photo-5152514.jpeg?auto=compress&cs=tinysrgb&w=1920';
 
 function DecorativeLine({ delay = 0, className = '' }) {
   return (
@@ -88,6 +88,7 @@ function SecondaryCta({ icon: Icon, label, onClick, disabled = false, order = 0 
   );
 }
 
+// AM: million-ignore - conserva los contenedores React y la separación original de los CTA.
 export default function LandingPage() {
   const { booking: PUBLIC_BOOKING_ENABLED } = usePrivateCommerce();
   const navigate = useNavigate();
@@ -108,10 +109,10 @@ export default function LandingPage() {
     <div className="mf-landing relative min-h-[100dvh] overflow-hidden bg-[var(--mf-bg)] font-[var(--font-body)]">
       <main aria-labelledby="landing-title">
       <h1 id="landing-title" className="sr-only">MASTERFADE — Barbería premium en Honduras</h1>
-      <div className="absolute inset-0">
-        <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url('${BG_URL}')`, opacity: 0.15 }} />
+      <div className="absolute inset-0" aria-hidden="true">
+        <div className="mf-landing__photo" />
         <div className="absolute inset-0 bg-[var(--mf-noise)] opacity-[0.03]" />
-        <div className="absolute inset-0 bg-[var(--mf-hero-gradient)]" />
+        <div className="mf-landing__shade absolute inset-0" />
       </div>
 
       <div className="relative z-10 md:hidden">
