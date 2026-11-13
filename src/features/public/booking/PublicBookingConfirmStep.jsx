@@ -269,7 +269,9 @@ export default function PublicBookingConfirmStep() {
 
         <div className="public-booking-payment-note mt-4">
           <span>
-            Los MasterPuntos se acreditan al completar las citas que califican, según las reglas vigentes.
+            {canUseClienteHold
+              ? 'Los MasterPuntos de las citas completadas que califican en este grupo se acreditan solo al titular que creó la reserva, incluidos los acompañantes con o sin cuenta.'
+              : 'Los MasterPuntos se acreditan al completar las citas que califican, según las reglas vigentes.'}
           </span>
         </div>
 

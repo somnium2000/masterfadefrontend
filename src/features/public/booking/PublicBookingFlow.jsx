@@ -3261,7 +3261,12 @@ const agendaAutoLoadKeyRef = useRef('');
     const contactos = buildContactValidationPayload();
     if (contactos.length === 0) return true;
     try {
-      await validatePublicBookingContacts({ contactos });
+      const validation = await validatePublicBookingContacts({ contactos });
+      if (canUseClienteHold && Array.isArray(validation?.warnings) && validation.warnings.some(warning => warning.code === 'COMPANION_POINTS_POLICY')) {
+        notifications.info('Los MasterPuntos de las citas completadas que califican en este grupo se acreditan solo a tu cuenta, incluso si un acompa\u00f1ante ya tiene cuenta propia.', {
+          dedupeKey: 'booking-companion-points-policy',
+        });
+      }
       return true;
     } catch (err) {
       if (handleContactValidationError(err)) return false;
@@ -3270,7 +3275,7 @@ const agendaAutoLoadKeyRef = useRef('');
       });
       return false;
     }
-  }, [buildContactValidationPayload, handleContactValidationError, notifications]);
+  }, [buildContactValidationPayload, canUseClienteHold, handleContactValidationError, notifications]);
 
   const goToConfirm = useCallback(async () => {
     if (location.pathname.startsWith(BOOKING_ROUTES.payment)) {

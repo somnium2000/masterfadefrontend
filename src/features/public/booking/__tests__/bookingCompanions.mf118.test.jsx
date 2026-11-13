@@ -32,3 +32,18 @@ test.each([0,300,450])('resumen real: plan solo titular, extras acompañantes %i
  expect(screen.queryByText('Cubierto completamente por tu plan.')!==null).toBe(extra===0);
  if(extra)expect(screen.getByText('Extras y acompañantes').parentElement.textContent.replace(/\s/g,'')).toContain(extra.toFixed(2));
 });
+
+// AM: Se comunica la politica sin cambiar contactos, cobertura ni importes del resumen.
+for (const companions of [1, 2, 3, 4]) for (const membership of [false, true]) {
+ test(`grupo autenticado: ${companions} acompanantes, membresia ${membership}`, () => {
+  const blocks = Array.from({length:companions+1},(_,index)=>({id:`B${index}`,alias:index?'Invitado '+index:'Titular',contactEmail:index?'registered'+index+'@example.test':'owner@example.test',total_hnl:300,
+   selectedServices:[{id_servicio:'S',nombre_servicio:'Corte',precio_hnl:300,coveredByPlan:index===0&&membership}]}));
+  const original=structuredClone(blocks);
+  render(<BookingFlowProvider value={{bookingBlocksSummary:blocks,canUseClienteHold:true,mode:'authenticated',membershipHasContext:membership,paymentRequired:true}}><Summary/></BookingFlowProvider>);
+  expect(screen.getAllByText(/se acreditan solo al titular que/)).toHaveLength(1);
+  expect(screen.getByText(/acompañantes con o sin cuenta/)).toBeTruthy();
+  expect(screen.queryByText('Los MasterPuntos se acreditan al completar las citas que califican, según las reglas vigentes.')).toBeNull();
+  expect(document.querySelectorAll('.citas-confirm-service-item')).toHaveLength(companions+1);
+  expect(blocks).toEqual(original);
+ });
+}
