@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import LegalTermsPage from '../LegalTermsPage.jsx';
-import legalTerms from '../../data/legalTerms.v0.3-RC1.json';
+import legalTerms from '../../data/legalTerms.v0.3-RC2-MP.json';
 import { ThemeProvider } from '../../../../context/ThemeContext.jsx';
 import App from '../../../../App.jsx';
 
@@ -17,10 +17,17 @@ vi.mock('../../../../context/AuthContext.jsx', async importOriginal => ({
 afterEach(cleanup);
 const mount = () => render(<ThemeProvider><MemoryRouter><LegalTermsPage /></MemoryRouter></ThemeProvider>);
 
-test('JSON idéntico al ZIP original y estructura completa 8/62/115/1', () => {
+test('conserva íntegro RC1 y usa versión QA 0.3-RC2-MP con estructura 8/62/115/1', () => {
   const raw = readFileSync('src/features/public/data/legalTerms.v0.3-RC1.json');
   expect(createHash('sha256').update(raw).digest('hex')).toBe('a03303b016034d13edd868c2876389d201af272242ed7dfbc395a740994fd9ef');
-  expect(legalTerms.version).toBe('0.3-RC1');
+  expect(legalTerms.version).toBe('0.3-RC2-MP');
+  expect(legalTerms.publication_mode).toBe('qa_review_only');
+  const rewards = legalTerms.documents.find(document => document.id === 'masterpuntos');
+  const rewardText = rewards.chapters.flatMap(chapter => chapter.blocks).map(block => block.text || '').join(' ');
+  expect(rewardText).toMatch(/pago válido|pago y reserva/);
+  expect(rewardText).toMatch(/reagendar|reagendamiento/);
+  expect(rewardText).toMatch(/acompañantes/);
+  expect(rewardText).not.toMatch(/se complete efectivamente/);
   expect(legalTerms.documents).toHaveLength(8);
   const chapters = legalTerms.documents.flatMap(doc => doc.chapters);
   expect(chapters).toHaveLength(62);
