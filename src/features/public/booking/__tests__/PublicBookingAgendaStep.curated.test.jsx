@@ -66,6 +66,40 @@ test('companion slots keep titular/overlap restrictions without re-ranking', () 
   expect(flow.onSelectTime).toHaveBeenCalledWith('09:30', true);
 });
 
+test.each(['titular', 'acompanante'])('privacidad: conflicto con %s conserva bloqueo sin nombres en texto, tooltip ni nombre accesible', type => {
+  const flow = context.current;
+  const privateName = 'Persona Reservada ApellidoConfidencial';
+  flow.activeBlockIndex = 2;
+  flow.activeBlock = { id: 'active', idBarbero: 'barber', contactFirstName: 'Actual' };
+  flow.bookingBlocks = [...flow.bookingBlocks, flow.activeBlock];
+  const collision = { index: type === 'titular' ? 0 : 1, alias: privateName, idBarbero: 'barber', selectedDate: flow.selectedDate, selectedTime: '08:30', duracion_bloque_min: 15 };
+  flow.bookingBlocksSummary = type === 'titular' ? [collision] : [{ index: 0, idBarbero: 'other' }, collision];
+  flow.slotsCurated.manana.alternatives = ['08:35', '08:45', '09:30'].map(slot);
+  flow.slotConflict = { conflictingAlias: privateName, timeKey: '08:30' };
+  flow.slotSuggestions = [{ idBarbero: 'other', nombreBarbero: 'Barbero Propuesto' }];
+  flow.selectSuggestedBarber = vi.fn();
+  const { container, rerender } = render(<PublicBookingAgendaStep />);
+  const message = 'Horario no disponible: coincide con otra cita del grupo';
+  const buttons = [...container.querySelectorAll('.public-booking-time-block')];
+  for (const button of buttons.slice(0, 2)) {
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe(message);
+    expect(button.textContent).toContain(message);
+  }
+  expect(screen.getAllByRole('button', { name: new RegExp(message) })).toHaveLength(2);
+  for (const selector of ['.public-booking-time-blocks-shell', '.public-booking-slot-conflict']) {
+    expect(container.querySelector(selector).outerHTML).not.toContain(privateName);
+    expect(container.querySelector(selector).outerHTML).not.toContain('Solapa con');
+  }
+  fireEvent.click(buttons[0]); expect(flow.onSelectTime).not.toHaveBeenCalled();
+  fireEvent.click(buttons[2]); expect(flow.onSelectTime).toHaveBeenCalledWith('08:45', true);
+  fireEvent.click(screen.getByRole('button', { name: 'Cambiar a Barbero Propuesto' }));
+  expect(flow.selectSuggestedBarber).toHaveBeenCalledWith('other');
+  flow.activeBlock = { ...flow.activeBlock, idBarbero: 'other' };
+  rerender(<PublicBookingAgendaStep />);
+  expect([...container.querySelectorAll('.public-booking-time-block')].every(button => !button.disabled)).toBe(true);
+});
+
 test('primera entrega oculta Promociones sin ejecutar selección ni borrar datos existentes', () => {
   context.current.promotions = [{id_promocion:'promotion',titulo:'Promo histórica'}];
   context.current.selectPromotion = vi.fn();

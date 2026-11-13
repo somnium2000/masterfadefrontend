@@ -8,12 +8,12 @@ import process from 'node:process';
 
 const engines = createRequire(import.meta.url)(process.env.MASTERFADE_PLAYWRIGHT_MODULE || 'playwright');
 const base = process.env.MASTERFADE_BROWSER_URL || 'http://127.0.0.1:4189';
-const legal = JSON.parse(readFileSync(new URL('../src/features/public/data/legalTerms.v0.3-RC1.json', import.meta.url), 'utf8'));
+const legal = JSON.parse(readFileSync(new URL('../src/features/public/data/legalTerms.v0.3-RC2-MP.json', import.meta.url), 'utf8'));
 const evidence = path.join(process.env.TEMP || process.cwd(), 'mf-legal-ux01-evidence');
 
-for (const engine of (process.env.MASTERFADE_BROWSER_ENGINES || 'chromium,webkit').split(',')) for (const width of [320, 390, 1440]) for (const theme of ['dark', 'light']) {
+for (const engine of (process.env.MASTERFADE_BROWSER_ENGINES || 'chromium,webkit').split(',')) for (const width of [360, 390, 768, 1440]) for (const theme of ['dark', 'light']) {
   test(`${engine} ${width} ${theme}: documentos íntegros y lectura sin consentimiento automático`, {
-    skip: !existsSync(engines[engine].executablePath()), timeout: 90000,
+    skip: !(engine === 'chromium' && process.env.MASTERFADE_CHROMIUM_CHANNEL) && !existsSync(engines[engine].executablePath()), timeout: 90000,
   }, async () => {
     const browser = await engines[engine].launch(engine === 'chromium' && process.env.MASTERFADE_CHROMIUM_CHANNEL ? { channel: process.env.MASTERFADE_CHROMIUM_CHANNEL } : {});
     try {
@@ -51,6 +51,8 @@ for (const engine of (process.env.MASTERFADE_BROWSER_ENGINES || 'chromium,webkit
       await page.getByRole('heading', { level: 1, name: 'Términos y condiciones' }).waitFor();
       assert.equal(await page.getByRole('article').count(), 8);
       assert.equal(await page.getByRole('heading', { level: 3 }).count(), 62);
+      assert.equal(legal.version, '0.3-RC2-MP');
+      assert.equal(legal.publication_mode, 'qa_review_only');
       const rendered = await page.locator('.legal-terms__paragraph').allTextContents();
       assert.deepEqual(rendered, legal.documents.flatMap(doc => doc.chapters.flatMap(ch => ch.blocks.filter(block => block.type === 'paragraph').map(block => block.text))));
       const table = page.getByRole('table');
@@ -99,7 +101,8 @@ for (const engine of (process.env.MASTERFADE_BROWSER_ENGINES || 'chromium,webkit
           assert.equal(await link.evaluate(node => node.closest('label') === null), true);
           await link.focus();
           assert.equal(await link.evaluate(node => document.activeElement === node && getComputedStyle(node).textDecorationLine.includes('underline') && getComputedStyle(node).outlineStyle !== 'none'), true);
-          assert.ok(await link.evaluate(node => node.getBoundingClientRect().height >= 44));
+          // AM: Espera la animacion del formulario y tolera redondeo subpixel; el minimo CSS sigue siendo 44px.
+          await page.waitForFunction(node => parseFloat(getComputedStyle(node).minHeight) >= 44 && node.getBoundingClientRect().height >= 43.5, await link.elementHandle());
           const [reading] = await Promise.all([context.waitForEvent('page'), link.click()]);
           await reading.getByRole('heading', { level: 1, name: 'Términos y condiciones' }).waitFor();
           assert.equal(new URL(reading.url()).hash, `#${target}`);

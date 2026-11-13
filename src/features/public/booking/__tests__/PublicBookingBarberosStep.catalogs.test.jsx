@@ -8,6 +8,7 @@ import PublicBookingBarberosStep from '../PublicBookingBarberosStep.jsx';
 import { PublicBookingProvider } from '../BookingFlowContext.jsx';
 import useBookingCatalogs from '../hooks/useBookingCatalogs.js';
 import { createBookingBlock } from '../utils/bookingMappers.js';
+import { BarberCard } from '../PublicBookingBlocks.jsx';
 
 const api = vi.hoisted(() => ({
   getPublicBookingContext: vi.fn(), getClienteMembershipEstado: vi.fn(),
@@ -21,6 +22,20 @@ const BARBER = { id_empleado: '9f7192ec-f8ee-41be-91c4-b0f4024e63a2', nombre_com
 const OTHER_BARBER = { id_empleado: '22222222-2222-4222-8222-222222222222', nombre_completo: 'Otro Barbero' };
 const branches = [{ id_sucursal: SUYAPA, nombre_sucursal: 'MasterFade Blvd. Suyapa' },
   { id_sucursal: OTHER, nombre_sucursal: 'Otra sucursal test' }];
+
+test('foto ausente o fallida conserva iniciales y seleccion; una URL nueva puede recuperarse', () => {
+  const onSelect = vi.fn();
+  const barber = { id_empleado: 'barber-photo', nombre_completo: 'Barbero QA' };
+  const view = render(<BarberCard barber={barber} onSelect={onSelect} />);
+  expect(screen.queryByRole('img')).toBeNull(); expect(screen.getByText('BQ')).toBeVisible();
+  view.rerender(<BarberCard barber={{ ...barber, foto_perfil_url: '/missing.jpg' }} onSelect={onSelect} />);
+  fireEvent.error(screen.getByRole('img', { name: 'Barbero QA' }));
+  expect(screen.queryByRole('img')).toBeNull(); expect(screen.getByText('BQ')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Seleccionar a Barbero QA' }));
+  expect(onSelect).toHaveBeenCalledWith('barber-photo');
+  view.rerender(<BarberCard barber={{ ...barber, foto_perfil_url: '/recovered.jpg' }} onSelect={onSelect} />);
+  expect(screen.getByRole('img', { name: 'Barbero QA' })).toHaveAttribute('src', '/recovered.jpg');
+});
 
 function Harness() {
   const [blocks, setBookingBlocks] = useState(() => [createBookingBlock()]);

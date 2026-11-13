@@ -1666,11 +1666,6 @@ const agendaAutoLoadKeyRef = useRef('');
     const normalizedIndex = Number.isInteger(Number(block?.index))
       ? Math.max(0, Number(block.index))
       : (Number.isInteger(effectiveActiveBlockIndex) ? effectiveActiveBlockIndex : 0);
-    const label = String(
-      block?.alias
-      || (normalizedIndex === 0 ? BOOKING_HOLDER_ALIAS : `${BOOKING_COMPANION_ALIAS_PREFIX} ${normalizedIndex}`)
-    ).trim();
-
     invalidHoldSelectionFingerprintRef.current = bookingHoldFingerprint;
     clearSelectedTimes({ onlyIndex: normalizedIndex });
     setSlotConflict(block?.selectedDate && block?.selectedTime && block?.idBarbero
@@ -1678,10 +1673,9 @@ const agendaAutoLoadKeyRef = useRef('');
           dateKey: block.selectedDate,
           timeKey: block.selectedTime,
           barberId: block.idBarbero,
-          conflictingAlias: label,
         }
       : null);
-    notifications.warning(`Revisa el horario de ${label}. Selecciona una hora disponible.`, {
+    notifications.warning('Revisa el horario de la cita. Selecciona una hora disponible.', {
       dedupeKey: 'public-booking-submit-invalid-block-schedule',
     });
     setActiveBlockIndex(normalizedIndex);
@@ -2649,7 +2643,6 @@ const agendaAutoLoadKeyRef = useRef('');
         dateKey: selectedDate,
         timeKey: nextTime,
         barberId: activeBlockBarberId,
-        conflictingAlias: conflictingBlock.alias || `Integrante ${conflictingBlock.index + 1}`,
       });
       notifications.warning('Ese bloque se solapa con otra reserva del grupo para el mismo barbero.', {
         dedupeKey: 'public-booking-duplicate-barber-slot',
@@ -2874,7 +2867,6 @@ const agendaAutoLoadKeyRef = useRef('');
             dateKey: block.selectedDate,
             timeKey: block.selectedTime,
             barberId: block.idBarbero,
-            conflictingAlias: previous.alias || 'Integrante',
           });
           return rejectInvalidScheduleBlock(block);
         }
@@ -2957,11 +2949,6 @@ const agendaAutoLoadKeyRef = useRef('');
       const conflictReason = String(apiError?.reason || '').trim().toUpperCase();
       const safeConflictMessage = mapPublicBookingErrorMessage(conflictCode, extractMessage(err));
       const fallbackConflictIndex = Number.isInteger(effectiveActiveBlockIndex) ? effectiveActiveBlockIndex : 0;
-      const affectedIndex = detailIndex != null ? Math.max(0, Math.trunc(detailIndex)) : fallbackConflictIndex;
-      const affectedSummaryBlock = bookingBlocksSummary[affectedIndex] || null;
-      const affectedLabel = affectedIndex === 0
-        ? 'titular'
-        : (affectedSummaryBlock?.alias || `${BOOKING_COMPANION_ALIAS_PREFIX} ${affectedIndex}`);
 
       if (conflictCode === 'CLIENT_PROFILE_INCOMPLETE') {
         // AM: Fallback de contrato backend Fase 1A para perfil incompleto.
@@ -3121,8 +3108,8 @@ const agendaAutoLoadKeyRef = useRef('');
             : fallbackConflictIndex;
           const isSameBarberConflict = conflictReason === 'AGENDA_INTERNAL_GROUP_CONFLICT';
           const conflictMessage = isSameBarberConflict
-            ? `${affectedLabel} usa el mismo barbero en un horario que se cruza. Selecciona una hora posterior o cambia de barbero.`
-            : `El horario seleccionado para ${affectedLabel} ya no está disponible.`;
+            ? 'Horario no disponible: coincide con otra cita del grupo'
+            : 'El horario seleccionado ya no está disponible. Selecciona otra hora.';
           invalidHoldSelectionFingerprintRef.current = bookingHoldFingerprint;
           setActiveBlockIndex(affectedIndex);
           recoverToAgendaForReselection(

@@ -560,7 +560,7 @@ export default function PublicBookingAgendaStep() {
         && titularBlock.idBarbero === activeBlock.idBarbero
         && titularBlock.selectedTime === slot.hora
       ) {
-        return { disabled: true, variant: 'danger', reason: 'Hora del titular (mismo barbero)' };
+        return { disabled: true, variant: 'danger', reason: 'Horario no disponible: coincide con otra cita del grupo' };
       }
 
       const conflictingBlock = bookingBlocksSummary.find((block) =>
@@ -574,7 +574,7 @@ export default function PublicBookingAgendaStep() {
         return {
           disabled: true,
           variant: 'muted',
-          reason: `Solapa con ${conflictingBlock.alias || `integrante ${conflictingBlock.index + 1}`}`,
+          reason: 'Horario no disponible: coincide con otra cita del grupo',
         };
       }
 
@@ -1236,8 +1236,7 @@ export default function PublicBookingAgendaStep() {
                 {slotConflict ? (
                   <div className="public-booking-slot-conflict">
                     <p>
-                      {slotConflict.conflictingAlias || 'Otro integrante'} ya tiene este barbero en{' '}
-                      {formatTime12Hour(slotConflict.timeKey)}.
+                      Horario no disponible: coincide con otra cita del grupo
                     </p>
                     {slotSuggestionsLoading ? (
                       <p className="citas-selected-date">Buscando barberos disponibles para la misma hora...</p>
