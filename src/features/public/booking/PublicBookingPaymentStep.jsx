@@ -200,7 +200,12 @@ function formatPhone(value) {
   return normalizeDigits(value).slice(0, 15);
 }
 
-export function validatePaymentForm(form, referenceDate = new Date(), pixelPayEnvironment = 'sandbox') {
+export function validatePaymentForm(
+  form,
+  referenceDate = new Date(),
+  pixelPayEnvironment = 'sandbox',
+  { requireBilling = true } = {},
+) {
   const errors = {};
   const expiryDigits = normalizeDigits(form.expiry);
   const expiryFormatValid = /^(0[1-9]|1[0-2])\/[0-9]{2}$/.test(String(form.expiry || '').trim());
@@ -225,14 +230,16 @@ export function validatePaymentForm(form, referenceDate = new Date(), pixelPayEn
   if (![3, 4].includes(normalizeDigits(form.cvv).length)) {
     errors.cvv = 'Ingresa un CVV de 3 o 4 digitos.';
   }
-  if (!String(form.billingAddress || '').trim() || isPixelPayBillingAddressPlaceholder(form.billingAddress)) {
-    errors.billingAddress = 'Ingresa una dirección de facturación válida.';
+  if (requireBilling) {
+    if (!String(form.billingAddress || '').trim() || isPixelPayBillingAddressPlaceholder(form.billingAddress)) {
+      errors.billingAddress = 'Ingresa una dirección de facturación válida.';
+    }
+    if (!String(form.billingCity || '').trim()) errors.billingCity = 'Ingresa la ciudad.';
+    if (!HONDURAS_DEPARTMENTS.some(([code]) => code === form.billingState)) {
+      errors.billingState = 'Selecciona un departamento valido.';
+    }
+    if (form.billingCountry !== 'HN') errors.billingCountry = 'El pais de facturacion debe ser Honduras.';
   }
-  if (!String(form.billingCity || '').trim()) errors.billingCity = 'Ingresa la ciudad.';
-  if (!HONDURAS_DEPARTMENTS.some(([code]) => code === form.billingState)) {
-    errors.billingState = 'Selecciona un departamento valido.';
-  }
-  if (form.billingCountry !== 'HN') errors.billingCountry = 'El pais de facturacion debe ser Honduras.';
 
   return errors;
 }
@@ -523,7 +530,12 @@ export default function PublicBookingPaymentStep() {
 
   const handleMockPay = async () => {
     if (processingPayment || paymentRestoring || !paymentCanExecuteSale) return;
-    const validationErrors = validatePaymentForm(paymentForm, new Date(), pixelPayPresentation.environment);
+    const validationErrors = validatePaymentForm(
+      paymentForm,
+      new Date(),
+      pixelPayPresentation.environment,
+      { requireBilling: paymentSimulationAction.type === 'pixelpay' },
+    );
     if (Object.keys(validationErrors).length > 0) {
       setFieldErrors(validationErrors);
       return;

@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { resolvePaymentExecutionContext } from '../PublicBookingFlow.jsx';
 import useBookingPayment from '../hooks/useBookingPayment.js';
-import { createPublicPaymentIntent } from '../publicBookingApi.js';
+import { completePublicSimulatorPayment, createPublicPaymentIntent } from '../publicBookingApi.js';
 
 vi.mock('../publicBookingApi.js', () => ({
   confirmClienteCitaHoldWithoutPayment: vi.fn(), createClienteCitaHold: vi.fn(),
@@ -82,4 +82,44 @@ test('respuesta tardia de creacion anterior no reemplaza el intent del grupo nue
   await act(async () => { await result.current.createPaymentIntentOnce({ groupId: NEW, payload: {} }); });
   await act(async () => { resolveOld({ data: oldIntent }); await pending; });
   expect(result.current.paymentIntent).toMatchObject(newIntent);
+});
+
+test('simulator envia IDs, correo y escenario seleccionados al endpoint publico', async () => {
+  window.sessionStorage.setItem('masterfade.todopagoSimulation.amountHnl', '1.00');
+  completePublicSimulatorPayment.mockResolvedValue({ data: { normalized_status: 'PAID' } });
+  const { result } = renderHook(() => useBookingPayment({ currentGroupId: OLD }));
+
+  await act(async () => {
+    await result.current.completeSimulatorPaymentOnce({
+      groupId: OLD,
+      intentId: oldIntent.id_intent,
+      titularEmail: 'QA@EXAMPLE.COM',
+    });
+  });
+
+  expect(completePublicSimulatorPayment).toHaveBeenCalledWith({
+    id_grupo_cita: OLD,
+    id_intent: oldIntent.id_intent,
+    titular_email: 'qa@example.com',
+    status: 'success',
+    monto_prueba_hnl: 1,
+  }, { authenticated: false });
+});
+
+test.each(['FAILED', 'PENDING'])('simulator devuelve resultado %s para recuperar el estado canonico', async (normalizedStatus) => {
+  completePublicSimulatorPayment.mockResolvedValue({
+    data: { normalized_status: normalizedStatus, booking_confirmed: false },
+  });
+  const { result } = renderHook(() => useBookingPayment({ currentGroupId: OLD }));
+  let payload;
+
+  await act(async () => {
+    payload = await result.current.completeSimulatorPaymentOnce({
+      groupId: OLD,
+      intentId: oldIntent.id_intent,
+      titularEmail: 'qa@example.com',
+    });
+  });
+
+  expect(payload).toMatchObject({ normalized_status: normalizedStatus, booking_confirmed: false });
 });

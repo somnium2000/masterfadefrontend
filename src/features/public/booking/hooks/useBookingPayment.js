@@ -371,10 +371,6 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
       amountForSimulation,
     }), { authenticated });
     const payload = response?.data ?? response;
-    const normalizedStatus = safeText(payload?.normalized_status).toUpperCase();
-    if (normalizedStatus && normalizedStatus !== 'PAID') {
-      throw new Error(safeText(payload?.message) || 'El pago no fue aprobado por el simulador.');
-    }
     return payload || true;
   }, [authenticated, isCurrentPaymentGroup]);
 
