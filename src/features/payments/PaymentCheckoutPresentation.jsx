@@ -12,13 +12,14 @@ export function PaymentCheckoutHero({ commercialPreview = false }) {
         <h2 className="mf-checkout-brand">
           <img className="mf-checkout-brand-logo" src={pixelPayLogo} alt="PixelPay" />
         </h2>
+        {commercialPreview ? <span className="mf-checkout-demo-badge">Demostración QA · sin cobros reales</span> : null}
         {presentation.environment === 'sandbox' ? <span className="mf-checkout-environment">Sandbox · Entorno de pruebas (QA)</span> : null}
         <p className="mf-checkout-intro">
           {commercialPreview ? 'Completa tus datos para confirmar tu reserva de forma segura.' : presentation.intro}
         </p>
         <ul className="mf-checkout-trust">
           <li><LockKeyhole size={17} />Transacción segura y encriptada</li>
-          <li><CreditCard size={17} />{presentation.environment === 'sandbox' ? 'Utiliza exclusivamente tarjetas de prueba' : 'Solo aceptamos tarjetas válidas'}</li>
+          <li><CreditCard size={17} />{commercialPreview || presentation.environment === 'sandbox' ? 'Utiliza exclusivamente una tarjeta de prueba' : 'Solo aceptamos tarjetas válidas'}</li>
           <li><ShieldCheck size={17} />Tus datos se procesan de forma segura</li>
         </ul>
       </div>

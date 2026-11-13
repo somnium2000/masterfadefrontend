@@ -537,8 +537,10 @@ describe('integracion del shell TodoPago', () => {
 
     let resolvePayment;
     const completePaymentSimulation = vi.fn(() => new Promise((resolve) => { resolvePayment = resolve; }));
+    const completePixelPayPayment = vi.fn();
     bookingFlowMock.current = createBookingFlow({
       completePaymentSimulation,
+      completePixelPayPayment,
       holdPricing: { subtotal_hnl: 300, cubierto_por_plan_hnl: 0, total_pagar_hnl: 300 },
       holdTotalToPay: 300,
       paymentIntent: {
@@ -556,7 +558,11 @@ describe('integracion del shell TodoPago', () => {
     expect(screen.queryByRole('button', { name: 'Verificar estado del pago' })).toBeNull();
     expect(screen.queryByText('Intent: intent-video-demo')).toBeNull();
     expect(screen.queryByText(/Proveedor:/)).toBeNull();
-    expect(screen.queryByText(/QA|simulaci|datos ficticios|TodoPago/i)).toBeNull();
+    expect(screen.getByText('Demostración QA · sin cobros reales')).not.toBeNull();
+    expect(screen.getByText('Utiliza exclusivamente una tarjeta de prueba')).not.toBeNull();
+    expect(screen.getByText(/No ingreses una tarjeta real/)).not.toBeNull();
+    expect(screen.queryByText(/Intent:|Proveedor:|Escenario simulator|TodoPago/i)).toBeNull();
+    expect(screen.getAllByText('L 300.00').length).toBeGreaterThan(0);
 
     const payButton = screen.getByRole('button', { name: 'Pagar' });
     fireEvent.click(payButton);
@@ -565,10 +571,10 @@ describe('integracion del shell TodoPago', () => {
 
     for (const [label, value] of [
       ['Nombre del titular', 'Cliente comercial'],
-      ['Numero de tarjeta', '4111111111111111'],
-      ['Expiracion', '12/40'],
+      ['Tarjeta de prueba', '4111111111111111'],
+      ['Vencimiento', '12/40'],
       ['CVV', '123'],
-      ['Telefono de contacto', '99999999'],
+      ['Teléfono de contacto', '99999999'],
     ]) {
       fireEvent.change(screen.getByLabelText(label), { target: { value } });
     }
@@ -578,8 +584,10 @@ describe('integracion del shell TodoPago', () => {
 
     await waitFor(() => expect(completePaymentSimulation).toHaveBeenCalledTimes(1));
     expect(completePaymentSimulation).toHaveBeenCalledWith({ provider: 'simulator' });
+    expect(completePixelPayPayment).not.toHaveBeenCalled();
     expect(window.sessionStorage.getItem('masterfade.todopagoSimulation.amountHnl')).toBe('1.00');
-    expect(screen.getByRole('button', { name: 'Pagar' }).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Procesando…' }).disabled).toBe(true);
+    expect(screen.getByLabelText('Tarjeta de prueba').disabled).toBe(true);
 
     resolvePayment(true);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Pagar' }).disabled).toBe(false));

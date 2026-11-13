@@ -675,7 +675,7 @@ export default function PublicBookingPaymentStep() {
 
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
           {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
-            <div className="public-booking-contact-card public-booking-payment-gateway-card">
+            <div className="public-booking-contact-card public-booking-payment-gateway-card" aria-busy={processingPayment}>
             <h4 className="citas-confirm-subtitle mt-4">
               {qaVideoDemoMode ? 'Datos de pago' : paymentSimulationAction.type === 'pixelpay' ? 'Información de pago' : 'Datos para la simulacion'}
             </h4>
@@ -686,13 +686,14 @@ export default function PublicBookingPaymentStep() {
                 className="mf-input"
                 placeholder="Ej. Carlos Ramirez"
                 autoComplete="cc-name"
+                disabled={processingPayment}
                 value={paymentForm.cardholderName}
                 onChange={handleFieldChange('cardholderName')}
               />
               {fieldErrors.cardholderName ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.cardholderName}</p> : null}
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-card-number">Numero de tarjeta</label>
+              <label className="mf-label" htmlFor="pay-card-number">{qaVideoDemoMode ? 'Tarjeta de prueba' : 'Numero de tarjeta'}</label>
               <input
                 id="pay-card-number"
                 className="mf-input"
@@ -700,6 +701,7 @@ export default function PublicBookingPaymentStep() {
                 autoComplete="cc-number"
                 inputMode="numeric"
                 maxLength={23}
+                disabled={processingPayment}
                 value={paymentForm.cardNumber}
                 onChange={handleFieldChange('cardNumber')}
               />
@@ -712,13 +714,14 @@ export default function PublicBookingPaymentStep() {
             </div>
             <div className="mt-2 grid gap-3 md:grid-cols-2">
               <div className="public-booking-form-row">
-                <label className="mf-label" htmlFor="pay-expiry">Expiracion</label>
+                <label className="mf-label" htmlFor="pay-expiry">{qaVideoDemoMode ? 'Vencimiento' : 'Expiracion'}</label>
                 <input
                   id="pay-expiry"
                   className="mf-input"
                   placeholder="MM/AA"
                   autoComplete="cc-exp"
                   inputMode="numeric"
+                  disabled={processingPayment}
                   value={paymentForm.expiry}
                   onChange={handleFieldChange('expiry')}
                 />
@@ -734,6 +737,7 @@ export default function PublicBookingPaymentStep() {
                   autoComplete="cc-csc"
                   inputMode="numeric"
                   maxLength={4}
+                  disabled={processingPayment}
                   value={paymentForm.cvv}
                   onChange={handleFieldChange('cvv')}
                 />
@@ -741,7 +745,7 @@ export default function PublicBookingPaymentStep() {
               </div>
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-receipt-email">Correo del titular para comprobante</label>
+              <label className="mf-label" htmlFor="pay-receipt-email">{qaVideoDemoMode ? 'Correo para comprobante' : 'Correo del titular para comprobante'}</label>
               <input
                 id="pay-receipt-email"
                 className="mf-input"
@@ -753,13 +757,14 @@ export default function PublicBookingPaymentStep() {
               <p className="mt-1 text-xs text-[var(--mf-text-2)]">Se usa el correo ya validado del titular de la reserva.</p>
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-phone">Telefono de contacto</label>
+              <label className="mf-label" htmlFor="pay-phone">{qaVideoDemoMode ? 'Teléfono de contacto' : 'Telefono de contacto'}</label>
               <input
                 id="pay-phone"
                 className="mf-input"
                 placeholder="99999999"
                 autoComplete="tel"
                 inputMode="tel"
+                disabled={processingPayment}
                 value={paymentForm.phone}
                 onChange={handleFieldChange('phone')}
               />
@@ -769,18 +774,18 @@ export default function PublicBookingPaymentStep() {
               <>
                 <div className="public-booking-form-row mt-2">
                   <label className="mf-label" htmlFor="pay-billing-address">Direccion de facturacion</label>
-                  <input id="pay-billing-address" className="mf-input" autoComplete="street-address" value={paymentForm.billingAddress} onChange={handleFieldChange('billingAddress')} />
+                  <input id="pay-billing-address" className="mf-input" autoComplete="street-address" disabled={processingPayment} value={paymentForm.billingAddress} onChange={handleFieldChange('billingAddress')} />
                   {fieldErrors.billingAddress ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingAddress}</p> : null}
                 </div>
                 <div className="mf-checkout-billing mt-2 grid gap-3">
                   <div className="public-booking-form-row">
                     <label className="mf-label" htmlFor="pay-billing-city">Ciudad</label>
-                    <input id="pay-billing-city" className="mf-input" autoComplete="address-level2" value={paymentForm.billingCity} onChange={handleFieldChange('billingCity')} />
+                    <input id="pay-billing-city" className="mf-input" autoComplete="address-level2" disabled={processingPayment} value={paymentForm.billingCity} onChange={handleFieldChange('billingCity')} />
                     {fieldErrors.billingCity ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingCity}</p> : null}
                   </div>
                   <div className="public-booking-form-row">
                     <label className="mf-label" htmlFor="pay-billing-state">Departamento</label>
-                    <select id="pay-billing-state" className="mf-select" autoComplete="address-level1" value={paymentForm.billingState} onChange={handleFieldChange('billingState')}>
+                    <select id="pay-billing-state" className="mf-select" autoComplete="address-level1" disabled={processingPayment} value={paymentForm.billingState} onChange={handleFieldChange('billingState')}>
                       {HONDURAS_DEPARTMENTS.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
                     </select>
                     {fieldErrors.billingState ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingState}</p> : null}
@@ -795,7 +800,7 @@ export default function PublicBookingPaymentStep() {
             ) : null}
             <div className="mt-3 rounded-xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-3 text-xs leading-relaxed text-[var(--mf-text-2)]">
               {qaVideoDemoMode
-                ? 'Tus datos se protegen durante el proceso y se limpian al terminar el intento.'
+                ? 'Usa únicamente datos de prueba. No ingreses una tarjeta real; la información se elimina al terminar.'
                 : paymentSimulationAction.type === 'pixelpay'
                 ? pixelPayPresentation.privacyNotice
                 : 'Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.'}
@@ -966,7 +971,9 @@ export default function PublicBookingPaymentStep() {
                   disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation || !paymentCanExecuteSale}
                 >
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
-                  {qaVideoDemoMode
+                  {processingPayment
+                    ? 'Procesando…'
+                    : qaVideoDemoMode
                     ? 'Pagar'
                     : paymentSimulationAction.type === 'pixelpay'
                     ? pixelPayPresentation.payButton
