@@ -465,6 +465,26 @@ describe('integracion del shell TodoPago', () => {
     expect(screen.getByRole('button', { name: 'Ejecutar simulator' })).not.toBeNull();
   });
 
+  test('simulator ejecuta el escenario sin exigir campos de facturacion ocultos', async () => {
+    vi.stubEnv('VITE_PAYMENT_PROVIDER', 'simulator');
+    vi.stubEnv('VITE_ENABLE_PAYMENT_SIMULATOR', 'true');
+    const completePaymentSimulation = vi.fn().mockResolvedValue(true);
+    bookingFlowMock.current = createBookingFlow({ completePaymentSimulation });
+
+    render(<PublicBookingPaymentStep />);
+    fireEvent.change(screen.getByLabelText('Nombre del titular'), { target: { value: 'Cliente QA' } });
+    fireEvent.change(screen.getByLabelText('Numero de tarjeta'), { target: { value: '4111111111111111' } });
+    fireEvent.change(screen.getByLabelText('Expiracion'), { target: { value: '12/40' } });
+    fireEvent.change(screen.getByLabelText('CVV'), { target: { value: '123' } });
+    fireEvent.change(screen.getByLabelText('Telefono de contacto'), { target: { value: '99999999' } });
+    fireEvent.change(screen.getByLabelText('Escenario simulator'), { target: { value: '1.00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ejecutar simulator' }));
+
+    await waitFor(() => expect(completePaymentSimulation).toHaveBeenCalledWith({ provider: 'simulator' }));
+    expect(window.sessionStorage.getItem('masterfade.todopagoSimulation.amountHnl')).toBe('1.00');
+    expect(screen.queryByText('Ingresa una dirección de facturación válida.')).toBeNull();
+  });
+
   test('habilita TodoPago simulado en el host QA solo con ambos flags explicitos', () => {
     const action = resolvePaymentSimulationAction({
       hostname: 'qa.masterfadeapp.com',
