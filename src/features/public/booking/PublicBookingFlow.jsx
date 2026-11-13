@@ -3263,7 +3263,7 @@ const agendaAutoLoadKeyRef = useRef('');
     try {
       const validation = await validatePublicBookingContacts({ contactos });
       if (canUseClienteHold && Array.isArray(validation?.warnings) && validation.warnings.some(warning => warning.code === 'COMPANION_POINTS_POLICY')) {
-        notifications.info('Los MasterPuntos de las citas completadas que califican en este grupo se acreditan solo a tu cuenta, incluso si un acompa\u00f1ante ya tiene cuenta propia.', {
+        notifications.info('Al confirmarse el pago y la reserva, los MasterPuntos de las citas elegibles del grupo se acreditan solo a tu cuenta, incluso si un acompa\u00f1ante ya tiene cuenta propia.', {
           dedupeKey: 'booking-companion-points-policy',
         });
       }

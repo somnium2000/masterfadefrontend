@@ -36,6 +36,26 @@ test('401 vigente mantiene invalidación HTTP', async () => {
 test('200 vigente carga y refresca Shell', async () => {
   await ready(); await act(async () => requests[0].resolve(response())); expect(screen.getAllByText('CURRENT').length).toBeGreaterThan(0); expect(h.refresh).toHaveBeenCalledTimes(1);
 });
+
+test('pago confirmado: volver al perfil por focus actualiza puntos y Shell sin pulsar actualizar', async () => {
+  await ready(); await act(async () => requests[0].resolve(response()));
+  window.dispatchEvent(new Event('focus'));
+  document.dispatchEvent(new Event('visibilitychange'));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  const paid = response();
+  paid.json = async () => ({ data: { cliente: { nombre_completo: 'CURRENT', masterpuntos: 5 } } });
+  await act(async () => requests[1].resolve(paid));
+  expect(screen.getByText('Masterpuntos: 5')).toBeTruthy();
+  expect(h.refresh).toHaveBeenCalledTimes(2);
+});
+
+test('regreso durante carga inicial reemplaza lectura sin dejar skeleton bloqueado', async () => {
+  await ready(); window.dispatchEvent(new Event('focus'));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[0].signal.aborted).toBe(true);
+  await act(async () => requests[1].resolve(response()));
+  expect(screen.getAllByText('CURRENT').length).toBeGreaterThan(0);
+});
 test('carga sustituida y su finally no cancelan la nueva', async () => {
   const view = await ready(); h.refresh = vi.fn(); view.rerender(<Page />); await waitFor(() => expect(requests).toHaveLength(2));
   expect(requests[0].signal.aborted).toBe(true); await act(async () => requests[0].resolve(response(401))); expect(requests[1].signal.aborted).toBe(false);

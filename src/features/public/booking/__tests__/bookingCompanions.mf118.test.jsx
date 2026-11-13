@@ -27,7 +27,7 @@ test.each([0,300,450])('resumen real: plan solo titular, extras acompañantes %i
  const titular={id:'T',total_hnl:300,selectedServices:[{id_servicio:'S',nombre_servicio:'Corte',precio_hnl:300,coveredByPlan:true}]};
  const companion={id:'C',total_hnl:extra,selectedServices:extra===450?[{id_servicio:'S',nombre_servicio:'Corte',precio_hnl:300,coveredByPlan:false},{id_servicio:'E',nombre_servicio:'Barba',precio_hnl:150,coveredByPlan:false}]:[{id_servicio:'S',nombre_servicio:'Corte',precio_hnl:extra,coveredByPlan:false}]};
  render(<BookingFlowProvider value={{bookingBlocksSummary:extra?[titular,companion]:[titular],holdResult:null,holdPricing:null,membershipHasContext:true,paymentRequired:true}}><Summary/></BookingFlowProvider>);
- expect(screen.getByText('Los MasterPuntos se acreditan al completar las citas que califican, según las reglas vigentes.')).toBeTruthy();
+ expect(screen.getByText('Los MasterPuntos se acreditan al confirmarse el pago y la reserva de las citas elegibles, sin esperar a completar la visita.')).toBeTruthy();
  const total=screen.getByText('Total a pagar hoy').parentElement;expect(total.textContent.replace(/\s/g,'')).toContain(extra.toFixed(2));
  expect(screen.queryByText('Cubierto completamente por tu plan.')!==null).toBe(extra===0);
  if(extra)expect(screen.getByText('Extras y acompañantes').parentElement.textContent.replace(/\s/g,'')).toContain(extra.toFixed(2));
@@ -40,7 +40,7 @@ for (const companions of [1, 2, 3, 4]) for (const membership of [false, true]) {
    selectedServices:[{id_servicio:'S',nombre_servicio:'Corte',precio_hnl:300,coveredByPlan:index===0&&membership}]}));
   const original=structuredClone(blocks);
   render(<BookingFlowProvider value={{bookingBlocksSummary:blocks,canUseClienteHold:true,mode:'authenticated',membershipHasContext:membership,paymentRequired:true}}><Summary/></BookingFlowProvider>);
-  expect(screen.getAllByText(/se acreditan solo al titular que/)).toHaveLength(1);
+  expect(screen.getAllByText(/acredita \+1 MasterPunto solo al titular que/)).toHaveLength(1);
   expect(screen.getByText(/acompañantes con o sin cuenta/)).toBeTruthy();
   expect(screen.queryByText('Los MasterPuntos se acreditan al completar las citas que califican, según las reglas vigentes.')).toBeNull();
   expect(document.querySelectorAll('.citas-confirm-service-item')).toHaveLength(companions+1);

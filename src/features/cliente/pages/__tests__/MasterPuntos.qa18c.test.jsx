@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // AM: React montado y promesas controladas; ningún HTTP ni canje real.
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import Points from '../../components/ClienteCourtesyRouteSection.jsx';
@@ -10,18 +10,20 @@ const branches = vi.hoisted(() => vi.fn());
 const notices = vi.hoisted(() => ({ info: vi.fn(), success: vi.fn(), error: vi.fn() }));
 const navigate = vi.hoisted(() => vi.fn());
 const flags = vi.hoisted(() => ({ CLIENT_BOOKING_ENABLED: true, CLIENT_LOCK_MESSAGE: 'Proximamente...' }));
+const route = vi.hoisted(() => ({ key: 'initial', search: '', pathname: '/home/cliente' }));
 vi.mock('../../lib/clienteApi.js', () => api);
 vi.mock('../../lib/clientFeatureFlags.js', () => flags);
 vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ booking: flags.CLIENT_BOOKING_ENABLED }) }));
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => auth }));
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => notices }));
 vi.mock('../../../public/lib/catalogApi.js', () => ({ listPublicCatalogBranches: branches }));
-vi.mock('react-router-dom', () => ({ useLocation: () => ({ search: '', pathname: '/home/cliente' }), useNavigate: () => navigate }));
+vi.mock('react-router-dom', () => ({ useLocation: () => route, useNavigate: () => navigate }));
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 const summary = (balance = 12, owner = 'A') => ({ saldo_total: balance, puntos_titular: balance - 2, puntos_integrante: 2, puntos_para_premio: 10, progreso_actual: balance >= 10 ? 10 : balance % 10, recompensas_disponibles: Math.floor(balance / 10), puede_canjear: balance >= 10, servicios_redimibles: [{ id_servicio: 'S', nombre_servicio: 'Servicio QA', sucursales_disponibles: ['A', 'B'] }], historial: [{ id_points_tx: owner, motivo: `MOV-${owner}`, puntos: 2 }] });
 const branchData = { branches: [{ id_sucursal: 'A', nombre_sucursal: 'Suyapa' }, { id_sucursal: 'B', nombre_sucursal: 'City Mall' }] };
 const redemption = { data: { canje_context_token: 'synthetic-context-only', id_servicio_canje: 'S', id_sucursal: 'A', servicio_nombre: 'Servicio QA' } };
 beforeEach(() => {
+  route.key = 'initial';
   Object.assign(auth, { user: { id_usuario: 'user-A', cliente_id: 'client-A' }, isAuthenticated: true, isHydrated: true, isHydrating: false });
   Object.values(api).forEach(mock => mock.mockReset()); Object.values(notices).forEach(mock => mock.mockReset()); navigate.mockReset();
   api.getClientePuntosResumen.mockResolvedValue(summary()); api.getClienteMe.mockResolvedValue({ cliente: { id_sucursal_preferida: 'A' } }); api.redeemClientePuntosReward.mockResolvedValue(redemption);
@@ -96,6 +98,29 @@ test('integral: volver a consultar actualiza saldo, historial y disponibilidad s
   expect(screen.queryByText('MOV-A')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Canjear mi recompensa' })).not.toBeInTheDocument();
   expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
+});
+
+test.each(['focus', 'visibilitychange', 'pageshow', 'navigation'])('pago confirmado: %s refresca saldo e historial automaticamente', async event => {
+  api.getClientePuntosResumen.mockResolvedValue(summary(9)); const view = await ready();
+  api.getClientePuntosResumen.mockResolvedValue({ ...summary(10), historial: [{ id_points_tx: 'PAID', puntos: 1, motivo: 'Pago y reserva confirmados' }] });
+  if (event === 'navigation') { route.key = 'return-from-payment'; view.rerender(<Points />); }
+  else if (event === 'visibilitychange') document.dispatchEvent(new Event(event));
+  else if (event === 'pageshow') window.dispatchEvent(new PageTransitionEvent(event, { persisted: true }));
+  else window.dispatchEvent(new Event(event));
+  await screen.findByText('Pago y reserva confirmados');
+  expect(within(balance()).getByText('10')).toBeInTheDocument();
+  expect(api.getClientePuntosResumen).toHaveBeenCalledTimes(2);
+  expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
+});
+
+test('regreso desmontado y sesion no preparada no solicitan puntos', async () => {
+  const view = await ready(); window.dispatchEvent(new Event('focus')); view.unmount();
+  await new Promise(resolve => setTimeout(resolve, 120));
+  expect(api.getClientePuntosResumen).toHaveBeenCalledTimes(1);
+  auth.isAuthenticated = false; render(<Points />); window.dispatchEvent(new Event('focus'));
+  await waitFor(() => expect(screen.queryByText('MOV-A')).not.toBeInTheDocument());
+  await new Promise(resolve => setTimeout(resolve, 120));
+  expect(api.getClientePuntosResumen).toHaveBeenCalledTimes(1);
 });
 
 test('CANJE-GRUPAL-01: saldo 10 sin servicios elegibles informa ausencia y no inicia canje',async()=>{

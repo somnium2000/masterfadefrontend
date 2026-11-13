@@ -37,7 +37,7 @@ for (const width of [390, 1440]) for (const theme of ['dark', 'light']) for (con
         if (endpoint === '/v1/auth/me') data = { user: { id_usuario: USER, nombres: 'Cliente', apellidos: 'Sintético', telefono_principal: '99999999' }, roles: ['cliente'], cliente_id: CLIENT };
         else if (endpoint === '/v1/auth/csrf') data = { csrf_token: 'synthetic-only' };
         else if (endpoint === '/v1/commerce/eligibility') data = { booking, vipPurchase: false };
-        else if (endpoint === '/v1/cliente/me') data = { cliente: { id_cliente: CLIENT, id_sucursal_preferida: BRANCH, nombres: 'Cliente', apellidos: 'Sintético', telefono_principal: '99999999', perfil_completo: true } };
+        else if (endpoint === '/v1/cliente/me') data = { cliente: { id_cliente: CLIENT, id_usuario: USER, nombre_completo: 'Cliente Sintético', masterpuntos: balance, id_sucursal_preferida: BRANCH, nombres: 'Cliente', apellidos: 'Sintético', telefono_principal: '99999999', perfil_completo: true } };
         else if (endpoint === '/v1/cliente/puntos/resumen') data = summary();
         else if (endpoint === '/v1/public/catalog/sucursales') data = { sucursales: [{ id_sucursal: BRANCH, nombre_sucursal: 'Centro' }, { id_sucursal: OTHER, nombre_sucursal: 'Otra sucursal' }] };
         else if (endpoint === '/v1/citas') data = { citas: [] };
@@ -65,8 +65,9 @@ for (const width of [390, 1440]) for (const theme of ['dark', 'light']) for (con
       await page.goto(base + '/home/cliente');
       for (const amount of [0, 9, 10, 11, 20]) {
         balance = amount;
-        const update = page.getByRole('button', { name: 'Actualizar', exact: true });
-        await update.waitFor(); await update.click();
+        await page.getByRole('button', { name: 'Actualizar', exact: true }).waitFor();
+        // AM: El regreso de la pasarela refresca saldo/historial sin pulsar Actualizar.
+        await page.evaluate(() => window.dispatchEvent(new Event('focus')));
         await page.getByText(`Lectura sintética ${amount}`, { exact: true }).waitFor();
         const card = page.getByText('Saldo total', { exact: true }).locator('..');
         await card.getByText(String(amount), { exact: true }).waitFor();
@@ -74,6 +75,17 @@ for (const width of [390, 1440]) for (const theme of ['dark', 'light']) for (con
         assert.equal(await page.getByRole('button', { name: 'Canjear mi recompensa', exact: true }).count(), amount >= 10 ? 1 : 0);
         await noOverflow();
       }
+      await page.goto(base + '/home/cliente/perfil');
+      await page.getByText('Masterpuntos: 20', { exact: true }).waitFor();
+      balance = 21;
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await page.getByText('Masterpuntos: 21', { exact: true }).waitFor();
+      await noOverflow();
+      await page.goBack();
+      await page.getByText('Lectura sintética 21', { exact: true }).waitFor();
+      balance = 20;
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await page.getByText('Lectura sintética 20', { exact: true }).waitFor();
       await mkdir(evidence, { recursive: true });
       await page.getByRole('heading', { name: 'Ruta a tu cortesía' }).scrollIntoViewIfNeeded();
       await page.screenshot({ path: path.join(evidence, `${width}-${theme}-${booking}-summary.png`) });

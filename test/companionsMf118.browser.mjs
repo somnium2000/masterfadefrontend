@@ -165,7 +165,7 @@ for (const engine of engines) for (const width of [390,1440]) for (const count o
     assert.match(await detail.nth(0).innerText(),/Cubierto por recompensa/);
     for(let i=1;i<=count;i++) assert.doesNotMatch(await detail.nth(i).innerText(),/Cubierto por recompensa|Cubierto por tu plan/);
     assert.match((await page.getByText('Extras y acompañantes',{exact:true}).locator('..').innerText()).replace(/[^0-9.]/g,''),new RegExp((count*300).toFixed(2)));
-   } else await page.getByText(/se acreditan solo al titular que creó la reserva/).waitFor();
+   } else await page.getByText(/acredita \+1 MasterPunto solo al titular que creó la reserva/).waitFor();
    await page.getByText(/incluso si un acompañante ya tiene cuenta propia/).waitFor();
    assert.equal(await page.locator('.citas-confirm-service-item').count(),count+1);
    const contacts=session.calls.filter(call=>call.path.endsWith('/validar-contactos')).at(-1).payload.contactos;

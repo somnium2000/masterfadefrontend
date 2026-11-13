@@ -271,10 +271,10 @@ export default function PublicBookingConfirmStep() {
         <div className="public-booking-payment-note mt-4">
           <span>
             {coveredByReward > 0
-              ? 'El servicio canjeado del titular no genera puntos. Cada cita elegible de un acompañante que se complete acreditará +1 MasterPunto al titular; cancelar o no asistir no genera puntos.'
+              ? 'El servicio canjeado del titular no genera puntos. Cada cita elegible de un acompañante acredita +1 MasterPunto al titular al confirmarse el pago y la reserva. Los puntos acreditados se conservan si después no asistes.'
               : canUseClienteHold
-              ? 'Los MasterPuntos de las citas completadas que califican en este grupo se acreditan solo al titular que creó la reserva, incluidos los acompañantes con o sin cuenta.'
-              : 'Los MasterPuntos se acreditan al completar las citas que califican, según las reglas vigentes.'}
+              ? 'Al confirmarse el pago y la reserva, cada cita elegible del grupo acredita +1 MasterPunto solo al titular que creó la reserva, incluidos los acompañantes con o sin cuenta.'
+              : 'Los MasterPuntos se acreditan al confirmarse el pago y la reserva de las citas elegibles, sin esperar a completar la visita.'}
           </span>
         </div>
 

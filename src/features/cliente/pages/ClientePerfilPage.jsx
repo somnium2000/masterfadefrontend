@@ -7,6 +7,7 @@ import ClienteAccountDeletionDialog from '../components/ClienteAccountDeletionDi
 import ClienteProfileCompletionBanner from '../components/ClienteProfileCompletionBanner.jsx';
 import ClienteProfileEditModal from '../components/ClienteProfileEditModal.jsx';
 import { getClienteMe } from '../lib/clienteApi.js';
+import useRefreshOnReturn from '../hooks/useRefreshOnReturn.js';
 
 function formatDate(value) {
   if (!value) return '-';
@@ -120,7 +121,7 @@ function ClientePerfilContent({ identity }) {
       }
       notifyError('No se pudo cargar tu perfil.');
     } finally {
-      if (isCurrent() && !silent) setLoading(false);
+      if (isCurrent()) setLoading(false);
       if (activeProfileControllerRef.current === controller) {
         activeProfileControllerRef.current = null;
       }
@@ -131,6 +132,8 @@ function ClientePerfilContent({ identity }) {
     if (!canLoadProfile) return;
     void loadProfile();
   }, [canLoadProfile, loadProfile]);
+
+  useRefreshOnReturn(loadProfile, canLoadProfile);
 
   const profile = data?.cliente || null;
   const completion = data?.profile_completion || null;
