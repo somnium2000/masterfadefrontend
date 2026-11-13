@@ -15,9 +15,14 @@ const EMAIL = 'synthetic@example.test';
 const branch = { id_sucursal: BRANCH, nombre_sucursal: 'Sucursal sintética' };
 const profile = { id_usuario: '66666666-6666-4666-8666-666666666666', nombres: 'Cliente', apellidos: 'Sintético', email: EMAIL, telefono_principal: '99999999' };
 
-async function setup(browser, { cliente = false, mobile = true, membership = true } = {}) {
+async function setup(browser, { cliente = false, mobile = true, membership = true, reward = false } = {}) {
   const context = await browser.newContext(mobile ? devices['iPhone 13'] : { viewport: { width: 1440, height: 900 } });
   await context.addInitScript(theme=>localStorage.setItem('mf_theme_variant',theme),mobile?'dark':'light');
+  if(reward) await context.addInitScript(({service,branch,user})=>{
+    const client='77777777-7777-4777-8777-777777777777';
+    const token='mf_reward_ctx_v1.'+btoa(JSON.stringify({v:1,id_cliente:client,id_servicio_canje:service,id_sucursal:branch})).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_')+'.'+'a'.repeat(43);
+    sessionStorage.setItem('mf_reward_redeem_context_v1',JSON.stringify({owner_id_usuario:user,owner_id_cliente:client,canje_context_token:token,id_servicio_canje:service,id_sucursal:branch,servicio_nombre:'Corte sintético'}));
+  },{service:SERVICE,branch:BRANCH,user:profile.id_usuario});
   const page = await context.newPage();
   page.setDefaultTimeout(7000);
   await page.clock.setFixedTime(new Date('2030-06-15T12:00:00Z'));
@@ -126,11 +131,11 @@ for(const engine of engines)for(const width of [390,1440])test(engine.name()+' '
 });
 
 // AM: App, router y hooks reales; solo las APIs externas usan datos sinteticos, sin holds ni pagos.
-for (const engine of engines) for (const width of [390,1440]) for (const count of [1,2,3,4]) {
- test(`${engine.name()} ${width}: puntos del titular con ${count} acompanantes`, {timeout:60000}, async () => {
+for (const engine of engines) for (const width of [390,1440]) for (const count of [1,2,3,4]) for(const reward of [false,true]) {
+ test(`${engine.name()} ${width}: puntos del titular con ${count} acompanantes canje=${reward}`, {timeout:60000}, async () => {
   const browser=await launch(engine);
   try {
-   const session=await setup(browser,{cliente:true,mobile:width===390,membership:count%2===0}); const {page}=session;
+   const session=await setup(browser,{cliente:true,mobile:width===390,membership:count%2===0,reward}); const {page}=session;
    await page.setViewportSize({width,height:900}); await page.goto(baseURL+'/agendar');
    await page.getByRole('button',{name:'Seleccionar a Barbero sintético'}).click();
    const service=page.getByRole('button',{name:/Corte sintético/}); if(await service.isEnabled()) await service.click();
@@ -153,7 +158,14 @@ for (const engine of engines) for (const width of [390,1440]) for (const count o
    }
    await page.getByRole('button',{name:'Continuar a resumen',exact:true}).click();
    await page.getByRole('heading',{name:'Resumen de cita',exact:true}).waitFor().catch(async error=>{throw new Error(error.message+'\n'+await page.locator('body').innerText());});
-   await page.getByText(/se acreditan solo al titular que creó la reserva/).waitFor();
+   if(reward) {
+    await page.getByText(/El servicio canjeado del titular no genera puntos/).waitFor();
+    await page.getByText(/10 puntos una sola vez/).waitFor();
+    const detail=page.locator('.citas-confirm-service-item');
+    assert.match(await detail.nth(0).innerText(),/Cubierto por recompensa/);
+    for(let i=1;i<=count;i++) assert.doesNotMatch(await detail.nth(i).innerText(),/Cubierto por recompensa|Cubierto por tu plan/);
+    assert.match((await page.getByText('Extras y acompañantes',{exact:true}).locator('..').innerText()).replace(/[^0-9.]/g,''),new RegExp((count*300).toFixed(2)));
+   } else await page.getByText(/se acreditan solo al titular que creó la reserva/).waitFor();
    await page.getByText(/incluso si un acompañante ya tiene cuenta propia/).waitFor();
    assert.equal(await page.locator('.citas-confirm-service-item').count(),count+1);
    const contacts=session.calls.filter(call=>call.path.endsWith('/validar-contactos')).at(-1).payload.contactos;
@@ -164,7 +176,7 @@ for (const engine of engines) for (const width of [390,1440]) for (const count o
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
    assert.deepEqual(session.errors,[]);
    const evidence=path.join(process.env.TEMP,'mf-points-companions-evidence'); await mkdir(evidence,{recursive:true});
-   await page.screenshot({path:path.join(evidence,engine.name()+'-'+width+'-'+count+'.png'),fullPage:true});
+   await page.screenshot({path:path.join(evidence,engine.name()+'-'+width+'-'+count+'-reward-'+reward+'.png'),fullPage:true});
   } finally {await browser.close();}
  });
 }

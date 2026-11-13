@@ -97,3 +97,11 @@ test('integral: volver a consultar actualiza saldo, historial y disponibilidad s
   expect(screen.queryByRole('button', { name: 'Canjear mi recompensa' })).not.toBeInTheDocument();
   expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
 });
+
+test('CANJE-GRUPAL-01: saldo 10 sin servicios elegibles informa ausencia y no inicia canje',async()=>{
+ api.getClientePuntosResumen.mockResolvedValue({...summary(10),servicios_redimibles:[]});
+ await ready();
+ expect(screen.getByText('No hay servicios disponibles para canje en este momento.')).toBeInTheDocument();
+ const button=screen.getByRole('button',{name:'Canjear mi recompensa'});expect(button).toBeDisabled();fireEvent.click(button);
+ expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();expect(navigate).not.toHaveBeenCalled();
+});

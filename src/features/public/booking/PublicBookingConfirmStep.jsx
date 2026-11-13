@@ -73,7 +73,8 @@ export default function PublicBookingConfirmStep() {
     ?? 0
   );
   const totalToPayApi = Number(holdPricing?.total_pagar_hnl ?? holdResult?.total_pagar_hnl ?? holdResult?.total_hnl ?? 0);
-  const subtotalMenosDescuento = Math.max(0, subtotalResolved - Math.max(0, descuento));
+  const otherDiscount = Math.max(0, descuento - coveredTotal);
+  const subtotalMenosDescuento = Math.max(0, subtotalResolved - otherDiscount);
   const totalServiciosNeto = Math.max(0, subtotalMenosDescuento - coveredTotal);
   const hasBackendTotal = hasHoldReady && Number.isFinite(totalToPayApi);
   const totalToPay = hasBackendTotal ? Math.max(0, totalToPayApi) : totalServiciosNeto;
@@ -82,9 +83,9 @@ export default function PublicBookingConfirmStep() {
   const safeCoveredByPlan = Math.max(0, Number(coveredByPlan || 0));
   const safeExtrasToPay = hasBackendTotal ? Math.max(0, Number(extrasToPay || 0)) : totalServiciosNeto;
   const hasPlanCoverage = safeCoveredByPlan > 0;
-  const hasSaldoToPay = hasPlanCoverage && safeExtrasToPay > 0;
+  const hasSaldoToPay = (hasPlanCoverage || coveredByReward > 0) && safeExtrasToPay > 0;
   const isFullyCoveredByPlan = hasPlanCoverage && safeExtrasToPay <= 0;
-  const hasRealDiscount = Math.max(0, descuento) > 0;
+  const hasRealDiscount = otherDiscount > 0;
   const showIsvLine = totalToPay > 0;
   const mustLoginForNoPaymentConfirmation = Boolean(!requiresOnlinePayment && !canUseClienteHold);
   const primaryActionLabel = requiresOnlinePayment
@@ -193,7 +194,7 @@ export default function PublicBookingConfirmStep() {
               Cubierto por recompensa: {holdPricing?.recompensa_servicio_nombre || 'Servicio de cortesía'}.
             </p>
             <p className="citas-selected-date text-emerald-100">
-              Tus 10 puntos se descontarán cuando confirmes la cita.
+              Se descontarán 10 puntos una sola vez al confirmar la reserva. Los acompañantes y extras se cobran normalmente.
             </p>
           </>
         ) : null}
@@ -230,7 +231,7 @@ export default function PublicBookingConfirmStep() {
         {hasRealDiscount ? (
           <div className="citas-confirm-row">
             <span>Descuento</span>
-            <span>-{formatCurrencyHnl(Math.max(0, descuento))}</span>
+            <span>-{formatCurrencyHnl(otherDiscount)}</span>
           </div>
         ) : null}
         {coveredByReward > 0 ? (
@@ -247,7 +248,7 @@ export default function PublicBookingConfirmStep() {
         ) : null}
         {hasSaldoToPay ? (
           <div className="citas-confirm-row">
-            <span>{membershipHasContext ? 'Extras y acompañantes' : 'Saldo a pagar'}</span>
+            <span>{membershipHasContext || coveredByReward > 0 ? 'Extras y acompañantes' : 'Saldo a pagar'}</span>
             <span>{formatCurrencyHnl(safeExtrasToPay)}</span>
           </div>
         ) : null}
@@ -269,7 +270,9 @@ export default function PublicBookingConfirmStep() {
 
         <div className="public-booking-payment-note mt-4">
           <span>
-            {canUseClienteHold
+            {coveredByReward > 0
+              ? 'El servicio canjeado del titular no genera puntos. Cada cita elegible de un acompañante que se complete acreditará +1 MasterPunto al titular; cancelar o no asistir no genera puntos.'
+              : canUseClienteHold
               ? 'Los MasterPuntos de las citas completadas que califican en este grupo se acreditan solo al titular que creó la reserva, incluidos los acompañantes con o sin cuenta.'
               : 'Los MasterPuntos se acreditan al completar las citas que califican, según las reglas vigentes.'}
           </span>
