@@ -145,3 +145,15 @@ test('QA-UX conserva teléfono del Cliente al seguir editando y descarta solo co
   fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
+
+
+test.each([false, true])('consentimientos de Cliente son solo lectura y guardar preserva valores %s', async (accepted) => {
+  api.getAdminPersonaCliente.mockResolvedValue({ data: { cliente: { ...client(), acepta_terminos: accepted, consentimiento_marketing: accepted } } });
+  render(<Page />); await edit();
+  const agreements = within(dialog()).getByRole('region', { name: 'Acuerdos y privacidad' });
+  expect(within(agreements).queryAllByRole('checkbox')).toHaveLength(0);
+  expect(within(agreements).getByText(accepted ? 'Aceptación registrada' : 'Sin aceptación registrada')).toBeInTheDocument();
+  fireEvent.change(within(dialog()).getByDisplayValue('99990000'), { target: { value: '99990001' } });
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Actualizar cliente' }));
+  expect(api.updateAdminPersonaCliente.mock.calls[0][1].cliente).toMatchObject({ acepta_terminos: accepted, consentimiento_marketing: accepted });
+});

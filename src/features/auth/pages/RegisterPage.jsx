@@ -6,13 +6,13 @@ import {
   EyeOff,
   KeyRound,
   Mail,
-  Megaphone,
   ShieldCheck,
   Sparkles,
   UserRound,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import ConsentAgreements from '../../../components/legal/ConsentAgreements.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
 import { useNotifications } from '../../../context/NotificationsContext.jsx';
@@ -354,42 +354,11 @@ export default function RegisterPage() {
                 Mínimo 8 caracteres con mayúscula, minúscula y número.
               </p>
 
-              {/* AM: Panel de consentimientos para separar legal/marketing y mejorar legibilidad. */}
-              <div className="mf-register-consent-panel">
-                <p className="mf-register-consent-title">
-                  <ShieldCheck size={14} strokeWidth={1.9} />
-                  Consentimientos de cuenta
-                </p>
-
-                <div className="mf-register-checkboxes">
-                  <label className="mf-checkbox mf-checkbox-block">
-                    <input
-                      type="checkbox"
-                      checked={aceptaTerminos}
-                      onChange={(event) => setAceptaTerminos(event.target.checked)}
-                      disabled={loading}
-                    />
-                    <span>
-                      Acepto <a href="/terminos-y-condiciones#terminos-y-condiciones" target="_blank" rel="noopener noreferrer" title="Se abre en otra pestaña" className="rounded text-[var(--mf-accent)] underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">términos y condiciones</a> para crear mi cuenta.
-                    </span>
-                  </label>
-
-                  <p className="text-xs leading-6 text-[var(--mf-text-2)]"><a href="/terminos-y-condiciones#politica-de-privacidad" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center rounded text-[var(--mf-accent)] underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" title="Se abre en otra pestaña">Política de privacidad</a> · Los documentos se abren en otra pestaña.</p>
-
-                  <label className="mf-checkbox mf-checkbox-block">
-                    <input
-                      type="checkbox"
-                      checked={consentimientoMarketing}
-                      onChange={(event) => setConsentimientoMarketing(event.target.checked)}
-                      disabled={loading}
-                    />
-                    <span className="mf-register-checkbox-content">
-                      <Megaphone size={13} strokeWidth={1.9} />
-                      Acepto recibir comunicaciones por correo sobre servicios, novedades y promociones.
-                    </span>
-                  </label>
-                </div>
-              </div>
+              <ConsentAgreements
+                termsInputProps={{ checked: aceptaTerminos, onChange: event => setAceptaTerminos(event.target.checked), disabled: loading }}
+                marketingInputProps={{ checked: consentimientoMarketing, onChange: event => setConsentimientoMarketing(event.target.checked), disabled: loading }}
+                marketingLabel="Acepto recibir comunicaciones por correo sobre servicios, novedades y promociones."
+              />
 
               {error ? <div id="register-error" className="mf-error" role="alert">{error}</div> : null}
 

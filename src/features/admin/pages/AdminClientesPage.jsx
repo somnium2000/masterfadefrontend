@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import ConsentAgreements from '../../../components/legal/ConsentAgreements.jsx';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
 import { useNavigate } from 'react-router-dom';
 import { Ban, Building2, CheckCircle2, Eye, KeyRound, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Users, X } from 'lucide-react';
@@ -851,14 +852,7 @@ export default function AdminClientesPage() {
               </div>
               <p className="text-xs text-[var(--mf-text-2)]">El cliente creara su propia contrasena con flujo seguro.</p>
 
-              <label className="mt-1 flex items-center gap-2">
-                <input type="checkbox" checked={formValues.consentimiento_marketing} onChange={(e) => setFormValues((p) => ({ ...p, consentimiento_marketing: e.target.checked }))} />
-                <span>Consentimiento de marketing</span>
-              </label>
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={formValues.acepta_terminos} onChange={(e) => setFormValues((p) => ({ ...p, acepta_terminos: e.target.checked }))} />
-                <span>Aceptacion de terminos</span>
-              </label>
+              <ConsentAgreements readOnly termsInputProps={{ checked: formValues.acepta_terminos }} marketingInputProps={{ checked: formValues.consentimiento_marketing }} />
             </div>
           </div>
 

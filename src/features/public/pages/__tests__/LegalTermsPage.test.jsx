@@ -28,17 +28,17 @@ test('JSON idéntico al ZIP original y estructura completa 8/62/115/1', () => {
   expect(chapters.flatMap(ch => ch.blocks).filter(b => b.type === 'table')).toHaveLength(1);
 });
 
-test('renderiza cada título, párrafo, aviso y celda sin reescribir ni omitir contenido', () => {
+test('renderiza cada título, párrafo y celda sin reescribir ni omitir contenido', () => {
   mount();
   expect(screen.getAllByRole('article')).toHaveLength(8);
   expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(62);
-  expect(screen.getByRole('note')).toHaveTextContent(legalTerms.approval_status);
-  expect(screen.getByRole('note')).toHaveTextContent('Pendiente de revisión legal y entrada en vigor.');
+  expect(screen.queryByText(/Borrador 0.3-RC1/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/revisión en QA|pendiente de revisión legal|entrada en vigor.{0,40}pendiente|0\.3-RC1/i)).not.toBeInTheDocument();
   for (const doc of legalTerms.documents) {
     const article = document.getElementById(doc.id);
     expect(within(article).getByRole('heading', { level: 2 }).textContent).toBe(doc.title);
     const metadata = [...article.querySelector('header').querySelectorAll('p')].map(node => node.textContent);
-    expect(metadata).toEqual([doc.kicker, doc.description, doc.notice]);
+    expect(metadata).toEqual([doc.kicker, doc.description]);
     for (const chapter of doc.chapters) {
       const section = document.getElementById(`${doc.id}-apartado-${chapter.number}`);
       expect(within(section).getByRole('heading', { level: 3 }).textContent).toBe(chapter.title);

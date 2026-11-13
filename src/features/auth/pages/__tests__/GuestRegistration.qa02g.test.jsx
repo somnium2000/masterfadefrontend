@@ -67,7 +67,7 @@ test('confirmación conserva borrador y consentimientos al leer términos y priv
   for (const [label, value] of [['Nombre', 'New'], ['Apellido', 'Owner'], ['Contraseña final', 'FinalOwner9!'], ['Confirmar contraseña', 'FinalOwner9!']]) fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
   const terms = screen.getByRole('checkbox', { name: 'Acepto términos y condiciones para crear mi cuenta.' });
   const marketing = screen.getByRole('checkbox', { name: 'Acepto recibir comunicaciones comerciales.' });
-  for (const [name, hash] of [['términos y condiciones', 'terminos-y-condiciones'], ['Política de privacidad', 'politica-de-privacidad']]) {
+  for (const [name, hash] of [['Términos y condiciones', 'terminos-y-condiciones'], ['Política de privacidad', 'politica-de-privacidad']]) {
     const link = screen.getByRole('link', { name, exact: true });
     expect(link).toHaveAttribute('href', `/terminos-y-condiciones#${hash}`);
     expect(link).toHaveAttribute('target', '_blank');

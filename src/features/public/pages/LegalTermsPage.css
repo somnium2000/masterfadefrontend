@@ -1,18 +1,37 @@
 .legal-terms { overflow-wrap: anywhere; }
+.legal-terms__intro { max-width: 780px; padding: 8px 0 28px; }
+.legal-terms__intro h1 { font-size: clamp(32px, 4vw, 48px); letter-spacing: -.025em; }
 .legal-terms__layout { display: grid; gap: 24px; align-items: start; }
 .legal-terms__index, .legal-terms__document, .legal-terms__chapter { min-width: 0; scroll-margin-top: 24px; }
-.legal-terms__index-link { display: block; min-height: 44px; padding: 10px 4px; line-height: 1.6; font-size: 13px; border-radius: 6px; }
+.legal-terms__index { padding: 16px; border: 1px solid var(--mf-nav-border); background: var(--mf-card); border-radius: 18px; }
+.legal-terms__index-disclosure > summary { display: flex; align-items: center; gap: 12px; min-height: 48px; cursor: pointer; color: var(--mf-accent); border-radius: 6px; }
+.legal-terms__index-disclosure > summary::after { content: '+'; margin-left: auto; font-size: 22px; }
+.legal-terms__index-disclosure[open] > summary::after { content: '−'; }
+.legal-terms__index-disclosure > summary::-webkit-details-marker { display: none; }
+.legal-terms__index-disclosure h2 { font-size: 15px; font-weight: 600; color: var(--mf-text); }
+.legal-terms__index-disclosure > summary span span { display: block; margin-top: 4px; font-size: 12px; color: var(--mf-text-2); }
+.legal-terms__index-disclosure > ol > li + li { border-top: 1px solid var(--mf-nav-border); padding-top: 8px; }
+.legal-terms__index-link { display: block; min-height: 44px; padding: 10px 4px; line-height: 1.65; font-size: 14px; border-radius: 6px; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--mf-btn-border); }
 .legal-terms__index-link:hover { color: var(--mf-accent); background: var(--mf-btn-bg); }
-.legal-terms__paragraph { font-size: 15px; line-height: 1.85; white-space: pre-line; }
+.legal-terms__chapters summary { font-size: 12px; }
+.legal-terms__chapters .legal-terms__index-link { font-size: 13px; }
+.legal-terms__documents { display: grid; gap: 24px; min-width: 0; }
+.legal-terms__document { border: 1px solid var(--mf-nav-border); border-radius: 22px; background: var(--mf-card); padding: 24px; }
+.legal-terms__document > header h2 { font-size: clamp(26px, 3vw, 34px); letter-spacing: -.02em; }
+.legal-terms__chapter + .legal-terms__chapter { padding-top: 8px; }
+.legal-terms__chapter h3 { font-size: 18px; line-height: 1.5; }
+.legal-terms__paragraph { font-size: 16px; line-height: 1.85; white-space: pre-line; }
 .legal-terms__table-scroll { width: 100%; overflow: auto; border: 1px solid var(--mf-nav-border); border-radius: 12px; }
-.legal-terms table { width: 100%; min-width: 560px; table-layout: fixed; border-collapse: collapse; font-size: 13px; line-height: 1.7; text-align: left; }
-.legal-terms th, .legal-terms td { padding: 12px; vertical-align: top; white-space: pre-line; border-bottom: 1px solid var(--mf-nav-border); }
+.legal-terms table { width: 100%; min-width: 560px; table-layout: fixed; border-collapse: collapse; font-size: 14px; line-height: 1.75; text-align: left; }
+.legal-terms th, .legal-terms td { padding: 14px; vertical-align: top; white-space: pre-line; border-bottom: 1px solid var(--mf-nav-border); }
 .legal-terms th { background: var(--mf-btn-bg); font-weight: 600; }
 .legal-terms tbody tr:last-child td { border-bottom: 0; }
-.legal-terms__back { display: inline-flex; min-height: 44px; align-items: center; gap: 6px; margin-top: 24px; color: var(--mf-accent); font-size: 13px; font-weight: 600; }
-.legal-terms a:focus-visible, .legal-terms summary:focus-visible, .legal-terms__table-scroll:focus-visible { outline: 2px solid var(--mf-accent); outline-offset: 3px; }
-@media (min-width: 640px) { .legal-terms__paragraph { font-size: 16px; } }
+.legal-terms__back { display: inline-flex; min-height: 44px; align-items: center; gap: 6px; margin-top: 28px; color: var(--mf-accent); font-size: 13px; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; }
+.legal-terms a:focus-visible, .legal-terms summary:focus-visible, .legal-terms__table-scroll:focus-visible, .legal-terms__document:focus-visible { outline: 2px solid var(--mf-accent); outline-offset: 3px; }
+@media (max-width: 359px) { .legal-terms__document { padding: 18px; } .legal-terms__index { padding: 12px; } }
 @media (min-width: 1024px) {
-  .legal-terms__layout { grid-template-columns: 260px minmax(0, 1fr); gap: 32px; }
+  .legal-terms__layout { grid-template-columns: 280px minmax(0, 1fr); gap: 32px; }
   .legal-terms__index { position: sticky; top: 24px; max-height: calc(100dvh - 48px); overflow: auto; }
+  .legal-terms__document { padding: 36px; }
+  .legal-terms__paragraph { font-size: 17px; }
 }

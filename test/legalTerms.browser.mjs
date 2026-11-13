@@ -9,15 +9,15 @@ import process from 'node:process';
 const engines = createRequire(import.meta.url)(process.env.MASTERFADE_PLAYWRIGHT_MODULE || 'playwright');
 const base = process.env.MASTERFADE_BROWSER_URL || 'http://127.0.0.1:4189';
 const legal = JSON.parse(readFileSync(new URL('../src/features/public/data/legalTerms.v0.3-RC1.json', import.meta.url), 'utf8'));
-const evidence = path.join(process.env.TEMP || process.cwd(), 'mf-legal-terms-evidence');
+const evidence = path.join(process.env.TEMP || process.cwd(), 'mf-legal-ux01-evidence');
 
-for (const engine of ['chromium', 'webkit']) for (const width of [390, 1440]) for (const theme of ['dark', 'light']) {
+for (const engine of (process.env.MASTERFADE_BROWSER_ENGINES || 'chromium,webkit').split(',')) for (const width of [320, 390, 1440]) for (const theme of ['dark', 'light']) {
   test(`${engine} ${width} ${theme}: documentos íntegros y lectura sin consentimiento automático`, {
     skip: !existsSync(engines[engine].executablePath()), timeout: 90000,
   }, async () => {
-    const browser = await engines[engine].launch();
+    const browser = await engines[engine].launch(engine === 'chromium' && process.env.MASTERFADE_CHROMIUM_CHANNEL ? { channel: process.env.MASTERFADE_CHROMIUM_CHANNEL } : {});
     try {
-      const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width === 390, isMobile: width === 390 });
+      const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 640, isMobile: width < 640 });
       const errors = [], writes = [];
       await context.addInitScript(value => {
         if (location.protocol === 'http:' || location.protocol === 'https:') localStorage.setItem('mf_theme_variant', value);
@@ -57,17 +57,19 @@ for (const engine of ['chromium', 'webkit']) for (const width of [390, 1440]) fo
       const sourceTable = legal.documents.flatMap(doc => doc.chapters.flatMap(ch => ch.blocks)).find(block => block.type === 'table');
       assert.deepEqual(await table.locator('th').allTextContents(), sourceTable.headers);
       assert.deepEqual(await table.locator('tbody tr').evaluateAll(rows => rows.map(row => [...row.cells].map(cell => cell.textContent))), sourceTable.rows);
-      await page.getByRole('note').getByText(legal.approval_status, { exact: true }).waitFor();
+      assert.equal(await page.getByText(/Borrador|revisión en QA|pendiente de revisión legal|entrada en vigor.{0,40}pendiente|0\.3-RC1/i).count(), 0);
       await noOverflow(page);
       await mkdir(evidence, { recursive: true });
       await page.waitForFunction(() => [...document.querySelectorAll('header img')].every(image => image.complete && image.naturalWidth > 0));
-      await page.screenshot({ path: path.join(evidence, `${engine}-${width}-${theme}-overview.png`) });
+      await page.screenshot({ path: path.join(evidence, `after-${engine}-${width}-${theme}-legal.png`) });
       const nav = page.getByRole('navigation', { name: 'Índice de documentos legales' });
+      assert.equal(await nav.locator('.legal-terms__index-disclosure').evaluate(node => node.open), width >= 1024);
+      if (width < 1024) await nav.locator('.legal-terms__index-disclosure > summary').click();
       await nav.locator('a[href="#politica-de-privacidad"]').click();
       await aligned(page, 'politica-de-privacidad');
       await page.screenshot({ path: path.join(evidence, `${engine}-${width}-${theme}-privacy.png`) });
       await page.locator('#politica-de-privacidad .legal-terms__back').click();
-      await nav.locator('summary').first().click();
+      await nav.locator('.legal-terms__chapters summary').first().click();
       await nav.locator('a[href="#aviso-legal-apartado-1"]').click();
       await aligned(page, 'aviso-legal-apartado-1');
       await page.goto(`${base}/terminos-y-condiciones#politica-de-privacidad`);
@@ -75,7 +77,7 @@ for (const engine of ['chromium', 'webkit']) for (const width of [390, 1440]) fo
       const cookieRegion = page.getByRole('region', { name: 'Tabla de cookies y almacenamiento local' });
       await cookieRegion.scrollIntoViewIfNeeded();
       await noOverflow(page);
-      if (width === 390) {
+      if (width < 640) {
         await cookieRegion.focus();
         for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowRight');
         await page.waitForFunction(() => document.querySelector('.legal-terms__table-scroll').scrollLeft > 0);
@@ -91,9 +93,13 @@ for (const engine of ['chromium', 'webkit']) for (const width of [390, 1440]) fo
         for (const [label, value] of fields) await page.getByLabel(label, { exact: true }).fill(value);
         const terms = page.getByRole('checkbox', { name: 'Acepto términos y condiciones para crear mi cuenta.', exact: true });
         const marketing = page.getByRole('checkbox', { name: /Acepto recibir comunicaciones/ });
-        for (const [name, target] of [['términos y condiciones', 'terminos-y-condiciones'], ['Política de privacidad', 'politica-de-privacidad']]) {
+        for (const [name, target] of [['Términos y condiciones', 'terminos-y-condiciones'], ['Política de privacidad', 'politica-de-privacidad']]) {
           const link = page.getByRole('link', { name, exact: true });
           assert.equal(await link.getAttribute('target'), '_blank');
+          assert.equal(await link.evaluate(node => node.closest('label') === null), true);
+          await link.focus();
+          assert.equal(await link.evaluate(node => document.activeElement === node && getComputedStyle(node).textDecorationLine.includes('underline') && getComputedStyle(node).outlineStyle !== 'none'), true);
+          assert.ok(await link.evaluate(node => node.getBoundingClientRect().height >= 44));
           const [reading] = await Promise.all([context.waitForEvent('page'), link.click()]);
           await reading.getByRole('heading', { level: 1, name: 'Términos y condiciones' }).waitFor();
           assert.equal(new URL(reading.url()).hash, `#${target}`);
@@ -105,12 +111,17 @@ for (const engine of ['chromium', 'webkit']) for (const width of [390, 1440]) fo
           assert.equal(await marketing.isChecked(), false);
           for (const [label, value] of fields) assert.equal(await page.getByLabel(label, { exact: true }).inputValue(), value);
         }
+        await page.locator('.mf-agreements').scrollIntoViewIfNeeded();
+        await page.locator('.mf-agreements').screenshot({ path: path.join(evidence, `after-${engine}-${width}-${theme}-${confirmation ? 'confirm' : 'register'}.png`) });
         const before = writes.length;
         await page.getByRole('button', { name: confirmation ? 'Completar registro' : 'Crear cuenta', exact: true }).click();
         if (!confirmation) await page.getByRole('alert').filter({ hasText: 'Debes aceptar los términos' }).waitFor();
         else assert.equal(await terms.evaluate(node => node.validity.valueMissing), true);
         assert.equal(writes.length, before);
-        await terms.check();
+        await terms.focus();
+        await page.keyboard.press('Space');
+        assert.equal(await terms.isChecked(), true);
+        assert.equal(await marketing.isChecked(), false);
         await page.getByRole('button', { name: confirmation ? 'Completar registro' : 'Crear cuenta', exact: true }).click();
         await page.getByRole('status').filter({ hasText: confirmation ? 'Registro completado' : 'Registro pendiente' }).waitFor();
         assert.deepEqual(writes.at(-1), { endpoint: confirmation ? '/v1/auth/register/confirm' : '/v1/auth/register', terms: true, marketing: false });

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { http } from '../../../services/httpClient.js';
+import ConsentAgreements from '../../../components/legal/ConsentAgreements.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
 import './LoginPage.css';
 import './RegisterPage.css';
@@ -72,9 +73,7 @@ export default function GuestRegistrationConfirmPage() {
                 {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
-            <label className="mf-checkbox"><input type="checkbox" name="acepta_terminos" required disabled={loading} /><span>Acepto <a href="/terminos-y-condiciones#terminos-y-condiciones" target="_blank" rel="noopener noreferrer" title="Se abre en otra pestaña" className="rounded text-[var(--mf-accent)] underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">términos y condiciones</a> para crear mi cuenta.</span></label>
-            <p className="text-xs leading-6 text-[var(--mf-text-2)]"><a href="/terminos-y-condiciones#politica-de-privacidad" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center rounded text-[var(--mf-accent)] underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" title="Se abre en otra pestaña">Política de privacidad</a> · Los documentos se abren en otra pestaña.</p>
-            <label className="mf-checkbox"><input type="checkbox" name="consentimiento_marketing" disabled={loading} />Acepto recibir comunicaciones comerciales.</label>
+            <ConsentAgreements termsInputProps={{ name: 'acepta_terminos', required: true, disabled: loading }} marketingInputProps={{ name: 'consentimiento_marketing', disabled: loading }} />
             {error ? <p role="alert">{error}</p> : null}
             <button className="mf-btn" type="submit" disabled={loading}>{loading ? 'Confirmando…' : 'Completar registro'}</button>
           </form>}

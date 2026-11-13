@@ -1,3 +1,4 @@
+import ConsentAgreements from '../../../components/legal/ConsentAgreements.jsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -464,28 +465,13 @@ export default function AuthCallbackPage() {
           >
             <p className="font-semibold uppercase tracking-[0.08em] text-[var(--mf-accent)]">COMPLETAR REGISTRO</p>
             <p className="text-xs leading-5 text-[var(--mf-text-2)]">
-              Confirma tus decisiones para crear tu perfil. Los documentos legales publicos aun estan pendientes de aprobacion.
+              Confirma tus decisiones para crear tu perfil.
             </p>
-            <label className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                checked={acceptsTerms}
-                disabled={submittingConsent}
-                onChange={(event) => setAcceptsTerms(event.target.checked)}
-                className="mt-0.5 h-4 w-4 accent-[var(--mf-accent)]"
-              />
-              <span>Acepto los terminos y condiciones para crear mi cuenta.</span>
-            </label>
-            <label className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                checked={acceptsMarketing}
-                disabled={submittingConsent}
-                onChange={(event) => setAcceptsMarketing(event.target.checked)}
-                className="mt-0.5 h-4 w-4 accent-[var(--mf-accent)]"
-              />
-              <span>Acepto recibir comunicaciones comerciales.</span>
-            </label>
+            <ConsentAgreements
+              termsLabel="Acepto los términos y condiciones para crear mi cuenta."
+              termsInputProps={{ checked: acceptsTerms, disabled: submittingConsent, onChange: event => setAcceptsTerms(event.target.checked) }}
+              marketingInputProps={{ checked: acceptsMarketing, disabled: submittingConsent, onChange: event => setAcceptsMarketing(event.target.checked) }}
+            />
             <button
               type="submit"
               disabled={submittingConsent}

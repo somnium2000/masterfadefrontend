@@ -112,7 +112,7 @@ test('lectura legal en otra pestaña conserva campos y no acepta términos ni ma
   mount(); complete();
   const terms = screen.getByRole('checkbox', { name: 'Acepto términos y condiciones para crear mi cuenta.' });
   const marketing = screen.getByRole('checkbox', { name: /Acepto recibir comunicaciones/ });
-  for (const [name, hash] of [['términos y condiciones', 'terminos-y-condiciones'], ['Política de privacidad', 'politica-de-privacidad']]) {
+  for (const [name, hash] of [['Términos y condiciones', 'terminos-y-condiciones'], ['Política de privacidad', 'politica-de-privacidad']]) {
     const link = screen.getByRole('link', { name, exact: true });
     expect(link).toHaveAttribute('href', `/terminos-y-condiciones#${hash}`);
     expect(link).toHaveAttribute('target', '_blank');
