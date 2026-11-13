@@ -74,3 +74,26 @@ test('QA-18C: rehidratación de A mantiene su bloqueo hasta terminar y luego lo 
   await act(async () => a.reject({ status: 401 })); expect(navigate).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: 'Canjear mi recompensa' })).toBeEnabled();
 });
+
+
+test.each([0, 9, 10, 11, 20])('integral: saldo %s, progreso y recompensas corresponden al resumen real', async count => {
+  api.getClientePuntosResumen.mockResolvedValue(summary(count));
+  await ready();
+  expect(within(balance()).getByText(String(count))).toBeInTheDocument();
+  const rewards = screen.getByText('Recompensas disponibles').closest('article');
+  expect(within(rewards).getByText(String(Math.floor(count / 10)))).toBeInTheDocument();
+  expect(screen.getAllByText(`${Math.min(count, 10)}/10`)).toHaveLength(2);
+  if (count < 10) expect(screen.queryByRole('button', { name: 'Canjear mi recompensa' })).not.toBeInTheDocument();
+  else expect(screen.getByRole('button', { name: 'Canjear mi recompensa' })).toBeEnabled();
+});
+
+test('integral: volver a consultar actualiza saldo, historial y disponibilidad sin descontar en el cliente', async () => {
+  api.getClientePuntosResumen.mockResolvedValue(summary(11)); await ready();
+  api.getClientePuntosResumen.mockResolvedValue({ ...summary(1, 'ACTUALIZADO'), historial: [{ id_points_tx: 'NEW', puntos: -10, motivo: 'Canje confirmado' }] });
+  fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+  await screen.findByText('Canje confirmado');
+  expect(within(balance()).getByText('1')).toBeInTheDocument();
+  expect(screen.queryByText('MOV-A')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Canjear mi recompensa' })).not.toBeInTheDocument();
+  expect(api.redeemClientePuntosReward).not.toHaveBeenCalled();
+});

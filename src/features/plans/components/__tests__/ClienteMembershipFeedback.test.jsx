@@ -12,6 +12,8 @@ const BRANCH = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => ({ user: { id_usuario: 'user-a', cliente_id: 'client-a' }, clienteId: 'client-a' }) }));
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => mocks.notifications }));
 vi.mock('../../../cliente/lib/clientFeatureFlags.js', () => ({ CLIENT_PLAN_PURCHASE_ENABLED: true, CLIENT_LOCK_MESSAGE: '' }));
+// AM: Este escenario simula comercio autorizado; la pausa se cubre por separado con el guard real.
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ booking: true, vipPurchase: true }) }));
 vi.mock('../../../public/lib/catalogApi.js', () => ({
   listPublicCatalogBranches: async () => ({ branches: [{ id_sucursal: BRANCH, nombre_sucursal: 'Centro' }] }),
   listPublicPlansByBranch: async () => ({ plans: [{ id_plan: 'plan-a', id_plan_sucursal: 'offer-a', nombre_plan: 'VIP prueba', precio_hnl: 300, beneficios: [] }] }),

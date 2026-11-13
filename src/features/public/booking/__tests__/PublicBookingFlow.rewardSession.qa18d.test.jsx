@@ -62,7 +62,8 @@ function BookingProbe() { const state = useBookingFlow(); return <p>{state.rewar
 function App({ entry = '/home/cliente' }) { return <MemoryRouter initialEntries={[entry]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><AuthProvider><SessionProbe /><Routes><Route path="/home/cliente" element={<Points />} /><Route path="/login" element={<p>Login simulado</p>} /><Route path="/agendar" element={<Flow />}><Route index element={<BookingProbe />} /><Route path="agenda" element={<BookingProbe />} /></Route></Routes></AuthProvider></MemoryRouter>; }
 async function prepare() {
   const view = render(<App />); await act(async () => { await latest.hydrateSession(); }); await screen.findByText('Saldo total');
-  fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' })); await screen.findByRole('button', { name: /Servicio QA\s*Seleccionado/ });
+  fireEvent.click(screen.getByRole('button', { name: 'Canjear mi recompensa' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Servicio QA', exact: true }));
   fireEvent.click(screen.getByRole('button', { name: 'Confirmar canje' })); await screen.findByText('Recompensa S'); return view;
 }
 
