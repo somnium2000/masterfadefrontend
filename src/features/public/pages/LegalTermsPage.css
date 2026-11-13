@@ -1,0 +1,18 @@
+.legal-terms { overflow-wrap: anywhere; }
+.legal-terms__layout { display: grid; gap: 24px; align-items: start; }
+.legal-terms__index, .legal-terms__document, .legal-terms__chapter { min-width: 0; scroll-margin-top: 24px; }
+.legal-terms__index-link { display: block; min-height: 44px; padding: 10px 4px; line-height: 1.6; font-size: 13px; border-radius: 6px; }
+.legal-terms__index-link:hover { color: var(--mf-accent); background: var(--mf-btn-bg); }
+.legal-terms__paragraph { font-size: 15px; line-height: 1.85; white-space: pre-line; }
+.legal-terms__table-scroll { width: 100%; overflow: auto; border: 1px solid var(--mf-nav-border); border-radius: 12px; }
+.legal-terms table { width: 100%; min-width: 560px; table-layout: fixed; border-collapse: collapse; font-size: 13px; line-height: 1.7; text-align: left; }
+.legal-terms th, .legal-terms td { padding: 12px; vertical-align: top; white-space: pre-line; border-bottom: 1px solid var(--mf-nav-border); }
+.legal-terms th { background: var(--mf-btn-bg); font-weight: 600; }
+.legal-terms tbody tr:last-child td { border-bottom: 0; }
+.legal-terms__back { display: inline-flex; min-height: 44px; align-items: center; gap: 6px; margin-top: 24px; color: var(--mf-accent); font-size: 13px; font-weight: 600; }
+.legal-terms a:focus-visible, .legal-terms summary:focus-visible, .legal-terms__table-scroll:focus-visible { outline: 2px solid var(--mf-accent); outline-offset: 3px; }
+@media (min-width: 640px) { .legal-terms__paragraph { font-size: 16px; } }
+@media (min-width: 1024px) {
+  .legal-terms__layout { grid-template-columns: 260px minmax(0, 1fr); gap: 32px; }
+  .legal-terms__index { position: sticky; top: 24px; max-height: calc(100dvh - 48px); overflow: auto; }
+}

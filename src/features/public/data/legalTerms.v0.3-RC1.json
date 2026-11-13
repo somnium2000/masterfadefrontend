@@ -1,0 +1,957 @@
+{
+  "publication_mode": "qa_review_only",
+  "source_document": "MASTERFADE_Terminos_y_Politicas_v0.3_RC1_PARA_REVISION.docx",
+  "source_sha256": "684815ea69b7aa1e31616bb57e5797a6ac6985922661dd1f0710f17e552a82d0",
+  "version": "0.3-RC1",
+  "approval_status": "Borrador 0.3-RC1 - Entrada en vigor pendiente de aprobación legal y publicación",
+  "suggested_public_path": "/terminos-y-condiciones",
+  "documents": [
+    {
+      "id": "aviso-legal",
+      "number": 1,
+      "kicker": "DOCUMENTO 01 / 08",
+      "title": "Aviso legal e identificación del proveedor",
+      "description": "Identidad comercial, canales de atención y marco general de la plataforma.",
+      "notice": "Borrador 0.3-RC1   •   Entrada en vigor: pendiente de aprobación legal y publicación",
+      "chapters": [
+        {
+          "number": 1,
+          "title": "1. Identificación del operador",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "MASTERFADE es la denominación comercial de una plataforma web de información, contratación y gestión de servicios de barbería. Según los datos corporativos facilitados para este documento, el operador es Master Fade S. de R.L., RTN 0801-9026-437252, con domicilio comercial en Edificio CH, bulevar Suyapa, local A7, Honduras."
+            },
+            {
+              "type": "paragraph",
+              "text": "Según la organización comercial informada, Master Fade S. de R.L. administra las sucursales y recibe los pagos realizados a través de la plataforma. Las sucursales no actúan como comerciantes independientes frente al consumidor en esas operaciones."
+            }
+          ]
+        },
+        {
+          "number": 2,
+          "title": "2. Información de contacto y horarios",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Correo general, reclamos y privacidad: masterfade@masterfadeapp.com. Teléfono de atención: 3222-5281. Atención presencial: sucursal relacionada con el servicio, dentro de sus horarios publicados."
+            },
+            {
+              "type": "paragraph",
+              "text": "La información de contacto publicada debe permanecer accesible incluso cuando las reservas y compras se encuentren pausadas. Para presentar un reclamo no será necesario contratar servicios adicionales."
+            },
+            {
+              "type": "paragraph",
+              "text": "El horario general informado por la administración es de miércoles a lunes, de 9:00 a. m. a 5:00 p. m. No obstante, la disponibilidad de cada servicio depende de los horarios vigentes y publicados de la sucursal, del profesional y de sus excepciones. Para información sobre horarios y disponibilidad, se deberá consultar la sucursal correspondiente o el sistema."
+            }
+          ]
+        },
+        {
+          "number": 3,
+          "title": "3. Finalidad y servicios digitales",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La plataforma permite consultar sucursales, barberos, servicios, precios, horarios, promociones y, cuando estén habilitados, realizar reservas y pagos, administrar membresías VIP, consultar MasterPuntos y gestionar cuentas."
+            },
+            {
+              "type": "paragraph",
+              "text": "El contenido informativo no constituye por sí solo una reserva. La prestación contratada queda sujeta a confirmación efectiva del servicio, fecha, hora, sucursal y estado del pago, conforme a las políticas específicas."
+            }
+          ]
+        },
+        {
+          "number": 4,
+          "title": "4. Información comercial y actualización",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La empresa procurará mostrar las condiciones particulares de cada servicio u oferta, su precio expresado en lempiras (HNL), vigencia y restricciones aplicables antes de la contratación. Las actualizaciones futuras no podrán desconocer derechos del consumidor respecto de operaciones ya contratadas."
+            },
+            {
+              "type": "paragraph",
+              "text": "Los precios que se muestren en el catálogo no deberán presentarse como cobros realizados ni como reservas confirmadas; en cada operación, el cliente deberá poder distinguir entre consulta, solicitud, confirmación y pago."
+            }
+          ]
+        },
+        {
+          "number": 5,
+          "title": "5. Atención a solicitudes y reclamos",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Los reclamos pueden presentarse por correo, teléfono o en la sucursal correspondiente. MASTERFADE propone como metas internas: confirmar recepción dentro de dos (2) días hábiles, emitir una primera respuesta dentro de cinco (5) días hábiles y procurar resolver dentro de diez (10) días hábiles, salvo causas justificadas. Estos compromisos no sustituyen ni amplían los plazos imperativos establecidos por la legislación hondureña."
+            },
+            {
+              "type": "paragraph",
+              "text": "El uso del procedimiento interno es voluntario y no limita el derecho del consumidor a acudir directamente a las autoridades competentes o a los tribunales que correspondan."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "terminos-y-condiciones",
+      "number": 2,
+      "kicker": "DOCUMENTO 02 / 08",
+      "title": "Términos y condiciones de uso",
+      "description": "Acceso, registro, aceptación, contratación y uso responsable.",
+      "notice": "Borrador 0.3-RC1   •   Entrada en vigor: pendiente de aprobación legal y publicación",
+      "chapters": [
+        {
+          "number": 1,
+          "title": "1. Objeto, ámbito y aceptación",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Estas condiciones regulan el acceso al sitio y a las cuentas, la consulta de información y el uso de los servicios digitales de MASTERFADE. Se complementan con el Aviso Legal, la Política de Privacidad, el Aviso de Cookies, la Política de Reservas, las condiciones de Membresías VIP, las condiciones de Promociones y las de MasterPuntos. Ante una condición específica aplicable a una compra, deberá mostrarse al usuario antes de confirmar su decisión."
+            },
+            {
+              "type": "paragraph",
+              "text": "Para crear una cuenta, el usuario debe poder leer previamente estos documentos y expresar su aceptación mediante una casilla independiente, inicialmente desmarcada. El consentimiento para comunicaciones comerciales es separado, opcional y revocable. Visitar el sitio, iniciar sesión o confirmar un correo electrónico no constituye por sí solo aceptación de una nueva versión de las condiciones."
+            },
+            {
+              "type": "paragraph",
+              "text": "La aceptación debe identificar el alcance de los documentos vinculados. El usuario podrá consultarlos desde un enlace separado de la casilla y regresar al formulario sin que la lectura marque automáticamente la aceptación."
+            }
+          ]
+        },
+        {
+          "number": 2,
+          "title": "2. Registro y uso responsable de cuentas",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "El usuario se compromete a proporcionar datos correctos, mantenerlos actualizados, proteger sus credenciales y comunicar posibles accesos no autorizados. No podrá suplantar identidades ni manipular datos, reservas, beneficios, promociones o derechos de otras personas."
+            },
+            {
+              "type": "paragraph",
+              "text": "MASTERFADE podrá implementar verificaciones y restricciones justificadas, proporcionales y documentadas ante indicios razonables de fraude, suplantación o riesgos de seguridad, respetando el derecho del usuario a solicitar revisión. La presentación de una reclamación legítima no constituirá motivo de sanción."
+            }
+          ]
+        },
+        {
+          "number": 3,
+          "title": "3. Capacidad y reservas para menores",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Las reservas para personas menores de 18 años deberán efectuarse por una persona legalmente facultada, con autorización de su padre, madre o representante legal y acompañamiento o autorización verificable que MASTERFADE considere suficiente para prestar el servicio, de conformidad con la legislación aplicable."
+            },
+            {
+              "type": "paragraph",
+              "text": "La capacidad contractual correspondiente a otros supuestos de edad se sujetará al análisis jurídico de la normativa hondureña. No se presume que un menor puede suscribir por sí solo obligaciones de pago o autorizar tratamientos publicitarios."
+            }
+          ]
+        },
+        {
+          "number": 4,
+          "title": "4. Información de servicios y precios",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "El catálogo y la disponibilidad pueden variar según la sucursal, el profesional, la fecha y el servicio. Antes de una contratación habilitada, el sistema debe identificar el servicio o paquete, sus condiciones relevantes y el total a pagar en lempiras hondureñas (HNL), incluyendo los conceptos e impuestos que correspondan. Una solicitud, una retención temporal de horario o un intento de pago no equivalen a una cita confirmada."
+            }
+          ]
+        },
+        {
+          "number": 5,
+          "title": "5. Reservas, prepagos y confirmación",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Cuando la contratación en línea esté habilitada, las reservas con importe pendiente positivo requerirán, como regla comercial propuesta, el pago anticipado del cien por ciento (100 %) por medio del procesador autorizado. Podrán confirmarse citas sin cobro adicional si el importe está cubierto legítimamente por una membresía aplicable, promoción, recompensa o cortesía. La utilización de PixelPay u otro proveedor dependerá de la configuración aprobada y efectivamente habilitada."
+            },
+            {
+              "type": "paragraph",
+              "text": "Un pago rechazado, pendiente o de resultado incierto no confirma automáticamente una reserva. Si una operación no presenta un resultado definitivo, el usuario debe consultar el estado de su reserva y solicitar asistencia antes de realizar otro intento, para reducir el riesgo de cargos duplicados."
+            }
+          ]
+        },
+        {
+          "number": 6,
+          "title": "6. Reservas para acompañantes",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Si se permite reservar para acompañantes, el titular deberá facilitar información correcta y contar con autorización suficiente para proporcionar los datos de contacto de terceros. También deberá informarles las condiciones del servicio y la Política de Privacidad. Cada integrante tendrá su propia cita y condiciones de puntualidad, aunque las citas formen parte de una misma reserva."
+            },
+            {
+              "type": "paragraph",
+              "text": "Las membresías, recompensas y otros beneficios personales del titular no se transfieren automáticamente a los acompañantes. La asignación eventual de puntos derivados de una cita de grupo dependerá de las reglas operativas vigentes y de que esa cita resulte efectivamente elegible; no se promete acreditación por el solo hecho de incorporar acompañantes."
+            },
+            {
+              "type": "paragraph",
+              "text": "La información de acompañantes debe utilizarse únicamente para la gestión de la reserva y las comunicaciones relacionadas; la incorporación de un tercero no autoriza campañas comerciales dirigidas a ese acompañante."
+            }
+          ]
+        },
+        {
+          "number": 7,
+          "title": "7. Reprogramaciones, cancelaciones e inasistencia",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Como condiciones comerciales propuestas, los cambios de fecha deben solicitarse al menos cuarenta y ocho (48) horas antes y los cambios únicamente de hora al menos veinticuatro (24) horas antes de la cita original, siempre sujetos a disponibilidad efectiva. Cuando la aplicación no ofrezca autogestión, la solicitud podrá presentarse por los canales oficiales, sin que ello implique confirmación automática del cambio."
+            },
+            {
+              "type": "paragraph",
+              "text": "Se recomienda llegar con cinco (5) minutos de anticipación. Existe una tolerancia comercial propuesta de diez (10) minutos desde la hora programada; después de ese lapso, y previa comprobación de la ausencia, la cita podrá registrarse como «No asistió». La inasistencia atribuible al cliente no genera automáticamente devolución voluntaria ni una nueva cita gratuita, sin perjuicio de los derechos legalmente exigibles."
+            }
+          ]
+        },
+        {
+          "number": 8,
+          "title": "8. Membresías, promociones y MasterPuntos",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Los planes VIP, las campañas promocionales y el programa MasterPuntos se rigen por sus condiciones específicas. Su utilización exige vigencia, elegibilidad, cupos y restricciones informadas. Estos beneficios no son automáticamente acumulables entre sí salvo indicación expresa."
+            }
+          ]
+        },
+        {
+          "number": 9,
+          "title": "9. Conductas prohibidas y respuesta de seguridad",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Se prohíbe emplear la plataforma para actividades ilícitas, accesos no autorizados, explotación de fallas, manipulación de saldos o beneficios, reservas ficticias y fraudes. Las restricciones por seguridad deberán basarse en circunstancias verificables y facilitar al usuario un mecanismo de revisión."
+            }
+          ]
+        },
+        {
+          "number": 10,
+          "title": "10. Disponibilidad y fallas técnicas",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Cuando una falla atribuible a MASTERFADE impida prestar el servicio contratado, se ofrecerá una solución adecuada al caso, como reprogramación sin costo o la restitución que legalmente corresponda. No se renuncia anticipadamente a los derechos del consumidor."
+            },
+            {
+              "type": "paragraph",
+              "text": "Durante períodos de pausa operativa o mantenimiento, el catálogo puede continuar visible. Esa visibilidad no implica que el cliente pueda crear nuevas reservas, comprar membresías ni procesar pagos si tales operaciones están deshabilitadas."
+            },
+            {
+              "type": "paragraph",
+              "text": "Ninguna condición limita los derechos del consumidor a restituciones u otros remedios legalmente exigibles si el proveedor incumple sus obligaciones."
+            }
+          ]
+        },
+        {
+          "number": 11,
+          "title": "11. Fotografías, testimonios y privacidad",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Los datos personales se tratan conforme a la Política de Privacidad. El uso publicitario de fotografías o testimonios identificables requiere autorización expresa y documentada, distinta de la aceptación de estos términos. La negativa a autorizar publicidad no condiciona la prestación del servicio."
+            }
+          ]
+        },
+        {
+          "number": 12,
+          "title": "12. Propiedad intelectual y licencias de uso",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "El acceso al sitio concede una autorización limitada, personal y no exclusiva para usar sus funcionalidades legítimas. No transfiere marcas, materiales, fotografías, diseños ni software. La propiedad de desarrollos contratados por la empresa y la titularidad de contenidos de terceros se rigen por los contratos y licencias que correspondan."
+            },
+            {
+              "type": "paragraph",
+              "text": "El uso de marcas o materiales protegidos fuera de las finalidades permitidas requiere autorización de sus titulares. Estas condiciones no alteran contratos de desarrollo o cesión de derechos que existan entre MASTERFADE, SOMNIUMIA u otros proveedores."
+            }
+          ]
+        },
+        {
+          "number": 13,
+          "title": "13. Modificaciones y registro de aceptación",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Cada edición pública deberá identificarse por número de versión y fecha de entrada en vigor y mantenerse disponible para consulta. Como compromiso propuesto, los cambios sustanciales se comunicarán con al menos quince (15) días calendario de anticipación, salvo circunstancias justificadas o exigencias legales diferentes; no alterarán retroactivamente los derechos de operaciones ya celebradas."
+            },
+            {
+              "type": "paragraph",
+              "text": "Cuando sea necesario obtener una nueva aceptación, se solicitará expresamente. Para una trazabilidad adecuada deberán conservarse, una vez implementados y validados los controles técnicos, el identificador de la persona o cuenta, la versión o huella del texto, el momento y el medio de aceptación. El registro técnico será proporcional, accesible y sujeto a los controles de seguridad y conservación aplicables."
+            }
+          ]
+        },
+        {
+          "number": 14,
+          "title": "14. Atención de reclamos y ley aplicable",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Los reclamos se podrán presentar por los canales del Aviso Legal, sin perjuicio del derecho a la vía administrativa o judicial. Rige la legislación hondureña aplicable; no se establece arbitraje obligatorio ni una renuncia anticipada a las vías de protección del consumidor."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "politica-de-privacidad",
+      "number": 3,
+      "kicker": "DOCUMENTO 03 / 08",
+      "title": "Política de privacidad y tratamiento de datos personales",
+      "description": "Categorías, fines, destinatarios, protección y derechos sobre los datos.",
+      "notice": "Borrador 0.3-RC1   •   Entrada en vigor: pendiente de aprobación legal y publicación",
+      "chapters": [
+        {
+          "number": 1,
+          "title": "1. Responsable y contacto",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Master Fade S. de R.L. actúa como responsable comercial del tratamiento de los datos necesarios para operar la plataforma y prestar sus servicios. Para solicitudes de privacidad, acceso, corrección, eliminación, reclamaciones o retiro de consentimiento comercial: masterfade@masterfadeapp.com."
+            },
+            {
+              "type": "paragraph",
+              "text": "La aceptación de términos no equivale a autorización general para usos de datos incompatibles con el servicio solicitado. La persona podrá dirigirse al canal de privacidad indicado para obtener información sobre los tratamientos aplicables."
+            }
+          ]
+        },
+        {
+          "number": 2,
+          "title": "2. Categorías de información",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Según el servicio utilizado, MASTERFADE puede tratar nombres, apellidos, fecha de nacimiento, documentos de identificación cuando proceda, correo, teléfono, datos de cuenta y autenticación, fotografías de perfil, preferencias de servicio, reservas y acompañantes, información sobre sucursales y profesionales, historial de atención, planes, promociones, MasterPuntos, importes y estados de pago, consultas de soporte y registros técnicos de seguridad. Se debe solicitar únicamente información pertinente para la finalidad declarada."
+            },
+            {
+              "type": "paragraph",
+              "text": "La información profesional de barberos y personal podrá incluir datos de perfil público, alias, fotografía y acreditaciones, conforme a su función y autorizaciones aplicables."
+            }
+          ]
+        },
+        {
+          "number": 3,
+          "title": "3. Finalidades de tratamiento",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Los datos se utilizan para registrar y proteger cuentas, verificar identidad y permisos, mostrar el catálogo y la disponibilidad, gestionar reservas y acompañantes, procesar pagos, administrar beneficios comerciales, efectuar comunicaciones operativas, responder reclamaciones, prevenir fraudes y cumplir obligaciones legales."
+            },
+            {
+              "type": "paragraph",
+              "text": "Las finalidades comerciales opcionales se diferencian de los mensajes necesarios para operar una reserva, informar cambios de horario, confirmar un pago o proteger una sesión."
+            },
+            {
+              "type": "paragraph",
+              "text": "El envío de promociones por correo y otros usos de publicidad se realizará únicamente cuando exista la autorización necesaria; la aceptación de términos no equivale a consentimiento comercial."
+            }
+          ]
+        },
+        {
+          "number": 4,
+          "title": "4. Datos de tarjetas y procesamiento de pagos",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La intervención del navegador, los sistemas de MASTERFADE y el procesador puede variar según la modalidad de pago. El tratamiento se limitará a las operaciones necesarias para procesar, verificar y documentar el pago, con las medidas técnicas y organizativas aplicables."
+            },
+            {
+              "type": "paragraph",
+              "text": "Los códigos de seguridad de tarjeta y demás información financiera no se utilizarán con fines publicitarios. MASTERFADE procurará limitar la conservación a los identificadores y evidencias necesarias para conciliación y obligaciones aplicables, de acuerdo con los flujos efectivamente implementados."
+            }
+          ]
+        },
+        {
+          "number": 5,
+          "title": "5. Proveedores y destinatarios",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Para prestar el servicio pueden intervenir, según los sistemas efectivamente habilitados, Supabase (autenticación, base de datos o almacenamiento), infraestructura de alojamiento y conectividad, servicios de correo, procesadores de pago como PixelPay y entidades financieras. Si el usuario elige inicio de sesión social, podrá intervenir Google como proveedor de autenticación."
+            },
+            {
+              "type": "paragraph",
+              "text": "Los proveedores podrán tratar únicamente los datos que correspondan a la finalidad del servicio prestado. MASTERFADE no venderá datos personales ni los pondrá a disposición de terceros con fines publicitarios sin autorización válida."
+            },
+            {
+              "type": "paragraph",
+              "text": "El personal de MASTERFADE tendrá acceso según sus funciones; los profesionales podrán visualizar la información operativa necesaria de sus propias citas sin adquirir acceso general a los datos financieros o privados de los demás clientes."
+            }
+          ]
+        },
+        {
+          "number": 6,
+          "title": "6. Acceso interno y confidencialidad",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "El cliente podrá consultar los datos de su cuenta. Los barberos, administradores de sucursal, superadministradores y personal técnico autorizado accederán a información según sus funciones y permisos, utilizando el principio de mínimo acceso necesario. Las operaciones sensibles deberán quedar sujetas a controles de seguridad y seguimiento."
+            }
+          ]
+        },
+        {
+          "number": 7,
+          "title": "7. Conservación y eliminación",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Los datos se mantendrán mientras sean necesarios para las finalidades informadas y, después, por los plazos que establezcan obligaciones tributarias, contractuales, legales o de seguridad. Los datos que ya no deban conservarse serán eliminados o anonimizados, según corresponda."
+            },
+            {
+              "type": "paragraph",
+              "text": "Solicitar la eliminación de una cuenta no significa necesariamente que puedan desaparecer de inmediato todos los registros: información de facturación, pagos, seguridad, controversias o auditoría puede conservarse por obligaciones legales justificadas, con acceso restringido. Los demás datos serán eliminados, desidentificados o tratados conforme al procedimiento aplicable y a las posibilidades técnicas verificadas."
+            }
+          ]
+        },
+        {
+          "number": 8,
+          "title": "8. Derechos del titular y procedimiento",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "El titular podrá solicitar acceso, rectificación, información sobre el uso de sus datos, eliminación cuando proceda, retiro de consentimiento comercial o presentar reclamaciones. MASTERFADE podrá verificar razonablemente su identidad antes de atender una solicitud, sin exigir información innecesaria."
+            },
+            {
+              "type": "paragraph",
+              "text": "Como objetivos de atención, se propone confirmar recepción en dos (2) días hábiles y ofrecer una primera respuesta dentro de cinco (5) días hábiles. La resolución se comunicará de manera comprensible, incluyendo restricciones justificadas y los plazos que establezca la legislación aplicable."
+            }
+          ]
+        },
+        {
+          "number": 9,
+          "title": "9. Marketing y comunicaciones operativas",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La autorización de comunicaciones comerciales será expresa, independiente, opcional y revocable por el correo oficial sin necesidad de cancelar la cuenta. Su retiro no suspenderá comunicaciones necesarias de seguridad, recuperación, reservas, pagos u otros asuntos propios de un servicio contratado."
+            }
+          ]
+        },
+        {
+          "number": 10,
+          "title": "10. Fotografías, testimonios y menores",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La fotografía privada de perfil de un cliente se utilizará para la finalidad operativa comunicada. La publicación publicitaria de imágenes o testimonios de personas identificables requiere autorización específica y documentada; su retiro será atendido respecto de usos futuros y publicaciones bajo control de MASTERFADE, conforme a la normativa aplicable."
+            },
+            {
+              "type": "paragraph",
+              "text": "Los datos de menores de edad recibirán protección especial; no se entenderá otorgado consentimiento publicitario por el solo hecho de que un tercero realice una reserva."
+            },
+            {
+              "type": "paragraph",
+              "text": "No se publicarán fotografías identificables de clientes o menores como material comercial a partir de una simple reserva o del uso de una instalación física; deberá existir la autorización específica que corresponda."
+            }
+          ]
+        },
+        {
+          "number": 11,
+          "title": "11. Seguridad, cookies y modificaciones",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Se aplicarán medidas técnicas y organizativas apropiadas para proteger acceso, sesiones, información y registros. No existe una promesa de seguridad absoluta. Las tecnologías de navegador se describen en el Aviso de Cookies."
+            },
+            {
+              "type": "paragraph",
+              "text": "Los cambios significativos se comunicarán apropiadamente. Cuando una nueva finalidad o condición requiera consentimiento adicional, se obtendrá por separado. Deben conservarse versiones históricas y evidencias de aceptación cuando se implanten y certifiquen los controles correspondientes."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cookies-y-almacenamiento",
+      "number": 4,
+      "kicker": "DOCUMENTO 04 / 08",
+      "title": "Aviso de cookies y almacenamiento local",
+      "description": "Sesión, seguridad, preferencias y almacenamiento del navegador.",
+      "notice": "Borrador 0.3-RC1   •   Entrada en vigor: pendiente de aprobación legal y publicación",
+      "chapters": [
+        {
+          "number": 1,
+          "title": "1. Qué tecnologías utiliza la plataforma",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Las cookies son datos que el navegador puede enviar al servidor. MASTERFADE también utiliza almacenamiento del navegador, como localStorage y sessionStorage, para funciones temporales, preferencias y continuidad de determinados procesos. No todas estas tecnologías son cookies."
+            }
+          ]
+        },
+        {
+          "number": 2,
+          "title": "2. Mecanismos identificados durante la revisión",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La plataforma utiliza tecnologías necesarias para mantener sesiones, proteger solicitudes y conservar temporalmente preferencias o el contexto de determinadas operaciones. Los identificadores y categorías conocidos se describen en la tabla siguiente; sus atributos efectivos pueden variar según el entorno."
+            },
+            {
+              "type": "table",
+              "headers": [
+                "Tecnología",
+                "Finalidad",
+                "Categoría / observación"
+              ],
+              "rows": [
+                [
+                  "mf_session\nCookie de sesión",
+                  "Autenticación, continuidad y protección de la cuenta.",
+                  "Necesaria; verificar duración en el despliegue."
+                ],
+                [
+                  "mf_csrf\nCookie o mecanismo de seguridad",
+                  "Protección frente a solicitudes no autorizadas.",
+                  "Seguridad; verificar atributos efectivos."
+                ],
+                [
+                  "mf_theme_variant\nlocalStorage",
+                  "Conservar la preferencia de tema claro/oscuro.",
+                  "Funcional."
+                ],
+                [
+                  "sessionStorage\nAlmacenamiento de sesión",
+                  "Conservar contexto temporal de reserva, pagos y navegación.",
+                  "Funcional o necesario para el flujo en uso."
+                ],
+                [
+                  "localStorage\nAlmacenamiento local",
+                  "Preferencias y estado funcional de determinadas vistas.",
+                  "Funcional; inventariar claves efectivas."
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "number": 3,
+          "title": "3. Tecnologías de analítica y publicidad",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Este aviso no incluye actualmente una declaración de cookies publicitarias de terceros. Si se incorporan herramientas opcionales de medición o publicidad, su uso deberá informarse previamente y reflejarse en una versión actualizada."
+            },
+            {
+              "type": "paragraph",
+              "text": "Si en el futuro se incorporan tecnologías opcionales para estadísticas, personalización comercial o publicidad, se informará previamente su finalidad y proveedor y se habilitarán los controles de consentimiento que resulten exigibles, sin condicionar el acceso a las funciones esenciales."
+            }
+          ]
+        },
+        {
+          "number": 4,
+          "title": "4. Preferencias y control del navegador",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "El usuario puede administrar o eliminar cookies y datos guardados mediante la configuración del navegador. El bloqueo de mecanismos estrictamente necesarios puede impedir iniciar sesión o completar operaciones. El borrado de almacenamiento temporal puede hacer perder el progreso no confirmado de una reserva o pago."
+            },
+            {
+              "type": "paragraph",
+              "text": "Al limpiar el navegador, cerrar sesiones o cambiar de dispositivo, puede perderse información local de una operación no finalizada. Ello no permite dar por realizado un cargo ni una confirmación que el servidor no haya validado."
+            }
+          ]
+        },
+        {
+          "number": 5,
+          "title": "5. Contacto y versiones",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Consultas: masterfade@masterfadeapp.com. Este aviso tendrá número de versión y fecha de publicación. Su inventario definitivo se actualizará cuando se incorporen tecnologías nuevas."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reservas-cancelaciones-reembolsos",
+      "number": 5,
+      "kicker": "DOCUMENTO 05 / 08",
+      "title": "Política de reservas, cancelaciones y reembolsos",
+      "description": "Formación de la reserva, prepago, cambios, inasistencias y solución de incidencias.",
+      "notice": "Borrador 0.3-RC1   •   Entrada en vigor: pendiente de aprobación legal y publicación",
+      "chapters": [
+        {
+          "number": 1,
+          "title": "1. Alcance y contratación de la cita",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La confirmación de una reserva requiere identificar el servicio, sucursal, profesional, fecha, hora, importe total y beneficios aplicados. Los horarios que se muestran pueden dejar de estar disponibles antes de completar la contratación; el sistema debe revalidar la disponibilidad y confirmar expresamente el resultado."
+            }
+          ]
+        },
+        {
+          "number": 2,
+          "title": "2. Pago anticipado y confirmación",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Cuando las reservas de pago en línea estén habilitadas, la regla comercial propuesta es cobrar anticipadamente el cien por ciento (100 %) del importe pendiente. La cita solo se considera confirmada cuando el sistema constate la disponibilidad y la evidencia válida de pago, o una cobertura autorizada por la totalidad del precio."
+            },
+            {
+              "type": "paragraph",
+              "text": "Podrán existir reservas de importe cero cuando el total esté legítimamente cubierto por una membresía VIP, promoción, recompensa de MasterPuntos o cortesía autorizada. Un intento, rechazo o estado pendiente de pago no equivale a una reserva confirmada."
+            },
+            {
+              "type": "paragraph",
+              "text": "Las reservas para varios integrantes pueden tener importes y coberturas individuales. La membresía o recompensa del titular no cubre automáticamente servicios solicitados para otros integrantes."
+            }
+          ]
+        },
+        {
+          "number": 3,
+          "title": "3. Reprogramación solicitada por el cliente",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Como condición comercial propuesta, el cambio de fecha debe solicitarse con al menos cuarenta y ocho (48) horas de anticipación y el cambio de hora con al menos veinticuatro (24) horas respecto al inicio original de la cita. El cambio está sujeto a disponibilidad y confirmación expresa por MASTERFADE; una solicitud no garantiza el nuevo horario."
+            },
+            {
+              "type": "paragraph",
+              "text": "Si no existe una función de reprogramación habilitada para el cliente, este podrá presentar su solicitud por los canales oficiales. Una solicitud pendiente no modifica el horario original hasta recibir confirmación expresa."
+            }
+          ]
+        },
+        {
+          "number": 4,
+          "title": "4. Cancelación voluntaria del cliente",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La cancelación voluntaria solicitada por el cliente no genera, como condición comercial propuesta, una devolución automática por simple desistimiento. Se procurará informar las alternativas de reprogramación y la disponibilidad aplicable. En cualquier caso, prevalecen los derechos de desistimiento, restitución u otros que resulten obligatorios por ley."
+            },
+            {
+              "type": "paragraph",
+              "text": "En todos los casos prevalecerán las restituciones, anulaciones, garantías u otros derechos que la normativa imperativa reconozca al consumidor; ninguna cláusula pretende excluirlos."
+            }
+          ]
+        },
+        {
+          "number": 5,
+          "title": "5. Puntualidad e inasistencia",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Se recomienda presentarse cinco (5) minutos antes de la cita. Se contempla una tolerancia de diez (10) minutos. Cuando la ausencia sea comprobada y corresponda según el procedimiento vigente, la cita podrá identificarse frente al cliente como «No asistió»."
+            },
+            {
+              "type": "paragraph",
+              "text": "Una inasistencia atribuible al cliente no da derecho automático a reembolso voluntario o a un servicio gratuito sustituto. Se revisarán las circunstancias excepcionales o legalmente relevantes, y los reclamos podrán presentarse por los canales oficiales."
+            }
+          ]
+        },
+        {
+          "number": 6,
+          "title": "6. Cancelación, indisponibilidad o incumplimiento atribuible a MASTERFADE",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Si MASTERFADE cancela la cita o no puede prestar el servicio contratado por causas que le sean atribuibles, ofrecerá inicialmente una reprogramación sin costo, de común acuerdo y según disponibilidad."
+            },
+            {
+              "type": "paragraph",
+              "text": "La propuesta de reprogramación no reemplaza los derechos legales del cliente a otras soluciones, incluida la restitución del pago cuando corresponda. MASTERFADE seguirá siendo responsable frente al consumidor aunque utilice plataformas de pago, alojamiento u otros proveedores."
+            },
+            {
+              "type": "paragraph",
+              "text": "Cuando exista un reclamo sobre un cargo, reserva o estado de pago, MASTERFADE deberá revisar la evidencia disponible antes de atribuir un incumplimiento al cliente o exigir un nuevo cobro."
+            }
+          ]
+        },
+        {
+          "number": 7,
+          "title": "7. Cobros duplicados, rechazados o indebidos",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Los cargos duplicados o indebidos serán investigados y, cuando proceda, restituidos por el medio adecuado y dentro del plazo exigible. Los cobros indebidos quedan sujetos a los procedimientos y plazos de restitución establecidos por la normativa hondureña aplicable."
+            },
+            {
+              "type": "paragraph",
+              "text": "Si un pago permanece pendiente o resulta incierto, el cliente deberá consultar su estado antes de repetirlo. Los plazos de devolución dependen de la causa, del medio de pago y de las normas aplicables; se comunicará el estado del trámite sin prometer tiempos bancarios no verificados."
+            }
+          ]
+        },
+        {
+          "number": 8,
+          "title": "8. Membresías, beneficios y acompañantes",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Las reservas cubiertas por un beneficio VIP, promoción o MasterPuntos dependen de las condiciones particulares de ese programa. Los acompañantes están sujetos a las reglas individuales de la reserva; el titular será responsable de la gestión y los datos de contacto que proporcione."
+            }
+          ]
+        },
+        {
+          "number": 9,
+          "title": "9. Fallas técnicas y reclamaciones",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Las interrupciones, inconsistencias de estado, errores de calendario o fallas de proveedores serán documentadas y atendidas. MASTERFADE revisará los registros antes de confirmar cargos, duplicidades, cancelaciones o restituciones."
+            },
+            {
+              "type": "paragraph",
+              "text": "Las reclamaciones podrán presentarse por los canales oficiales del Aviso Legal. Ninguna cláusula de esta política pretende excluir el acceso del cliente a la autoridad de protección al consumidor o a los tribunales competentes."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "membresias-vip",
+      "number": 6,
+      "kicker": "DOCUMENTO 06 / 08",
+      "title": "Condiciones comerciales de membresías VIP",
+      "description": "Activación, consumo, renovación manual, cancelación y límites del plan.",
+      "notice": "Borrador 0.3-RC1   •   Entrada en vigor: pendiente de aprobación legal y publicación",
+      "chapters": [
+        {
+          "number": 1,
+          "title": "1. Descripción y ficha de cada plan",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Las membresías VIP son planes personales cuyos beneficios, precio, duración y sucursales varían según cada oferta publicada. Antes de contratar, el cliente debe poder consultar la ficha específica del plan: nombre, vigencia, importe en HNL, servicios o cortesías incluidas, número de usos, reglas de cobertura y exclusiones."
+            },
+            {
+              "type": "paragraph",
+              "text": "Este documento no incorpora precios ni beneficios supuestos: cada plan se regirá por su ficha comercial oficial vigente y visible antes de la contratación."
+            },
+            {
+              "type": "paragraph",
+              "text": "La publicidad de una oferta no sustituye la verificación de existencia, vigencia, condiciones particulares y elegibilidad de cada plan."
+            }
+          ]
+        },
+        {
+          "number": 2,
+          "title": "2. Activación y período mensual",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La contratación y el pago, cuando estén habilitados, deben validarse antes de activar la suscripción. Según el modelo comercial aprobado provisionalmente, los planes mensuales se renuevan de manera manual; no se ejecutan renovaciones ni cobros automáticos por el solo hecho de llegar la fecha de vencimiento."
+            }
+          ]
+        },
+        {
+          "number": 3,
+          "title": "3. Titularidad, sucursales y beneficios",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Los beneficios corresponden exclusivamente al titular y al alcance de sucursales y servicios anunciado en la ficha del plan. No se transfieren automáticamente a terceros ni a acompañantes, aunque formen parte de una misma reserva."
+            },
+            {
+              "type": "paragraph",
+              "text": "Los consumos fuera de cobertura y servicios adicionales generan el importe informado que corresponda. Los usos no consumidos no se trasladan automáticamente al siguiente período, salvo una condición particular expresamente anunciada y compatible con la normativa aplicable."
+            }
+          ]
+        },
+        {
+          "number": 4,
+          "title": "4. Concurrencia con otros programas",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La membresía VIP no se acumula automáticamente con promociones, cortesías o MasterPuntos, salvo indicación expresa en la oferta aplicable. MASTERFADE debe mostrar al usuario la cobertura y el importe adicional antes de una operación."
+            }
+          ]
+        },
+        {
+          "number": 5,
+          "title": "5. Cancelación de la membresía activa",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Como condición comercial propuesta, la cancelación voluntaria de una membresía vigente tiene efecto inmediato sobre beneficios no consumidos y no genera un reembolso proporcional voluntario automático. El usuario deberá recibir información clara sobre las consecuencias antes de confirmar la cancelación."
+            },
+            {
+              "type": "paragraph",
+              "text": "Las citas confirmadas con anterioridad se mantendrán bajo sus condiciones particulares, sujeto a disponibilidad y reglas de cobertura ya confirmadas. Esta política no afecta las devoluciones o remedios legales por incumplimiento, error de cobro u otras circunstancias protegidas."
+            },
+            {
+              "type": "paragraph",
+              "text": "La renovación de una membresía vencida exige una nueva operación voluntaria y su correspondiente confirmación; no debe describirse como cobro automático si el sistema no lo realiza."
+            }
+          ]
+        },
+        {
+          "number": 6,
+          "title": "6. Modificaciones, reclamaciones y transparencia",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Los cambios futuros en precios o beneficios se aplicarán según las condiciones de la siguiente contratación o renovación y no alterarán indebidamente los derechos derivados de operaciones ya confirmadas. Para consultas, reclamaciones o revisión de cargos se utilizarán los canales oficiales."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promociones-ofertas",
+      "number": 7,
+      "kicker": "DOCUMENTO 07 / 08",
+      "title": "Condiciones generales de promociones y ofertas",
+      "description": "Información previa, vigencia, requisitos y acumulación de descuentos.",
+      "notice": "Borrador 0.3-RC1   •   Entrada en vigor: pendiente de aprobación legal y publicación",
+      "chapters": [
+        {
+          "number": 1,
+          "title": "1. Naturaleza de las promociones",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "MASTERFADE puede publicar promociones, descuentos, precios especiales o cortesías limitadas por sucursal, servicio, fecha, campaña o cliente elegible. Cada oferta deberá mostrar sus condiciones esenciales antes de que el usuario confirme su contratación."
+            }
+          ]
+        },
+        {
+          "number": 2,
+          "title": "2. Información de la oferta",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La información de la oferta incluirá, cuando aplique, nombre, servicios o paquetes participantes, sucursales, fecha y hora de vigencia, requisito de elegibilidad, importe final o porcentaje de descuento, cantidad máxima de usos y reglas de acumulación."
+            },
+            {
+              "type": "paragraph",
+              "text": "No se presentarán como vigentes campañas vencidas ni se anunciarán porcentajes, precios anteriores o cantidades sin respaldo comercial verificable."
+            }
+          ]
+        },
+        {
+          "number": 3,
+          "title": "3. Disponibilidad y confirmación",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La visualización de una promoción no garantiza que existan cupos para una fecha, hora o barbero específicos. Su aplicación quedará sujeta a las reglas vigentes cuando se efectúe la contratación y al estado efectivo de la reserva y el pago, si corresponde."
+            }
+          ]
+        },
+        {
+          "number": 4,
+          "title": "4. Acumulación de beneficios",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Las promociones no se acumulan automáticamente con otras campañas, membresías VIP o canjes de MasterPuntos. La compatibilidad debe estar anunciada de forma expresa, antes del pago o confirmación de la reserva."
+            }
+          ]
+        },
+        {
+          "number": 5,
+          "title": "5. Errores de publicación, cambios y reclamos",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "MASTERFADE procurará corregir errores de comunicación o implementación sin desconocer derechos ya adquiridos ni las condiciones publicitadas que resulten exigibles. Los reclamos podrán presentarse por los canales oficiales y serán atendidos conforme a la normativa hondureña aplicable."
+            },
+            {
+              "type": "paragraph",
+              "text": "La participación en una campaña no constituye consentimiento para recibir publicidad posterior ni concede acceso ilimitado a datos personales de terceros."
+            }
+          ]
+        },
+        {
+          "number": 6,
+          "title": "6. Información y consentimiento comercial",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La participación en una promoción no autoriza por sí misma la inscripción a campañas de publicidad ni la divulgación de datos del cliente a terceros. Los consentimientos pertinentes deberán ser independientes cuando proceda."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "masterpuntos",
+      "number": 8,
+      "kicker": "DOCUMENTO 08 / 08",
+      "title": "Condiciones del programa MasterPuntos",
+      "description": "Obtención, canje, vencimiento y corrección de beneficios de fidelización.",
+      "notice": "Borrador 0.3-RC1   •   Entrada en vigor: pendiente de aprobación legal y publicación",
+      "chapters": [
+        {
+          "number": 1,
+          "title": "1. Descripción y naturaleza",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "MasterPuntos es un programa de fidelización para clientes elegibles de MASTERFADE. Los puntos son beneficios promocionales, no constituyen depósitos, dinero de curso legal ni un derecho a solicitar su conversión en efectivo."
+            }
+          ]
+        },
+        {
+          "number": 2,
+          "title": "2. Obtención de puntos",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Como regla comercial de referencia, un (1) punto se reconoce por cada cita individual que cumpla las condiciones de elegibilidad y se complete efectivamente. Una reserva creada, retenida o simplemente confirmada no equivale por sí sola a un punto definitivamente acreditado."
+            },
+            {
+              "type": "paragraph",
+              "text": "En reservas de grupo, cualquier acreditación asociada a acompañantes dependerá de la identificación de las citas elegibles y de las reglas técnicas vigentes. No se garantiza que un acompañante sin cuenta genere automáticamente puntos para el titular. Una cita cubierta totalmente por una recompensa canjeada no deberá generar una nueva acreditación cuando así lo establezca la regla del programa."
+            }
+          ]
+        },
+        {
+          "number": 3,
+          "title": "3. Recompensas y canje",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "La regla comercial general de referencia exige diez (10) puntos para un canje estándar elegible; la disponibilidad y la cantidad concreta de puntos de cada recompensa deben verificarse en la oferta vigente. La solicitud de canje no constituye adjudicación hasta que el sistema confirme el beneficio."
+            },
+            {
+              "type": "paragraph",
+              "text": "La identificación exacta de los servicios redimibles se efectuará en el catálogo aprobado y visible al cliente. No se garantiza que todos los servicios ni todos los barberos participen."
+            }
+          ]
+        },
+        {
+          "number": 4,
+          "title": "4. Vigencia de los ciclos",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Al concluir el ciclo, los puntos no utilizados podrán vencer conforme a las reglas notificadas. El traslado automático a un ciclo posterior no está contemplado por la regla comercial propuesta; cualquier modificación deberá anunciarse previamente."
+            },
+            {
+              "type": "paragraph",
+              "text": "El cliente podrá solicitar información sobre el saldo, el inicio y el fin del ciclo aplicable y el detalle de las operaciones que afecten sus puntos mediante los canales oficiales."
+            }
+          ]
+        },
+        {
+          "number": 5,
+          "title": "5. Carácter personal y no acumulación",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "Los puntos pertenecen a la cuenta del titular, no se transfieren a terceros y no tienen valor de devolución en efectivo. El uso combinado con promociones, membresías VIP u otras cortesías solo procederá cuando la oferta particular lo autorice expresamente."
+            }
+          ]
+        },
+        {
+          "number": 6,
+          "title": "6. Correcciones y reclamaciones",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "MASTERFADE podrá corregir saldos duplicados, erróneos o derivados de citas no realizadas mediante registros verificables, sin efectuar descuentos arbitrarios. El cliente podrá solicitar aclaración sobre movimientos o canjes por los canales oficiales."
+            },
+            {
+              "type": "paragraph",
+              "text": "Los cambios futuros de reglas deberán comunicarse de forma clara y no aplicarse en detrimento de derechos adquiridos, en la medida exigida por la normativa correspondiente."
+            },
+            {
+              "type": "paragraph",
+              "text": "Los cambios sustanciales del programa deberán comunicarse y documentarse; los saldos ya reconocidos se tratarán conforme a la normativa aplicable y las condiciones vigentes en el momento correspondiente."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

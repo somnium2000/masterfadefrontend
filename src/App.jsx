@@ -62,6 +62,7 @@ import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
 import usePrivateCommerce from './hooks/usePrivateCommerce.js';
 
+const LegalTermsPage = lazy(() => import('./features/public/pages/LegalTermsPage.jsx'));
 const PublicBookingFlow = lazy(() => import('./features/public/booking/PublicBookingFlow.jsx'));
 const PublicBookingBarberosStep = lazy(() => import('./features/public/booking/PublicBookingBarberosStep.jsx'));
 const PublicBookingAgendaStep = lazy(() => import('./features/public/booking/PublicBookingAgendaStep.jsx'));
@@ -149,6 +150,7 @@ function App() {
       <Route path="/register/confirm" element={<GuestRegistrationConfirmPage key={location.hash} />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage key={location.hash} />} />
+      <Route path="/terminos-y-condiciones" element={<RouteErrorBoundary><Suspense fallback={<p role="status" className="p-6 text-[var(--mf-text)]">Cargando documentos legales…</p>}><LegalTermsPage /></Suspense></RouteErrorBoundary>} />
       <Route path="/servicios" element={<ServicesPage />} />
       <Route path="/promociones" element={<PromotionsPage />} />
       <Route path="/barberos" element={<BarbersLandingPage />} />
