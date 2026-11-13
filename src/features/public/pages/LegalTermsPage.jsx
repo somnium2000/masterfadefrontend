@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { BookOpen, ChevronUp } from 'lucide-react';
 import PublicNavigationHeader from '../../../components/layout/PublicNavigationHeader.jsx';
-import legalTerms from '../data/legalTerms.v0.3-RC1.json';
+import legalTerms from '../data/legalTerms.v0.3-RC2-MP.json';
 import './LegalTermsPage.css';
 
 export default function LegalTermsPage() {
