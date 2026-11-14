@@ -49,7 +49,6 @@ async function select(id) { const input = await picker(); fireEvent.change(input
 async function loaded(id = 'A') { await select(id); await screen.findByText('Saldo total'); }
 function balance() { return screen.getByText('Saldo total').closest('article'); }
 function fillAdjustment(subtract = false) {
-  fireEvent.change(screen.getByRole('combobox', { name: 'Operacion' }), { target: { value: subtract ? 'restar' : 'sumar' } });
   fireEvent.change(screen.getByPlaceholderText(subtract ? 'Ej. 3' : 'Ej. 10'), { target: { value: '2' } });
   fireEvent.change(screen.getByPlaceholderText('Describe el ajuste'), { target: { value: 'Motivo sintético' } });
 }
@@ -138,23 +137,24 @@ test('resta solicita confirmación y conserva payload', async () => {
 test.each([false, true])('ajuste resta=%s actualiza saldo e historial después de guardar', async subtract => {
   await ready(); await loaded(); fillAdjustment(subtract);
   const amount = subtract ? -2 : 2;
-  expect(screen.getByText(`${subtract ? 'RESTAR' : 'SUMAR'} 2 puntos. Saldo actual: 7. Saldo previsto: ${7 + amount}.`)).toBeInTheDocument();
+  expect(screen.getByText(`Resultado neto: ${subtract ? '-2' : '+2'} puntos.`)).toBeInTheDocument();
   api.getAdminClientePuntosResumen.mockResolvedValue({ data: { ...summary('A', 7 + amount).data,
     historial: [{ id_points_tx: 'NEW', tipo_puntos_codigo: subtract ? 'ajuste_resta' : 'ajustar', puntos: amount, motivo: 'Motivo sintético' }] } });
   fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }));
   if (subtract) fireEvent.click(screen.getByRole('button', { name: 'Si, aplicar ajuste' }));
   await waitFor(() => expect(within(balance()).getByText(String(7 + amount))).toBeInTheDocument());
   expect(screen.getByText('Motivo sintético')).toBeInTheDocument();
-  expect(screen.getByLabelText('Cantidad de puntos')).toHaveValue(null);
+  expect(screen.getByLabelText('Sumar puntos')).toHaveValue(null);
+  expect(screen.getByLabelText('Restar puntos')).toHaveValue(null);
   expect(screen.getByLabelText('Motivo (min. 5)')).toHaveValue('');
 });
 test('resta superior al saldo se bloquea antes de confirmar; saldo exacto se permite', async () => {
   await ready(); await loaded(); fillAdjustment(true);
-  fireEvent.change(screen.getByLabelText('Cantidad de puntos'), { target: { value: '8' } });
+  fireEvent.change(screen.getByLabelText('Restar puntos'), { target: { value: '8' } });
   expect(screen.getByRole('alert')).toHaveTextContent('No hay puntos suficientes');
   expect(screen.getByRole('button', { name: 'Aplicar ajuste' })).toBeDisabled();
   expect(api.createAdminClientePuntosAjuste).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('Cantidad de puntos'), { target: { value: '7' } });
+  fireEvent.change(screen.getByLabelText('Restar puntos'), { target: { value: '7' } });
   expect(screen.getByRole('button', { name: 'Aplicar ajuste' })).toBeEnabled();
 });
 test.each(['', 'abcd', 'x'.repeat(301)])('motivo inválido se bloquea antes de enviar: %s', async reason => {
@@ -163,7 +163,7 @@ test.each(['', 'abcd', 'x'.repeat(301)])('motivo inválido se bloquea antes de e
   expect(screen.getByRole('button', { name: 'Aplicar ajuste' })).toBeDisabled();
   expect(api.createAdminClientePuntosAjuste).not.toHaveBeenCalled();
 });
-test('resta reintentada conserva clave; cambiar operación descarta cantidad anterior', async () => {
+test('resta reintentada conserva clave y permite cambiar al campo sumar después del éxito', async () => {
   await ready(); await loaded(); fillAdjustment(true);
   api.createAdminClientePuntosAjuste.mockRejectedValueOnce(new Error('timeout')).mockResolvedValueOnce({ data: {} });
   const submit = () => {
@@ -174,16 +174,50 @@ test('resta reintentada conserva clave; cambiar operación descarta cantidad ant
   const key = api.createAdminClientePuntosAjuste.mock.calls[0][2].idempotencyKey;
   submit(); await waitFor(() => expect(api.createAdminClientePuntosAjuste).toHaveBeenCalledTimes(2));
   expect(api.createAdminClientePuntosAjuste.mock.calls[1][2].idempotencyKey).toBe(key);
-  fireEvent.change(screen.getByRole('combobox', { name: 'Operacion' }), { target: { value: 'sumar' } });
-  expect(screen.getByLabelText('Cantidad de puntos')).toHaveValue(null);
+  await waitFor(() => expect(screen.getByLabelText('Restar puntos')).toHaveValue(null));
+  expect(screen.getByLabelText('Sumar puntos')).toBeEnabled();
+  expect(screen.getByLabelText('Sumar puntos')).toHaveValue(null);
+  expect(screen.getByLabelText('Restar puntos')).toHaveValue(null);
 });
-test('admin puede sumar a cliente de otra sucursal pero no puede restarle', async () => {
-  await ready(); await loaded('B');
-  expect(screen.getByRole('option', { name: 'RESTAR' })).toBeDisabled();
-  expect(screen.getByText('Solo puedes restar puntos a clientes de tus sucursales autorizadas.')).toBeInTheDocument();
+test.each(['admin', 'super_admin'])('rol %s puede sumar y restar al mismo cliente de otra sucursal', async role => {
+  auth.roles = [role]; await ready(); await loaded('B');
+  expect(screen.getByLabelText('Sumar puntos')).toBeEnabled();
+  expect(screen.getByLabelText('Restar puntos')).toBeEnabled();
+  expect(screen.queryByRole('combobox', { name: 'Operacion' })).not.toBeInTheDocument();
   fillAdjustment(); fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }));
   await waitFor(() => expect(api.createAdminClientePuntosAjuste).toHaveBeenCalledWith('B', { accion: 'sumar', puntos: 2, motivo: 'Motivo sintético' }, { idempotencyKey: expect.any(String) }));
+  await waitFor(() => expect(screen.getByLabelText('Sumar puntos')).toHaveValue(null));
+  fillAdjustment(true); fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Si, aplicar ajuste' }));
+  await waitFor(() => expect(api.createAdminClientePuntosAjuste).toHaveBeenCalledWith('B', { accion: 'restar', puntos: 2, motivo: 'Motivo sintético' }, { idempotencyKey: expect.any(String) }));
 });
+
+test('formulario original conserva ambos campos y exclusión mutua', async () => {
+  await ready(); await loaded();
+  expect(screen.getByLabelText('Sumar puntos')).toBeEnabled();
+  expect(screen.getByLabelText('Restar puntos')).toBeEnabled();
+  fillAdjustment();
+  expect(screen.getByLabelText('Restar puntos')).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Sumar puntos'), { target: { value: '' } });
+  expect(screen.getByLabelText('Restar puntos')).toBeEnabled();
+  fillAdjustment(true);
+  expect(screen.getByLabelText('Sumar puntos')).toBeDisabled();
+});
+
+test('saldo cero bloquea una resta positiva sin invocar la API', async () => {
+  api.getAdminClientePuntosResumen.mockResolvedValue(summary('B', 0));
+  await ready(); await loaded('B'); fillAdjustment(true);
+  expect(screen.getByRole('button', { name: 'Aplicar ajuste' })).toBeDisabled();
+  expect(api.createAdminClientePuntosAjuste).not.toHaveBeenCalled();
+});
+
+test.each([0, -1, 1.5, 2147483648, 'abc', '1e2', ''])('resta inválida %s no se envía', async value => {
+  await ready(); await loaded(); fillAdjustment(true);
+  fireEvent.change(screen.getByLabelText('Restar puntos'), { target: { value: String(value) } });
+  expect(screen.getByRole('button', { name: 'Aplicar ajuste' })).toBeDisabled();
+  expect(api.createAdminClientePuntosAjuste).not.toHaveBeenCalled();
+});
+
 test('reintento tras error conserva la misma clave idempotente', async () => {
   await ready(); await loaded(); api.createAdminClientePuntosAjuste.mockRejectedValueOnce(new Error('timeout')).mockResolvedValueOnce({ data: {} }); fillAdjustment();
   fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' })); await screen.findByText('No fue posible aplicar el ajuste.');
