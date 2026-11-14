@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   listPublicCatalogBranches: vi.fn(),
   listPublicCatalogServices: vi.fn(),
   listPublicCatalogPackages: vi.fn(),
+  listPublicPlansByBranch: vi.fn(),
 }));
 const sync = vi.hoisted(() => ({ callback: null, unsubscribe: vi.fn() }));
 const navigate = vi.hoisted(() => vi.fn());
@@ -18,7 +19,10 @@ vi.mock('../../lib/catalogApi.js', () => api);
 vi.mock('../../../../lib/catalogSync.js', () => ({
   subscribeCatalogSync: (callback) => { sync.callback = callback; return sync.unsubscribe; },
 }));
-vi.mock('react-router-dom', () => ({ useNavigate: () => navigate }));
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => navigate,
+  Link: ({ to, children, ...props }) => <a href={to} {...props}>{children}</a>,
+}));
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => ({ isAuthenticated: false }) }));
 vi.mock('../../../../components/branding/MasterfadeLogo.jsx', () => ({ default: () => null }));
 vi.mock('../../../../components/theme/ThemeSwitcher.jsx', () => ({ default: () => null }));
@@ -55,6 +59,7 @@ beforeEach(() => {
   api.listPublicCatalogBranches.mockResolvedValue({ branches });
   api.listPublicCatalogServices.mockResolvedValue({ services: [service('Corte A')] });
   api.listPublicCatalogPackages.mockResolvedValue({ packages: [pkg('Paquete A')] });
+  api.listPublicPlansByBranch.mockResolvedValue({ plans: [] });
 });
 afterEach(() => cleanup());
 
@@ -163,6 +168,7 @@ describe('catálogo público por sucursal', () => {
     render(<ServicesPage />);
     const retry = await screen.findByRole('button', { name: 'Reintentar' });
     expect(catalogCalls()).toHaveLength(0);
+    expect(api.listPublicPlansByBranch).not.toHaveBeenCalled();
     fireEvent.click(retry);
     await screen.findByText('Corte A');
     expect(api.listPublicCatalogBranches).toHaveBeenCalledTimes(2);
@@ -184,6 +190,7 @@ describe('catálogo público por sucursal', () => {
     render(<ServicesPage />);
     expect(await screen.findByText('No hay sucursales disponibles en este momento.')).toBeInTheDocument();
     expect(catalogCalls()).toHaveLength(0);
+    expect(api.listPublicPlansByBranch).not.toHaveBeenCalled();
   });
 
   test('solo sucursales inactivas produce estado sin sucursales', async () => {
@@ -193,6 +200,7 @@ describe('catálogo público por sucursal', () => {
     render(<ServicesPage />);
     expect(await screen.findByText('No hay sucursales disponibles en este momento.')).toBeInTheDocument();
     expect(catalogCalls()).toHaveLength(0);
+    expect(api.listPublicPlansByBranch).not.toHaveBeenCalled();
   });
 
   test('cambio a B oculta de inmediato los productos de A y carga los de B', async () => {
@@ -323,6 +331,227 @@ describe('catálogo público por sucursal', () => {
     await screen.findByText('Corte A');
     expect(api.listPublicCatalogBranches).toHaveBeenCalledTimes(1);
     expect(api.listPublicCatalogServices).toHaveBeenCalledTimes(1);
+    expect(api.listPublicPlansByBranch).toHaveBeenCalledTimes(1);
     expect(sync.unsubscribe).toHaveBeenCalledTimes(1);
   });
+});
+
+const plan = (name = 'VIP Centro', branchId = 'A') => ({
+  id_plan: name, id_plan_sucursal: `offer-${name}`, id_sucursal: branchId,
+  nombre_plan: name, descripcion: 'Cuidado personal y atención premium', categoria_nivel: 2,
+  periodo_membresia_codigo: 'mensual', periodo_membresia_label: 'Mensual', precio_hnl: 950,
+  beneficios: [
+    { tipo: 'servicio', nombre: 'Corte premium', cantidad: 2 },
+    { tipo: 'cortesia', nombre: 'Bebida de cortesía', cantidad: 1 },
+  ],
+});
+const vipSection = () => screen.getByRole('region', { name: 'Membresías VIP' });
+
+describe('membresías VIP como primera sección informativa', () => {
+  test('presenta datos reales y conserva el orden y el enlace sin acciones de compra', async () => {
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan()] });
+    render(<ServicesPage />);
+    expect(await screen.findByText('VIP Centro')).toBeInTheDocument();
+    expect(api.listPublicPlansByBranch).toHaveBeenCalledWith('A');
+    const vip = within(vipSection());
+    expect(vip.getByText('Silver')).toBeInTheDocument();
+    expect(vip.getByText('Vigencia: Mensual')).toBeInTheDocument();
+    expect(vip.getByText('L 950.00')).toBeInTheDocument();
+    expect(vip.getByText('2 × Corte premium')).toBeInTheDocument();
+    expect(vip.getByText('1 × Bebida de cortesía')).toBeInTheDocument();
+    expect(vip.getByRole('link', { name: 'Ver membresías VIP' })).toHaveAttribute('href', '/membresias-vip');
+    expect(vip.queryByRole('button', { name: /comprar|adquirir|agendar/i })).not.toBeInTheDocument();
+    expect(vip.getByRole('region', { name: 'Planes de membresías VIP' })).toHaveAttribute('tabindex', '0');
+    expect(screen.getAllByRole('heading', { level: 2 }).map(node => node.textContent)).toEqual([
+      'Membresías VIP', 'Servicios agendables', 'Servicios informativos', 'Combos / Paquetes',
+    ]);
+    expect(screen.getByText('Corte A')).toBeInTheDocument();
+    expect(screen.getByText('Paquete A')).toBeInTheDocument();
+  });
+
+  test('vacío no oculta los servicios ni inventa planes', async () => {
+    render(<ServicesPage />);
+    expect(await screen.findByText('No hay membresías VIP disponibles en esta sucursal.')).toBeInTheDocument();
+    expect(screen.getByText('Corte A')).toBeInTheDocument();
+    expect(within(vipSection()).queryByRole('article')).not.toBeInTheDocument();
+  });
+
+  test('carga independiente: los servicios aparecen mientras los planes siguen pendientes', async () => {
+    const slow = deferred();
+    api.listPublicPlansByBranch.mockReturnValue(slow.promise);
+    render(<ServicesPage />);
+    await screen.findByText('Corte A');
+    expect(screen.getByText('Cargando membresías VIP…')).toBeInTheDocument();
+    await act(async () => slow.resolve({ plans: [plan()] }));
+    expect(screen.getByText('VIP Centro')).toBeInTheDocument();
+  });
+
+  test('los planes aparecen aunque falle el resto del catálogo', async () => {
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan()] });
+    api.listPublicCatalogServices.mockRejectedValue(new Error('service error'));
+    api.listPublicCatalogPackages.mockRejectedValue(new Error('package error'));
+    render(<ServicesPage />);
+    await screen.findByText('No se pudieron cargar los servicios ni los paquetes.');
+    expect(screen.getByText('VIP Centro')).toBeInTheDocument();
+  });
+
+  test('error y reintento de planes son independientes del catálogo y conservan la sucursal', async () => {
+    api.listPublicPlansByBranch.mockRejectedValueOnce(new Error('private SQL stack'));
+    render(<ServicesPage />);
+    await screen.findByText('No se pudieron cargar las membresías VIP de esta sucursal.');
+    expect(screen.getByText('Corte A')).toBeInTheDocument();
+    expect(screen.getByText('Paquete A')).toBeInTheDocument();
+    expect(screen.queryByText('private SQL stack')).not.toBeInTheDocument();
+    expect(screen.queryByText('No hay membresías VIP disponibles en esta sucursal.')).not.toBeInTheDocument();
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan()] });
+    fireEvent.click(within(vipSection()).getByRole('button', { name: 'Reintentar' }));
+    await screen.findByText('VIP Centro');
+    expect(api.listPublicPlansByBranch).toHaveBeenNthCalledWith(2, 'A');
+    expect(api.listPublicCatalogServices).toHaveBeenCalledTimes(1);
+    expect(api.listPublicCatalogPackages).toHaveBeenCalledTimes(1);
+  });
+
+  test('cambiar sucursal limpia la oferta anterior y evita refetch de la misma sucursal', async () => {
+    const slowB = deferred();
+    api.listPublicPlansByBranch.mockImplementation(id => id === 'A' ? Promise.resolve({ plans: [plan()] }) : slowB.promise);
+    render(<ServicesPage />);
+    await screen.findByText('VIP Centro');
+    fireEvent.click(screen.getByRole('button', { name: 'Centro' }));
+    expect(api.listPublicPlansByBranch).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Norte' }));
+    expect(screen.queryByText('VIP Centro')).not.toBeInTheDocument();
+    expect(screen.getByText('Cargando membresías VIP…')).toBeInTheDocument();
+    await act(async () => slowB.resolve({ plans: [plan('VIP Norte', 'B')] }));
+    expect(screen.getByText('VIP Norte')).toBeInTheDocument();
+    expect(api.listPublicPlansByBranch).toHaveBeenLastCalledWith('B');
+  });
+
+  test.each(['respuesta', 'error'])('ignora %s tardío de otra sucursal', async (outcome) => {
+    const slowA = deferred();
+    api.listPublicPlansByBranch.mockImplementation(id => id === 'A' ? slowA.promise : Promise.resolve({ plans: [plan('VIP Norte', 'B')] }));
+    render(<ServicesPage />);
+    await waitFor(() => expect(api.listPublicPlansByBranch).toHaveBeenCalledWith('A'));
+    fireEvent.click(screen.getByRole('button', { name: 'Norte' }));
+    await screen.findByText('VIP Norte');
+    await act(async () => outcome === 'error' ? slowA.reject(new Error('old error')) : slowA.resolve({ plans: [plan()] }));
+    expect(screen.getByText('VIP Norte')).toBeInTheDocument();
+    expect(screen.queryByText('VIP Centro')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  test('A → B → A y sincronización descartan generaciones antiguas de planes', async () => {
+    const firstA = deferred();
+    const secondA = deferred();
+    api.listPublicPlansByBranch.mockReturnValueOnce(firstA.promise)
+      .mockResolvedValueOnce({ plans: [plan('VIP Norte', 'B')] })
+      .mockReturnValueOnce(secondA.promise)
+      .mockResolvedValueOnce({ plans: [plan('VIP Centro actualizado')] });
+    render(<ServicesPage />);
+    await waitFor(() => expect(api.listPublicPlansByBranch).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Norte' }));
+    await screen.findByText('VIP Norte');
+    fireEvent.click(screen.getByRole('button', { name: 'Centro' }));
+    await act(async () => firstA.resolve({ plans: [plan('VIP antiguo')] }));
+    expect(screen.queryByText('VIP antiguo')).not.toBeInTheDocument();
+    await act(async () => sync.callback());
+    await screen.findByText('VIP Centro actualizado');
+    await act(async () => secondA.resolve({ plans: [plan('VIP anterior al sync')] }));
+    expect(screen.queryByText('VIP anterior al sync')).not.toBeInTheDocument();
+    expect(api.listPublicPlansByBranch.mock.calls.map(([id]) => id)).toEqual(['A', 'B', 'A', 'A']);
+  });
+
+  test('no muestra ofertas inactivas, ajenas a sucursal ni precios inválidos', async () => {
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [
+      plan(), { ...plan('Inactivo'), activo: false }, plan('Otra sucursal', 'B'),
+      ...[0, -1, null, 'invalid'].map((precio_hnl, i) => ({ ...plan(`Inválido ${i}`), precio_hnl })),
+    ] });
+    render(<ServicesPage />);
+    await screen.findByText('VIP Centro');
+    expect(within(vipSection()).getAllByRole('article')).toHaveLength(1);
+  });
+
+  test('no inventa categoría, vigencia ni beneficios cuando faltan', async () => {
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [{ ...plan(), categoria_nivel: null, periodo_membresia_label: null, beneficios: [] }] });
+    render(<ServicesPage />);
+    await screen.findByText('Categoría no disponible');
+    expect(screen.getByText('Vigencia: Consultar vigencia')).toBeInTheDocument();
+    expect(screen.getByText('Consulta los beneficios del plan.')).toBeInTheDocument();
+    expect(within(vipSection()).queryByRole('list')).not.toBeInTheDocument();
+  });
+
+  test('respuestas posteriores al desmontaje no se aplican', async () => {
+    const pending = deferred();
+    api.listPublicPlansByBranch.mockReturnValue(pending.promise);
+    const view = render(<ServicesPage />);
+    await waitFor(() => expect(api.listPublicPlansByBranch).toHaveBeenCalled());
+    view.unmount();
+    await act(async () => pending.resolve({ plans: [plan()] }));
+    expect(screen.queryByText('VIP Centro')).not.toBeInTheDocument();
+    expect(sync.unsubscribe).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('VIP compacto y detalle informativo', () => {
+  test('resume beneficios largos y conserva íntegros descripción, cantidades y nombres en detalle', async () => {
+    const longName = 'Corte especializado con tratamiento, asesoría personalizada y acabado profesional para cada cliente';
+    const benefits = [
+      { tipo: 'servicio', nombre: longName, cantidad: 3 },
+      { tipo: 'cortesia', nombre: 'Bebida de cortesía', cantidad: 1 },
+      { tipo: 'servicio', nombre: 'Tratamiento adicional completo', cantidad: 4 },
+    ];
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [{ ...plan(), beneficios: benefits }] });
+    render(<ServicesPage />);
+    await screen.findByText('VIP Centro');
+    const card = within(vipSection()).getByRole('article');
+    expect(within(card).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(card).getByText('+ 1 beneficio más')).toBeInTheDocument();
+    expect(within(card).queryByText(`3 × ${longName}`)).not.toBeInTheDocument();
+    expect(screen.queryByText('Cuidado personal y atención premium')).not.toBeInTheDocument();
+    const open = within(card).getByRole('button', { name: 'Ver detalle de VIP Centro' });
+    fireEvent.click(open);
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByRole('heading', { name: 'VIP Centro' })).toBeInTheDocument();
+    expect(dialog.getByText('Cuidado personal y atención premium')).toBeInTheDocument();
+    expect(dialog.getByText('L 950.00')).toBeInTheDocument();
+    for (const benefit of benefits) expect(dialog.getByText(`${benefit.cantidad} × ${benefit.nombre}`)).toBeInTheDocument();
+    expect(dialog.queryByRole('button', { name: /comprar|agendar|adquirir/i })).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', code: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(api.listPublicPlansByBranch).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  test('abre el plan seleccionado sin mezclar beneficios de otra oferta', async () => {
+    api.listPublicPlansByBranch.mockResolvedValue({ plans: [plan(), { ...plan('VIP especial'), beneficios: [{ nombre: 'Beneficio exclusivo', cantidad: 2 }] }] });
+    render(<ServicesPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver detalle de VIP especial' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByText('2 × Beneficio exclusivo')).toBeInTheDocument();
+    expect(dialog.queryByText('2 × Corte premium')).not.toBeInTheDocument();
+  });
+
+  test('conserva los patrones y controles originales del carrusel de Servicios', async () => {
+    api.listPublicCatalogServices.mockResolvedValue({ services: ['Uno', 'Dos', 'Tres', 'Cuatro'].map(name => service(name)) });
+    render(<ServicesPage />);
+    const section = (await screen.findByRole('heading', { name: 'Servicios agendables' })).closest('section');
+    const previous = within(section).getByRole('button', { name: 'Desplazar a la izquierda' });
+    const next = within(section).getByRole('button', { name: 'Desplazar a la derecha' });
+    expect(previous).toBeEnabled();
+    expect(next).toBeEnabled();
+    expect(next).toHaveClass('h-10', 'w-10');
+    expect(next.parentElement).toHaveClass('hidden', 'sm:flex');
+    const track = section.querySelector('.overflow-x-auto');
+    expect(track).toHaveClass('snap-mandatory', '[scrollbar-width:none]', '[&::-webkit-scrollbar]:hidden');
+    expect(track).not.toHaveAttribute('id', 'services-vip-plans');
+    expect(within(section).getAllByRole('article')).toHaveLength(4);
+    expect(within(section).getAllByRole('article')[0]).toHaveClass('w-[85vw]', 'lg:w-[calc((100%-2rem)/3)]');
+  });
+});
+
+test('conserva la navegacion comercial original de main', async () => {
+  render(<ServicesPage />);
+  await screen.findByText('Corte A');
+  fireEvent.click(screen.getByRole('button', { name: 'Agendar', exact: true }));
+  expect(navigate).toHaveBeenCalledWith('/agendar/barberos');
 });
