@@ -7,12 +7,12 @@ import process from 'node:process';
 
 const { chromium } = createRequire(import.meta.url)(process.env.MASTERFADE_PLAYWRIGHT_MODULE || 'playwright');
 const base = process.env.MASTERFADE_BROWSER_URL || 'http://127.0.0.1:4197';
-const evidence = path.join(process.env.TEMP || process.cwd(), 'mf-masterpuntos-admin-adjustment-evidence');
+const evidence = process.env.MASTERFADE_BROWSER_EVIDENCE || path.join(process.env.TEMP || process.cwd(), 'mf-masterpuntos-admin-adjustment-evidence');
 const USER = '11111111-1111-4111-8111-111111111111', CLIENT = '22222222-2222-4222-8222-222222222222';
 const BRANCH = '33333333-3333-4333-8333-333333333333', OTHER = '44444444-4444-4444-8444-444444444444';
 
-for (const width of [390, 1440]) for (const role of ['admin', 'super_admin']) {
-  test(`Ajuste administrativo ${role} ${width}: sumar/restar, confirmar, historial y saldo`, { timeout: 60000 }, async () => {
+for (const width of [390, 1440]) for (const role of ['admin', 'super_admin']) for (const crossBranch of [false, true]) {
+  test(`Ajuste administrativo ${role} ${width} otraSucursal=${crossBranch}: sumar/restar, confirmar, historial y saldo`, { timeout: 60000 }, async () => {
     const browser = await chromium.launch({ channel: process.env.MASTERFADE_CHROMIUM_CHANNEL || 'chrome' });
     try {
       const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 640, hasTouch: width < 640 });
@@ -34,15 +34,17 @@ for (const width of [390, 1440]) for (const role of ['admin', 'super_admin']) {
           { id_cliente: CLIENT, nombre_cliente: 'Cliente Sintetico', id_sucursal_origen: BRANCH },
           { id_cliente: OTHER, nombre_cliente: 'Cliente Otra Sucursal', id_sucursal_origen: OTHER },
         ] };
-        else if (endpoint.endsWith('/resumen')) data = { id_cliente: CLIENT, nombre_cliente: endpoint.includes(OTHER) ? 'Cliente Otra Sucursal' : 'Cliente Sintetico', saldo_total: balance,
+        else if (endpoint.endsWith('/resumen')) data = { id_cliente: endpoint.includes(OTHER) ? OTHER : CLIENT, nombre_cliente: endpoint.includes(OTHER) ? 'Cliente Otra Sucursal' : 'Cliente Sintetico', saldo_total: balance,
           puntos_para_premio: 10, historial: movements, id_sucursal_origen: endpoint.includes(OTHER) ? OTHER : BRANCH };
         if (request.method() !== 'GET') {
           assert.ok(endpoint.endsWith('/ajuste') || endpoint === '/v1/auth/session/touch', `Escritura inesperada: ${endpoint}`);
           if (endpoint.endsWith('/ajuste')) {
             const payload = request.postDataJSON();
             assert.match(request.headers()['x-idempotency-key'], /^[0-9a-f-]{36}$/i);
-            writes.push(payload);
+            assert.ok(Number.isInteger(payload.puntos) && payload.puntos > 0);
+            writes.push({ ...payload, client: endpoint.includes(OTHER) ? OTHER : CLIENT });
             const amount = payload.accion === 'restar' ? -payload.puntos : payload.puntos;
+            assert.ok(balance + amount >= 0);
             balance += amount;
             movements.unshift({ id_points_tx: String(writes.length), puntos: amount, motivo: payload.motivo, tipo_puntos_codigo: amount < 0 ? 'ajuste_resta' : 'ajustar' });
             data = { saldo_actual: balance };
@@ -58,37 +60,47 @@ for (const width of [390, 1440]) for (const role of ['admin', 'super_admin']) {
         await page.getByRole('button', { name, exact: true }).click();
         await page.getByText('Saldo total', { exact: true }).waitFor();
       };
-      await selectClient('Cliente Sintetico');
-      const form = page.locator('form').filter({ has: page.getByLabel('Operacion', { exact: true }) });
-      await page.getByLabel('Cantidad de puntos').fill('2');
+      const name = crossBranch ? 'Cliente Otra Sucursal' : 'Cliente Sintetico';
+      await selectClient(name);
+      const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Aplicar ajuste', exact: true }) });
+      assert.equal(await form.locator('select').count(), 0);
+      assert.equal(await page.getByLabel('Restar puntos').isEnabled(), true);
+      await page.getByLabel('Sumar puntos').fill('2');
       await page.getByLabel('Motivo (min. 5)', { exact: true }).fill('Suma sintetica');
-      await page.getByText('SUMAR 2 puntos. Saldo actual: 5. Saldo previsto: 7.', { exact: true }).waitFor();
+      await page.getByText('Resultado neto: +2 puntos.', { exact: true }).waitFor();
       await page.getByRole('button', { name: 'Aplicar ajuste', exact: true }).click();
       await page.getByText('Suma sintetica', { exact: true }).waitFor();
-      await page.getByLabel('Operacion', { exact: true }).selectOption('restar');
-      await page.getByLabel('Cantidad de puntos').fill('8');
+      assert.equal(balance, 7);
+      await page.getByLabel('Restar puntos').fill('8');
       await page.getByLabel('Motivo (min. 5)', { exact: true }).fill('Resta sintetica');
       assert.equal(await page.getByRole('button', { name: 'Aplicar ajuste', exact: true }).isDisabled(), true);
-      await page.getByLabel('Cantidad de puntos').fill('3');
+      await page.getByLabel('Restar puntos').fill('3');
       await page.getByRole('button', { name: 'Aplicar ajuste', exact: true }).click();
       const dialog = page.getByRole('dialog');
-      await dialog.getByText('RESTAR 3 puntos a Cliente Sintetico. Saldo actual: 7. Saldo previsto: 4. Motivo: Resta sintetica', { exact: true }).waitFor();
+      await dialog.getByText('RESTAR 3 puntos a ' + name + '. Saldo actual: 7. Saldo previsto: 4. Motivo: Resta sintetica', { exact: true }).waitFor();
       assert.equal(writes.length, 1);
       await mkdir(evidence, { recursive: true });
-      await page.screenshot({ path: path.join(evidence, `${role}-${width}-confirm.png`), fullPage: true });
+      await page.screenshot({ path: path.join(evidence, `${role}-${width}-${crossBranch}-confirm.png`), fullPage: true });
       await dialog.getByRole('button', { name: 'Cancelar', exact: true }).click(); assert.equal(writes.length, 1);
       await page.getByRole('button', { name: 'Aplicar ajuste', exact: true }).click();
       await page.getByRole('button', { name: 'Si, aplicar ajuste', exact: true }).click();
       await page.getByText('Resta sintetica', { exact: true }).waitFor();
       assert.equal(balance, 4); assert.equal(writes.length, 2);
       assert.deepEqual(writes.map(row => row.accion), ['sumar', 'restar']);
-      assert.equal(await form.locator('input[type=number]').inputValue(), '');
+      assert.equal(await page.getByLabel('Sumar puntos').inputValue(), '');
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-      await form.screenshot({ path: path.join(evidence, `${role}-${width}-form.png`) });
-      if (role === 'admin') {
-        await selectClient('Cliente Otra Sucursal');
-        assert.equal(await page.getByRole('option', { name: 'RESTAR', exact: true }).isDisabled(), true);
-      }
+      await form.screenshot({ path: path.join(evidence, `${role}-${width}-${crossBranch}-form.png`) });
+      assert.ok(writes.every(row => row.client === (crossBranch ? OTHER : CLIENT)));
+      await page.getByLabel('Restar puntos').fill('4');
+      await page.getByLabel('Motivo (min. 5)', { exact: true }).fill('Saldo exacto sintetico');
+      await page.getByRole('button', { name: 'Aplicar ajuste', exact: true }).click();
+      await page.getByRole('button', { name: 'Si, aplicar ajuste', exact: true }).click();
+      await page.getByText('Saldo exacto sintetico', { exact: true }).waitFor();
+      assert.equal(balance, 0);
+      await page.getByLabel('Restar puntos').fill('1');
+      await page.getByLabel('Motivo (min. 5)', { exact: true }).fill('No debe escribir');
+      assert.equal(await page.getByRole('button', { name: 'Aplicar ajuste', exact: true }).isDisabled(), true);
+      assert.equal(writes.length, 3);
       assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });
