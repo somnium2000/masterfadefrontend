@@ -30,7 +30,8 @@ describe('Reportes frontend authorization contract', () => {
     const adminModules = buildNavModules('/home/admin', 'admin', ['admin']);
     expect(superModules.find((module) => module.id === 'reportes')?.subItems).toHaveLength(4);
     expect(adminModules.some((module) => module.id === 'reportes')).toBe(false);
-    const operationalIds = ['inicio', 'personas', 'servicios', 'sucursales', 'citas', 'superpuntos', 'configuracion'];
+    expect(adminModules.some((module) => module.id === 'inicio')).toBe(false);
+    const operationalIds = ['personas', 'servicios', 'sucursales', 'citas', 'superpuntos', 'configuracion'];
     expect(adminModules.map((module) => module.id)).toEqual(expect.arrayContaining(operationalIds));
   });
 
