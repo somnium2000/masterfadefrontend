@@ -1,3 +1,5 @@
+import { resolvePixelPayEnvironment } from '../../config/pixelPayEnvironment.js';
+
 const CUSTOMER_MESSAGES = Object.freeze({
   PIXELPAY_PAYMENT_DECLINED: "El pago fue rechazado. Verifica los datos o utiliza otra tarjeta.",
   PIXELPAY_PAYMENT_DATA_INVALID: "Revisa los datos de la tarjeta y la información de facturación.",
@@ -15,10 +17,25 @@ export function isPixelPayUncertainError(source = {}) {
     || ["AbortError", "TimeoutError"].includes(source?.name);
 }
 
-export function getPixelPayPresentation(environment = import.meta.env.VITE_PIXELPAY_ENV) {
-  const normalized = String(environment || "sandbox").trim().toLowerCase();
-  const live = normalized === "live";
+export function getPixelPayPresentation(environment = import.meta.env.VITE_PIXELPAY_ENV, {
+  appUrl = import.meta.env.VITE_APP_URL,
+  runtimeHostname = typeof window === 'undefined' ? undefined : window.location.hostname,
+} = {}) {
+  const state = resolvePixelPayEnvironment({ environment, appUrl, runtimeHostname });
+  if (!state.canPay) {
+    return {
+      environment: 'invalid', canPay: false, providerLabel: 'PixelPay',
+      configurationError: 'El pago no está disponible temporalmente. No ingreses datos de tarjeta e intenta más tarde.',
+      intro: 'El pago no está disponible temporalmente.',
+      cardNotice: 'No ingreses datos de tarjeta hasta que el pago vuelva a estar disponible.',
+      privacyNotice: 'La acción de pago permanece deshabilitada.',
+      paymentTitle: 'Pago no disponible', payButton: 'Pago no disponible',
+    };
+  }
+  const live = state.environment === 'live';
   return {
+    canPay: true,
+    configurationError: null,
     environment: live ? "live" : "sandbox",
     providerLabel: live ? "PixelPay" : "PixelPay Sandbox",
     intro: live

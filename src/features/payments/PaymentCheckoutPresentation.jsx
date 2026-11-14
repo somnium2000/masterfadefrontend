@@ -4,6 +4,12 @@ import './paymentCheckout.css';
 
 export function PaymentCheckoutHero() {
   const presentation = getPixelPayPresentation();
+  if (!presentation.canPay) return (
+    <div className="mf-checkout-hero" role="alert">
+      <div><h2 className="mf-checkout-brand">Pago no disponible</h2>
+        <p className="mf-checkout-intro">{presentation.configurationError}</p></div>
+    </div>
+  );
   return (
     <div className="mf-checkout-hero">
       <div>
