@@ -125,7 +125,7 @@ export async function releaseClienteCitaHold(idGrupoCita) {
     };
     throw error;
   }
-  return http.del(`/v1/citas/hold/${encodeURIComponent(groupId)}`);
+  return http.post(`/v1/citas/pendiente/${encodeURIComponent(groupId)}/descartar`, {});
 }
 
 export async function confirmClienteCitaHoldWithoutPayment(idGrupoCita, payload = {}, options = {}) {

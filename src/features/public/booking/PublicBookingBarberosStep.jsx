@@ -28,7 +28,7 @@ export default function PublicBookingBarberosStep() {
           title="Selecciona sucursal y barbero"
           subtitle={mode === 'preview'
             ? 'Esta vista replica el flujo publico con reglas guardadas para validar comportamiento antes de publicar.'
-            : 'Este flujo esta disponible sin iniciar sesion y no comparte navbar o sidebar del panel interno.'}
+            : 'Elige tu sucursal y barbero para continuar con tu reserva.'}
         />
 
         {contextLoading ? (

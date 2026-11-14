@@ -91,7 +91,8 @@ function SecondaryCta({ icon: Icon, label, onClick, disabled = false, order = 0 
 }
 
 export default function LandingPage() {
-  const { booking: PUBLIC_BOOKING_ENABLED } = usePrivateCommerce();
+  const commerce = usePrivateCommerce();
+  const PUBLIC_BOOKING_ENABLED = commerce.booking || commerce.publicBooking;
   const navigate = useNavigate();
 
   function handleAgendar() {
