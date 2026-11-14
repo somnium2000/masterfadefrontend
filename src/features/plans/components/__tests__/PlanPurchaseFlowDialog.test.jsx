@@ -77,4 +77,23 @@ describe("formulario PixelPay VIP", () => {
     expect(onBackToSummary).toHaveBeenCalledOnce();
     expect(onCancel).toHaveBeenCalledOnce();
   });
+
+  it("presenta la demostración QA sin solicitar ni enviar tarjetas", () => {
+    const onConfirmPayment = vi.fn();
+    render(
+      <PlanPurchaseFlowDialog
+        open
+        step="payment"
+        orderSummary={orderSummary}
+        simulatorMode
+        onConfirmPayment={onConfirmPayment}
+      />
+    );
+    expect(screen.getByRole("heading", { name: "Demostración QA" })).toBeInTheDocument();
+    expect(screen.getByText("Demostración QA · Sin cobros reales")).toBeInTheDocument();
+    expect(screen.getByText(/Prohibido introducir tarjetas reales/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Numero de tarjeta")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ejecutar simulación" }));
+    expect(onConfirmPayment).toHaveBeenCalledExactlyOnceWith({});
+  });
 });

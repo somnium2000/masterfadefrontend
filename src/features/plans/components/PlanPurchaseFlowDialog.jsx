@@ -99,6 +99,7 @@ export default function PlanPurchaseFlowDialog({
   pendingConfirmation = false,
   paymentIntent = null,
   paymentConfirmation = null,
+  simulatorMode = false,
   onCancel,
   onBackToSummary,
   onContinueToPayment,
@@ -139,7 +140,11 @@ export default function PlanPurchaseFlowDialog({
     setPaymentForm((current) => ({ ...current, [field]: value }));
     setFieldErrors((current) => ({ ...current, [field]: "" }));
   };
-  const submitPixelPay = () => {
+  const submitPayment = () => {
+    if (simulatorMode) {
+      if (!reconciling) onConfirmPayment?.({});
+      return;
+    }
     const validationErrors = validateVipPaymentForm(paymentForm);
     setFieldErrors(validationErrors);
     if (Object.keys(validationErrors).length || reconciling) return;
@@ -199,15 +204,24 @@ export default function PlanPurchaseFlowDialog({
         ) : (
           <>
             <DialogHeader className="pt-3">
-              <DialogTitle>{displayStep === "payment" ? "Pago seguro" : "Resumen de compra"}</DialogTitle>
+              <DialogTitle>{displayStep === "payment" ? (simulatorMode ? "Demostración QA" : "Pago seguro") : "Resumen de compra"}</DialogTitle>
               <DialogDescription>
                 {displayStep === "payment"
-                  ? "Ingresa los datos solicitados para procesar el pago con PixelPay."
+                  ? (simulatorMode
+                    ? "Simula el resultado del pago sin realizar cobros reales."
+                    : "Ingresa los datos solicitados para procesar el pago con PixelPay.")
                   : "Verifica los datos antes de continuar al pago."}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
+              {simulatorMode ? (
+                <div role="note" className="rounded-2xl border border-amber-400/50 bg-amber-500/10 p-4 text-sm text-[var(--mf-text)]">
+                  <p className="font-semibold">Demostración QA · Sin cobros reales</p>
+                  <p className="mt-1">Prohibido introducir tarjetas reales. Este flujo no solicita datos de tarjeta.</p>
+                  <p className="mt-1 text-xs text-[var(--mf-text-2)]">Si otro formulario de prueba solicita una tarjeta, usa únicamente la tarjeta de prueba indicada para QA.</p>
+                </div>
+              ) : null}
               {displayStep === "payment" ? (
                 <>
                   <PaymentCheckoutSteps processing={loading || reconciling} />
@@ -215,7 +229,7 @@ export default function PlanPurchaseFlowDialog({
                     <div><p className="mf-checkout-section-title">Tu membresía</p><h3>{plan?.nombre_plan || "Plan"}</h3><p>{branchLabel}</p></div>
                     <div><p>Total a pagar · {totals?.moneda_codigo || "HNL"}</p><strong>{formatMoney(totals?.total_hnl)}</strong></div>
                   </div>
-                  <div className="mf-payment-panel text-sm">
+                  {simulatorMode ? null : <div className="mf-payment-panel text-sm">
                     <p className="flex items-center gap-2 font-semibold text-[var(--mf-text)]">
                       <LockKeyhole size={14} />
                       Pago seguro
@@ -258,7 +272,7 @@ export default function PlanPurchaseFlowDialog({
                         {getPixelPayCustomerMessage({ pending_confirmation: true })}
                       </p>
                     ) : null}
-                  </div>
+                  </div>}
                 </>
               ) : null}
               {displayStep === "summary" ? (
@@ -323,9 +337,9 @@ export default function PlanPurchaseFlowDialog({
 
             {displayStep === "payment" ? (
               <DialogFooter className="mf-payment-footer">
-                <Button type="button" className="mf-payment-submit" onClick={submitPixelPay} disabled={loading || disableClose || reconciling}>
+                <Button type="button" className="mf-payment-submit" onClick={submitPayment} disabled={loading || disableClose || reconciling}>
                   {loading ? <Loader2 size={15} className="animate-spin" /> : <LockKeyhole size={15} />}
-                  Pagar con PixelPay
+                  {simulatorMode ? "Ejecutar simulación" : "Pagar con PixelPay"}
                 </Button>
                 <Button type="button" variant="outline" className="mf-payment-back" onClick={() => { onBackToSummary?.(); }} disabled={loading || disableClose}>Volver al resumen</Button>
                 <Button type="button" variant="ghost" onClick={onCancel} disabled={loading || disableClose}>Cancelar</Button>

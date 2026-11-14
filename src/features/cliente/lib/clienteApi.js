@@ -1,5 +1,6 @@
 import { supabase } from '../../../config/supabaseClient.js';
 import { http } from '../../../services/httpClient.js';
+import { isQaVipPurchaseSimulationEnabled } from '../../plans/lib/qaVipPurchaseSimulation.js';
 
 const BASE = '/v1/cliente';
 const PURCHASE_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -19,23 +20,8 @@ function normalizeResponsePayload(response) {
   return response?.data || response;
 }
 
-function readEnvFlag(value, fallback = false) {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  if (!normalized) return fallback;
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
-  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
-  return fallback;
-}
-
 function shouldUseMembershipPaymentSimulator() {
-  const provider = String(
-    import.meta.env.VITE_PAYMENT_PROVIDER
-    || import.meta.env.VITE_PAYMENT_PROVIDER_CODE
-    || ''
-  ).trim().toLowerCase();
-  if (provider !== 'todopago' && provider !== 'simulator') return false;
-  return readEnvFlag(import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR, false)
-    && readEnvFlag(import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION, false);
+  return isQaVipPurchaseSimulationEnabled();
 }
 
 function buildQuery(params = {}) {

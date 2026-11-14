@@ -36,6 +36,7 @@ import {
   queryMembershipPaymentStatus,
 } from "../lib/clienteApi.js";
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
+import { isQaVipPurchaseSimulationEnabled } from "../../plans/lib/qaVipPurchaseSimulation.js";
 import useMembershipPaymentPolling from "../../plans/hooks/useMembershipPaymentPolling.js";
 import { CLIENT_LOCK_MESSAGE } from "../lib/clientFeatureFlags.js";
 import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
@@ -92,26 +93,6 @@ function storeClientPurchaseAttempt(record) {
   } catch {
     // AM: La referencia en memoria conserva la clave si sessionStorage no esta disponible.
   }
-}
-
-function readEnvFlag(value, fallback = false) {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (!normalized) return fallback;
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  return fallback;
-}
-
-function shouldShowMembershipSimulator() {
-  if (import.meta.env.PROD) return false;
-  const provider = String(
-    import.meta.env.VITE_PAYMENT_PROVIDER
-    || import.meta.env.VITE_PAYMENT_PROVIDER_CODE
-    || ""
-  ).trim().toLowerCase();
-  if (provider !== "todopago" && provider !== "simulator") return false;
-  return readEnvFlag(import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR, false)
-    && readEnvFlag(import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION, false);
 }
 
 function isPlanOperationalForCoverage(planLike) {
@@ -402,7 +383,7 @@ export default function ClientePlanesPage() {
   const purchaseUserId = String(user?.id_usuario || user?.id || "").trim();
   const purchaseClientId = String(clienteId || user?.cliente_id || "").trim();
   const purchaseIdentity = purchaseUserId && purchaseClientId ? `${purchaseUserId}:${purchaseClientId}` : "";
-  const showMembershipSimulator = shouldShowMembershipSimulator();
+  const showMembershipSimulator = isQaVipPurchaseSimulationEnabled();
 
   const fetchPlans = useCallback(async (selectedBranchId) => {
     const safeBranchId = String(selectedBranchId || "").trim();
@@ -1112,6 +1093,7 @@ export default function ClientePlanesPage() {
         disableClose={purchaseLoading || purchasePendingConfirmation}
         pendingConfirmation={purchasePendingConfirmation}
         paymentConfirmation={purchaseConfirmation}
+        simulatorMode={showMembershipSimulator}
         onCancel={membershipPaymentIntent ? resetPurchaseFlow : discardPurchaseFlow}
         onBackToSummary={() => setPurchaseStep("summary")}
         onContinueToPayment={handleContinueToPayment}
