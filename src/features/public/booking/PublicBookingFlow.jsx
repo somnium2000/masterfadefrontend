@@ -326,7 +326,7 @@ function persistRewardBookingContext(context) {
   window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, JSON.stringify(context));
 }
 
-export default function PublicBookingFlow() {
+export default function PublicBookingFlow({ pixelpaySale } = {}) {
   const { user: rewardUser } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -3816,7 +3816,8 @@ const agendaAutoLoadKeyRef = useRef('');
   ).trim().toLowerCase();
   const backendPaymentAmount = Number(paymentResult?.monto_hnl ?? paymentIntent?.monto_hnl);
   const paymentCanExecuteSale = Boolean(
-    !paymentRestoring
+    pixelpaySale !== false
+    && !paymentRestoring
     && backendPaymentState === 'link_generado'
     && Number.isFinite(backendPaymentAmount)
     && backendPaymentAmount > 0
@@ -4110,6 +4111,7 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentTitularEmail,
       paymentRestoring,
       paymentCanExecuteSale,
+      pixelpaySale,
       bookingSuccessResult,
       pendingCompanionFocusId,
       pendingFieldFocus,
@@ -4260,6 +4262,7 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentTitularEmail,
       paymentRestoring,
       paymentCanExecuteSale,
+      pixelpaySale,
       bookingSuccessResult,
       pendingCompanionFocusId,
       pendingFieldFocus,

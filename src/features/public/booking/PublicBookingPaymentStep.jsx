@@ -346,6 +346,7 @@ export default function PublicBookingPaymentStep() {
     paymentTitularEmail,
     paymentRestoring = false,
     paymentCanExecuteSale = true,
+    pixelpaySale,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
@@ -375,6 +376,7 @@ export default function PublicBookingPaymentStep() {
   });
   const paymentSimulationAction = resolvePaymentSimulationAction();
   const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
+  const pixelPaySaleSuspended = isPixelPayProvider && pixelpaySale === false;
   const qaVideoDemoMode = resolveQaVideoDemoMode();
   const usesProductionCheckoutDesign = isPixelPayProvider || qaVideoDemoMode;
   const pixelPayPresentation = getPixelPayPresentation();
@@ -547,7 +549,7 @@ export default function PublicBookingPaymentStep() {
   };
 
   const handleMockPay = async () => {
-    if (paymentSubmissionInFlightRef.current || processingPayment || paymentRestoring || !paymentCanExecuteSale) return;
+    if (paymentSubmissionInFlightRef.current || processingPayment || paymentRestoring || pixelPaySaleSuspended || !paymentCanExecuteSale) return;
     const validationErrors = validatePaymentForm(
       paymentForm,
       new Date(),
@@ -673,8 +675,13 @@ export default function PublicBookingPaymentStep() {
           </div>
         ) : null}
 
+        {pixelPaySaleSuspended && !pixelPayPendingConfirmation ? (
+          <p role="status" className="public-booking-payment-note mt-3">
+            El pago con PixelPay Sandbox aún no está habilitado. Puedes revisar tu reserva sin enviar un pago.
+          </p>
+        ) : null}
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
-          {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
+          {paymentSimulationAction.canShow && !pixelPaySaleSuspended && !pixelPayPendingConfirmation && !paymentRestoring ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card" aria-busy={processingPayment}>
             <h4 className="citas-confirm-subtitle mt-4">
               {qaVideoDemoMode ? 'Datos de pago' : paymentSimulationAction.type === 'pixelpay' ? 'Información de pago' : 'Datos para la simulacion'}
@@ -964,7 +971,7 @@ export default function PublicBookingPaymentStep() {
                   </select>
                 </div>
               ) : null}
-              {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
+              {paymentSimulationAction.canShow && !pixelPaySaleSuspended && !pixelPayPendingConfirmation && !paymentRestoring ? (
                 <Button
                   className="mf-checkout-submit w-full sm:w-auto"
                   onClick={handleMockPay}
