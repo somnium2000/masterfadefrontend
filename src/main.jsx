@@ -7,6 +7,7 @@ import { AuthProvider } from './context/AuthContext.jsx';
 import { ThemeProvider } from './context/ThemeContext.jsx';
 import { NotificationProvider } from './context/NotificationsContext.jsx';
 import NotificationsViewport from './components/feedback/NotificationsViewport.jsx';
+import TemporaryBookingNotice from './components/feedback/TemporaryBookingNotice.jsx';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -15,6 +16,7 @@ createRoot(document.getElementById('root')).render(
         <AuthProvider>
           <NotificationProvider>
             <App />
+            <TemporaryBookingNotice />
             <NotificationsViewport />
           </NotificationProvider>
         </AuthProvider>
