@@ -60,13 +60,13 @@ it('presenta un único error externo, vuelve al formulario y conserva sus datos'
   fireEvent.change(screen.getByLabelText('Nombre del titular'), { target: { value: 'Cliente de prueba' } });
   view.rerender(<PlanPurchaseFlowDialog {...initial} errorMessage={errorMessage} />);
   expect(screen.getAllByRole('alertdialog')).toHaveLength(1);
-  expect(screen.queryByLabelText('Numero de tarjeta')).toBeNull();
+  expect(screen.queryByLabelText('Número de tarjeta')).toBeNull();
   const understood = screen.getByRole('button', { name: 'Entendido' });
   await waitFor(() => expect(document.activeElement).toBe(understood));
   fireEvent.click(understood);
   expect(screen.queryByRole('alertdialog')).toBeNull();
   expect(screen.getByLabelText('Nombre del titular').value).toBe('Cliente de prueba');
-  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Numero de tarjeta')));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Número de tarjeta')));
   view.rerender(<PlanPurchaseFlowDialog {...initial} errorMessage={errorMessage} />);
   expect(screen.queryByRole('alertdialog')).toBeNull();
   expect(onOpenChange).not.toHaveBeenCalled();
@@ -83,7 +83,7 @@ it('Escape reconoce el error sin cancelar la compra ni exponer mensajes técnico
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Entendido' })));
   fireEvent.keyDown(document.activeElement, { key: 'Escape' });
   await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
-  expect(screen.getByLabelText('Numero de tarjeta')).toBeTruthy();
+  expect(screen.getByLabelText('Número de tarjeta')).toBeTruthy();
   expect(onCancel).not.toHaveBeenCalled();
 });
 
