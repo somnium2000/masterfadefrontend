@@ -37,6 +37,7 @@ export default function usePrivateCommerce() {
   // AM: A previous user's eligibility must never survive logout or identity changes.
   const data = identity && confirmed?.identity === identity ? confirmed.data : null;
   return { booking: data?.booking === true, vipPurchase: data?.vipPurchase === true,
+    ...(typeof data?.pixelpaySale === 'boolean' ? { pixelpaySale: data.pixelpaySale } : {}),
     checking: Boolean(identity && (
       confirmed?.identity !== identity || refreshing?.identity === identity
     )) };

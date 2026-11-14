@@ -71,3 +71,20 @@ it('mantiene pendiente sin CTA de cobro y conserva la verificación', () => {
   expect(context.refreshPaymentStatus).toHaveBeenCalledOnce();
   expect(context.completePixelPayPayment).not.toHaveBeenCalled();
 });
+
+it('capacidad Sale suspendida oculta tarjeta y cobro sin bloquear la consulta existente', () => {
+  const context = renderPayment({ pixelpaySale: false, paymentCanExecuteSale: true });
+  expect(screen.getByText(/El pago con PixelPay Sandbox aún no está habilitado/)).toBeTruthy();
+  expect(screen.queryByLabelText('CVV')).toBeNull();
+  expect(screen.queryByRole('button', { name: /^Pagar con/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Verificar estado del pago' }));
+  expect(context.refreshPaymentStatus).toHaveBeenCalledOnce();
+  expect(context.completePixelPayPayment).not.toHaveBeenCalled();
+});
+
+it('capacidad ausente conserva el checkout anterior', () => {
+  renderPayment();
+  expect(screen.queryByText(/aún no está habilitado/)).toBeNull();
+  expect(screen.getByLabelText('CVV')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' }).disabled).toBe(false);
+});

@@ -64,3 +64,21 @@ test('late response from previous identity cannot enable current user', async ()
   await act(async () => resolve({ data: { booking: true, vipPurchase: true } }));
   expect(view.result.current).toEqual({ booking: false, vipPurchase: false, checking: false });
 });
+
+test.each([false, true])('preserves an explicit PixelPay Sale capability (%s)', async (pixelpaySale) => {
+  login();
+  state.get.mockResolvedValue({ data: { booking: true, vipPurchase: false, pixelpaySale } });
+  const view = renderHook(usePrivateCommerce);
+  await waitFor(() => expect(view.result.current.checking).toBe(false));
+  expect(view.result.current).toMatchObject({ booking: true, vipPurchase: false, pixelpaySale });
+  state.auth = { isAuthenticated: false }; view.rerender();
+  expect(view.result.current).not.toHaveProperty('pixelpaySale');
+});
+
+test.each([undefined, null, 'false', 0])('omits absent or invalid legacy Sale capability (%s)', async (pixelpaySale) => {
+  login();
+  state.get.mockResolvedValue({ data: { booking: true, vipPurchase: false, pixelpaySale } });
+  const view = renderHook(usePrivateCommerce);
+  await waitFor(() => expect(view.result.current.checking).toBe(false));
+  expect(view.result.current).toEqual({ booking: true, vipPurchase: false, checking: false });
+});

@@ -26,9 +26,9 @@ vi.mock('../../../../components/theme/ThemeSwitcher.jsx',()=>({default:()=>null}
 const GROUP='11111111-1111-4111-8111-111111111111', INTENT='22222222-2222-4222-8222-222222222222';
 const KEY='masterfade.publicBookingPayment.v1';
 function Back(){const go=useNavigate();return <button onClick={()=>go(-1)}>Atrás navegador</button>;}
-function Probe(){const flow=useBookingFlow();return <><button onClick={()=>flow.cancelBookingFlow('payment_step')}>Salida de prueba</button><Payment/></>;}
+function Probe(){const flow=useBookingFlow();return <><button onClick={()=>flow.cancelBookingFlow('payment_step')}>Salida de prueba</button><button onClick={()=>flow.completePixelPayPayment({card:{},billing:{}})}>Invocar pago de prueba</button><output data-testid="can-execute-sale">{String(flow.paymentCanExecuteSale)}</output><Payment/></>;}
 function Where(){return <output data-testid="where">{useLocation().pathname}</output>;}
-function mount(resume=true){return render(<MemoryRouter initialEntries={['/agendar/confirmar','/agendar/pagar'+(resume?'?id_grupo_cita='+GROUP+'&id_intent='+INTENT:'')]}><Where/><Back/><Routes><Route path="/" element={<p>Landing</p>}/><Route path="/home/cliente" element={<p>Cliente</p>}/><Route path="/agendar" element={<Flow/>}><Route path="pagar" element={<Probe/>}/><Route path="confirmar" element={<p>Resumen</p>}/><Route path="exito" element={<p>Éxito</p>}/></Route></Routes></MemoryRouter>);}
+function mount(resume=true,flowProps={}){return render(<MemoryRouter initialEntries={['/agendar/confirmar','/agendar/pagar'+(resume?'?id_grupo_cita='+GROUP+'&id_intent='+INTENT:'')]}><Where/><Back/><Routes><Route path="/" element={<p>Landing</p>}/><Route path="/home/cliente" element={<p>Cliente</p>}/><Route path="/agendar" element={<Flow {...flowProps}/>}><Route path="pagar" element={<Probe/>}/><Route path="confirmar" element={<p>Resumen</p>}/><Route path="exito" element={<p>Éxito</p>}/></Route></Routes></MemoryRouter>);}
 beforeEach(()=>{
  vi.stubEnv('VITE_PAYMENT_PROVIDER','pixelpay');vi.stubEnv('VITE_PIXELPAY_ENV','sandbox');
  Object.assign(auth,{user:null,roles:[],isAuthenticated:false,isHydrated:true,isHydrating:false});
@@ -110,4 +110,23 @@ test('verificacion sin respuesta no atrapa al cliente autenticado',async()=>{
  mocks.data.paymentResult=null;mocks.data.homePath='/home/cliente';Object.assign(auth,{user:{id_usuario:'U',cliente_id:'C'},roles:['cliente'],isAuthenticated:true});
  mount();fireEvent.click(screen.getByRole('button',{name:'Inicio'}));const dialog=await screen.findByRole('dialog');
  expect(within(dialog).getByRole('button',{name:'Salir'})).toBeEnabled();fireEvent.click(within(dialog).getByRole('button',{name:'Salir'}));await screen.findByText('Cliente');expect(mocks.release).not.toHaveBeenCalled();expect(sessionStorage.getItem(KEY)).toContain(INTENT);
+});
+
+test('capacidad false bloquea incluso la invocación directa del callback Sale',async()=>{
+ const sale=vi.fn();mocks.data.salePixelPayOnce=sale;
+ mount(true,{pixelpaySale:false});
+ expect(screen.getByTestId('can-execute-sale')).toHaveTextContent('false');
+ fireEvent.click(screen.getByRole('button',{name:'Invocar pago de prueba'}));
+ await act(async()=>{});
+ expect(sale).not.toHaveBeenCalled();
+ expect(screen.queryByRole('button',{name:'Pagar con PixelPay Sandbox'})).not.toBeInTheDocument();
+ expect(sessionStorage.getItem(KEY)).toContain(INTENT);
+});
+
+test.each([undefined,true])('capacidad %s conserva el callback legacy sin reintentos',async pixelpaySale=>{
+ const sale=vi.fn().mockResolvedValue({pending_confirmation:true});mocks.data.salePixelPayOnce=sale;
+ mount(true,{pixelpaySale});
+ expect(screen.getByTestId('can-execute-sale')).toHaveTextContent('true');
+ fireEvent.click(screen.getByRole('button',{name:'Invocar pago de prueba'}));
+ await waitFor(()=>expect(sale).toHaveBeenCalledOnce());
 });
