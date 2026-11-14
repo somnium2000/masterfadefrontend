@@ -160,6 +160,14 @@ export async function listClientePlanConsumos(params = {}, options = {}) {
   return normalizeResponsePayload(response);
 }
 
+// AM: Contrato opt-in de lectura; cada pagina contiene citas completas.
+export async function listClientePlanConsumosPorCita(params = {}, options = {}) {
+  const response = await http.get(`${BASE}/planes/consumos?${buildQuery({ ...params, agrupar_por: 'cita', limit: 5 })}`, {
+    cache: false, dedupe: false, ...options,
+  });
+  return normalizeResponsePayload(response);
+}
+
 export async function getClientePlanEstado() {
   const response = await http.get(`${BASE}/planes/estado`);
   return normalizeResponsePayload(response);
