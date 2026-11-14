@@ -15,6 +15,8 @@ const BRANCH = '33333333-3333-4333-8333-333333333333';
 const BARBER = '44444444-4444-4444-8444-444444444444';
 const SERVICE = '55555555-5555-4555-8555-555555555555';
 const EMAIL = 'synthetic@example.test';
+const BOOKING_PAYMENT_CONTEXT_KEY = 'masterfade.publicBookingPayment.v1';
+const PENDING_PAYMENT_CONTEXT_KEY = 'mf_pending_payment_context_v1';
 
 async function createSession(browser, mobile) {
   const context = await browser.newContext(mobile ? devices['iPhone 13'] : { viewport: { width: 1440, height: 900 } });
@@ -25,6 +27,7 @@ async function createSession(browser, mobile) {
   const errors = [];
   let simulationBody = null;
   let releaseSimulation = null;
+  let eligibilityGate = null;
   let paid = false;
 
   page.on('pageerror', error => errors.push(error.stack || error.message));
@@ -50,9 +53,21 @@ async function createSession(browser, mobile) {
     } else if (requestPath === '/v1/auth/csrf') {
       data = { csrf_token: 'synthetic-csrf' };
     } else if (requestPath === '/v1/commerce/eligibility') {
+      if (eligibilityGate) await eligibilityGate.promise;
       data = { booking: true, vipPurchase: false };
     } else if (requestPath === '/v1/cliente/me') {
-      data = { id_usuario: '66666666-6666-4666-8666-666666666666', nombres: 'Cliente', apellidos: 'QA', email: EMAIL, telefono_principal: '99999999', perfil_completo: true };
+      const cliente = { id_cliente: '77777777-7777-4777-8777-777777777777', id_usuario: '66666666-6666-4666-8666-666666666666', nombres: 'Cliente', apellidos: 'QA', nombre_completo: 'Cliente QA', email: EMAIL, telefono_principal: '99999999', perfil_completo: true };
+      data = { ...cliente, cliente, profile_completion: { is_complete: true, completion_percent: 100 } };
+    } else if (requestPath === '/v1/cliente/puntos/resumen') {
+      data = { saldo_total: 0, puntos_para_premio: 10, progreso_actual: 0, recompensas_disponibles: 0, puede_canjear: false, historial: [] };
+    } else if (requestPath === '/v1/citas') {
+      const confirmedAppointment = { id_cita: '88888888-8888-4888-8888-888888888888', id_grupo_cita: GROUP, estado_cita_codigo: 'confirmada', nombre_sucursal: 'MasterFade Suyapa', nombre_barbero: 'Daniel Martínez', inicio_at: '2030-06-16T16:00:00Z', total_pagar_hnl: 300, servicios: [{ nombre_servicio: 'Corte de cabello' }] };
+      const citas = paid ? [confirmedAppointment] : [];
+      data = url.searchParams.has('apartado')
+        ? { citas, totals: { proximas: citas.length, historial: 0, total: citas.length, pendientes_pago: 1 }, pagination: { apartado: url.searchParams.get('apartado'), page: 1, limit: 4, total: citas.length, total_pages: 1, has_next: false, has_prev: false } }
+        : { citas };
+    } else if (requestPath === '/v1/citas/pendiente') {
+      data = { pendiente: null };
     } else if (requestPath.includes('/planes/estado')) {
       data = { planes_activos: [] };
     } else if (requestPath === '/v1/public/citas/contexto') {
@@ -102,6 +117,18 @@ async function createSession(browser, mobile) {
     context,
     calls,
     errors,
+    blockNextEligibilityRefresh() {
+      assert.equal(eligibilityGate, null, 'No debe existir otra elegibilidad bloqueada');
+      let release;
+      const promise = new Promise(resolve => { release = resolve; });
+      eligibilityGate = { promise, release };
+    },
+    finishEligibilityRefresh() {
+      assert.ok(eligibilityGate, 'Debe existir una elegibilidad pendiente');
+      const gate = eligibilityGate;
+      eligibilityGate = null;
+      gate.release();
+    },
     finishSimulation() {
       assert.ok(releaseSimulation, 'Debe existir una simulación pendiente');
       releaseSimulation();
@@ -148,6 +175,24 @@ test('checkout QA comercial: responsive, una simulación y cero solicitudes Pixe
           const backButtonBox = await page.getByRole('button', { name: 'Volver al resumen', exact: true }).boundingBox();
           assert.ok(payButtonBox && payButtonBox.height <= 64, `Altura inesperada del botón Pagar: ${payButtonBox?.height}`);
           assert.ok(backButtonBox && backButtonBox.height <= 64, `Altura inesperada del botón Volver: ${backButtonBox?.height}`);
+          session.blockNextEligibilityRefresh();
+          const eligibilityRequest = page.waitForRequest(request => new URL(request.url()).pathname === '/v1/commerce/eligibility');
+          const eligibilityResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/v1/commerce/eligibility');
+          await page.evaluate(() => {
+            window.dispatchEvent(new Event('blur'));
+            window.dispatchEvent(new Event('focus'));
+          });
+          await eligibilityRequest;
+          await page.waitForTimeout(100);
+          assert.match(page.url(), /\/agendar\/pagar/);
+          assert.equal(await page.getByLabel('Tarjeta de prueba', { exact: true }).count(), 1);
+          assert.equal(await page.getByText(/agendamiento privado no está disponible|proximamente/i).count(), 0);
+          session.finishEligibilityRefresh();
+          await eligibilityResponse;
+          await page.reload();
+          await page.getByLabel('Tarjeta de prueba', { exact: true }).waitFor();
+          assert.match(page.url(), /\/agendar\/pagar/);
+          assert.equal(session.calls.filter(call => call.path.endsWith('/crear-intent')).length, 1);
           if (artifacts) {
             await mkdir(artifacts, { recursive: true });
             await page.screenshot({ path: path.join(artifacts, mobile ? 'qa-checkout-mobile.png' : 'qa-checkout-desktop.png'), fullPage: true, mask: [page.locator('#pay-receipt-email')] });
@@ -155,7 +200,13 @@ test('checkout QA comercial: responsive, una simulación y cero solicitudes Pixe
           for (const [name, value] of [['Nombre del titular', 'Cliente QA'], ['Tarjeta de prueba', '4111111111111111'], ['Vencimiento', '12/40'], ['CVV', '123'], ['Teléfono de contacto', '99999999']]) {
             await page.getByLabel(name, { exact: true }).fill(value);
           }
-          await page.getByRole('button', { name: 'Pagar', exact: true }).click();
+          await page.evaluate(({ pendingKey, groupId, intentId, email }) => {
+            sessionStorage.setItem(pendingKey, JSON.stringify({ id_grupo_cita: groupId, id_intent: intentId, titular_email: email }));
+          }, { pendingKey: PENDING_PAYMENT_CONTEXT_KEY, groupId: GROUP, intentId: INTENT, email: EMAIL });
+          await page.getByRole('button', { name: 'Pagar', exact: true }).evaluate(button => {
+            button.click();
+            button.click();
+          });
           const processingButton = page.getByRole('button', { name: 'Procesando…', exact: true });
           await processingButton.waitFor();
           assert.equal(await processingButton.isDisabled(), true);
@@ -166,6 +217,28 @@ test('checkout QA comercial: responsive, una simulación y cero solicitudes Pixe
           assert.equal(session.getSimulationBody()?.monto_prueba_hnl, 1);
           assert.equal(session.calls.filter(call => call.path.endsWith('/simulator/event')).length, 1);
           assert.equal(session.calls.filter(call => call.path.includes('/pixelpay/')).length, 0);
+          assert.notEqual(await page.evaluate(key => sessionStorage.getItem(key), BOOKING_PAYMENT_CONTEXT_KEY), null);
+          assert.equal(await page.evaluate(key => sessionStorage.getItem(key), PENDING_PAYMENT_CONTEXT_KEY), null);
+          await page.reload();
+          await page.waitForURL(/\/agendar\/exito/);
+          await page.getByRole('heading', { name: '¡Reserva confirmada!', exact: true }).waitFor();
+          assert.equal(session.calls.filter(call => call.path.endsWith('/simulator/event')).length, 1);
+          assert.equal(session.calls.filter(call => call.path.includes('/pixelpay/')).length, 0);
+          if (mobile) {
+            await page.getByRole('button', { name: 'Entendido', exact: true }).click();
+            await page.waitForURL(/\/home\/cliente\/citas$/);
+            await page.getByRole('navigation', { name: 'Paginación de citas' }).waitFor();
+            await page.getByText('Confirmada', { exact: true }).waitFor();
+            assert.equal(await page.getByRole('button', { name: /reserva pendiente/i }).count(), 0);
+            assert.equal(await page.evaluate(key => sessionStorage.getItem(key), BOOKING_PAYMENT_CONTEXT_KEY), null);
+            assert.equal(await page.evaluate(key => sessionStorage.getItem(key), PENDING_PAYMENT_CONTEXT_KEY), null);
+            await page.getByRole('button', { name: 'Perfil', exact: true }).filter({ visible: true }).click();
+            await page.waitForURL(/\/home\/cliente\/perfil$/);
+            await page.getByRole('button', { name: 'Inicio', exact: true }).filter({ visible: true }).click();
+            await page.waitForURL(/\/home\/cliente$/);
+            await page.getByRole('button', { name: 'Citas', exact: true }).filter({ visible: true }).click();
+            await page.waitForURL(/\/home\/cliente\/citas$/);
+          }
           assert.deepEqual(session.errors, []);
         } finally {
           await session.context.close();

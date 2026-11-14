@@ -164,6 +164,41 @@ test('recuperación pendiente conserva intención existente y navegación',async
  expect(fixture.post).toHaveBeenCalledExactlyOnceWith('/v1/citas/pendiente/group/retomar',{});
  expect(JSON.parse(sessionStorage.getItem('mf_pending_payment_context_v1')).id_intent).toBe('existing');
 });
+test('un total agregado obsoleto no ofrece retomar cuando el endpoint canonico no tiene pendiente',async()=>{
+ rows=[row('pendiente_pago','2020-11-13T05:30:00Z')];
+ fixture.get.mockImplementation(async url=>url.endsWith('/pendiente')?{data:{pendiente:null}}:respond(url));
+ await mount();
+ await waitFor(()=>expect(fixture.get).toHaveBeenCalledWith('/v1/citas/pendiente'));
+ expect(screen.queryByRole('button',{name:'Ver reserva pendiente'})).toBeNull();
+ expect(screen.queryByText(/Detectamos citas pendientes de pago/)).toBeNull();
+});
+test('fallo al consultar pendiente muestra reintento seguro sin inventar CTA desde totales',async()=>{
+ rows=[row('pendiente_pago','2020-11-13T05:30:00Z')];
+ fixture.get.mockImplementation(async url=>{
+  if(url.endsWith('/pendiente'))throw new Error('detalle privado');
+  return respond(url);
+ });
+ await mount();
+ expect((await screen.findByRole('alert')).textContent).toContain('No pudimos verificar si tienes una reserva pendiente.');
+ expect(screen.queryByRole('button',{name:'Ver reserva pendiente'})).toBeNull();
+ expect(screen.queryByRole('button',{name:'Continuar pago'})).toBeNull();
+ fixture.get.mockImplementation(async url=>url.endsWith('/pendiente')?{data:{pendiente:null}}:respond(url));
+ fireEvent.click(screen.getByRole('button',{name:'Reintentar'}));
+ await waitFor(()=>expect(screen.queryByRole('alert')).toBeNull());
+});
+test('una reserva expirada deja de ofrecer Continuar pago sin borrar contexto incierto',async()=>{
+ rows=[row('pendiente_pago','2020-11-13T05:30:00Z')];
+ fixture.get.mockImplementation(async url=>url.endsWith('/pendiente')?{data:{pendiente:{id_grupo_cita:'group',citas:[],total_pendiente_hnl:100}}}:respond(url));
+ fixture.post.mockRejectedValue(Object.assign(new Error('detalle privado'),{data:{error:{code:'PENDING_APPOINTMENT_EXPIRED'}}}));
+ sessionStorage.setItem('mf_pending_payment_context_v1',JSON.stringify({id_grupo_cita:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',id_intent:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'}));
+ await mount();
+ fireEvent.click(await screen.findByRole('button',{name:'Continuar pago'}));
+ await screen.findByRole('heading',{name:'Reserva pendiente de pago'});
+ fireEvent.click(screen.getAllByRole('button',{name:'Continuar pago'}).at(-1));
+ await screen.findByText('Esta reserva ya expiró. Agenda nuevamente.');
+ expect(screen.queryByRole('button',{name:'Continuar pago'})).toBeNull();
+ expect(sessionStorage.getItem('mf_pending_payment_context_v1')).toContain('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+});
 test('cancelación pendiente conserva confirmación y código interno original',async()=>{
  rows=[{...row('pendiente_pago','2026-11-15T14:00:00Z'),nombre_sucursal:'Sucursal fixture'}];
  fixture.get.mockImplementation(async url=>url.endsWith('/pendiente')?{data:{pendiente:{id_grupo_cita:'group',citas:[],total_pendiente_hnl:100}}}:respond(url));

@@ -305,9 +305,11 @@ function ClienteHistorialCitasContent() {
     } catch (error) {
       const errorCode = extractApiErrorCode(error);
       if (errorCode === 'PENDING_APPOINTMENT_EXPIRED') {
+        setPendingData(null);
+        if (openModal) setPendingOpen(true);
         setPendingError('Esta reserva ya expiró. Agenda nuevamente.');
       } else {
-        setPendingError(error?.data?.error?.message || error?.message || 'No se pudo consultar la reserva pendiente.');
+        setPendingError('No pudimos verificar si tienes una reserva pendiente. Intenta nuevamente.');
       }
       return null;
     } finally {
@@ -317,7 +319,7 @@ function ClienteHistorialCitasContent() {
 
   const handleOpenPending = useCallback(async () => {
     if (!CLIENT_BOOKING_ENABLED) {
-      notifications.info(CLIENT_LOCK_MESSAGE);
+      notifications.info(CLIENT_LOCK_MESSAGE, { dedupeKey: 'cliente-booking-disabled' });
       return;
     }
     await loadPendingReservation({ openModal: true });
@@ -325,7 +327,7 @@ function ClienteHistorialCitasContent() {
 
   const handleContinuePendingPayment = useCallback(async () => {
     if (!CLIENT_BOOKING_ENABLED) {
-      notifications.info(CLIENT_LOCK_MESSAGE);
+      notifications.info(CLIENT_LOCK_MESSAGE, { dedupeKey: 'cliente-booking-disabled' });
       return;
     }
     const groupId = String(pendingData?.id_grupo_cita || '').trim();
@@ -353,6 +355,7 @@ function ClienteHistorialCitasContent() {
     } catch (error) {
       const errorCode = extractApiErrorCode(error);
       if (errorCode === 'PENDING_APPOINTMENT_EXPIRED') {
+        setPendingData(null);
         setPendingError('Esta reserva ya expiró. Agenda nuevamente.');
         return;
       }
@@ -546,20 +549,19 @@ function ClienteHistorialCitasContent() {
                   </button>
                 </div>
               </section>
-            ) : totals.pendientes_pago ? (
-              <section className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-                <p className="font-semibold">Detectamos citas pendientes de pago. Si esto no corresponde, contacta al equipo de MasterFade.</p>
-                <p className="mt-1 text-amber-100/90">Citas detectadas: {totals.pendientes_pago}</p>
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={handleOpenPending}
-                    disabled={!CLIENT_BOOKING_ENABLED}
-                    className="inline-flex rounded-lg border border-amber-200/40 bg-amber-300/10 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:bg-amber-300/20"
-                  >
-                    Ver reserva pendiente
-                  </button>
-                </div>
+            ) : null}
+
+            {!pendingData && pendingError && !pendingOpen ? (
+              <section role="alert" className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                <p>{pendingError}</p>
+                <button
+                  type="button"
+                  onClick={() => void loadPendingReservation()}
+                  disabled={pendingLoading}
+                  className="mt-3 inline-flex rounded-lg border border-amber-200/40 px-3 py-1.5 text-xs font-semibold transition hover:bg-amber-300/10 disabled:opacity-70"
+                >
+                  {pendingLoading ? 'Verificando...' : 'Reintentar'}
+                </button>
               </section>
             ) : null}
 

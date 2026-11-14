@@ -6,6 +6,7 @@ export default function usePrivateCommerce() {
   const { user, isAuthenticated, isHydrating } = useAuth();
   const identity = isAuthenticated && !isHydrating ? user?.id_usuario : null;
   const [confirmed, setConfirmed] = useState(null);
+  const [refreshing, setRefreshing] = useState(null);
   if (confirmed && confirmed.identity !== identity) setConfirmed(null);
   useEffect(() => {
     if (!identity) return undefined;
@@ -13,7 +14,7 @@ export default function usePrivateCommerce() {
     let generation = 0;
     const refresh = async () => {
       const current = ++generation;
-      setConfirmed(null);
+      setRefreshing({ identity, generation: current });
       try {
         const response = await http.get('/v1/commerce/eligibility', {
           signal: controller.signal, cache: false, dedupe: false, skipAuthInvalidation: true,
@@ -21,6 +22,12 @@ export default function usePrivateCommerce() {
         if (!controller.signal.aborted && current === generation) setConfirmed({ identity, data: response?.data });
       } catch {
         if (!controller.signal.aborted && current === generation) setConfirmed({ identity, data: null });
+      } finally {
+        if (!controller.signal.aborted) {
+          setRefreshing((active) => (
+            active?.identity === identity && active?.generation === current ? null : active
+          ));
+        }
       }
     };
     void refresh();
@@ -30,5 +37,7 @@ export default function usePrivateCommerce() {
   // AM: A previous user's eligibility must never survive logout or identity changes.
   const data = identity && confirmed?.identity === identity ? confirmed.data : null;
   return { booking: data?.booking === true, vipPurchase: data?.vipPurchase === true,
-    checking: Boolean(identity && confirmed?.identity !== identity) };
+    checking: Boolean(identity && (
+      confirmed?.identity !== identity || refreshing?.identity === identity
+    )) };
 }
