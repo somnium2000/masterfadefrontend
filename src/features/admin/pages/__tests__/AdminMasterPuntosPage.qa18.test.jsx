@@ -49,6 +49,7 @@ async function select(id) { const input = await picker(); fireEvent.change(input
 async function loaded(id = 'A') { await select(id); await screen.findByText('Saldo total'); }
 function balance() { return screen.getByText('Saldo total').closest('article'); }
 function fillAdjustment(subtract = false) {
+  fireEvent.change(screen.getByRole('combobox', { name: 'Operacion' }), { target: { value: subtract ? 'restar' : 'sumar' } });
   fireEvent.change(screen.getByPlaceholderText(subtract ? 'Ej. 3' : 'Ej. 10'), { target: { value: '2' } });
   fireEvent.change(screen.getByPlaceholderText('Describe el ajuste'), { target: { value: 'Motivo sintético' } });
 }
@@ -116,7 +117,7 @@ test('cambiar cliente descarta el borrador de ajuste anterior', async () => {
   expect(screen.getByPlaceholderText('Ej. 10')).toHaveValue(null); expect(screen.getByPlaceholderText('Describe el ajuste')).toHaveValue('');
   expect(screen.getByRole('button', { name: 'Aplicar ajuste' })).toBeDisabled();
 });
-test.each([0, -1, 1.5])('ajuste inválido %s no se envía', async value => {
+test.each([0, -1, 1.5, 2147483648, 'abc', '1e2', ''])('ajuste inválido %s no se envía', async value => {
   await ready(); await loaded(); fillAdjustment(); fireEvent.change(screen.getByPlaceholderText('Ej. 10'), { target: { value: String(value) } });
   expect(screen.getByRole('button', { name: 'Aplicar ajuste' })).toBeDisabled(); expect(api.createAdminClientePuntosAjuste).not.toHaveBeenCalled();
 });
@@ -129,13 +130,56 @@ test('suma válida conserva payload y bloquea duplicados mientras espera', async
 });
 test('resta solicita confirmación y conserva payload', async () => {
   await ready(); await loaded(); fillAdjustment(true); fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }));
+  expect(screen.getByText('RESTAR 2 puntos a Cliente A. Saldo actual: 7. Saldo previsto: 5. Motivo: Motivo sintético')).toBeInTheDocument();
   expect(api.createAdminClientePuntosAjuste).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
   expect(api.createAdminClientePuntosAjuste).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' })); fireEvent.click(screen.getByRole('button', { name: 'Si, aplicar ajuste' }));
   await waitFor(() => expect(api.createAdminClientePuntosAjuste).toHaveBeenCalledExactlyOnceWith('A', { accion: 'restar', puntos: 2, motivo: 'Motivo sintético' }, { idempotencyKey: expect.stringMatching(/^[0-9a-f-]{36}$/i) }));
 });
+test.each([false, true])('ajuste resta=%s actualiza saldo e historial después de guardar', async subtract => {
+  await ready(); await loaded(); fillAdjustment(subtract);
+  const amount = subtract ? -2 : 2;
+  expect(screen.getByText(`${subtract ? 'RESTAR' : 'SUMAR'} 2 puntos. Saldo actual: 7. Saldo previsto: ${7 + amount}.`)).toBeInTheDocument();
+  api.getAdminClientePuntosResumen.mockResolvedValue({ data: { ...summary('A', 7 + amount).data,
+    historial: [{ id_points_tx: 'NEW', tipo_puntos_codigo: subtract ? 'ajuste_resta' : 'ajustar', puntos: amount, motivo: 'Motivo sintético' }] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }));
+  if (subtract) fireEvent.click(screen.getByRole('button', { name: 'Si, aplicar ajuste' }));
+  await waitFor(() => expect(within(balance()).getByText(String(7 + amount))).toBeInTheDocument());
+  expect(screen.getByText('Motivo sintético')).toBeInTheDocument();
+  expect(screen.getByLabelText('Cantidad de puntos')).toHaveValue(null);
+  expect(screen.getByLabelText('Motivo (min. 5)')).toHaveValue('');
+});
+test('resta superior al saldo se bloquea antes de confirmar; saldo exacto se permite', async () => {
+  await ready(); await loaded(); fillAdjustment(true);
+  fireEvent.change(screen.getByLabelText('Cantidad de puntos'), { target: { value: '8' } });
+  expect(screen.getByRole('alert')).toHaveTextContent('No hay puntos suficientes');
+  expect(screen.getByRole('button', { name: 'Aplicar ajuste' })).toBeDisabled();
+  expect(api.createAdminClientePuntosAjuste).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Cantidad de puntos'), { target: { value: '7' } });
+  expect(screen.getByRole('button', { name: 'Aplicar ajuste' })).toBeEnabled();
+});
+test.each(['', 'abcd', 'x'.repeat(301)])('motivo inválido se bloquea antes de enviar: %s', async reason => {
+  await ready(); await loaded(); fillAdjustment();
+  fireEvent.change(screen.getByLabelText('Motivo (min. 5)'), { target: { value: reason } });
+  expect(screen.getByRole('button', { name: 'Aplicar ajuste' })).toBeDisabled();
+  expect(api.createAdminClientePuntosAjuste).not.toHaveBeenCalled();
+});
+test('resta reintentada conserva clave; cambiar operación descarta cantidad anterior', async () => {
+  await ready(); await loaded(); fillAdjustment(true);
+  api.createAdminClientePuntosAjuste.mockRejectedValueOnce(new Error('timeout')).mockResolvedValueOnce({ data: {} });
+  const submit = () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Si, aplicar ajuste' }));
+  };
+  submit(); await screen.findByText('No fue posible aplicar el ajuste.');
+  const key = api.createAdminClientePuntosAjuste.mock.calls[0][2].idempotencyKey;
+  submit(); await waitFor(() => expect(api.createAdminClientePuntosAjuste).toHaveBeenCalledTimes(2));
+  expect(api.createAdminClientePuntosAjuste.mock.calls[1][2].idempotencyKey).toBe(key);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Operacion' }), { target: { value: 'sumar' } });
+  expect(screen.getByLabelText('Cantidad de puntos')).toHaveValue(null);
+});
 test('admin puede sumar a cliente de otra sucursal pero no puede restarle', async () => {
   await ready(); await loaded('B');
-  expect(screen.getByPlaceholderText('Ej. 3')).toBeDisabled();
+  expect(screen.getByRole('option', { name: 'RESTAR' })).toBeDisabled();
   expect(screen.getByText('Solo puedes restar puntos a clientes de tus sucursales autorizadas.')).toBeInTheDocument();
   fillAdjustment(); fireEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }));
   await waitFor(() => expect(api.createAdminClientePuntosAjuste).toHaveBeenCalledWith('B', { accion: 'sumar', puntos: 2, motivo: 'Motivo sintético' }, { idempotencyKey: expect.any(String) }));
