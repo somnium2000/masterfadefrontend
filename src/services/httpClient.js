@@ -97,6 +97,8 @@ function shouldSkipCsrfPrefetch(path, baseUrl) {
     "/v1/public/pagos/simulator/event",
     "/v1/public/pagos/pixelpay/sale",
     "/v1/public/pagos/pixelpay/status",
+    "/v1/public/pagos/pixelpay/hosted/start",
+    "/v1/public/pagos/pixelpay/hosted/status",
   ]);
 
   return (

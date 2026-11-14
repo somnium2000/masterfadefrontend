@@ -42,6 +42,7 @@ import {
   SLOT_GRID_STEP_MINUTES,
 } from './constants/bookingDefaults.js';
 import { BOOKING_ROUTES } from './constants/bookingRoutes.js';
+import { isPixelPayHostedPayment, redirectToPixelPayHostedCheckout } from './pixelPayHostedCheckout.js';
 import {
   getBookingBlockOccupiedRange,
   rangesOverlap,
@@ -135,6 +136,7 @@ export function shouldPreserveUnresolvedPaymentState({
   paymentIntent,
 } = {}) {
   if (nextResult?.booking_confirmed === true) return false;
+  if (nextResult?.hosted_start_rejected === true && nextResult?.payment_channel === 'sdk') return false;
   const nextState = String(nextResult?.estado_intent_codigo || '').trim().toLowerCase();
   if (nextState === 'fallido') return false;
   return hasUnresolvedPaymentEvidence(nextResult)
@@ -917,6 +919,7 @@ const agendaAutoLoadKeyRef = useRef('');
     completeMockPaymentOnce,
     completeSimulatorPaymentOnce,
     salePixelPayOnce,
+    startPixelPayHostedOnce,
     queryPixelPayStatusOnce,
     isCurrentPaymentGroup,
   } = useBookingPayment({
@@ -3584,7 +3587,11 @@ const agendaAutoLoadKeyRef = useRef('');
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
 
     try {
-      const payload = options?.queryPixelPayProvider === true
+      const hostedPayment = isPixelPayHostedPayment(paymentIntent)
+        || isPixelPayHostedPayment(paymentResult)
+        || isPixelPayHostedPayment(storedContext?.paymentIntent)
+        || isPixelPayHostedPayment(storedContext);
+      const payload = options?.queryPixelPayProvider === true && !hostedPayment
         ? await queryPixelPayStatusOnce({ groupId, intentId, titularEmail })
         : await fetchPaymentStatusOnce({
             groupId,
@@ -3815,8 +3822,10 @@ const agendaAutoLoadKeyRef = useRef('');
     paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || ''
   ).trim().toLowerCase();
   const backendPaymentAmount = Number(paymentResult?.monto_hnl ?? paymentIntent?.monto_hnl);
+  const pixelPayHostedStarted = isPixelPayHostedPayment(paymentIntent) || isPixelPayHostedPayment(paymentResult);
   const paymentCanExecuteSale = Boolean(
     !paymentRestoring
+    && !pixelPayHostedStarted
     && backendPaymentState === 'link_generado'
     && Number.isFinite(backendPaymentAmount)
     && backendPaymentAmount > 0
@@ -3824,6 +3833,24 @@ const agendaAutoLoadKeyRef = useRef('');
     && paymentExecutionContext.intentId
     && isValidEmail(paymentExecutionContext.titularEmail)
   );
+  const paymentCanStartHosted = paymentCanExecuteSale
+    && !holdExpired
+    && paymentIntent?.hosted_available === true;
+
+  const completePixelPayHostedPayment = useCallback(async () => {
+    if (!paymentCanStartHosted) return null;
+    const { groupId, intentId, titularEmail } = paymentExecutionContext;
+    try {
+      const response = await startPixelPayHostedOnce({ groupId, intentId, titularEmail });
+      if (response?.checkout_url) redirectToPixelPayHostedCheckout(response.checkout_url);
+      return response;
+    } catch {
+      notifications.warning('No pudimos abrir el portal de pago. Verifica el estado antes de continuar y no vuelvas a pagar.', {
+        dedupeKey: 'public-booking-pixelpay-hosted-start',
+      });
+      return null;
+    }
+  }, [notifications, paymentCanStartHosted, paymentExecutionContext, startPixelPayHostedOnce]);
 
   const completePixelPayPayment = useCallback(async ({ card, billing }) => {
     const { groupId, intentId, titularEmail } = paymentExecutionContext;
@@ -4097,6 +4124,7 @@ const agendaAutoLoadKeyRef = useRef('');
       completeMockPayment,
       completePaymentSimulation,
       completePixelPayPayment,
+      completePixelPayHostedPayment,
       startCheckout,
       holdDurationMin,
       holdExpiresAtIso,
@@ -4110,6 +4138,7 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentTitularEmail,
       paymentRestoring,
       paymentCanExecuteSale,
+      paymentCanStartHosted,
       bookingSuccessResult,
       pendingCompanionFocusId,
       pendingFieldFocus,
@@ -4247,6 +4276,7 @@ const agendaAutoLoadKeyRef = useRef('');
       completeMockPayment,
       completePaymentSimulation,
       completePixelPayPayment,
+      completePixelPayHostedPayment,
       startCheckout,
       holdDurationMin,
       holdExpiresAtIso,
@@ -4260,6 +4290,7 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentTitularEmail,
       paymentRestoring,
       paymentCanExecuteSale,
+      paymentCanStartHosted,
       bookingSuccessResult,
       pendingCompanionFocusId,
       pendingFieldFocus,

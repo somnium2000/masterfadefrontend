@@ -11,6 +11,7 @@ import TodoPagoHostedModal, {
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 import { getPixelPayPresentation } from '../../payments/pixelPayPresentation.js';
 import { PaymentCheckoutHero, PaymentCheckoutSteps } from '../../payments/PaymentCheckoutPresentation.jsx';
+import { isPixelPayHostedPayment } from './pixelPayHostedCheckout.js';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
 const TODO_PAGO_SIMULATION_SCENARIOS = [
@@ -90,6 +91,7 @@ export function shouldQueryPixelPayProviderOnManualVerify({
   paymentResult,
 } = {}) {
   if (String(providerType || '').trim().toLowerCase() !== 'pixelpay') return false;
+  if (isPixelPayHostedPayment(paymentIntent) || isPixelPayHostedPayment(paymentResult)) return false;
   if (paymentResult?.manual_reconciliation_required === true) return true;
   if (paymentResult?.pending_confirmation === true) return true;
   return String(paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || '')
@@ -338,6 +340,7 @@ export default function PublicBookingPaymentStep() {
     checkingPaymentStatus,
     completePaymentSimulation,
     completePixelPayPayment,
+    completePixelPayHostedPayment,
     holdPricing,
     holdTotalToPay,
     membershipHasContext,
@@ -346,9 +349,11 @@ export default function PublicBookingPaymentStep() {
     paymentTitularEmail,
     paymentRestoring = false,
     paymentCanExecuteSale = true,
+    paymentCanStartHosted = false,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [preferredPaymentChannel, setPreferredPaymentChannel] = useState('sdk');
   const paymentSubmissionInFlightRef = useRef(false);
   const [hostedModalOpen, setHostedModalOpen] = useState(false);
   const [hostedResultReceived, setHostedResultReceived] = useState(false);
@@ -361,7 +366,7 @@ export default function PublicBookingPaymentStep() {
     registerPaymentNavigation?.({ dirty: paymentFormDirty, processing: processingPayment || loadingIntent || creatingPaymentIntent });
     return () => registerPaymentNavigation?.({ dirty: false, processing: false });
   }, [registerPaymentNavigation, paymentFormDirty, processingPayment, loadingIntent, creatingPaymentIntent]);
-  const reconciliationNotice = getPixelPayReconciliationNotice(paymentResult);
+  const reconciliationNotice = getPixelPayReconciliationNotice(paymentResult || paymentIntent);
   const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(() => {
     if (typeof window === 'undefined') return TODO_PAGO_APPROVED_SIMULATION_AMOUNT;
     try {
@@ -375,8 +380,11 @@ export default function PublicBookingPaymentStep() {
   });
   const paymentSimulationAction = resolvePaymentSimulationAction();
   const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
+  const pixelPayHostedStarted = isPixelPayHostedPayment(paymentIntent) || isPixelPayHostedPayment(paymentResult);
+  const pixelPayHostedSelected = pixelPayHostedStarted
+    || (isPixelPayProvider && preferredPaymentChannel === 'hosted' && paymentIntent?.hosted_available === true);
   const qaVideoDemoMode = resolveQaVideoDemoMode();
-  const usesProductionCheckoutDesign = isPixelPayProvider || qaVideoDemoMode;
+  const usesProductionCheckoutDesign = isPixelPayProvider || pixelPayHostedSelected || qaVideoDemoMode;
   const pixelPayPresentation = getPixelPayPresentation();
   const paymentUiState = normalizeBookingPaymentUiState({
     paymentIntent,
@@ -528,6 +536,18 @@ export default function PublicBookingPaymentStep() {
     await refreshPaymentStatus({ queryPixelPayProvider: pixelPayPendingConfirmation });
   };
 
+  const handleStartPixelPayHosted = async () => {
+    if (paymentSubmissionInFlightRef.current || processingPayment || !paymentCanStartHosted) return;
+    paymentSubmissionInFlightRef.current = true;
+    setProcessingPayment(true);
+    try {
+      await completePixelPayHostedPayment?.();
+    } finally {
+      paymentSubmissionInFlightRef.current = false;
+      setProcessingPayment(false);
+    }
+  };
+
   const handleOpenHostedModal = () => {
     if (!hasHostedLaunch || hostedSessionExpired || hostedLaunchConsumed) {
       setHostedModalError(hostedSessionExpired ? 'session_expired' : 'launch_unavailable');
@@ -613,6 +633,7 @@ export default function PublicBookingPaymentStep() {
 
   const hostedStatusText = (() => {
     if (paymentRestoring || checkingPaymentStatus) return 'Verificando pago';
+    if (pixelPayHostedStarted) return 'Pago en verificación';
     if (hostedModalError === 'session_expired' || hostedSessionExpired) return 'Sesión expirada';
     if (hostedModalError) return 'Error de carga';
     if (hostedResultReceived) return 'Resultado recibido. Verifica el estado con MasterFade.';
@@ -626,7 +647,7 @@ export default function PublicBookingPaymentStep() {
     <div className={`citas-confirm-wrap public-booking-payment-wrap ${usesProductionCheckoutDesign ? 'mf-checkout' : ''}`}>
       <div className="citas-surface p-3 sm:p-5">
         {usesProductionCheckoutDesign ? (
-          <><PaymentCheckoutHero commercialPreview={qaVideoDemoMode} /><PaymentCheckoutSteps processing={processingPayment || pixelPayPendingConfirmation || paymentRestoring} confirmed={paymentResult?.booking_confirmed === true} /></>
+          <><PaymentCheckoutHero commercialPreview={qaVideoDemoMode} environment={pixelPayHostedSelected ? 'sandbox' : undefined} /><PaymentCheckoutSteps processing={processingPayment || pixelPayPendingConfirmation || pixelPayHostedStarted || paymentRestoring} confirmed={paymentResult?.booking_confirmed === true} /></>
         ) : (
         <BookingStepHeader
           title="Pasarela de pago segura"
@@ -673,8 +694,39 @@ export default function PublicBookingPaymentStep() {
           </div>
         ) : null}
 
+        {isPixelPayProvider && paymentIntent?.hosted_available === true && !pixelPayHostedStarted && !pixelPayPendingConfirmation ? (
+          <div className="public-booking-form-row mt-4">
+            <label className="mf-label" htmlFor="booking-payment-channel">Dónde deseas pagar</label>
+            <select
+              id="booking-payment-channel"
+              className="mf-select"
+              value={preferredPaymentChannel}
+              onChange={(event) => setPreferredPaymentChannel(event.target.value === 'hosted' ? 'hosted' : 'sdk')}
+              disabled={processingPayment || paymentRestoring || checkingPaymentStatus}
+            >
+              <option value="sdk">En MasterFade con PixelPay</option>
+              <option value="hosted">En el portal de PixelPay Sandbox</option>
+            </select>
+          </div>
+        ) : null}
+
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
-          {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
+          {pixelPayHostedSelected ? (
+            <div className="public-booking-contact-card public-booking-payment-gateway-card" aria-busy={processingPayment || checkingPaymentStatus}>
+              <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
+                <ShieldCheck size={30} className="text-[var(--mf-accent)]" />
+                <h4 className="citas-confirm-subtitle">{pixelPayHostedStarted ? 'Pago en verificación' : 'Paga en el portal de PixelPay'}</h4>
+                <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
+                  {pixelPayHostedStarted
+                    ? 'Volver del portal o cerrarlo no confirma ni cancela el pago. Verifica el estado con MasterFade y no vuelvas a pagar.'
+                    : 'Ingresarás los datos de tarjeta y la autenticación bancaria en PixelPay Sandbox. Usa únicamente una tarjeta de prueba.'}
+                </p>
+                <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
+                  La reserva se confirma cuando MasterFade verifica el resultado del pago.
+                </p>
+              </div>
+            </div>
+          ) : paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card" aria-busy={processingPayment}>
             <h4 className="citas-confirm-subtitle mt-4">
               {qaVideoDemoMode ? 'Datos de pago' : paymentSimulationAction.type === 'pixelpay' ? 'Información de pago' : 'Datos para la simulacion'}
@@ -839,7 +891,9 @@ export default function PublicBookingPaymentStep() {
                 <ShieldCheck size={14} />
                 <span>
                   {holdExpired
-                    ? 'La reserva temporal expiro. Regresaremos a agenda para que elijas una nueva hora.'
+                    ? pixelPayHostedStarted
+                      ? 'La reserva temporal venció. El pago sigue en verificación; no vuelvas a pagar ni reserves otro horario.'
+                      : 'La reserva temporal expiro. Regresaremos a agenda para que elijas una nueva hora.'
                     : `Reserva temporal activa: ${holdCountdownLabel} restantes`}
                   {holdExpiresAtIso ? <span className="sr-only"> Vencimiento: {holdExpiresAtIso}</span> : null}
                 </span>
@@ -902,13 +956,14 @@ export default function PublicBookingPaymentStep() {
                 <p>Estado: {paymentUiState.text}</p>
                 <p>Monto: {paymentRestoring ? 'Verificando...' : formatCurrencyHnl(effectiveTotalToPay)}</p>
                 {!qaVideoDemoMode ? <p>Intent: {paymentIntent.id_intent}</p> : null}
-                {!qaVideoDemoMode ? <p>Proveedor: {paymentSimulationAction.provider || 'no_configurado'}</p> : null}
+                {!qaVideoDemoMode ? <p>Proveedor: {pixelPayHostedSelected ? 'PixelPay Hosted Sandbox' : paymentSimulationAction.provider || 'no_configurado'}</p> : null}
                 {reconciliationNotice ? (
                   <p role="status" className="rounded-lg border border-[var(--mf-warning)]/40 bg-[var(--mf-warning)]/10 p-3 font-medium text-[var(--mf-text-1)]">
                     {reconciliationNotice}
                   </p>
                 ) : null}
                 {!qaVideoDemoMode
+                  && !pixelPayHostedSelected
                   && paymentSimulationAction.canShow
                   && paymentIntent.launch?.type === 'redirect'
                   && paymentIntent.launch?.action ? (
@@ -964,7 +1019,17 @@ export default function PublicBookingPaymentStep() {
                   </select>
                 </div>
               ) : null}
-              {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
+              {pixelPayHostedSelected && !pixelPayHostedStarted ? (
+                <Button
+                  className="mf-checkout-submit w-full gap-2 sm:w-auto"
+                  onClick={handleStartPixelPayHosted}
+                  disabled={!paymentCanStartHosted || processingPayment || checkingPaymentStatus}
+                >
+                  {processingPayment ? <Loader2 size={16} className="animate-spin" /> : <ExternalLink size={16} />}
+                  {processingPayment ? 'Abriendo portal…' : 'Continuar en PixelPay Sandbox'}
+                </Button>
+              ) : null}
+              {!pixelPayHostedSelected && paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
                 <Button
                   className="mf-checkout-submit w-full sm:w-auto"
                   onClick={handleMockPay}
