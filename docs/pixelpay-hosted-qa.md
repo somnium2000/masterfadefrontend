@@ -17,7 +17,15 @@ Las tres consultas con intento envían `{ id_grupo_cita, id_intent, titular_emai
 
 `Hosted start` devuelve `payment_channel: "hosted"`, los identificadores canónicos, `pending_confirmation: true`, `booking_confirmed: false`, `hosted_state` y, cuando está disponible, `checkout_url`. Una respuesta pendiente sin URL no provoca reenvío automático.
 
-Antes de enviar el inicio se guarda el canal y la identidad en el contexto de recuperación de `sessionStorage`. No se persisten la URL de checkout, `paymentHash`, firma, credenciales, tarjeta o CVV. La URL debe ser HTTPS, sin credenciales ni fragmento, con origen exacto `https://pixelpay.app`, `https://www.pixelpay.app` o `https://pixelpay.dev`, y ruta Sandbox `/sandbox/<token>/checkout[/<example>]`. Esta lista se basa en el contrato documental; falta comprobar un checkout real exitoso del proveedor.
+Antes de enviar el inicio se guarda el canal y la identidad en el contexto de recuperación de `sessionStorage`. No se persisten la URL de checkout, `paymentHash`, firma, credenciales, tarjeta o CVV.
+
+### Validación de URL Sandbox
+
+Backend y frontend exigen HTTPS, origen exacto `https://pixelpay.app`, `https://www.pixelpay.app` o `https://pixelpay.dev`, sin credenciales, puertos alternativos, fragmento, controles ni rutas codificadas ambiguas. Se permite `/sandbox/<token>/checkout/example`, que aparece en [Hosted Sandbox EN](https://pixelpay.zendesk.com/hc/en-us/articles/26640565481748-SandBox-PixelPay-Hosted-Payment), y se conserva la variante sin `/example`; no se admiten sufijos arbitrarios.
+
+Los ejemplos generales de [Hosted ES](https://pixelpay.zendesk.com/hc/es-419/articles/360039834392-Hosted-Payment-Gateway) incluyen `/<comercio>/P-<uuid>/checkout`, y [Hosted EN](https://pixelpay.zendesk.com/hc/en-us/articles/26775620656148-Hosted-Payment-Gateway) muestra `/<comercio>/<identificador-opaco>/checkout`. Se reconocen como formas documentadas de Hosted, pero no demuestran ambiente Sandbox y siguen bloqueadas en QA. Tampoco existe evidencia Hosted suficiente para permitir `/<comercio>/S-<uuid>/checkout` solo por el prefijo observado en SDK. Falta una respuesta Sandbox auténtica que permita revisar esa frontera sin admitir un checkout Live.
+
+La query admite únicamente `success=0|1`, `slug=sandbox`, `merchant=sandbox`, `payload` con alfabeto Base64 y `lang=es|en`. El `url=` del ejemplo oficial puede contener un solo enlace al mismo origen y ruta/token de checkout, sin otro `url=` anidado. Se rechazan otra ruta/token anidado, destinos directos externos, duplicados y overrides directos `callback`, `_callback`, `_complete`, `_cancel`, `redirect` o `next` en query. El payload permanece opaco: el validador no comprueba la orden ni los destinos internos o las redirecciones posteriores del checkout. Nunca demuestra titular, ambiente o pago; los destinos de terceros del ejemplo público no se ejecutan en las pruebas.
 
 ## Retorno y errores
 
@@ -31,7 +39,7 @@ Si vence el horario después de iniciar Hosted, se conserva la consulta del pago
 
 ## Validación de QA
 
-Validación local final: suite de booking completa, **32 archivos y 325 pruebas aprobadas**, `npm run lint`, `npm run build` y `git diff --check` con código 0. El build conserva la advertencia habitual de tamaño de chunks. Estas pruebas usan contratos simulados; no acreditan checkout/callback reales del proveedor ni habilitación de la cuenta.
+Validación local actualizada: suite de booking completa, **32 archivos y 353 pruebas aprobadas**, `npm run lint`, `npm run build` y `git diff --check` con código 0. El build conserva la advertencia habitual de tamaño de chunks. Estas pruebas usan contratos simulados; no acreditan checkout/callback reales del proveedor ni habilitación de la cuenta.
 
 1. Mantener `PIXELPAY_HOSTED_ENABLED` apagada al desplegar ambos PR; ninguna variable `VITE_` activa comercio o la confirmación.
 2. Tras autorización de despliegue y configuración de QA/Sandbox, verificar que el backend devuelve capacidad Hosted únicamente a la identidad autorizada.

@@ -13,6 +13,13 @@ describe('PixelPay Hosted checkout boundary', () => {
     expect(validatePixelPayHostedCheckoutUrl(url)).toBe(url);
   });
 
+  it('admite los parámetros del ejemplo oficial y url anidada al mismo checkout con profundidad uno', () => {
+    const base = 'https://pixelpay.app/sandbox/ZvCAXse0zn/checkout/example';
+    const nested = `${base}?success=0&slug=sandbox&merchant=sandbox&payload=eyJfb3JkZXJfaWQiOiJmaXh0dXJlIn0%3D`;
+    const url = `${base}?success=1&slug=sandbox&merchant=sandbox&payload=eyJfb3JkZXJfaWQiOiJmaXh0dXJlIn0%3D&url=${encodeURIComponent(nested)}`;
+    expect(validatePixelPayHostedCheckoutUrl(url)).toBe(url);
+  });
+
   it.each([
     'http://pixelpay.app/sandbox/token/checkout/example',
     'https://pixelpay.app.evil.test/sandbox/token/checkout/example',
@@ -25,6 +32,33 @@ describe('PixelPay Hosted checkout boundary', () => {
     'https://pixelpay.app/sandbox/token/checkout/%2fredirect',
     'javascript:alert(1)',
     '/sandbox/token/checkout/example',
+    'https://pixelpay.dev/pruebas-maria-3/P-a039903a-449c-4911-bf43-85b776284e97/checkout',
+    'https://www.pixelpay.app/my_company/1dab5ed0/checkout',
+    'https://pixelpay.dev/masterfade/S-a039903a-449c-4911-bf43-85b776284e97/checkout',
+    'https://pixelpay.app/masterfade/S-a039903a-449c-4911-bf43-85b776284e97/checkout',
+    `${CHECKOUT}/redirect`,
+    `${CHECKOUT}?url=${encodeURIComponent('https://evil.test/checkout')}`,
+    `${CHECKOUT}?url=${encodeURIComponent('//evil.test/checkout')}`,
+    `${CHECKOUT}?url=${encodeURIComponent(CHECKOUT.replace('opaque-token', 'otra-orden'))}`,
+    `${CHECKOUT}?url=${encodeURIComponent(CHECKOUT.replace('pixelpay.app', 'pixelpay.dev'))}`,
+    `${CHECKOUT}?url=${encodeURIComponent(`${CHECKOUT}?url=${encodeURIComponent(CHECKOUT)}`)}`,
+    `${CHECKOUT}?redirect=https%3A%2F%2Fevil.test`,
+    `${CHECKOUT}?next=https%3A%2F%2Fevil.test`,
+    `${CHECKOUT}?callback=https%3A%2F%2Fevil.test`,
+    `${CHECKOUT}?_callback=https%3A%2F%2Fevil.test`,
+    `${CHECKOUT}?_complete=https%3A%2F%2Fevil.test`,
+    `${CHECKOUT}?_cancel=https%3A%2F%2Fevil.test`,
+    `${CHECKOUT}?merchant=masterfade`,
+    `${CHECKOUT}?slug=other`,
+    `${CHECKOUT}?success=paid`,
+    `${CHECKOUT}?success=1&success=0`,
+    `${CHECKOUT}?lang=es&lang=en`,
+    `${CHECKOUT}?%72edirect=https%3A%2F%2Fevil.test`,
+    `${CHECKOUT}?payload=not%25base64`,
+    `${CHECKOUT}?toString=unsafe`,
+    ` ${CHECKOUT}`,
+    `${CHECKOUT}\n`,
+    `${CHECKOUT}?payload=${'a'.repeat(16000)}`,
   ])('rechaza redirección no autorizada: %s', (url) => {
     expect(validatePixelPayHostedCheckoutUrl(url)).toBeNull();
     const location = { assign: vi.fn() };
