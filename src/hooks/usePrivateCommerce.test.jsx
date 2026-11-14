@@ -41,6 +41,21 @@ test('errors and focus revalidation revoke visibility; no cached eligibility', a
   expect(state.get.mock.calls[0][1]).toMatchObject({ cache: false, dedupe: false });
 });
 
+test('focus revalidation keeps the last verified eligibility while the request is pending', async () => {
+  login();
+  state.get.mockResolvedValueOnce({ data: { booking: true, vipPurchase: true } });
+  const view = renderHook(usePrivateCommerce);
+  await waitFor(() => expect(view.result.current.booking).toBe(true));
+
+  let resolveRefresh;
+  state.get.mockReturnValueOnce(new Promise((resolve) => { resolveRefresh = resolve; }));
+  act(() => window.dispatchEvent(new Event('focus')));
+
+  expect(view.result.current).toEqual({ booking: true, vipPurchase: true, checking: true });
+  await act(async () => resolveRefresh({ data: { booking: true, vipPurchase: true } }));
+  expect(view.result.current).toEqual({ booking: true, vipPurchase: true, checking: false });
+});
+
 test('late response from previous identity cannot enable current user', async () => {
   login(); let resolve;
   state.get.mockReturnValueOnce(new Promise(yes => { resolve = yes; })).mockResolvedValue({ data: { booking: false } });

@@ -42,11 +42,21 @@ function writeStoredPaymentContext(context) {
   try {
     if (!context) {
       window.sessionStorage.removeItem(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY);
+      window.sessionStorage.removeItem(PENDING_PAYMENT_CONTEXT_STORAGE_KEY);
       return;
     }
     window.sessionStorage.setItem(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY, JSON.stringify(context));
   } catch {
     // no-op
+  }
+}
+
+function clearStoredPendingPaymentContext() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(PENDING_PAYMENT_CONTEXT_STORAGE_KEY);
+  } catch {
+    // AM: El almacenamiento puede estar bloqueado; el backend mantiene el estado canónico.
   }
 }
 
@@ -320,6 +330,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
 
         if (!mountedRef.current || !isCurrentPaymentGroup(normalizedGroupId)) return null;
         setPaymentResultState(payload);
+        if (payload?.booking_confirmed === true) clearStoredPendingPaymentContext();
 
         const retry = typeof shouldRetry === 'function' && shouldRetry(payload);
         if (!retry || attempt >= maxAttempts - 1) break;
