@@ -23,6 +23,11 @@ export const HONDURAS_DEPARTMENTS = [
   ["HN-VA", "Valle"], ["HN-YO", "Yoro"],
 ];
 const BILLING_ADDRESS_PLACEHOLDERS = new Set(["QA", "TEST", "PRUEBA", "N/A", "NA", "NONE", "NULL"]);
+const INITIAL_PAYMENT_FORM = Object.freeze({
+  cardNumber: "", cardHolder: "", expiry: "", cvv: "",
+  address: "", city: "", state: "HN-FM", phone: "",
+});
+export const VIP_VIDEO_TEST_CARD_NUMBERS = Object.freeze(["4111111111111111"]);
 
 function digits(value) {
   return String(value || "").replace(/\D+/g, "");
@@ -42,12 +47,17 @@ export function toVipPixelPayExpiry(value) {
   return match ? `${match[2]}${match[1]}` : "";
 }
 
-export function validateVipPaymentForm(form, referenceDate = new Date()) {
+export function validateVipPaymentForm(form, referenceDate = new Date(), { allowedCardNumbers = null } = {}) {
   const errors = {};
   const cardDigits = digits(form.cardNumber);
   const phoneDigits = digits(form.phone);
   const expiryMatch = String(form.expiry || "").trim().match(/^(0[1-9]|1[0-2])\/([0-9]{2})$/);
-  if (cardDigits.length < 13 || cardDigits.length > 19) errors.cardNumber = "Ingresa un número de tarjeta válido.";
+  const allowedCardNumberSet = Array.isArray(allowedCardNumbers)
+    ? new Set(allowedCardNumbers.map(digits))
+    : null;
+  if (cardDigits.length < 13 || cardDigits.length > 19 || (allowedCardNumberSet && !allowedCardNumberSet.has(cardDigits))) {
+    errors.cardNumber = "Ingresa un número de tarjeta válido.";
+  }
   if (String(form.cardHolder || "").trim().length < 2) errors.cardHolder = "Ingresa el nombre del titular.";
   if (!expiryMatch) {
     errors.expiry = "Ingresa una fecha MM/AA válida.";
@@ -100,17 +110,17 @@ export default function PlanPurchaseFlowDialog({
   paymentIntent = null,
   paymentConfirmation = null,
   simulatorMode = false,
+  videoDemoMode = false,
   onCancel,
   onBackToSummary,
   onContinueToPayment,
   onConfirmPayment,
   onFinish,
 }) {
-  const [paymentForm, setPaymentForm] = useState({
-    cardNumber: "", cardHolder: "", expiry: "", cvv: "",
-    address: "", city: "", state: "HN-FM", phone: "",
-  });
+  const [paymentForm, setPaymentForm] = useState(() => ({ ...INITIAL_PAYMENT_FORM }));
   const [fieldErrors, setFieldErrors] = useState({});
+  const paymentSubmissionRef = useRef(false);
+  const commercialVideoMode = simulatorMode && videoDemoMode;
   const operationId = paymentIntent?.id_payment_intent || orderSummary?.id_order || 'membership';
   const [errorDisplay, setErrorDisplay] = useState({ message: errorMessage, open, operationId, acknowledged: false });
   if (errorDisplay.message !== errorMessage || errorDisplay.open !== open || errorDisplay.operationId !== operationId) {
@@ -140,15 +150,41 @@ export default function PlanPurchaseFlowDialog({
     setPaymentForm((current) => ({ ...current, [field]: value }));
     setFieldErrors((current) => ({ ...current, [field]: "" }));
   };
+  const clearPaymentForm = () => {
+    setPaymentForm({ ...INITIAL_PAYMENT_FORM });
+    setFieldErrors({});
+  };
+  const dispatchPayment = (details) => {
+    if (paymentSubmissionRef.current) return false;
+    paymentSubmissionRef.current = true;
+    try {
+      const result = onConfirmPayment?.(details);
+      Promise.resolve(result).then(
+        () => { paymentSubmissionRef.current = false; },
+        () => { paymentSubmissionRef.current = false; }
+      );
+      return true;
+    } catch (error) {
+      paymentSubmissionRef.current = false;
+      throw error;
+    }
+  };
   const submitPayment = () => {
     if (simulatorMode) {
-      if (!reconciling) onConfirmPayment?.({});
+      if (commercialVideoMode) {
+        const validationErrors = validateVipPaymentForm(paymentForm, new Date(), {
+          allowedCardNumbers: VIP_VIDEO_TEST_CARD_NUMBERS,
+        });
+        setFieldErrors(validationErrors);
+        if (Object.keys(validationErrors).length || reconciling) return;
+      }
+      if (!reconciling && dispatchPayment({})) clearPaymentForm();
       return;
     }
     const validationErrors = validateVipPaymentForm(paymentForm);
     setFieldErrors(validationErrors);
     if (Object.keys(validationErrors).length || reconciling) return;
-    onConfirmPayment?.({
+    if (!dispatchPayment({
       card: {
         number: digits(paymentForm.cardNumber), holder: paymentForm.cardHolder.trim(),
         expire: toVipPixelPayExpiry(paymentForm.expiry),
@@ -158,7 +194,7 @@ export default function PlanPurchaseFlowDialog({
         address: paymentForm.address.trim(), country: "HN", state: paymentForm.state,
         city: paymentForm.city.trim(), phone: digits(paymentForm.phone),
       },
-    });
+    })) return;
     setPaymentForm((current) => ({ ...current, cardNumber: "", expiry: "", cvv: "" }));
   };
   const plan = orderSummary?.plan || {};
@@ -176,8 +212,7 @@ export default function PlanPurchaseFlowDialog({
       if (!next && showTransactionError) { acknowledgeError(); return; }
       if (disableClose) return;
       if (!next) {
-        setPaymentForm((current) => ({ ...current, cardNumber: "", expiry: "", cvv: "" }));
-        setFieldErrors({});
+        clearPaymentForm();
       }
       onOpenChange?.(next);
     }}
@@ -204,18 +239,20 @@ export default function PlanPurchaseFlowDialog({
         ) : (
           <>
             <DialogHeader className="pt-3">
-              <DialogTitle>{displayStep === "payment" ? (simulatorMode ? "Demostración QA" : "Pago seguro") : "Resumen de compra"}</DialogTitle>
+              <DialogTitle>{displayStep === "payment" ? (simulatorMode && !commercialVideoMode ? "Demostración QA" : "Pago seguro") : "Resumen de compra"}</DialogTitle>
               <DialogDescription>
                 {displayStep === "payment"
-                  ? (simulatorMode
+                  ? (simulatorMode && !commercialVideoMode
                     ? "Simula el resultado del pago sin realizar cobros reales."
-                    : "Ingresa los datos solicitados para procesar el pago con PixelPay.")
+                    : commercialVideoMode
+                      ? "Ingresa los datos solicitados para completar el pago."
+                      : "Ingresa los datos solicitados para procesar el pago con PixelPay.")
                   : "Verifica los datos antes de continuar al pago."}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
-              {simulatorMode ? (
+              {simulatorMode && !commercialVideoMode ? (
                 <div role="note" className="rounded-2xl border border-amber-400/50 bg-amber-500/10 p-4 text-sm text-[var(--mf-text)]">
                   <p className="font-semibold">Demostración QA · Sin cobros reales</p>
                   <p className="mt-1">Prohibido introducir tarjetas reales. Este flujo no solicita datos de tarjeta.</p>
@@ -229,43 +266,49 @@ export default function PlanPurchaseFlowDialog({
                     <div><p className="mf-checkout-section-title">Tu membresía</p><h3>{plan?.nombre_plan || "Plan"}</h3><p>{branchLabel}</p></div>
                     <div><p>Total a pagar · {totals?.moneda_codigo || "HNL"}</p><strong>{formatMoney(totals?.total_hnl)}</strong></div>
                   </div>
-                  {simulatorMode ? null : <div className="mf-payment-panel text-sm">
+                  {simulatorMode && !commercialVideoMode ? null : <div className="mf-payment-panel text-sm">
                     <p className="flex items-center gap-2 font-semibold text-[var(--mf-text)]">
                       <LockKeyhole size={14} />
                       Pago seguro
                     </p>
-                    <p className="mt-1 text-[var(--mf-text-2)]">Los datos se envían a PixelPay y no se guardan en este navegador.</p>
+                    <p className="mt-1 text-[var(--mf-text-2)]">
+                      {commercialVideoMode
+                        ? "Completa la información solicitada para continuar de forma segura."
+                        : "Los datos se envían a PixelPay y no se guardan en este navegador."}
+                    </p>
 
                     <div className="mf-payment-form">
                       <label className="text-xs text-[var(--mf-text-2)]">
-                        Numero de tarjeta
-                        <input ref={cardInputRef} className="mf-input mt-1 w-full" type="text" inputMode="numeric" autoComplete="cc-number" placeholder="0000 0000 0000 0000" maxLength={23} value={paymentForm.cardNumber} onChange={setPaymentField("cardNumber")} />
+                        Número de tarjeta
+                        <input ref={cardInputRef} className="mf-input mt-1 w-full" type="text" inputMode="numeric" autoComplete={commercialVideoMode ? "off" : "cc-number"} placeholder="0000 0000 0000 0000" maxLength={23} value={paymentForm.cardNumber} onChange={setPaymentField("cardNumber")} />
                         {fieldErrors.cardNumber ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.cardNumber}</span> : null}
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         Nombre del titular
-                        <input className="mf-input mt-1 w-full" type="text" autoComplete="cc-name" placeholder="Como aparece en tu tarjeta" value={paymentForm.cardHolder} onChange={setPaymentField("cardHolder")} />
+                        <input className="mf-input mt-1 w-full" type="text" autoComplete={commercialVideoMode ? "off" : "cc-name"} placeholder="Como aparece en tu tarjeta" value={paymentForm.cardHolder} onChange={setPaymentField("cardHolder")} />
                         {fieldErrors.cardHolder ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.cardHolder}</span> : null}
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         Vencimiento
-                        <input className="mf-input mt-1 w-full" type="text" placeholder="MM/AA" inputMode="numeric" autoComplete="cc-exp" maxLength={5} value={paymentForm.expiry} onChange={setPaymentField("expiry")} />
+                        <input className="mf-input mt-1 w-full" type="text" placeholder="MM/AA" inputMode="numeric" autoComplete={commercialVideoMode ? "off" : "cc-exp"} maxLength={5} value={paymentForm.expiry} onChange={setPaymentField("expiry")} />
                         {fieldErrors.expiry ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.expiry}</span> : null}
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         CVV
-                        <input className="mf-input mt-1 w-full" type="password" inputMode="numeric" autoComplete="cc-csc" placeholder="CVV" maxLength={4} value={paymentForm.cvv} onChange={setPaymentField("cvv")} />
+                        <input className="mf-input mt-1 w-full" type="password" inputMode="numeric" autoComplete={commercialVideoMode ? "off" : "cc-csc"} placeholder="CVV" maxLength={4} value={paymentForm.cvv} onChange={setPaymentField("cvv")} />
                         {fieldErrors.cvv ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.cvv}</span> : null}
                       </label>
-                      <label className="text-xs text-[var(--mf-text-2)]">Dirección de facturación<input className="mf-input mt-1 w-full" autoComplete="street-address" value={paymentForm.address} onChange={setPaymentField("address")} />{fieldErrors.address ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.address}</span> : null}</label>
-                      <label className="text-xs text-[var(--mf-text-2)]">Ciudad<input className="mf-input mt-1 w-full" autoComplete="address-level2" value={paymentForm.city} onChange={setPaymentField("city")} />{fieldErrors.city ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.city}</span> : null}</label>
-                      <label className="text-xs text-[var(--mf-text-2)]">Departamento<select className="mf-select mt-1 w-full" autoComplete="address-level1" value={paymentForm.state} onChange={setPaymentField("state")}>{HONDURAS_DEPARTMENTS.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}</select>{fieldErrors.state ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.state}</span> : null}</label>
-                      <label className="text-xs text-[var(--mf-text-2)]">País<input className="mf-input mt-1 w-full" autoComplete="country" value="HN" readOnly /></label>
-                      <label className="text-xs text-[var(--mf-text-2)]">Teléfono<input className="mf-input mt-1 w-full" type="tel" inputMode="numeric" autoComplete="tel" maxLength={15} value={paymentForm.phone} onChange={setPaymentField("phone")} />{fieldErrors.phone ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.phone}</span> : null}</label>
+                      <label className="text-xs text-[var(--mf-text-2)]">Dirección de facturación<input className="mf-input mt-1 w-full" autoComplete={commercialVideoMode ? "off" : "street-address"} value={paymentForm.address} onChange={setPaymentField("address")} />{fieldErrors.address ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.address}</span> : null}</label>
+                      <label className="text-xs text-[var(--mf-text-2)]">Ciudad<input className="mf-input mt-1 w-full" autoComplete={commercialVideoMode ? "off" : "address-level2"} value={paymentForm.city} onChange={setPaymentField("city")} />{fieldErrors.city ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.city}</span> : null}</label>
+                      <label className="text-xs text-[var(--mf-text-2)]">Departamento<select className="mf-select mt-1 w-full" autoComplete={commercialVideoMode ? "off" : "address-level1"} value={paymentForm.state} onChange={setPaymentField("state")}>{HONDURAS_DEPARTMENTS.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}</select>{fieldErrors.state ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.state}</span> : null}</label>
+                      <label className="text-xs text-[var(--mf-text-2)]">País<input className="mf-input mt-1 w-full" autoComplete={commercialVideoMode ? "off" : "country"} value="HN" readOnly /></label>
+                      <label className="text-xs text-[var(--mf-text-2)]">Teléfono<input className="mf-input mt-1 w-full" type="tel" inputMode="numeric" autoComplete={commercialVideoMode ? "off" : "tel"} maxLength={15} value={paymentForm.phone} onChange={setPaymentField("phone")} />{fieldErrors.phone ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.phone}</span> : null}</label>
                     </div>
                     <p className="mt-3 inline-flex items-center gap-2 text-xs text-[var(--mf-text-2)]">
                       <CreditCard size={13} />
-                      PAN y CVV permanecen únicamente en memoria y se limpian al enviar o cerrar.
+                      {commercialVideoMode
+                        ? "Tu información permanece únicamente durante esta operación y se elimina al continuar o cerrar."
+                        : "PAN y CVV permanecen únicamente en memoria y se limpian al enviar o cerrar."}
                     </p>
                     {reconciling ? (
                       <p role="status" className="mt-3 rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm font-medium text-[var(--mf-text)]">
@@ -339,7 +382,9 @@ export default function PlanPurchaseFlowDialog({
               <DialogFooter className="mf-payment-footer">
                 <Button type="button" className="mf-payment-submit" onClick={submitPayment} disabled={loading || disableClose || reconciling}>
                   {loading ? <Loader2 size={15} className="animate-spin" /> : <LockKeyhole size={15} />}
-                  {simulatorMode ? "Ejecutar simulación" : "Pagar con PixelPay"}
+                  {commercialVideoMode
+                    ? (loading ? "Procesando pago..." : "Pagar")
+                    : simulatorMode ? "Ejecutar simulación" : "Pagar con PixelPay"}
                 </Button>
                 <Button type="button" variant="outline" className="mf-payment-back" onClick={() => { onBackToSummary?.(); }} disabled={loading || disableClose}>Volver al resumen</Button>
                 <Button type="button" variant="ghost" onClick={onCancel} disabled={loading || disableClose}>Cancelar</Button>

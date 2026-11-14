@@ -2,11 +2,18 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { confirmMembershipPayment, createMembershipOrder } from '../clienteApi.js';
 
 const http = vi.hoisted(() => ({ post: vi.fn() }));
+const simulation = vi.hoisted(() => ({ enabled: false }));
 vi.mock('../../../../services/httpClient.js', () => ({ http }));
 vi.mock('../../../../config/supabaseClient.js', () => ({ supabase: {} }));
+vi.mock('../../../plans/lib/qaVipPurchaseSimulation.js', () => ({
+  isQaVipPurchaseSimulationEnabled: () => simulation.enabled,
+}));
 const KEY = 'eeeeeeee-eeee-4eee-8eee-000000000001';
 const OFFER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-beforeEach(() => { http.post.mockReset(); });
+beforeEach(() => {
+  http.post.mockReset();
+  simulation.enabled = false;
+});
 
 describe('contrato opcional de idempotencia de orden VIP', () => {
   test('envía oferta y clave explícita sin cliente ni campos comerciales; conserva resumen', async () => {
@@ -49,4 +56,20 @@ test('confirmación PixelPay marca el cuerpo sensible y no permite dedupe ni cac
     dedupe: false,
     cache: false,
   });
+});
+
+test('simulación VIP envía solo intent y escenario, sin tarjeta ni facturación', async () => {
+  simulation.enabled = true;
+  http.post.mockResolvedValue({ data: { processed: true, normalized_status: 'PAID' } });
+
+  await confirmMembershipPayment(KEY, {
+    monto_prueba_hnl: 1,
+    card: { number: '4111111111111111', holder: 'Cliente QA', expire: '3012', cvv: '123' },
+    billing: { address: 'Blvd Suyapa', country: 'HN', state: 'HN-FM', city: 'Tegucigalpa', phone: '99999999' },
+  });
+
+  expect(http.post).toHaveBeenCalledExactlyOnceWith('/v1/cliente/planes/simulator/event', {
+    id_payment_intent: KEY,
+    monto_prueba_hnl: 1,
+  }, undefined);
 });

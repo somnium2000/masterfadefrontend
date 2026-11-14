@@ -36,6 +36,7 @@ import {
   queryMembershipPaymentStatus,
 } from "../lib/clienteApi.js";
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
+import { isQaVipCommercialVideoModeEnabled } from "../../plans/lib/qaVipCommercialVideoMode.js";
 import { isQaVipPurchaseSimulationEnabled } from "../../plans/lib/qaVipPurchaseSimulation.js";
 import useMembershipPaymentPolling from "../../plans/hooks/useMembershipPaymentPolling.js";
 import { CLIENT_LOCK_MESSAGE } from "../lib/clientFeatureFlags.js";
@@ -70,6 +71,7 @@ const MEMBERSHIP_SIMULATION_SCENARIOS = [
   { value: 1.56, label: "CVV incorrecto (1.56)" },
   { value: 1.57, label: "Timeout (1.57)" },
 ];
+const APPROVED_MEMBERSHIP_SIMULATION_AMOUNT = MEMBERSHIP_SIMULATION_SCENARIOS[0].value;
 const CLIENT_PURCHASE_ATTEMPT_STORAGE_KEY = "mf_cliente_vip_purchase_attempt_v1";
 const PURCHASE_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -384,6 +386,7 @@ export default function ClientePlanesPage() {
   const purchaseClientId = String(clienteId || user?.cliente_id || "").trim();
   const purchaseIdentity = purchaseUserId && purchaseClientId ? `${purchaseUserId}:${purchaseClientId}` : "";
   const showMembershipSimulator = isQaVipPurchaseSimulationEnabled();
+  const showVipCommercialVideo = showMembershipSimulator && isQaVipCommercialVideoModeEnabled();
 
   const fetchPlans = useCallback(async (selectedBranchId) => {
     const safeBranchId = String(selectedBranchId || "").trim();
@@ -617,7 +620,9 @@ export default function ClientePlanesPage() {
     try {
       const paymentResult = await confirmMembershipPayment(paymentIntentId, {
         ...paymentDetails,
-        monto_prueba_hnl: showMembershipSimulator ? selectedSimulationAmount : undefined,
+        monto_prueba_hnl: showMembershipSimulator
+          ? (showVipCommercialVideo ? APPROVED_MEMBERSHIP_SIMULATION_AMOUNT : selectedSimulationAmount)
+          : undefined,
       });
       if (paymentResult?.pending_confirmation) {
         setPurchasePendingConfirmation(true);
@@ -991,7 +996,7 @@ export default function ClientePlanesPage() {
         <p className="mt-1 text-sm text-[var(--mf-text-2)]">
           Debes seleccionar una sucursal para ver y comprar planes disponibles.
         </p>
-        {showMembershipSimulator ? (
+        {showMembershipSimulator && !showVipCommercialVideo ? (
           <div className="mt-4 w-full max-w-sm">
             <label className="mf-label">Escenario simulator</label>
             <select
@@ -1094,6 +1099,7 @@ export default function ClientePlanesPage() {
         pendingConfirmation={purchasePendingConfirmation}
         paymentConfirmation={purchaseConfirmation}
         simulatorMode={showMembershipSimulator}
+        videoDemoMode={showVipCommercialVideo}
         onCancel={membershipPaymentIntent ? resetPurchaseFlow : discardPurchaseFlow}
         onBackToSummary={() => setPurchaseStep("summary")}
         onContinueToPayment={handleContinueToPayment}

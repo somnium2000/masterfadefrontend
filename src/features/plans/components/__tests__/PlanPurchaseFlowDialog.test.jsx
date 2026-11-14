@@ -17,7 +17,7 @@ const orderSummary = {
 
 afterEach(cleanup);
 
-describe("formulario PixelPay VIP", () => {
+describe("formulario de pago VIP", () => {
   it("agrupa tarjeta, convierte MM/AA y valida campos específicos", () => {
     expect(formatVipCardNumber("4111a1111-1111 1111")).toBe("4111 1111 1111 1111");
     expect(formatVipExpiry("1230")).toBe("12/30");
@@ -35,12 +35,19 @@ describe("formulario PixelPay VIP", () => {
       state: "Selecciona un departamento válido.",
       phone: "Ingresa un teléfono de 8 a 15 dígitos.",
     });
+    expect(validateVipPaymentForm({
+      cardNumber: "4242424242424242", cardHolder: "Cliente", expiry: "12/30", cvv: "123",
+      address: "Blvd Suyapa", city: "Tegucigalpa", state: "HN-FM", phone: "99999999",
+    }, new Date("2026-10-25T12:00:00Z"), { allowedCardNumbers: ["4111111111111111"] })).toHaveProperty(
+      "cardNumber",
+      "Ingresa un número de tarjeta válido."
+    );
   });
 
   it("envía L 300 sin alterarlo, normaliza el payload y limpia PAN/CVV", () => {
     const onConfirmPayment = vi.fn();
     render(<PlanPurchaseFlowDialog open step="payment" orderSummary={orderSummary} onConfirmPayment={onConfirmPayment} />);
-    fireEvent.change(screen.getByLabelText("Numero de tarjeta"), { target: { value: "4111111111111111" } });
+    fireEvent.change(screen.getByLabelText("Número de tarjeta"), { target: { value: "4111111111111111" } });
     fireEvent.change(screen.getByLabelText("Nombre del titular"), { target: { value: "Cliente QA" } });
     fireEvent.change(screen.getByLabelText("Vencimiento"), { target: { value: "1230" } });
     fireEvent.change(screen.getByLabelText("CVV"), { target: { value: "987" } });
@@ -56,7 +63,7 @@ describe("formulario PixelPay VIP", () => {
     expect(screen.getByRole('heading', { name: 'VIP' })).toBeInTheDocument();
     expect(screen.getByText('Centro')).toBeInTheDocument();
     expect(screen.getByText('L 300.00')).toBeInTheDocument();
-    expect(screen.getByLabelText("Numero de tarjeta")).toHaveValue("");
+    expect(screen.getByLabelText("Número de tarjeta")).toHaveValue("");
     expect(screen.getByLabelText("CVV")).toHaveValue("");
   });
 
@@ -92,8 +99,68 @@ describe("formulario PixelPay VIP", () => {
     expect(screen.getByRole("heading", { name: "Demostración QA" })).toBeInTheDocument();
     expect(screen.getByText("Demostración QA · Sin cobros reales")).toBeInTheDocument();
     expect(screen.getByText(/Prohibido introducir tarjetas reales/)).toBeInTheDocument();
-    expect(screen.queryByLabelText("Numero de tarjeta")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Número de tarjeta")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Ejecutar simulación" }));
     expect(onConfirmPayment).toHaveBeenCalledExactlyOnceWith({});
+  });
+
+  it("presenta el formulario comercial en video, valida localmente y nunca entrega datos sensibles", () => {
+    let releasePayment;
+    const onConfirmPayment = vi.fn(() => new Promise((resolve) => { releasePayment = resolve; }));
+    const view = render(
+      <PlanPurchaseFlowDialog
+        open
+        step="payment"
+        orderSummary={orderSummary}
+        simulatorMode
+        videoDemoMode
+        onConfirmPayment={onConfirmPayment}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "Pago seguro" })).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Demostración QA|sin cobros reales|simulador|sandbox|tarjeta de prueba/i);
+    expect(screen.getByLabelText("Número de tarjeta")).toHaveAttribute("autocomplete", "off");
+    expect(screen.getByLabelText("CVV")).toHaveAttribute("type", "password");
+
+    fireEvent.click(screen.getByRole("button", { name: "Pagar" }));
+    expect(screen.getByText("Ingresa un número de tarjeta válido.")).toBeInTheDocument();
+    expect(onConfirmPayment).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText(/Número de tarjeta/), { target: { value: "4111111111111111" } });
+    fireEvent.change(screen.getByLabelText(/Nombre del titular/), { target: { value: "Cliente QA" } });
+    fireEvent.change(screen.getByLabelText(/Vencimiento/), { target: { value: "1230" } });
+    fireEvent.change(screen.getByLabelText(/CVV/), { target: { value: "987" } });
+    fireEvent.change(screen.getByLabelText(/Dirección de facturación/), { target: { value: "Blvd Suyapa" } });
+    fireEvent.change(screen.getByLabelText(/Ciudad/), { target: { value: "Tegucigalpa" } });
+    fireEvent.change(screen.getByLabelText(/Departamento/), { target: { value: "HN-CR" } });
+    fireEvent.change(screen.getByLabelText(/Teléfono/), { target: { value: "99999999" } });
+
+    const payButton = screen.getByRole("button", { name: "Pagar" });
+    fireEvent.click(payButton);
+    fireEvent.click(payButton);
+    expect(onConfirmPayment).toHaveBeenCalledExactlyOnceWith({});
+    expect(screen.getByLabelText(/Número de tarjeta/)).toHaveValue("");
+    expect(screen.getByLabelText(/Nombre del titular/)).toHaveValue("");
+    expect(screen.getByLabelText(/Vencimiento/)).toHaveValue("");
+    expect(screen.getByLabelText(/CVV/)).toHaveValue("");
+    expect(screen.getByLabelText(/Dirección de facturación/)).toHaveValue("");
+    expect(screen.getByLabelText(/Ciudad/)).toHaveValue("");
+    expect(screen.getByLabelText(/Departamento/)).toHaveValue("HN-FM");
+    expect(screen.getByLabelText(/Teléfono/)).toHaveValue("");
+
+    view.rerender(
+      <PlanPurchaseFlowDialog
+        open
+        step="payment"
+        orderSummary={orderSummary}
+        simulatorMode
+        videoDemoMode
+        loading
+        onConfirmPayment={onConfirmPayment}
+      />
+    );
+    expect(screen.getByRole("button", { name: "Procesando pago..." })).toBeDisabled();
+    releasePayment();
   });
 });

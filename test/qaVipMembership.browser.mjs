@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
+import path from "node:path";
 import process from "node:process";
 import { test } from "node:test";
 
@@ -11,15 +13,17 @@ const BRANCH = "33333333-3333-4333-8333-333333333333";
 const ORDER = "44444444-4444-4444-8444-444444444444";
 const INTENT = "55555555-5555-4555-8555-555555555555";
 const SUBSCRIPTION = "66666666-6666-4666-8666-666666666666";
+const screenshotDir = String(process.env.MASTERFADE_SCREENSHOT_DIR || "").trim();
 
 const names = ["MASTER BLACK", "MASTER ELITE", "MASTER EXPERIENCIA", "Máster Royal"];
+const prices = [300, 600, 1000, 1500];
 const catalogPlans = names.map((nombre_plan, index) => ({
   id_plan: `70000000-0000-4000-8000-00000000000${index}`,
   id_plan_sucursal: `80000000-0000-4000-8000-00000000000${index}`,
   id_sucursal: BRANCH,
   nombre_plan,
   descripcion: `Plan QA ${index + 1}`,
-  precio_hnl: 300 + (index * 100),
+  precio_hnl: prices[index],
   periodo_membresia_codigo: "mensual",
   categoria_nivel: index + 1,
   beneficios: [
@@ -52,13 +56,18 @@ test("VIP QA en navegador conserva precio, activa una vez y nunca usa PixelPay",
   });
   const page = await context.newPage();
   const calls = [];
+  const externalCalls = [];
   let simulatorBody = null;
   let simulatorRelease;
   let paid = false;
+  let selectedPlan = catalogPlans[0];
 
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
-    if (url.origin !== baseURL) return route.fulfill({ status: 204, body: "" });
+    if (url.origin !== baseURL) {
+      externalCalls.push(url.toString());
+      return route.fulfill({ status: 204, body: "" });
+    }
     if (!url.pathname.startsWith("/v1/")) return route.continue();
     const method = route.request().method();
     calls.push({ method, path: url.pathname });
@@ -84,14 +93,16 @@ test("VIP QA en navegador conserva precio, activa una vez y nunca usa PixelPay",
     } else if (url.pathname === "/v1/cliente/puntos/resumen") {
       data = { saldo_total: 0, historial: [] };
     } else if (url.pathname === "/v1/cliente/planes/orden") {
+      const orderBody = route.request().postDataJSON();
+      selectedPlan = catalogPlans.find((plan) => plan.id_plan_sucursal === orderBody?.id_plan_sucursal) || catalogPlans[0];
       data = {
         id_order: ORDER,
-        plan: { ...catalogPlans[0], sucursal_nombre: "MasterFade Blvd. Suyapa" },
+        plan: { ...selectedPlan, sucursal_nombre: "MasterFade Blvd. Suyapa" },
         cliente: { id_cliente: CLIENT, email: "vip.qa@example.test" },
-        totales: { subtotal_hnl: 300, descuento_hnl: 0, total_hnl: 300, moneda_codigo: "HNL" },
+        totales: { subtotal_hnl: selectedPlan.precio_hnl, descuento_hnl: 0, total_hnl: selectedPlan.precio_hnl, moneda_codigo: "HNL" },
       };
     } else if (url.pathname === "/v1/cliente/planes/pago-intent") {
-      data = { id_payment_intent: INTENT, estado_intent_codigo: "creado", monto_hnl: 300, moneda_codigo: "HNL" };
+      data = { id_payment_intent: INTENT, estado_intent_codigo: "creado", monto_hnl: selectedPlan.precio_hnl, moneda_codigo: "HNL" };
     } else if (url.pathname === "/v1/cliente/planes/simulator/event") {
       simulatorBody = route.request().postDataJSON();
       await new Promise((resolve) => { simulatorRelease = resolve; });
@@ -119,44 +130,75 @@ test("VIP QA en navegador conserva precio, activa una vez y nunca usa PixelPay",
     try {
       for (const name of names.slice(0, 3)) await page.getByRole("heading", { name, exact: true }).waitFor();
       await page.getByRole("button", { name: "Siguiente", exact: true }).last().click();
-      await page.getByRole("heading", { name: names[3], exact: true }).waitFor();
-      await page.getByRole("button", { name: "Anterior", exact: true }).last().click();
+      const royalHeading = page.getByRole("heading", { name: names[3], exact: true });
+      await royalHeading.waitFor();
+      await page.getByRole("button", { name: "Quiero este plan" }).last().click();
     } catch (error) {
       throw new Error(`No cargó el catálogo VIP. Llamadas: ${JSON.stringify(calls)}. Vista: ${await page.locator("body").innerText()}`, { cause: error });
     }
     assert.equal(await page.evaluate(() => typeof globalThis.crypto?.randomUUID), "function");
     try {
-      await page.getByRole("button", { name: "Quiero este plan" }).first().click();
-    } catch (error) {
-      throw new Error(`No se habilitó la compra VIP. Llamadas: ${JSON.stringify(calls)}. Vista: ${await page.locator("body").innerText()}`, { cause: error });
-    }
-    try {
       await page.getByRole("heading", { name: "Resumen de compra" }).waitFor();
     } catch (error) {
       throw new Error(`No se creó la orden VIP. Llamadas: ${JSON.stringify(calls)}. Vista: ${await page.locator("body").innerText()}`, { cause: error });
     }
-    assert.equal(await page.getByText("L 300.00", { exact: true }).count() > 0, true);
+    assert.equal(await page.getByText("L 1500.00", { exact: true }).count() > 0, true);
     await page.getByRole("button", { name: "Continuar al pago" }).click();
-    await page.getByRole("heading", { name: "Demostración QA" }).waitFor();
-    assert.equal(await page.getByText("Demostración QA · Sin cobros reales", { exact: true }).count(), 1);
-    assert.equal(await page.getByText(/Prohibido introducir tarjetas reales/).count(), 1);
-    assert.equal(await page.getByLabel("Numero de tarjeta").count(), 0);
+    await page.getByRole("heading", { name: "Pago seguro" }).waitFor();
+    assert.equal(await page.getByText("Demostración QA · Sin cobros reales", { exact: true }).count(), 0);
+    assert.equal(await page.getByText(/Prohibido introducir tarjetas reales/).count(), 0);
+    assert.equal(await page.getByText(/Escenario simulator/).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Ejecutar simulación" }).count(), 0);
+    assert.equal(await page.getByLabel("CVV").getAttribute("type"), "password");
+    assert.equal(await page.getByLabel("Número de tarjeta").getAttribute("autocomplete"), "off");
 
-    await page.getByRole("button", { name: "Ejecutar simulación" }).evaluate((button) => {
+    if (screenshotDir) {
+      await mkdir(screenshotDir, { recursive: true });
+      await page.screenshot({ path: path.join(screenshotDir, "vip-commercial-desktop-1440x900.png") });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.getByRole("dialog").evaluate((dialog) => { dialog.scrollTop = 0; });
+      const mobileDialog = await page.getByRole("dialog").boundingBox();
+      assert.ok(mobileDialog && mobileDialog.width <= 390 && mobileDialog.height <= 844);
+      await page.screenshot({ path: path.join(screenshotDir, "vip-commercial-mobile-390x844.png") });
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+
+    await page.getByLabel("Número de tarjeta").fill("4111111111111111");
+    await page.getByLabel("Nombre del titular").fill("Cliente QA");
+    await page.getByLabel("Vencimiento").fill("12/40");
+    await page.getByLabel("CVV").fill("123");
+    await page.getByLabel("Dirección de facturación").fill("Blvd Suyapa");
+    await page.getByLabel("Ciudad").fill("Tegucigalpa");
+    await page.getByLabel("Departamento").selectOption("HN-FM");
+    await page.getByLabel("Teléfono").fill("99999999");
+
+    await page.getByRole("button", { name: "Pagar", exact: true }).evaluate((button) => {
       button.click();
       button.click();
     });
-    await page.getByRole("button", { name: "Ejecutar simulación" }).waitFor({ state: "attached" });
+    const processingButton = page.getByRole("button", { name: "Procesando pago...", exact: true });
+    await processingButton.waitFor({ state: "attached" });
+    assert.equal(await processingButton.isDisabled(), true);
     assert.ok(simulatorRelease);
+    assert.equal(await page.getByLabel("Número de tarjeta").inputValue(), "");
+    assert.equal(await page.getByLabel("Nombre del titular").inputValue(), "");
+    assert.equal(await page.getByLabel("Vencimiento").inputValue(), "");
+    assert.equal(await page.getByLabel("CVV").inputValue(), "");
+    assert.equal(await page.getByLabel("Dirección de facturación").inputValue(), "");
+    assert.equal(await page.getByLabel("Ciudad").inputValue(), "");
+    assert.equal(await page.getByLabel("Teléfono").inputValue(), "");
     simulatorRelease();
     await page.getByRole("heading", { name: "¡Membresía VIP confirmada!" }).waitFor();
-    assert.equal(simulatorBody?.id_payment_intent, INTENT);
-    assert.equal(simulatorBody?.monto_prueba_hnl, 1);
+    assert.deepEqual(simulatorBody, { id_payment_intent: INTENT, monto_prueba_hnl: 1 });
     assert.equal(calls.filter((call) => call.path === "/v1/cliente/planes/orden").length, 1);
     assert.equal(calls.filter((call) => call.path === "/v1/cliente/planes/pago-intent").length, 1);
     assert.equal(calls.filter((call) => call.path === "/v1/cliente/planes/simulator/event").length, 1);
     assert.equal(calls.filter((call) => call.path.includes("/pixelpay/")).length, 0);
-    assert.equal(await page.getByText("L 300.00", { exact: true }).count() > 0, true);
+    assert.equal(externalCalls.some((url) => /pixelpay/i.test(url)), false);
+    assert.equal(externalCalls.some((url) => /4111111111111111|cvv|Cliente%20QA|Blvd%20Suyapa/i.test(url)), false);
+    assert.equal(await page.getByText("L 1500.00", { exact: true }).count() > 0, true);
+    const persistedBrowserData = await page.evaluate(() => JSON.stringify({ ...sessionStorage, ...localStorage }));
+    assert.equal(/4111111111111111|"cvv"|Cliente QA|Blvd Suyapa/.test(persistedBrowserData), false);
   } finally {
     await context.close();
     await browser.close();

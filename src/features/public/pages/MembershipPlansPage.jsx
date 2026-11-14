@@ -36,6 +36,7 @@ import {
   queryMembershipPaymentStatus,
 } from "../../cliente/lib/clienteApi.js";
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
+import { isQaVipCommercialVideoModeEnabled } from "../../plans/lib/qaVipCommercialVideoMode.js";
 import { isQaVipPurchaseSimulationEnabled } from "../../plans/lib/qaVipPurchaseSimulation.js";
 import useMembershipPaymentPolling from "../../plans/hooks/useMembershipPaymentPolling.js";
 import { getPixelPayCustomerMessage, isPixelPayUncertainError } from "../../payments/pixelPayPresentation.js";
@@ -271,6 +272,7 @@ export default function MembershipPlansPage() {
 
   const scrollRef = useRef(null);
   const showMembershipSimulator = isQaVipPurchaseSimulationEnabled();
+  const showVipCommercialVideo = showMembershipSimulator && isQaVipCommercialVideoModeEnabled();
 
   useLayoutEffect(() => {
     const previousIdentity = purchaseAttemptRef.current?.identity || purchaseIdentityRef.current;
@@ -901,6 +903,7 @@ export default function MembershipPlansPage() {
         pendingConfirmation={purchasePendingConfirmation}
         paymentConfirmation={purchaseConfirmation}
         simulatorMode={showMembershipSimulator}
+        videoDemoMode={showVipCommercialVideo}
         onCancel={cancelPurchaseFlow}
         onContinueToPayment={handleContinueToPayment}
         onConfirmPayment={handleConfirmPayment}
