@@ -1,3 +1,5 @@
+import { isPixelPayHostedPayment } from './pixelPayHostedCheckout.js';
+
 const SERVICE_SPECIALTIES = [
   'Fade y Degradado',
   'Diseno y Barba',
@@ -689,6 +691,15 @@ export function normalizeBookingPaymentUiState({
         : 'pagado',
       totalPagadoHnl: confirmedAmount,
       bookingConfirmed: true,
+    };
+  }
+  if (isPixelPayHostedPayment(paymentIntent) || isPixelPayHostedPayment(effectivePaymentResult)) {
+    return {
+      status: 'processing',
+      text: 'Pago en verificación',
+      paymentLabel: 'pendiente de verificación',
+      totalPagadoHnl: 0,
+      bookingConfirmed: false,
     };
   }
   if (['confirmado', 'pagado', 'paid', 'capturado', 'capturada'].includes(rawState)) {

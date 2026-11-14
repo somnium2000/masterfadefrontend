@@ -3,8 +3,8 @@ import pixelPayLogo from '../../assets/branding/pixelpay-official.png';
 import { getPixelPayPresentation } from './pixelPayPresentation.js';
 import './paymentCheckout.css';
 
-export function PaymentCheckoutHero({ commercialPreview = false }) {
-  const presentation = getPixelPayPresentation(commercialPreview ? 'live' : undefined);
+export function PaymentCheckoutHero({ commercialPreview = false, environment }) {
+  const presentation = getPixelPayPresentation(commercialPreview ? 'live' : environment);
   return (
     <div className="mf-checkout-hero">
       <div>

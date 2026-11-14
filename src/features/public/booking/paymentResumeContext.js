@@ -1,3 +1,5 @@
+import { isPixelPayHostedPayment } from './pixelPayHostedCheckout.js';
+
 export const PENDING_PAYMENT_CONTEXT_STORAGE_KEY = 'mf_pending_payment_context_v1';
 export const BOOKING_PAYMENT_CONTEXT_STORAGE_KEY = 'masterfade.publicBookingPayment.v1';
 
@@ -16,6 +18,9 @@ function normalizeContext(value, { includePaymentIntent = false } = {}) {
     id_grupo_cita: groupId,
     id_intent: intentId,
     titular_email: safeText(value.titular_email).toLowerCase(),
+    ...(isPixelPayHostedPayment(value) || isPixelPayHostedPayment(value.paymentIntent) || isPixelPayHostedPayment(value.payment_intent)
+      ? { payment_channel: 'hosted' }
+      : {}),
     ...(includePaymentIntent
       ? {
           paymentIntent: value.paymentIntent && typeof value.paymentIntent === 'object'
@@ -74,9 +79,15 @@ export function resolvePaymentResumeContext({
     candidate.id_grupo_cita === selected.id_grupo_cita
     && candidate.titular_email
   ))?.titular_email || '';
+  const hostedContext = candidates.find((candidate) => (
+    candidate.id_grupo_cita === selected.id_grupo_cita
+    && candidate.id_intent === selected.id_intent
+    && isPixelPayHostedPayment(candidate)
+  ));
   return {
     id_grupo_cita: selected.id_grupo_cita,
     id_intent: selected.id_intent,
     titular_email: selected.titular_email || matchingEmail,
+    ...(hostedContext ? { payment_channel: 'hosted' } : {}),
   };
 }

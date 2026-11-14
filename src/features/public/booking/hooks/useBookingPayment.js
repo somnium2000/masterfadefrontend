@@ -18,6 +18,8 @@ import {
   PENDING_PAYMENT_CONTEXT_STORAGE_KEY,
   readBookingPaymentContext,
 } from '../paymentResumeContext.js';
+import { getPixelPayHostedPaymentStatus, startPixelPayHostedPayment } from '../pixelPayHostedApi.js';
+import { isPixelPayHostedPayment, validatePixelPayHostedCheckoutUrl } from '../pixelPayHostedCheckout.js';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
 
@@ -65,6 +67,13 @@ function isAbortError(error) {
     || String(error?.message || '').toLowerCase().includes('aborted');
 }
 
+function isHostedStartRejectedBeforeClaim(error) {
+  const status = Number(error?.status || 0);
+  const code = String(error?.data?.error?.code || error?.error?.code || '').toUpperCase();
+  return (status >= 400 && status < 500 && status !== 408 && status !== 429)
+    || code === 'PIXELPAY_HOSTED_DISABLED';
+}
+
 function waitAbortable(ms, signal) {
   if (!ms || ms <= 0) return Promise.resolve();
   if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
@@ -106,6 +115,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
   const paymentStateSeqRef = useRef(0);
   const pixelPaySaleRef = useRef(null);
   const pixelPayStatusRef = useRef(null);
+  const pixelPayHostedStartRef = useRef(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -120,6 +130,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
       if (pixelPayStatusRef.current?.controller) {
         pixelPayStatusRef.current.controller.abort('booking_payment_unmounted');
       }
+      pixelPayHostedStartRef.current?.controller?.abort('booking_payment_unmounted');
       pixelPaySaleRef.current = null;
       pixelPayStatusRef.current = null;
     };
@@ -193,6 +204,8 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
       pixelPayStatusRef.current.controller.abort('booking_payment_cleared');
     }
     pixelPayStatusRef.current = null;
+    pixelPayHostedStartRef.current?.controller?.abort('booking_payment_cleared');
+    pixelPayHostedStartRef.current = null;
     createIntentRef.current = null;
     paymentIntentRef.current = null;
     paymentStateSeqRef.current += 1;
@@ -211,6 +224,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
           id_grupo_cita: safeText(fallbackContext.id_grupo_cita),
           id_intent: safeText(fallbackContext.id_intent),
           titular_email: safeText(fallbackContext.titular_email).toLowerCase(),
+          ...(isPixelPayHostedPayment(fallbackContext) ? { payment_channel: 'hosted' } : {}),
           paymentIntent: null,
         }
       : null;
@@ -227,6 +241,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     const restoredIntent = context.paymentIntent || {
       id_intent: context.id_intent,
       id_grupo_cita: context.id_grupo_cita,
+      ...(isPixelPayHostedPayment(context) ? { payment_channel: 'hosted' } : {}),
     };
     paymentIntentRef.current = restoredIntent;
     setPaymentIntentState(restoredIntent);
@@ -313,22 +328,62 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
 
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const promise = (async () => {
+      const requestSeq = paymentStateSeqRef.current;
       setCheckingPaymentStatus(true);
       let lastPayload = null;
       const maxAttempts = Math.max(1, Math.min(4, Number(retries || 0) + 1));
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        const response = await getPublicPaymentStatus(buildPaymentStatusParams({
+        const hostedContext = isPixelPayHostedPayment(paymentIntentRef.current);
+        const statusRequest = hostedContext && paymentIntentRef.current?.hosted_start_rejected !== true
+          ? getPixelPayHostedPaymentStatus
+          : getPublicPaymentStatus;
+        const statusParams = buildPaymentStatusParams({
           groupId: normalizedGroupId,
           intentId: normalizedIntentId,
           titularEmail: normalizedEmail,
-        }), {
+        });
+        const requestOptions = {
           authenticated,
           signal: controller?.signal,
-        });
-        const payload = response?.data ?? response;
-        lastPayload = payload;
+        };
+        let response;
+        try {
+          response = await statusRequest(statusParams, requestOptions);
+        } catch (error) {
+          if (statusRequest !== getPixelPayHostedPaymentStatus || Number(error?.status) !== 404) throw error;
+          response = await getPublicPaymentStatus(statusParams, requestOptions);
+        }
+        let payload = response?.data ?? response;
 
-        if (!mountedRef.current || !isCurrentPaymentGroup(normalizedGroupId)) return null;
+        if (!mountedRef.current || paymentStateSeqRef.current !== requestSeq
+          || !isCurrentPaymentGroup(normalizedGroupId)) return null;
+        const canRestoreSdkChannel = hostedContext
+          && paymentIntentRef.current?.hosted_start_rejected === true
+          && payload?.payment_channel === 'sdk';
+        if (canRestoreSdkChannel) payload = { ...payload, hosted_start_rejected: true };
+        lastPayload = payload;
+        if (isPixelPayHostedPayment(payload) || canRestoreSdkChannel) {
+          const recoveredIntent = {
+            ...paymentIntentRef.current,
+            id_grupo_cita: normalizedGroupId,
+            id_intent: normalizedIntentId,
+            payment_channel: canRestoreSdkChannel ? 'sdk' : 'hosted',
+            hosted_state: payload.hosted_state,
+            hosted_start_rejected: false,
+            hosted_available: payload.hosted_available === true,
+            estado_intent_codigo: payload.estado_intent_codigo,
+            pending_confirmation: payload.pending_confirmation,
+            manual_reconciliation_required: payload.manual_reconciliation_required,
+          };
+          paymentIntentRef.current = recoveredIntent;
+          setPaymentIntentState(recoveredIntent);
+          writeStoredPaymentContext(buildPaymentContextPayload({
+            groupId: normalizedGroupId,
+            intentId: normalizedIntentId,
+            titularEmail: normalizedEmail,
+            paymentIntent: recoveredIntent,
+          }));
+        }
         setPaymentResultState(payload);
         if (payload?.booking_confirmed === true) clearStoredPendingPaymentContext();
 
@@ -391,6 +446,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     const normalizedEmail = safeText(titularEmail).toLowerCase();
     if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return null;
     if (!isCurrentPaymentGroup(normalizedGroupId)) return null;
+    if (isPixelPayHostedPayment(paymentIntentRef.current)) return null;
     if (pixelPaySaleRef.current?.promise) return pixelPaySaleRef.current.promise;
 
     const controller = new AbortController();
@@ -422,12 +478,120 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     }
   }, [authenticated, isCurrentPaymentGroup]);
 
+  const startPixelPayHostedOnce = useCallback(async ({ groupId, intentId, titularEmail }) => {
+    const normalizedGroupId = safeText(groupId);
+    const normalizedIntentId = safeText(intentId);
+    const normalizedEmail = safeText(titularEmail).toLowerCase();
+    if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return null;
+    if (!isCurrentPaymentGroup(normalizedGroupId)) return null;
+    const requestKey = `${normalizedGroupId}|${normalizedIntentId}`;
+    if (pixelPayHostedStartRef.current?.key === requestKey) return pixelPayHostedStartRef.current.promise;
+    if (safeText(paymentIntentRef.current?.id_intent) !== normalizedIntentId
+      || paymentIntentRef.current?.hosted_available !== true
+      || isPixelPayHostedPayment(paymentIntentRef.current)) return null;
+
+    const controller = new AbortController();
+    const requestSeq = paymentStateSeqRef.current;
+    const pendingIntent = {
+      ...paymentIntentRef.current,
+      payment_channel: 'hosted',
+      hosted_state: 'creating',
+      estado_intent_codigo: 'pendiente_confirmacion',
+      pending_confirmation: true,
+      manual_reconciliation_required: true,
+      booking_confirmed: false,
+    };
+    // AM: Persistir antes de salir evita reenviar una creación cuyo resultado se perdió.
+    paymentIntentRef.current = pendingIntent;
+    setPaymentIntentState(pendingIntent);
+    setPaymentResultState(pendingIntent);
+    writeStoredPaymentContext(buildPaymentContextPayload({
+      groupId: normalizedGroupId,
+      intentId: normalizedIntentId,
+      titularEmail: normalizedEmail,
+      paymentIntent: pendingIntent,
+    }));
+
+    const promise = (async () => {
+      try {
+        const response = await startPixelPayHostedPayment(buildPaymentStatusParams({
+          groupId: normalizedGroupId,
+          intentId: normalizedIntentId,
+          titularEmail: normalizedEmail,
+        }), { authenticated, signal: controller.signal });
+        if (!mountedRef.current || paymentStateSeqRef.current !== requestSeq
+          || !isCurrentPaymentGroup(normalizedGroupId)) return null;
+        const checkoutUrl = response?.checkout_url
+          ? validatePixelPayHostedCheckoutUrl(response.checkout_url)
+          : null;
+        if (!isPixelPayHostedPayment(response)
+          || safeText(response?.id_intent) !== normalizedIntentId
+          || (response?.id_grupo_cita && safeText(response.id_grupo_cita) !== normalizedGroupId)
+          || (response?.checkout_url && !checkoutUrl)) {
+          throw new Error('No se pudo abrir el portal de pago. Verifica el estado antes de continuar.');
+        }
+        const safeResult = {
+          ...response,
+          id_grupo_cita: normalizedGroupId,
+          checkout_url: checkoutUrl,
+          estado_intent_codigo: 'pendiente_confirmacion',
+          booking_confirmed: false,
+          pending_confirmation: true,
+        };
+        const savedIntent = {
+          ...pendingIntent,
+          hosted_state: response.hosted_state || 'checkout_ready',
+          expires_at: response.expires_at || pendingIntent.expires_at,
+        };
+        paymentIntentRef.current = savedIntent;
+        setPaymentIntentState(savedIntent);
+        setPaymentResultState(safeResult);
+        writeStoredPaymentContext(buildPaymentContextPayload({
+          groupId: normalizedGroupId,
+          intentId: normalizedIntentId,
+          titularEmail: normalizedEmail,
+          paymentIntent: savedIntent,
+        }));
+        return safeResult;
+      } catch (error) {
+        if (mountedRef.current && paymentStateSeqRef.current === requestSeq
+          && isCurrentPaymentGroup(normalizedGroupId)) {
+          const rejected = isHostedStartRejectedBeforeClaim(error);
+          const uncertainIntent = {
+            ...pendingIntent,
+            hosted_state: rejected ? 'start_rejected' : 'creation_uncertain',
+            hosted_start_rejected: rejected,
+          };
+          paymentIntentRef.current = uncertainIntent;
+          setPaymentIntentState(uncertainIntent);
+          setPaymentResultState(uncertainIntent);
+          writeStoredPaymentContext(buildPaymentContextPayload({
+            groupId: normalizedGroupId,
+            intentId: normalizedIntentId,
+            titularEmail: normalizedEmail,
+            paymentIntent: uncertainIntent,
+          }));
+        }
+        throw error;
+      }
+    })();
+    pixelPayHostedStartRef.current = { key: requestKey, controller, promise };
+    try {
+      return await promise;
+    } finally {
+      if (pixelPayHostedStartRef.current?.promise === promise) pixelPayHostedStartRef.current = null;
+    }
+  }, [authenticated, isCurrentPaymentGroup]);
+
   const queryPixelPayStatusOnce = useCallback(async ({ groupId, intentId, titularEmail }) => {
     const normalizedGroupId = safeText(groupId);
     const normalizedIntentId = safeText(intentId);
     const normalizedEmail = safeText(titularEmail).toLowerCase();
     if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return null;
     if (!isCurrentPaymentGroup(normalizedGroupId)) return null;
+    if (isPixelPayHostedPayment(paymentIntentRef.current)) {
+      return fetchPaymentStatusOnce({ groupId, intentId, titularEmail });
+    }
     const requestKey = `${normalizedGroupId}|${normalizedIntentId}|${normalizedEmail}`;
     if (pixelPayStatusRef.current?.key === requestKey) return pixelPayStatusRef.current.promise;
 
@@ -456,7 +620,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
       if (pixelPayStatusRef.current?.promise === promise) pixelPayStatusRef.current = null;
       if (mountedRef.current) setCheckingPaymentStatus(false);
     }
-  }, [authenticated, isCurrentPaymentGroup]);
+  }, [authenticated, fetchPaymentStatusOnce, isCurrentPaymentGroup]);
 
   return {
     paymentIntent: paymentIntentState,
@@ -474,6 +638,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     completeMockPaymentOnce,
     completeSimulatorPaymentOnce,
     salePixelPayOnce,
+    startPixelPayHostedOnce,
     queryPixelPayStatusOnce,
     isCurrentPaymentGroup,
   };
