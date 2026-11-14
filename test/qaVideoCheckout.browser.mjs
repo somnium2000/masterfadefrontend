@@ -52,6 +52,8 @@ async function createSession(browser, mobile) {
       data = { user: { id_usuario: '66666666-6666-4666-8666-666666666666', nombres: 'Cliente', apellidos: 'QA', email: EMAIL, telefono_principal: '99999999' }, roles: ['cliente'], cliente_id: '77777777-7777-4777-8777-777777777777' };
     } else if (requestPath === '/v1/auth/csrf') {
       data = { csrf_token: 'synthetic-csrf' };
+    } else if (requestPath === '/v1/auth/session/touch') {
+      data = { touched: true };
     } else if (requestPath === '/v1/commerce/eligibility') {
       if (eligibilityGate) await eligibilityGate.promise;
       data = { booking: true, vipPurchase: false };
