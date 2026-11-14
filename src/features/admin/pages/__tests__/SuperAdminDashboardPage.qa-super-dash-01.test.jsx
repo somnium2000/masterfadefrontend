@@ -122,6 +122,7 @@ describe('SuperAdminDashboardPage', () => {
     fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '' } });
     expect(await screen.findByText(/Selecciona ambas fechas/i)).toBeInTheDocument();
     expect(getSummary).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByLabelText('Hasta'), { target: { value: '2026-11-09' } });
     fireEvent.change(screen.getByLabelText('Desde'), { target: { value: '2026-11-10' } });
     expect(await screen.findByText(/no puede ser posterior/i)).toBeInTheDocument();
     expect(getSummary).toHaveBeenCalledTimes(1);

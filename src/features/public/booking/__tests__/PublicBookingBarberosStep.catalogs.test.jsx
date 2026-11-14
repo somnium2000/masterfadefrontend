@@ -58,7 +58,7 @@ function deferred() {
   return { promise, resolve };
 }
 async function ready() {
-  render(<Harness />);
+  await act(async () => { render(<Harness />); });
   await screen.findByRole('option', { name: 'MasterFade Blvd. Suyapa' });
   return screen.getByRole('combobox', { name: 'Sucursal' });
 }
