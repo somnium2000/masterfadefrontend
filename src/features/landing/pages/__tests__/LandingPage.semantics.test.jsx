@@ -8,11 +8,12 @@ import { resolve } from 'node:path';
 import { cwd } from 'node:process';
 import LandingPage from '../LandingPage.jsx';
 import { ThemeProvider } from '../../../../context/ThemeContext.jsx';
-const eligibility = vi.hoisted(() => ({ booking: false }));
+const eligibility = vi.hoisted(() => ({ booking: false, publicBooking: false }));
 vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => eligibility }));
 
 afterEach(() => {
   eligibility.booking = false;
+  eligibility.publicBooking = false;
   cleanup();
   window.localStorage.removeItem('mf_theme_variant');
 });
@@ -22,6 +23,16 @@ test('solo elegibilidad positiva del backend abre la entrada privada', () => {
   render(<ThemeProvider><MemoryRouter><LandingPage /><LocationProbe /></MemoryRouter></ThemeProvider>);
   fireEvent.click(screen.getAllByRole('button', { name: 'Agendar Cita', exact: true })[0]);
   expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent('/agendar/barberos');
+});
+
+test('disponibilidad publica muestra Agendar sin conceder elegibilidad personal', () => {
+  eligibility.publicBooking = true;
+  render(<ThemeProvider><MemoryRouter><LandingPage /><LocationProbe /></MemoryRouter></ThemeProvider>);
+  const entry = screen.getAllByRole('button', { name: 'Agendar Cita', exact: true })[0];
+  expect(entry).toBeEnabled();
+  fireEvent.click(entry);
+  expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent('/agendar/barberos');
+  expect(eligibility.booking).toBe(false);
 });
 
 function LocationProbe() {

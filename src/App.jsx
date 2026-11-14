@@ -60,8 +60,8 @@ import AdminSeguridadSesionesPage from './features/admin/pages/AdminSeguridadSes
 import AdminSeguridadUsuariosPage from './features/admin/pages/AdminSeguridadUsuariosPage.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
 import RouteErrorBoundary from './components/errors/RouteErrorBoundary.jsx';
-import BookingUnavailablePage from './features/public/pages/BookingUnavailablePage.jsx';
 import usePrivateCommerce from './hooks/usePrivateCommerce.js';
+import PublicBookingAccess from './features/public/booking/components/PublicBookingAccess.jsx';
 
 const PublicBookingFlow = lazy(() => import('./features/public/booking/PublicBookingFlow.jsx'));
 const PublicBookingBarberosStep = lazy(() => import('./features/public/booking/PublicBookingBarberosStep.jsx'));
@@ -159,7 +159,7 @@ function App() {
         element={
           <RouteErrorBoundary>
             <BookingSuspense>
-              {privateCommerce.booking ? <PublicBookingFlow /> : <BookingUnavailablePage />}
+              <PublicBookingAccess commerce={privateCommerce}><PublicBookingFlow /></PublicBookingAccess>
             </BookingSuspense>
           </RouteErrorBoundary>
         }
