@@ -361,7 +361,8 @@ describe('integracion del shell TodoPago', () => {
 
     render(<PublicBookingPaymentStep />);
 
-    expect(screen.getByText('PixelPay Sandbox: usa exclusivamente una tarjeta de prueba.')).not.toBeNull();
+    expect(screen.getByText('Sandbox · Entorno de pruebas (QA)')).not.toBeNull();
+    expect(screen.getByText('Utiliza exclusivamente tarjetas de prueba')).not.toBeNull();
     expect(screen.getByLabelText('Numero de tarjeta')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' })).not.toBeNull();
     expect(screen.queryByText(/TodoPago/i)).toBeNull();
@@ -375,7 +376,7 @@ describe('integracion del shell TodoPago', () => {
 
     render(<PublicBookingPaymentStep />);
 
-    expect(screen.getByText('Ingresa los datos de tu tarjeta para procesar el pago de forma segura.')).not.toBeNull();
+    expect(screen.getByText('Solo aceptamos tarjetas válidas')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Pagar con PixelPay' })).not.toBeNull();
     expect(screen.queryByText(/Sandbox/i)).toBeNull();
     expect(screen.queryByText(/tarjeta de prueba/i)).toBeNull();
@@ -461,7 +462,7 @@ describe('integracion del shell TodoPago', () => {
     render(<PublicBookingPaymentStep />);
 
     expect(screen.getByLabelText('Numero de tarjeta')).not.toBeNull();
-    expect(screen.getByText('TodoPago test')).not.toBeNull();
+    expect(screen.getByText('Simulador local: esta pantalla no procesa cargos reales.')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Ejecutar simulator' })).not.toBeNull();
   });
 

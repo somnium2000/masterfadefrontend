@@ -5,7 +5,7 @@ import PaymentErrorContent from "../../../components/feedback/PaymentErrorConten
 import MembershipConfirmation from "./MembershipConfirmation.jsx";
 import { Button } from "../../../components/ui/button.jsx";
 import { PaymentCheckoutSteps } from "../../payments/PaymentCheckoutPresentation.jsx";
-import { getPixelPayCustomerMessage } from "../../payments/pixelPayPresentation.js";
+import { getPixelPayCustomerMessage, getPixelPayPresentation } from "../../payments/pixelPayPresentation.js";
 import {
   Dialog,
   DialogContent,
@@ -110,6 +110,7 @@ export default function PlanPurchaseFlowDialog({
     address: "", city: "", state: "HN-FM", phone: "",
   });
   const [fieldErrors, setFieldErrors] = useState({});
+  const pixelPayPresentation = getPixelPayPresentation();
   const operationId = paymentIntent?.id_payment_intent || orderSummary?.id_order || 'membership';
   const [errorDisplay, setErrorDisplay] = useState({ message: errorMessage, open, operationId, acknowledged: false });
   if (errorDisplay.message !== errorMessage || errorDisplay.open !== open || errorDisplay.operationId !== operationId) {
@@ -140,6 +141,8 @@ export default function PlanPurchaseFlowDialog({
     setFieldErrors((current) => ({ ...current, [field]: "" }));
   };
   const submitPixelPay = () => {
+    // AM: El bloqueo de presentacion impide disparar el callback financiero con un entorno inconsistente.
+    if (!pixelPayPresentation.canPay) return;
     const validationErrors = validateVipPaymentForm(paymentForm);
     setFieldErrors(validationErrors);
     if (Object.keys(validationErrors).length || reconciling) return;
@@ -199,10 +202,10 @@ export default function PlanPurchaseFlowDialog({
         ) : (
           <>
             <DialogHeader className="pt-3">
-              <DialogTitle>{displayStep === "payment" ? "Pago seguro" : "Resumen de compra"}</DialogTitle>
+              <DialogTitle>{displayStep === "payment" ? (pixelPayPresentation.canPay ? "Pago seguro" : "Pago no disponible") : "Resumen de compra"}</DialogTitle>
               <DialogDescription>
                 {displayStep === "payment"
-                  ? "Ingresa los datos solicitados para procesar el pago con PixelPay."
+                  ? (pixelPayPresentation.canPay ? "Ingresa los datos solicitados para procesar el pago con PixelPay." : pixelPayPresentation.cardNotice)
                   : "Verifica los datos antes de continuar al pago."}
               </DialogDescription>
             </DialogHeader>
@@ -211,6 +214,7 @@ export default function PlanPurchaseFlowDialog({
               {displayStep === "payment" ? (
                 <>
                   <PaymentCheckoutSteps processing={loading || reconciling} />
+                  {!pixelPayPresentation.canPay ? <p role="alert">{pixelPayPresentation.configurationError}</p> : null}
                   <div className="mf-payment-panel mf-payment-summary">
                     <div><p className="mf-checkout-section-title">Tu membresía</p><h3>{plan?.nombre_plan || "Plan"}</h3><p>{branchLabel}</p></div>
                     <div><p>Total a pagar · {totals?.moneda_codigo || "HNL"}</p><strong>{formatMoney(totals?.total_hnl)}</strong></div>
@@ -218,11 +222,11 @@ export default function PlanPurchaseFlowDialog({
                   <div className="mf-payment-panel text-sm">
                     <p className="flex items-center gap-2 font-semibold text-[var(--mf-text)]">
                       <LockKeyhole size={14} />
-                      Pago seguro
+                      {pixelPayPresentation.canPay ? 'Pago seguro' : 'Pago no disponible'}
                     </p>
-                    <p className="mt-1 text-[var(--mf-text-2)]">Los datos se envían a PixelPay y no se guardan en este navegador.</p>
+                    <p className="mt-1 text-[var(--mf-text-2)]">{pixelPayPresentation.canPay ? 'Los datos se envían a PixelPay y no se guardan en este navegador.' : pixelPayPresentation.privacyNotice}</p>
 
-                    <div className="mf-payment-form">
+                    <fieldset className="mf-payment-form min-w-0" disabled={!pixelPayPresentation.canPay}>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         Numero de tarjeta
                         <input ref={cardInputRef} className="mf-input mt-1 w-full" type="text" inputMode="numeric" autoComplete="cc-number" placeholder="0000 0000 0000 0000" maxLength={23} value={paymentForm.cardNumber} onChange={setPaymentField("cardNumber")} />
@@ -248,7 +252,7 @@ export default function PlanPurchaseFlowDialog({
                       <label className="text-xs text-[var(--mf-text-2)]">Departamento<select className="mf-select mt-1 w-full" autoComplete="address-level1" value={paymentForm.state} onChange={setPaymentField("state")}>{HONDURAS_DEPARTMENTS.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}</select>{fieldErrors.state ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.state}</span> : null}</label>
                       <label className="text-xs text-[var(--mf-text-2)]">País<input className="mf-input mt-1 w-full" autoComplete="country" value="HN" readOnly /></label>
                       <label className="text-xs text-[var(--mf-text-2)]">Teléfono<input className="mf-input mt-1 w-full" type="tel" inputMode="numeric" autoComplete="tel" maxLength={15} value={paymentForm.phone} onChange={setPaymentField("phone")} />{fieldErrors.phone ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.phone}</span> : null}</label>
-                    </div>
+                    </fieldset>
                     <p className="mt-3 inline-flex items-center gap-2 text-xs text-[var(--mf-text-2)]">
                       <CreditCard size={13} />
                       PAN y CVV permanecen únicamente en memoria y se limpian al enviar o cerrar.
@@ -323,7 +327,7 @@ export default function PlanPurchaseFlowDialog({
 
             {displayStep === "payment" ? (
               <DialogFooter className="mf-payment-footer">
-                <Button type="button" className="mf-payment-submit" onClick={submitPixelPay} disabled={loading || disableClose || reconciling}>
+                <Button type="button" className="mf-payment-submit" onClick={submitPixelPay} disabled={loading || disableClose || reconciling || !pixelPayPresentation.canPay}>
                   {loading ? <Loader2 size={15} className="animate-spin" /> : <LockKeyhole size={15} />}
                   Pagar con PixelPay
                 </Button>
