@@ -5,11 +5,11 @@ import { isQaPixelPay3dsDiagnosticAuthorized } from '../../../payments/pixelPayS
 import { PublicBookingProvider } from '../BookingFlowContext.jsx';
 import PublicBookingPaymentStep from '../PublicBookingPaymentStep.jsx';
 import useBookingPayment from '../hooks/useBookingPayment.js';
-import { getPublicPaymentStatus, queryPublicPixelPayStatus, salePublicPixelPay } from '../publicBookingApi.js';
+import { getPublicPaymentStatus, queryPublicPixelPayStatus, salePublicPixelPay, requestSongbirdBridge } from '../publicBookingApi.js';
 
 vi.mock('../publicBookingApi.js', () => ({
   completePublicMockPayment: vi.fn(), completePublicSimulatorPayment: vi.fn(), createPublicPaymentIntent: vi.fn(),
-  getPublicPaymentStatus: vi.fn(), queryPublicPixelPayStatus: vi.fn(), salePublicPixelPay: vi.fn(),
+  getPublicPaymentStatus: vi.fn(), queryPublicPixelPayStatus: vi.fn(), salePublicPixelPay: vi.fn(), requestSongbirdBridge:vi.fn(),
 }));
 const GROUP = '11111111-1111-4111-8111-111111111111';
 const INTENT = '22222222-2222-4222-8222-222222222222';
@@ -51,7 +51,8 @@ test.each([['VITE_ENTORNO', 'production'], ['VITE_PIXELPAY_ENV', 'live'], ['VITE
 });
 test('fresh marked intent can observe once, clears sensitive fields and never uses normal Sale', async () => {
   let finish;
-  const context = mountPayment({ observePixelPay3ds: vi.fn(() => new Promise(resolve => { finish = resolve; })) });
+  const context = mountPayment({ pixelpaySongbirdBridge:true,paymentOwnerId:'synthetic-owner',
+    observePixelPay3ds: vi.fn(() => new Promise(resolve => { finish = resolve; })) });
   for (const [label, value] of [['Nombre del titular', 'Synthetic fixture'], ['Numero de tarjeta', '0000000000000000'],
     ['Expiracion', '12/39'], ['CVV', '000'], ['Telefono de contacto', '99999999'],
     ['Direccion de facturacion', 'Barrio Central calle uno'], ['Ciudad', 'Tegucigalpa']]) {
@@ -61,6 +62,7 @@ test('fresh marked intent can observe once, clears sensitive fields and never us
   const button = screen.getByRole('button', { name: 'Observar respuesta Sandbox (una operación)' });
   fireEvent.click(button); fireEvent.click(button);
   expect(context.observePixelPay3ds).toHaveBeenCalledOnce();
+  expect(requestSongbirdBridge).not.toHaveBeenCalled();
   expect(context.completePixelPayPayment).not.toHaveBeenCalled();
   await act(async () => finish(pending));
   expect(screen.getByLabelText('CVV').value).toBe('');
@@ -75,6 +77,22 @@ test('pending marked intent only verifies local state even after diagnostic capa
   fireEvent.click(screen.getByRole('button', { name: 'Verificar estado del pago' }));
   expect(context.refreshPaymentStatus).toHaveBeenCalledWith({ queryPixelPayProvider: false });
   expect(context.observePixelPay3ds).not.toHaveBeenCalled();
+});
+
+test('pending checkout exposes bridge metadata only with its own QA capability; it never calls Sale or external Status',async()=>{
+  requestSongbirdBridge.mockResolvedValue({state:'contract_blocked',can_start:false});
+  const context=mountPayment({paymentIntent:pending,paymentResult:pending,paymentOwnerId:'synthetic-owner',
+    pixelpaySongbirdBridge:true,pixelpay3dsDiagnostic:false,paymentCanObserve3ds:false});
+  await screen.findByText(/El puente conservó el intento/);
+  expect(requestSongbirdBridge.mock.calls.map(c=>c[0].action)).toEqual(['status']);
+  expect(context.completePixelPayPayment).not.toHaveBeenCalled();expect(context.observePixelPay3ds).not.toHaveBeenCalled();
+  expect(salePublicPixelPay).not.toHaveBeenCalled();expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+  expect(screen.queryByLabelText('CVV')).toBeNull();
+});
+
+test('fresh checkout never reads an unreserved bridge state',()=>{
+  mountPayment({pixelpaySongbirdBridge:true,paymentOwnerId:'synthetic-owner'});
+  expect(requestSongbirdBridge).not.toHaveBeenCalled();
 });
 test('terminal verified approval remains a confirmed payment in diagnostic presentation', () => {
   mountPayment({ paymentIntent: { ...fresh, booking_confirmed: true }, paymentResult: { ...fresh, booking_confirmed: true },
