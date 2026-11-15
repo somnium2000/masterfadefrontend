@@ -45,3 +45,13 @@ test('expired hold cannot start; backend authentication-complete never claims a 
   view.unmount();requestSongbirdBridge.mockResolvedValue({state:'authentication_complete',can_start:false});render(<SongbirdBridgePanel {...props}/>);
   await screen.findByText(/La autenticación no confirma el pago/);
 });
+
+test('reload before upstream completion can explicitly recover metadata without automatically claiming a lease',async()=>{
+  requestSongbirdBridge.mockResolvedValueOnce({state:'awaiting_response',can_start:false})
+    .mockResolvedValueOnce({state:'handoff_ready',can_start:true});
+  render(<SongbirdBridgePanel {...props}/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Actualizar estado 3DS'}));
+  await screen.findByRole('button',{name:'Iniciar autenticación 3DS'});
+  expect(requestSongbirdBridge.mock.calls.map(c=>c[0].action)).toEqual(['status','status']);
+  expect(createSongbirdSession).not.toHaveBeenCalled();
+});

@@ -711,7 +711,7 @@ export default function PublicBookingPaymentStep() {
         ) : null}
 
         <SongbirdBridgePanel enabled={isQaPixelPay3dsDiagnosticAuthorized(pixelpaySongbirdBridge)&&diagnosticContext
-          &&paymentResult?.booking_confirmed!==true} groupId={holdResult?.id_grupo_cita||paymentIntent?.id_grupo_cita}
+          &&pixelPayPendingConfirmation&&!processingPayment&&paymentResult?.booking_confirmed!==true} groupId={holdResult?.id_grupo_cita||paymentIntent?.id_grupo_cita}
           intentId={paymentIntent?.id_intent} email={paymentTitularEmail} identity={paymentOwnerId} allowStart={!holdExpired}/>
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
           {paymentSimulationAction.canShow && (!pixelPaySaleSuspended || diagnosticCanSubmit) && !pixelPayPendingConfirmation && !paymentRestoring ? (

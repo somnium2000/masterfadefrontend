@@ -45,6 +45,7 @@ export async function createSongbirdSession({ handoff, transport, onState=()=>{}
   timer=setTimeout(()=>{onState({state:'interrupted'});stop();},Math.max(0,Date.parse(handoff.expires_at)-Date.now()));
   try {
     const {sdk,Manager,Modal}=await loadSdk();
+    if(stopped||signal?.aborted)throw new Error('SONGBIRD_INTERRUPTED');
     cardinal=await loadCardinal(sessionAbort.signal);
     if(stopped||signal?.aborted||!cardinal)throw new Error('SONGBIRD_INTERRUPTED');
     previous=window.Cardinal;
@@ -74,7 +75,7 @@ export async function createSongbirdSession({ handoff, transport, onState=()=>{}
     let setupClaimed=false;let validationClaimed=false;
     manager.service={
       async authenticationLookup(value){
-        if(stopped)return halted;if(setupClaimed)return failure();setupClaimed=true;
+        if(stopped||setupClaimed)return halted;setupClaimed=true;
         const r=await transport('setup',{lease_id:handoff.lease_id,reference:value.reference});
         if(stopped)return halted;onState(r);
         if(r.state!=='challenge_ready'||!r.challenge)return failure();
@@ -83,7 +84,7 @@ export async function createSongbirdSession({ handoff, transport, onState=()=>{}
           continue_payload:r.challenge.payload,transaction_id:r.challenge.transactionId};return response;
       },
       async authenticationContinue(value){
-        if(stopped)return halted;if(validationClaimed)return failure();validationClaimed=true;
+        if(stopped||validationClaimed)return halted;validationClaimed=true;
         const r=await transport('validated',{lease_id:handoff.lease_id,jwt:value.payload});if(stopped)return halted;onState(r);return failure();
       },
       async retryTransaction(){if(stopped)return halted;onState({state:'financial_finalization_blocked'});return failure();},

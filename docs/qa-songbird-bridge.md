@@ -11,6 +11,9 @@ La capacidad estricta `pixelpaySongbirdBridge === true` solo vale en QA PixelPay
 Sandbox con booking autorizado. Se revoca durante revalidación, error y cambio de
 identidad. No concede Sale ni VIP. Un intent diagnóstico pendiente muestra estado
 local del puente; no restaura tarjeta ni vuelve a enviar Sale al recargar.
+El panel se activa después del inicio pendiente, fuera de la petición inicial en
+curso. Si la recarga precede a la respuesta del proveedor, Actualizar estado 3DS
+consulta solo metadatos; nunca reclama automáticamente el handoff.
 
 `SongbirdBridgePanel` guarda únicamente estado visible. El handoff transitorio no
 pasa por estado React ni storage/logs. Debe contener protocolo, orden canónica,

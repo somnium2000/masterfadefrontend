@@ -22,6 +22,16 @@ export default function SongbirdBridgePanel({enabled=false,groupId,intentId,emai
     // eslint-disable-next-line react-hooks/exhaustive-deps -- AM: This ref is a request epoch, not a DOM ref.
     return ()=>{controller.abort();abortRef.current?.abort();generation.current++;session.current?.stop();session.current=null;};
   },[call,canRead,scope]);
+  const refresh=async()=>{
+    if(!canRead||inFlight.current)return;
+    const current=generation.current;inFlight.current=true;setBusyScope(scope);
+    const controller=new AbortController();abortRef.current=controller;
+    try{
+      const result=await call('status',{}, {signal:controller.signal});
+      if(current===generation.current)setView({...safeView(result),scope});
+    }catch{if(current===generation.current)setView({state:'unavailable',can_start:false,scope});}
+    finally{controller.abort();if(current===generation.current){inFlight.current=false;setBusyScope(null);}}
+  };
   const start=async()=>{
     if(!canRead||!allowStart||inFlight.current||view.scope!==scope||view.can_start!==true)return;
     const current=generation.current;const currentScope=scope;inFlight.current=true;setBusyScope(scope);
@@ -50,5 +60,7 @@ export default function SongbirdBridgePanel({enabled=false,groupId,intentId,emai
       :view.state==='expired'?'La sesión de autenticación venció. No repitas el pago.'
       :'El resultado sigue pendiente. No inicies otro pago.'}</p>
     {view.scope===scope&&view.can_start===true?<button type="button" onClick={start} disabled={busyScope===scope||!allowStart}>Iniciar autenticación 3DS</button>:null}
+    {['awaiting_response','unavailable','browser_leased','interrupted','expired'].includes(view.state)
+      ?<button type="button" onClick={refresh} disabled={busyScope===scope}>Actualizar estado 3DS</button>:null}
   </section>;
 }
