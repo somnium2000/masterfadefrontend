@@ -36,6 +36,48 @@ test('401 vigente mantiene invalidación HTTP', async () => {
 test('200 vigente carga y refresca Shell', async () => {
   await ready(); await act(async () => requests[0].resolve(response())); expect(screen.getAllByText('CURRENT').length).toBeGreaterThan(0); expect(h.refresh).toHaveBeenCalledTimes(1);
 });
+
+test('pago confirmado: volver al perfil por focus actualiza puntos y Shell sin pulsar actualizar', async () => {
+  await ready(); await act(async () => requests[0].resolve(response()));
+  window.dispatchEvent(new Event('focus'));
+  document.dispatchEvent(new Event('visibilitychange'));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  const paid = response();
+  paid.json = async () => ({ data: { cliente: { nombre_completo: 'CURRENT', masterpuntos: 5 } } });
+  await act(async () => requests[1].resolve(paid));
+  expect(screen.getByText('Masterpuntos: 5')).toBeTruthy();
+  expect(h.refresh).toHaveBeenCalledTimes(2);
+});
+
+test('regreso durante carga inicial reemplaza lectura sin dejar skeleton bloqueado', async () => {
+  await ready(); window.dispatchEvent(new Event('focus'));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[0].signal.aborted).toBe(true);
+  await act(async () => requests[1].resolve(response()));
+  expect(screen.getAllByText('CURRENT').length).toBeGreaterThan(0);
+});
+
+test('401 tardio del regreso de A no invalida la sesion B', async () => {
+  const view = await ready(); await act(async () => requests[0].resolve(response()));
+  window.dispatchEvent(new Event('focus'));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  h.auth.user = { id_usuario: 'synthetic-B' }; h.auth.clienteId = 'client-B'; view.rerender(<Page />);
+  await waitFor(() => expect(requests).toHaveLength(3));
+  expect(requests[1].signal.aborted).toBe(true);
+  await act(async () => { requests[1].resolve(response(401)); requests[2].resolve(response(200, 'OWNER-B')); });
+  expect(screen.getAllByText('OWNER-B').length).toBeGreaterThan(0);
+  expect(invalidation).not.toHaveBeenCalled(); expect(h.auth.logout).not.toHaveBeenCalled();
+});
+
+test('fallo de actualizacion silenciosa conserva perfil y termina carga', async () => {
+  await ready(); await act(async () => requests[0].resolve(response()));
+  window.dispatchEvent(new Event('focus'));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  await act(async () => requests[1].resolve(response(503)));
+  expect(screen.getAllByText('CURRENT').length).toBeGreaterThan(0);
+  expect(h.notify).toHaveBeenCalledWith('No se pudo cargar tu perfil.');
+  expect(h.auth.logout).not.toHaveBeenCalled();
+});
 test('carga sustituida y su finally no cancelan la nueva', async () => {
   const view = await ready(); h.refresh = vi.fn(); view.rerender(<Page />); await waitFor(() => expect(requests).toHaveLength(2));
   expect(requests[0].signal.aborted).toBe(true); await act(async () => requests[0].resolve(response(401))); expect(requests[1].signal.aborted).toBe(false);
