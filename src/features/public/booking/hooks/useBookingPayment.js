@@ -38,16 +38,17 @@ function createClientRequestId() {
 }
 
 function writeStoredPaymentContext(context) {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') return false;
   try {
     if (!context) {
       window.sessionStorage.removeItem(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY);
       window.sessionStorage.removeItem(PENDING_PAYMENT_CONTEXT_STORAGE_KEY);
-      return;
+      return true;
     }
     window.sessionStorage.setItem(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY, JSON.stringify(context));
+    return true;
   } catch {
-    // no-op
+    return false;
   }
 }
 
@@ -63,6 +64,16 @@ function clearStoredPendingPaymentContext() {
 function isAbortError(error) {
   return error?.name === 'AbortError'
     || String(error?.message || '').toLowerCase().includes('aborted');
+}
+
+export function isPixelPaySalePreflightRejection(error) {
+  const code = String(error?.data?.error?.code || error?.error?.code || error?.code || '').trim().toUpperCase();
+  return Number(error?.status) >= 400 && Number(error?.status) < 500 && [
+    'PRIVATE_COMMERCE_RESTRICTED', 'AUTH_TOKEN_REQUIRED', 'AUTH_TOKEN_INVALID',
+    'AUTH_SESSION_NOT_FOUND', 'AUTH_SESSION_INVALID', 'AUTH_SESSION_IDLE_EXPIRED',
+    'AUTH_FORBIDDEN', 'CSRF_TOKEN_INVALID', 'FST_ERR_VALIDATION',
+    'PIXELPAY_RECOVERY_CONTEXT_UNAVAILABLE',
+  ].includes(code);
 }
 
 function waitAbortable(ms, signal) {
@@ -312,6 +323,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     }
 
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const requestSeq = paymentStateSeqRef.current;
     const promise = (async () => {
       setCheckingPaymentStatus(true);
       let lastPayload = null;
@@ -325,10 +337,40 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
           authenticated,
           signal: controller?.signal,
         });
-        const payload = response?.data ?? response;
+        const receivedPayload = response?.data ?? response;
+        if (!mountedRef.current || paymentStateSeqRef.current !== requestSeq
+          || !isCurrentPaymentGroup(normalizedGroupId)) return null;
+        if (paymentIntentRef.current?.id_intent
+          && paymentIntentRef.current.id_intent !== normalizedIntentId) return null;
+        const unresolvedSale = paymentIntentRef.current?.id_intent === normalizedIntentId
+          && paymentIntentRef.current?.pending_confirmation === true;
+        const responseMatches = receivedPayload?.id_grupo_cita === normalizedGroupId
+          && receivedPayload?.id_intent === normalizedIntentId;
+        if (unresolvedSale && !responseMatches) return null;
+        const definitive = responseMatches && (receivedPayload?.booking_confirmed === true
+          || receivedPayload?.estado_intent_codigo === 'fallido');
+        if (definitive) {
+          const intent = {
+            ...paymentIntentRef.current,
+            id_grupo_cita: normalizedGroupId,
+            id_intent: normalizedIntentId,
+            estado_intent_codigo: receivedPayload.estado_intent_codigo,
+            booking_confirmed: receivedPayload.booking_confirmed === true,
+            pending_confirmation: false,
+          };
+          paymentIntentRef.current = intent;
+          setPaymentIntentState(intent);
+          writeStoredPaymentContext(buildPaymentContextPayload({
+            groupId: normalizedGroupId, intentId: normalizedIntentId,
+            titularEmail: normalizedEmail, paymentIntent: intent,
+          }));
+        }
+        // AM: Un GET transitorio no demuestra que una Sale enviada pueda repetirse.
+        const payload = unresolvedSale && !definitive
+          ? { ...receivedPayload, pending_confirmation: true }
+          : receivedPayload;
         lastPayload = payload;
 
-        if (!mountedRef.current || !isCurrentPaymentGroup(normalizedGroupId)) return null;
         setPaymentResultState(payload);
         if (payload?.booking_confirmed === true) clearStoredPendingPaymentContext();
 
@@ -392,7 +434,48 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return null;
     if (!isCurrentPaymentGroup(normalizedGroupId)) return null;
     if (pixelPaySaleRef.current?.promise) return pixelPaySaleRef.current.promise;
+    if (paymentIntentRef.current?.id_intent
+      && paymentIntentRef.current.id_intent !== normalizedIntentId) return null;
+    if (paymentIntentRef.current?.id_intent === normalizedIntentId
+      && (paymentIntentRef.current.pending_confirmation === true
+        || paymentIntentRef.current.booking_confirmed === true
+        || ['confirmado', 'fallido', 'expirado'].includes(paymentIntentRef.current.estado_intent_codigo))) return null;
 
+    const saleStateSeq = paymentStateSeqRef.current;
+    const previousIntent = paymentIntentRef.current?.id_intent === normalizedIntentId
+      ? paymentIntentRef.current
+      : { id_grupo_cita: normalizedGroupId, id_intent: normalizedIntentId };
+    const persistSaleState = (pending, terminal = null) => {
+      if (!mountedRef.current || paymentStateSeqRef.current !== saleStateSeq
+        || !isCurrentPaymentGroup(normalizedGroupId)) return false;
+      if (paymentIntentRef.current?.id_intent
+        && paymentIntentRef.current.id_intent !== normalizedIntentId) return false;
+      const intent = {
+        ...previousIntent,
+        pending_confirmation: pending,
+        ...(terminal ? {
+          estado_intent_codigo: terminal.estado_intent_codigo,
+          booking_confirmed: terminal.booking_confirmed === true,
+        } : {}),
+      };
+      const stored = writeStoredPaymentContext(buildPaymentContextPayload({
+        groupId: normalizedGroupId,
+        intentId: normalizedIntentId,
+        titularEmail: normalizedEmail,
+        paymentIntent: intent,
+      }));
+      if (stored) {
+        paymentIntentRef.current = intent;
+        if (mountedRef.current) setPaymentIntentState(intent);
+      }
+      return stored;
+    };
+    // AM: Persistir antes del envío protege también una recarga sin catch; nunca incluye tarjeta.
+    if (!persistSaleState(true)) {
+      throw Object.assign(new Error('No fue posible guardar el contexto del pago. Revisa el almacenamiento del navegador.'), {
+        code: 'PIXELPAY_RECOVERY_CONTEXT_UNAVAILABLE', status: 409,
+      });
+    }
     const controller = new AbortController();
     const promise = (async () => {
       const response = await salePublicPixelPay({
@@ -409,14 +492,21 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
         billing_city: safeText(billing?.city),
         billing_phone: safeText(billing?.phone),
       }, { authenticated, signal: controller.signal });
-      if (mountedRef.current && isCurrentPaymentGroup(normalizedGroupId)) {
-        setPaymentResultState(response);
+      const definitive = response?.booking_confirmed === true || response?.estado_intent_codigo === 'fallido';
+      if (definitive) persistSaleState(false, response);
+      const result = definitive ? response : { ...response, pending_confirmation: true };
+      if (mountedRef.current && paymentStateSeqRef.current === saleStateSeq
+        && isCurrentPaymentGroup(normalizedGroupId)) {
+        setPaymentResultState(result);
       }
-      return response;
+      return result;
     })();
     pixelPaySaleRef.current = { controller, promise };
     try {
       return await promise;
+    } catch (error) {
+      if (isPixelPaySalePreflightRejection(error)) persistSaleState(false);
+      throw error;
     } finally {
       if (pixelPaySaleRef.current?.promise === promise) pixelPaySaleRef.current = null;
     }

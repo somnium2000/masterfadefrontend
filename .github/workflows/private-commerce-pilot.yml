@@ -23,6 +23,8 @@ jobs:
           src/features/cliente/pages/__tests__/MasterPuntos.qa18c.test.jsx
           src/features/public/booking/__tests__/PublicBookingPaymentPresentation.test.jsx
           src/features/public/booking/__tests__/PublicBookingFlow.paymentReload.test.jsx
+          src/features/public/booking/__tests__/PublicBookingFlow.pixelpaySaleContract.test.jsx
+          src/features/public/booking/__tests__/useBookingPayment.pixelpay.test.jsx
           src/features/public/pages/__tests__/MembershipPlansPage.catalog.test.jsx
           src/features/public/pages/__tests__/MembershipPlansPage.identity.test.jsx
           src/features/landing/pages/__tests__/LandingPage.semantics.test.jsx

@@ -92,7 +92,7 @@ import useBookingCatalogs from './hooks/useBookingCatalogs.js';
 import useBookingAvailability from './hooks/useBookingAvailability.js';
 import useBookingCompanions from './hooks/useBookingCompanions.js';
 import useBookingHold from './hooks/useBookingHold.js';
-import useBookingPayment from './hooks/useBookingPayment.js';
+import useBookingPayment, { isPixelPaySalePreflightRejection } from './hooks/useBookingPayment.js';
 import usePublicAgendaEvents, { parseAgendaSseEnabled } from './hooks/usePublicAgendaEvents.js';
 import useBookingWizardNavigation from './hooks/useBookingWizardNavigation.js';
 import { resolvePaymentResumeContext } from './paymentResumeContext.js';
@@ -3818,6 +3818,9 @@ const agendaAutoLoadKeyRef = useRef('');
   const paymentCanExecuteSale = Boolean(
     pixelpaySale !== false
     && !paymentRestoring
+    && !paymentResult?.booking_confirmed
+    && !hasUnresolvedPaymentEvidence(paymentResult)
+    && !hasUnresolvedPaymentEvidence(paymentIntent)
     && backendPaymentState === 'link_generado'
     && Number.isFinite(backendPaymentAmount)
     && backendPaymentAmount > 0
@@ -3843,11 +3846,12 @@ const agendaAutoLoadKeyRef = useRef('');
           pending_confirmation: false,
           estado_intent_codigo: 'fallido',
         });
-      } else if (!errorCode || errorCode === 'PIXELPAY_SALE_ERROR') {
-        setPaymentResult({
+      } else if (!isPixelPaySalePreflightRejection(err)) {
+        setPaymentResult((current) => ({
+          ...(current && typeof current === 'object' ? current : {}),
           pending_confirmation: true,
           estado_intent_codigo: 'pendiente_confirmacion',
-        });
+        }));
       }
       notifications.error(extractMessage(err), { dedupeKey: 'public-booking-pixelpay-error' });
       throw err;
