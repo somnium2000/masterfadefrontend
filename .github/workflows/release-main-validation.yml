@@ -9,6 +9,8 @@ jobs:
     if: startsWith(github.head_ref, 'release/prod-')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      TZ: America/Tegucigalpa
     strategy:
       fail-fast: false
       matrix:
