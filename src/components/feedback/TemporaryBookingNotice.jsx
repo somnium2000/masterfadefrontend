@@ -29,7 +29,7 @@ export default function TemporaryBookingNotice() {
     return () => window.clearTimeout(timeout);
   }, [visible]);
 
-  if (!visible || Date.now() >= EXPIRES_AT) return null;
+  if (!visible) return null;
 
   function dismiss() {
     try {

@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   notifications: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
   api: { getClientePlanEstado: vi.fn(), createMembershipOrder: vi.fn(), createMembershipPaymentIntent: vi.fn(), confirmMembershipPayment: vi.fn(), queryMembershipPaymentStatus: vi.fn(), cancelClientePlanBySubscription: vi.fn() },
 }));
+// AM: El caso aprobado requiere elegibilidad explicita; las guardas reales se prueban por separado.
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ booking: true, vipPurchase: true }) }));
 const BRANCH = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => ({ user: { id_usuario: 'user-a', cliente_id: 'client-a' }, clienteId: 'client-a' }) }));
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => mocks.notifications }));
