@@ -1,3 +1,4 @@
+import { getAppointmentStatusLabel } from '../../../lib/appointmentStatus.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarClock, CheckCircle2, TimerReset } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -14,23 +15,18 @@ import {
 
 const STATUS_META = {
   confirmada: {
-    label: 'Confirmado',
     className: 'border-emerald-400/25 bg-emerald-500/10 text-emerald-300',
   },
   en_salon: {
-    label: 'En salón',
     className: 'border-amber-400/25 bg-amber-500/10 text-amber-300',
   },
   en_atencion: {
-    label: 'En atención',
     className: 'border-indigo-400/25 bg-indigo-500/10 text-indigo-300',
   },
   en_espera: {
-    label: 'En espera',
     className: 'border-sky-400/25 bg-sky-500/10 text-sky-300',
   },
   pendiente_pago: {
-    label: 'Pendiente',
     className: 'border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-accent)]',
   },
 };
@@ -87,9 +83,9 @@ function getInitials(name) {
 
 function getStatusMeta(state) {
   const normalized = String(state || '').trim().toLowerCase();
-  return STATUS_META[normalized] || {
-    label: 'Programada',
-    className: 'border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)]',
+  return {
+    label: getAppointmentStatusLabel(state),
+    className: STATUS_META[normalized]?.className || 'border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] text-[var(--mf-text-2)]',
   };
 }
 

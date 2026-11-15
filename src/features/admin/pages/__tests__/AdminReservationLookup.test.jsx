@@ -14,6 +14,15 @@ function open() {
   fireEvent.click(screen.getAllByRole('button', { name: /Buscar reserva/ })[0]);
   return screen.getByRole('dialog');
 }
+it.each([['en_espera','En espera'],['pendiente_pago','Pendiente de pago'],['confirmada','Confirmada'],['en_salon','En salón'],['en_atencion','En atención'],['completada','Completada'],['cancelada','Cancelada'],['cancelada_por_cliente','Cancelada por el cliente'],['expirada','Expirada'],['no_show','No asistió'],['anulada','Anulada']])('Buscar reserva: %s legible en resultado y detalle',async(code,label)=>{
+ const cita={id_cita:'fixture',nombre_cliente:'Integrante',alias_integrante:'Integrante',estado_cita_codigo:code,inicio_at:'2026-11-15T14:00:00Z'};
+ mocks.search.mockResolvedValue({data:{reservas:[{id_grupo_cita:'fixture',codigo_reserva:'ABCDE',citas:[cita]}]}});
+ const dialog=open();fireEvent.change(within(dialog).getByLabelText('Código de reserva'),{target:{value:'ABCDE'}});
+ fireEvent.click(within(dialog).getByRole('button',{name:'Buscar',exact:true}));
+ expect((await within(dialog).findAllByText(label,{exact:true})).length).toBeGreaterThan(0);
+ expect(dialog.textContent).toContain(' · '+label);expect(cita.estado_cita_codigo).toBe(code);
+ expect(dialog.textContent).not.toMatch(/no_show|en_salon|en_atencion|pendiente_pago|cancelada_por_cliente/);
+});
 
 it('mantiene un único encabezado accesible y conserva búsqueda y herramientas', () => {
   render(<MemoryRouter><AdminAgendamientoCitasPage /></MemoryRouter>);
