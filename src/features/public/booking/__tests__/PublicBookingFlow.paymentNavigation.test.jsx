@@ -123,6 +123,18 @@ test('capacidad false bloquea incluso la invocación directa del callback Sale',
  expect(sessionStorage.getItem(KEY)).toContain(INTENT);
 });
 
+test('Inicio con Sale suspendida conserva contexto sin afirmar transacción ni liberar la reserva',async()=>{
+ const sale=vi.fn();mocks.data.salePixelPayOnce=sale;
+ mount(true,{pixelpaySale:false});
+ expect(screen.getByText('Pago deshabilitado en QA')).toBeInTheDocument();
+ expect(screen.queryByText(/Estamos verificando el resultado del pago/)).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Inicio'}));
+ fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'Salir'}));
+ await screen.findByText('Landing');
+ expect(sale).not.toHaveBeenCalled();expect(mocks.release).not.toHaveBeenCalled();
+ expect(sessionStorage.getItem(KEY)).toContain(INTENT);
+});
+
 test.each([undefined,true])('capacidad %s conserva el callback legacy sin reintentos',async pixelpaySale=>{
  const sale=vi.fn().mockResolvedValue({pending_confirmation:true});mocks.data.salePixelPayOnce=sale;
  mount(true,{pixelpaySale});

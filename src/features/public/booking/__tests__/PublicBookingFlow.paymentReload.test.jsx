@@ -57,6 +57,7 @@ function PaymentReloadHarness({
   holdPricing = null,
   bookingBlocksSummary = [PLACEHOLDER_BOOKING_BLOCK],
   browserNavigation = false,
+  pixelpaySale,
 } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -168,6 +169,7 @@ function PaymentReloadHarness({
         paymentTitularEmail: resumeContext?.titular_email || '',
         paymentRestoring,
         paymentCanExecuteSale,
+        pixelpaySale,
       }}>
         {(!browserNavigation || location.pathname === '/agendar/pagar') && <PublicBookingPaymentStep />}
       </PublicBookingProvider>
@@ -221,6 +223,36 @@ function fillPixelPayForm() {
 }
 
 describe('PublicBookingFlow payment hard reload integration', () => {
+  test.each(['link_generado', 'pendiente_confirmacion'])('F5 con Sale suspendida recupera %s sin enviar un cobro ni borrar conciliación', async estado => {
+    writeStandardContext();
+    getPublicPaymentStatus.mockResolvedValue({
+      id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, estado_intent_codigo: estado,
+      pending_confirmation: estado === 'pendiente_confirmacion', booking_confirmed: false, monto_hnl: 1,
+    });
+    let view = renderPaymentFlow('/agendar/pagar', { pixelpaySale: false });
+    await screen.findByText('Monto: L 1.00');
+    const assertPresentation = () => {
+      expect(screen.queryByRole('button', { name: /^Pagar con/ })).toBeNull();
+      expect(screen.queryByLabelText('CVV')).toBeNull();
+      if (estado === 'link_generado') {
+        expect(screen.getByText('Pago deshabilitado en QA')).toBeTruthy();
+        expect(screen.queryByText(/Estamos verificando el resultado del pago/)).toBeNull();
+        expect(screen.getByText('Procesando').parentElement.getAttribute('aria-current')).toBeNull();
+      } else {
+        expect(screen.getByText('Tu pago requiere verificación. No vuelvas a realizar el pago.')).toBeTruthy();
+        expect(screen.getByText('Procesando').parentElement.getAttribute('aria-current')).toBe('step');
+      }
+      expect(salePublicPixelPay).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem('masterfade.publicBookingPayment.v1')).toContain(INTENT_ID);
+    };
+    assertPresentation();
+    view.unmount();
+    view = renderPaymentFlow('/agendar/pagar', { pixelpaySale: false });
+    await screen.findByText('Monto: L 1.00');
+    assertPresentation();
+    expect(getPublicPaymentStatus).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
   test('Atrás y Adelante durante Sale conservan seguimiento y no envían un segundo cobro', async () => {
     writeStandardContext();
     getPublicPaymentStatus.mockResolvedValue({
