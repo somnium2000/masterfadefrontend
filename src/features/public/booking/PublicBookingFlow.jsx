@@ -96,7 +96,7 @@ import useBookingPayment, { isPixelPaySalePreflightRejection } from './hooks/use
 import usePublicAgendaEvents, { parseAgendaSseEnabled } from './hooks/usePublicAgendaEvents.js';
 import useBookingWizardNavigation from './hooks/useBookingWizardNavigation.js';
 import { resolvePaymentResumeContext } from './paymentResumeContext.js';
-import { isPixelPaySaleAuthorized } from '../../payments/pixelPaySaleCapability.js';
+import { isPixelPaySaleAuthorized, isQaPixelPay3dsDiagnosticAuthorized } from '../../payments/pixelPaySaleCapability.js';
 import BookingLayout from './components/BookingLayout.jsx';
 import BookingErrorState from './components/BookingErrorState.jsx';
 import { PublicBookingProvider } from './BookingFlowContext.jsx';
@@ -327,7 +327,7 @@ function persistRewardBookingContext(context) {
   window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, JSON.stringify(context));
 }
 
-export default function PublicBookingFlow({ pixelpaySale } = {}) {
+export default function PublicBookingFlow({ pixelpaySale, pixelpay3dsDiagnostic = false } = {}) {
   const { user: rewardUser } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -918,12 +918,14 @@ const agendaAutoLoadKeyRef = useRef('');
     completeMockPaymentOnce,
     completeSimulatorPaymentOnce,
     salePixelPayOnce,
+    observePixelPay3dsOnce,
     queryPixelPayStatusOnce,
     isCurrentPaymentGroup,
   } = useBookingPayment({
     currentGroupId: holdResult?.id_grupo_cita || '',
     authenticated: canUseClienteHold,
   });
+  const diagnosticPaymentContext = paymentIntent?.qa_3ds_diagnostic === true || paymentResult?.qa_3ds_diagnostic === true;
 
   const handleSelectedSlotUnavailable = useCallback(() => {
     notifications.warning(
@@ -3585,7 +3587,8 @@ const agendaAutoLoadKeyRef = useRef('');
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
 
     try {
-      const payload = options?.queryPixelPayProvider === true
+      const payload = options?.queryPixelPayProvider === true && !diagnosticPaymentContext
+        && storedContext?.paymentIntent?.qa_3ds_diagnostic !== true
         ? await queryPixelPayStatusOnce({ groupId, intentId, titularEmail })
         : await fetchPaymentStatusOnce({
             groupId,
@@ -3734,6 +3737,7 @@ const agendaAutoLoadKeyRef = useRef('');
     }
   }, [
     bookingBlocks,
+    diagnosticPaymentContext,
     confirmHoldWithoutPaymentRequest,
     fetchPaymentStatusOnce,
     holdResult,
@@ -3818,6 +3822,7 @@ const agendaAutoLoadKeyRef = useRef('');
   const backendPaymentAmount = Number(paymentResult?.monto_hnl ?? paymentIntent?.monto_hnl);
   const paymentCanExecuteSale = Boolean(
     isPixelPaySaleAuthorized(pixelpaySale)
+    && !diagnosticPaymentContext
     && !paymentRestoring
     && !paymentResult?.booking_confirmed
     && !hasUnresolvedPaymentEvidence(paymentResult)
@@ -3829,6 +3834,29 @@ const agendaAutoLoadKeyRef = useRef('');
     && paymentExecutionContext.intentId
     && isValidEmail(paymentExecutionContext.titularEmail)
   );
+
+  const paymentCanObserve3ds = Boolean(isQaPixelPay3dsDiagnosticAuthorized(pixelpay3dsDiagnostic)
+    && !isPixelPaySaleAuthorized(pixelpaySale) && canUseClienteHold
+    && !paymentRestoring && !holdExpired && Number(holdRemainingMs) > 0
+    && !paymentResult?.booking_confirmed && !hasUnresolvedPaymentEvidence(paymentResult)
+    && !hasUnresolvedPaymentEvidence(paymentIntent) && backendPaymentState === 'link_generado'
+    && backendPaymentAmount === 1 && paymentExecutionContext.groupId && paymentExecutionContext.intentId
+    && isValidEmail(paymentExecutionContext.titularEmail));
+
+  const observePixelPay3ds = useCallback(async ({ card, billing }) => {
+    if (!paymentCanObserve3ds) return null;
+    const { groupId, intentId, titularEmail } = paymentExecutionContext;
+    try {
+      return await observePixelPay3dsOnce({ groupId, intentId, titularEmail, card, billing });
+    } catch (error) {
+      // AM: The payment hook owns pending recovery and rejects results from a cleared group.
+      if (isCurrentPaymentGroup(groupId)) {
+        notifications.error('No se pudo completar la observación. Consulta el estado local y no repitas la operación.',
+          { dedupeKey: 'qa-3ds-observation-error' });
+      }
+      throw error;
+    }
+  }, [isCurrentPaymentGroup, notifications, observePixelPay3dsOnce, paymentCanObserve3ds, paymentExecutionContext]);
 
   const completePixelPayPayment = useCallback(async ({ card, billing }) => {
     const { groupId, intentId, titularEmail } = paymentExecutionContext;
@@ -4116,6 +4144,9 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentTitularEmail,
       paymentRestoring,
       paymentCanExecuteSale,
+      paymentCanObserve3ds,
+      observePixelPay3ds,
+      pixelpay3dsDiagnostic,
       pixelpaySale,
       bookingSuccessResult,
       pendingCompanionFocusId,
@@ -4267,6 +4298,9 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentTitularEmail,
       paymentRestoring,
       paymentCanExecuteSale,
+      paymentCanObserve3ds,
+      observePixelPay3ds,
+      pixelpay3dsDiagnostic,
       pixelpaySale,
       bookingSuccessResult,
       pendingCompanionFocusId,

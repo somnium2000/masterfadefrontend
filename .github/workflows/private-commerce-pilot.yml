@@ -26,6 +26,8 @@ jobs:
           src/features/public/booking/__tests__/PublicBookingFlow.paymentReload.test.jsx
           src/features/public/booking/__tests__/PublicBookingFlow.pixelpaySaleContract.test.jsx
           src/features/public/booking/__tests__/useBookingPayment.pixelpay.test.jsx
+          src/features/public/booking/__tests__/qa3dsDiagnostic.test.jsx
+          src/features/public/booking/__tests__/PublicBookingFlow.paymentNavigation.test.jsx
           src/features/public/pages/__tests__/MembershipPlansPage.catalog.test.jsx
           src/features/public/pages/__tests__/MembershipPlansPage.identity.test.jsx
           src/features/landing/pages/__tests__/LandingPage.semantics.test.jsx
