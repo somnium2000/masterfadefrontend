@@ -319,7 +319,7 @@ function ClienteHistorialCitasContent() {
 
   const handleOpenPending = useCallback(async () => {
     if (!CLIENT_BOOKING_ENABLED) {
-      notifications.info(CLIENT_LOCK_MESSAGE);
+      notifications.info(CLIENT_LOCK_MESSAGE, { dedupeKey: 'cliente-booking-disabled' });
       return;
     }
     await loadPendingReservation({ openModal: true });
@@ -327,7 +327,7 @@ function ClienteHistorialCitasContent() {
 
   const handleContinuePendingPayment = useCallback(async () => {
     if (!CLIENT_BOOKING_ENABLED) {
-      notifications.info(CLIENT_LOCK_MESSAGE);
+      notifications.info(CLIENT_LOCK_MESSAGE, { dedupeKey: 'cliente-booking-disabled' });
       return;
     }
     const groupId = String(pendingData?.id_grupo_cita || '').trim();

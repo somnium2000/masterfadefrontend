@@ -207,6 +207,7 @@ export default function BarberoCalendarioPage() {
 
     try {
       const response = await listAdminCitasOperativas({
+        zona_horaria: TIME_ZONE,
         fecha_desde: range.firstDay,
         fecha_hasta: range.lastDay,
         estado: 'confirmada',

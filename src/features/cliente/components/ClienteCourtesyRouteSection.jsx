@@ -21,6 +21,7 @@ import {
 } from '../lib/clienteApi.js';
 import { CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
 import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
+import useRefreshOnReturn from '../hooks/useRefreshOnReturn.js';
 
 const DEFAULT_REWARD_TARGET = 10;
 const REWARD_BOOKING_CONTEXT_STORAGE_KEY = 'mf_reward_redeem_context_v1';
@@ -337,7 +338,9 @@ export default function ClienteCourtesyRouteSection() {
 
   useEffect(() => {
     if (ready) void loadSummary();
-  }, [identity, ready, loadSummary]);
+  }, [identity, ready, loadSummary, location.key]);
+
+  useRefreshOnReturn(loadSummary, ready);
 
   const contributionWidths = useMemo(
     () => resolveContributionWidths(summary),

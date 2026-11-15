@@ -11,7 +11,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-15T18:00:00Z'));
   api.context.mockResolvedValue({ data: { sucursales: [], barberos: [] } });
-  api.completed.mockResolvedValue({ data: { citas: [{ id_cita: 'done', estado_cita_codigo: 'completada' }] } });
+  api.completed.mockResolvedValue({ data: { citas: [{ id_cita: 'done', id_empleado_barbero: 'B', inicio_at: '2026-11-15T14:00:00Z', estado_cita_codigo: 'completada' }] } });
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
@@ -20,15 +20,19 @@ test.each([
   ['en_salon', 'En salón'], ['en_atencion', 'En atención'], ['completada', 'Completada'],
   ['cancelada', 'Cancelada'], ['cancelada_por_cliente', 'Cancelada por el cliente'],
   ['expirada', 'Expirada'], ['no_show', 'No asistió'], ['anulada', 'Anulada'],
-])('%s cambia su etiqueta sin cambiar datos, consulta ni conteos', async (code, label) => {
-  const row = Object.freeze({ id_cita: 'appointment', estado_cita_codigo: code, inicio_at: '2026-11-15T14:00:00Z', nombre_cliente: 'Cliente sintetico' });
+])('%s conserva código y etiqueta; solo los estados operativos cuentan en la jornada', async (code, label) => {
+  const row = Object.freeze({ id_cita: 'appointment', id_empleado_barbero: 'B', estado_cita_codigo: code, inicio_at: '2026-11-15T14:00:00Z', nombre_cliente: 'Cliente sintetico' });
   api.list.mockResolvedValue({ data: { citas: Object.freeze([row]) } });
   const view = render(<MemoryRouter><Page /></MemoryRouter>);
-  await waitFor(() => expect(screen.getAllByText(label).length).toBeGreaterThan(0));
+  const active = ['en_espera', 'pendiente_pago', 'confirmada', 'en_salon', 'en_atencion'].includes(code);
+  await waitFor(() => expect(api.completed).toHaveBeenCalledOnce());
+  if (active) await waitFor(() => expect(screen.getAllByText(label).length).toBeGreaterThan(0));
+  else expect(screen.queryByText(label, { exact: true })).toBeNull();
   expect(row.estado_cita_codigo).toBe(code);
-  expect(api.list).toHaveBeenCalledExactlyOnceWith({ fecha_desde: '2026-11-15', fecha_hasta: '2026-11-15', limit: 240 });
-  expect(api.completed).toHaveBeenCalledExactlyOnceWith({ fecha_desde: '2026-11-15', fecha_hasta: '2026-11-15', limit: 240 });
-  for (const [name, value] of [['Citas totales', '2'], ['Citas completadas', '1'], ['Citas restantes', '1']]) {
+  expect(api.list).toHaveBeenCalledExactlyOnceWith({ fecha_desde: '2026-11-15', fecha_hasta: '2026-11-15', zona_horaria: 'America/Tegucigalpa', id_empleado_barbero: 'B', limit: 240 });
+  expect(api.completed).toHaveBeenCalledExactlyOnceWith({ fecha_desde: '2026-11-15', fecha_hasta: '2026-11-15', zona_horaria: 'America/Tegucigalpa', id_empleado_barbero: 'B', limit: 240 });
+  const completed = code === 'completada' ? 2 : 1;
+  for (const [name, value] of [['Citas totales', String(completed + Number(active))], ['Citas completadas', String(completed)], ['Citas restantes', String(Number(active))]]) {
     const node = [...view.container.querySelectorAll('p')].find(p => p.textContent.toLowerCase() === name.toLowerCase());
     expect(node?.nextElementSibling?.textContent).toBe(value);
   }
