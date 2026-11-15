@@ -49,7 +49,7 @@ function writeStoredPaymentContext(context) {
     const intent = context.paymentIntent;
     const stored = intent?.qa_3ds_diagnostic === true ? { ...context, paymentIntent: Object.fromEntries([
       'id_grupo_cita', 'id_intent', 'estado_intent_codigo', 'monto_hnl', 'moneda_codigo', 'expires_at',
-      'pending_confirmation', 'booking_confirmed', 'qa_3ds_diagnostic',
+      'pending_confirmation', 'booking_confirmed', 'qa_3ds_diagnostic', 'qa_sandbox_session',
     ].filter(key => intent[key] !== undefined).map(key => [key, intent[key]])) } : context;
     window.sessionStorage.setItem(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY, JSON.stringify(stored));
     return true;
