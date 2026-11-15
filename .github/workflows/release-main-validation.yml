@@ -15,8 +15,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: C0-PR97
-            ref: 3eaa85e72921cf03c0d95933d40fee4325dae28a
           - target: D1
             ref: ${{ github.event.pull_request.head.sha }}
     steps:

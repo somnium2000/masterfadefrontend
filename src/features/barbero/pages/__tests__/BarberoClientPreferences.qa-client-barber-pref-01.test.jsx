@@ -38,13 +38,18 @@ function appointment(preferences = 'Degradado bajo\nConservar largo en la parte 
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-12T12:00:00-06:00'));
   Object.values(api).forEach((mock) => mock.mockReset());
   navigate.mockReset(); auth.invalidateSession.mockReset();
   api.getAdminCitasOperativasContexto.mockResolvedValue({ data: { sucursales: [], barberos: [] } });
   api.getAdminCitasOperativasCompletadasHoy.mockResolvedValue({ data: { citas: [] } });
   api.listAdminCitasOperativas.mockResolvedValue({ data: { citas: [appointment()] } });
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 test('Inicio muestra preferencias completas en una sección expandible y responsive', async () => {
   render(<BarberoHomePage />);
