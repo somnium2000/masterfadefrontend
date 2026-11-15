@@ -1,5 +1,6 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarDays, MapPin, Scissors, Wallet } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getAppointmentStatusLabel } from '../../../lib/appointmentStatus.js';
+import { ArrowUpRight, CalendarDays, MapPin, Scissors, Wallet } from 'lucide-react';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import {
   Dialog,
@@ -19,6 +20,7 @@ import {
 } from '../lib/clienteApi.js';
 import { CLIENT_CITAS_ENABLED, CLIENT_LOCK_MESSAGE } from '../lib/clientFeatureFlags.js';
 import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
+import './ClienteHistorialCitasCards.css';
 
 const PENDING_PAYMENT_CONTEXT_STORAGE_KEY = 'mf_pending_payment_context_v1';
 const BOOKING_PAYMENT_CONTEXT_STORAGE_KEY = 'masterfade.publicBookingPayment.v1';
@@ -27,13 +29,11 @@ function formatDateTime(value) {
   if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
-  return new Intl.DateTimeFormat('es-HN', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  return new Intl.DateTimeFormat('es-HN', { timeZone: 'America/Tegucigalpa', dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
-function isUpcoming(cita) {
-  const date = new Date(cita?.inicio_at || 0);
-  return Number.isFinite(date.getTime()) && date.getTime() >= Date.now();
-}
+const ACTIVE_STATES = new Set(['en_espera', 'pendiente_pago', 'confirmada', 'en_salon', 'en_atencion']);
+const HISTORY_STATES = new Set(['completada', 'cancelada', 'cancelada_por_cliente', 'expirada', 'no_show', 'anulada']);
 
 function normalizeEstado(value) {
   return String(value || '').trim().toLowerCase();
@@ -131,73 +131,83 @@ function resolveServiceSummary(cita) {
   return extras > 0 ? `${first} +${extras} más` : first;
 }
 
+function getAppointmentTone(code) {
+  const status = normalizeEstado(code);
+  if (['confirmada', 'completada'].includes(status)) return 'positive';
+  if (['en_salon', 'en_atencion'].includes(status)) return 'info';
+  if (['en_espera', 'pendiente_pago', 'expirada'].includes(status)) return 'warning';
+  if (['no_show', 'cancelada', 'cancelada_por_cliente', 'anulada'].includes(status)) return 'negative';
+  return 'neutral';
+}
+
 function CitaCard({ cita, onOpenDetail }) {
   const serviceSummary = resolveServiceSummary(cita);
   const tipoChip = resolveTipoCitaChip(cita?.tipo_cita_visual, cita?.tipo_cita_label);
+  const branchName = cita.nombre_sucursal || 'Sucursal';
+  const dateTime = formatDateTime(cita.inicio_at);
+  const typeTone = { membresia: 'info', cortesia: 'positive', cortesia_acompanantes: 'positive', pendiente_pago: 'warning' }[cita?.tipo_cita_visual] || 'neutral';
 
   return (
-    <button
-      type="button"
-      onClick={() => onOpenDetail(cita)}
-      className="mf-glass-surface w-full rounded-[18px] border border-[var(--mf-nav-border)] p-3 text-left transition-colors hover:border-[var(--mf-btn-border)]"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="space-y-1">
-          <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--mf-text)]">
-            <MapPin size={14} className="shrink-0 text-[var(--mf-accent)]" />
-            <span className="leading-none">{cita.nombre_sucursal || 'Sucursal'}</span>
-          </p>
-          <p className="mt-1 text-xs text-[var(--mf-text-2)]">{formatDateTime(cita.inicio_at)}</p>
+    <article className="client-cita-card" aria-label={`Cita en ${branchName}`}>
+      <header className="client-cita-card__identity">
+        <div className="client-cita-card__branch">
+          <span className="client-cita-card__location-icon"><MapPin size={19} aria-hidden="true" /></span>
+          <div className="min-w-0">
+            <p className="client-cita-card__eyebrow">Sucursal</p>
+            <h2 className="mf-font-display client-cita-card__title">{branchName}</h2>
+          </div>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <span className="mf-badge mf-badge-gold">{cita.estado_cita_codigo}</span>
-          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${tipoChip.className}`}>
-            {tipoChip.label}
-          </span>
+        <div className="client-cita-card__date">
+          <CalendarDays size={16} aria-hidden="true" />
+          <p><span className="client-cita-card__eyebrow">Fecha y hora · Honduras</span><span>{dateTime}</span></p>
         </div>
+      </header>
+
+      <div className="client-cita-card__indicators" aria-label="Estado y tipo de reserva">
+        <span className="client-cita-card__badge" data-tone={getAppointmentTone(cita.estado_cita_codigo)}>{getAppointmentStatusLabel(cita.estado_cita_codigo)}</span>
+        <span className="client-cita-card__badge client-cita-card__badge--type" data-tone={typeTone}>{tipoChip.label}</span>
       </div>
 
-      <dl className="mt-3 grid grid-cols-1 gap-2 text-xs text-[var(--mf-text-2)] sm:grid-cols-2">
-        <div className="flex items-center gap-2">
-          <Scissors size={14} className="shrink-0 text-[var(--mf-accent)]" />
-          <span>{cita.nombre_barbero || 'Barbero por definir'}</span>
+      <div className="client-cita-card__operations">
+        <div className="client-cita-card__modules">
+          <div className="client-cita-card__module">
+            <p className="client-cita-card__eyebrow"><Scissors size={14} aria-hidden="true" />Tu barbero</p>
+            <p className="client-cita-card__barber">{cita.nombre_barbero || 'Barbero por definir'}</p>
+          </div>
+          <div className="client-cita-card__module client-cita-card__module--amount">
+            <p className="client-cita-card__eyebrow"><Wallet size={14} aria-hidden="true" />Importe de la cita</p>
+            <p className="client-cita-card__amount">{formatMoney(cita.total_pagar_hnl)}</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Wallet size={14} className="shrink-0 text-[var(--mf-accent)]" />
-          <span>{formatMoney(cita.total_pagar_hnl)}</span>
-        </div>
-        <div className="sm:col-span-2">
-          {serviceSummary ? (
-            <p className="text-[var(--mf-text-2)]">{serviceSummary}</p>
-          ) : (
-            <span className="text-[var(--mf-accent)] underline underline-offset-2">Ver servicios en detalle</span>
-          )}
-        </div>
-      </dl>
-    </button>
+        {serviceSummary ? <p className="client-cita-card__services"><span className="client-cita-card__eyebrow">Servicios</span>{serviceSummary}</p> : null}
+      </div>
+
+      <footer className="client-cita-card__footer">
+        <button type="button" onClick={event => onOpenDetail(cita, event.currentTarget)} className="client-cita-card__action" aria-label={`Ver detalle completo de la cita en ${branchName} del ${dateTime}`}>
+          <span>Ver detalle completo</span><ArrowUpRight size={18} aria-hidden="true" />
+        </button>
+      </footer>
+    </article>
   );
 }
 
 function CitasList({ items, onOpenDetail }) {
   return (
-    <>
-      <div className="hidden max-h-[34rem] overflow-y-auto pr-1 sm:block">
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {items.map((cita) => <CitaCard key={cita.id_cita} cita={cita} onOpenDetail={onOpenDetail} />)}
-        </div>
+    <div className="client-citas-list">
+      <div className="client-citas-grid">
+        {items.map(cita => <CitaCard key={cita.id_cita} cita={cita} onOpenDetail={onOpenDetail} />)}
       </div>
-      <div className="max-h-[30rem] space-y-2 overflow-y-auto pr-1 sm:hidden">
-        {items.map((cita) => (
-          <div key={cita.id_cita} className="w-full">
-            <CitaCard cita={cita} onOpenDetail={onOpenDetail} />
-          </div>
-        ))}
-      </div>
-    </>
+    </div>
   );
 }
 
 export default function ClienteHistorialCitasPage() {
+  const { user } = useAuth();
+  // AM: Una nueva identidad nunca reutiliza páginas, detalles ni borradores del Cliente anterior.
+  return <ClienteHistorialCitasContent key={user?.id_usuario || 'anonymous'} />;
+}
+
+function ClienteHistorialCitasContent() {
   const { booking: CLIENT_BOOKING_ENABLED } = usePrivateCommerce();
   const navigate = useNavigate();
   const { startNewAppointment } = useOutletContext() || {};
@@ -208,7 +218,18 @@ export default function ClienteHistorialCitasPage() {
   const [loading, setLoading] = useState(true);
   const [citas, setCitas] = useState([]);
   const [activeTab, setActiveTab] = useState('proximas');
+  const [pages, setPages] = useState({ proximas: 1, historial: 1 });
+  const [totals, setTotals] = useState({ proximas: 0, historial: 0, total: 0, pendientes_pago: 0 });
+  const [pagination, setPagination] = useState(null);
+  const [listError, setListError] = useState('');
+  const listRequest = useRef(null);
+  const listGeneration = useRef(0);
+  const page = pages[activeTab];
+  const requestKey = `${activeTab}:${page}`;
+  const latestListKey = useRef(requestKey);
+  latestListKey.current = requestKey;
   const [detailOpen, setDetailOpen] = useState(false);
+  const detailTriggerRef = useRef(null);
   const [selectedCita, setSelectedCita] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
@@ -224,25 +245,45 @@ export default function ClienteHistorialCitasPage() {
 
   const loadCitas = useCallback(async () => {
     if (!canLoad) return;
+    listRequest.current?.abort();
+    const controller = new AbortController();
+    listRequest.current = controller;
+    const generation = ++listGeneration.current;
+    const current = () => !controller.signal.aborted && generation === listGeneration.current && latestListKey.current === requestKey;
     setLoading(true);
+    setListError('');
     try {
-      const payload = await listClienteCitas();
-      setCitas(Array.isArray(payload?.citas) ? payload.citas : []);
+      const payload = await listClienteCitas({ apartado: activeTab, page, limit: 4 }, {
+        signal: controller.signal, cache: false, dedupe: false,
+      });
+      if (!current()) return;
+      if (!payload?.pagination || !payload?.totals) throw new Error('Incomplete pagination');
+      const metadata = payload.pagination;
+      setTotals(payload.totals);
+      if (metadata.page !== page) {
+        setPages(prev => ({ ...prev, [activeTab]: metadata.page }));
+        return;
+      }
+      const rows = Array.isArray(payload?.citas) ? payload.citas : [];
+      setCitas([...new Map(rows.map(cita => [cita.id_cita, cita])).values()]);
+      setPagination({ ...metadata, key: requestKey });
     } catch (error) {
+      if (!current()) return;
       if (Number(error?.status) === 401) {
         logout();
         navigate('/login', { replace: true });
         return;
       }
-      notifications.error(error?.data?.error?.message || error?.message || 'No se pudo cargar tu historial de citas.');
+      setListError('No fue posible cargar tus citas. Inténtalo de nuevo.');
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
-  }, [canLoad, logout, navigate, notifications]);
+  }, [canLoad, logout, navigate, activeTab, page, requestKey]);
 
   useEffect(() => {
-    if (!canLoad) return;
+    if (!canLoad) return undefined;
     void loadCitas();
+    return () => { listRequest.current?.abort(); };
   }, [canLoad, loadCitas]);
 
   const loadPendingReservation = useCallback(async ({ openModal = false } = {}) => {
@@ -264,9 +305,11 @@ export default function ClienteHistorialCitasPage() {
     } catch (error) {
       const errorCode = extractApiErrorCode(error);
       if (errorCode === 'PENDING_APPOINTMENT_EXPIRED') {
+        setPendingData(null);
+        if (openModal) setPendingOpen(true);
         setPendingError('Esta reserva ya expiró. Agenda nuevamente.');
       } else {
-        setPendingError(error?.data?.error?.message || error?.message || 'No se pudo consultar la reserva pendiente.');
+        setPendingError('No pudimos verificar si tienes una reserva pendiente. Intenta nuevamente.');
       }
       return null;
     } finally {
@@ -312,6 +355,7 @@ export default function ClienteHistorialCitasPage() {
     } catch (error) {
       const errorCode = extractApiErrorCode(error);
       if (errorCode === 'PENDING_APPOINTMENT_EXPIRED') {
+        setPendingData(null);
         setPendingError('Esta reserva ya expiró. Agenda nuevamente.');
         return;
       }
@@ -366,25 +410,22 @@ export default function ClienteHistorialCitasPage() {
     navigate(location.pathname, { replace: true, state: null });
   }, [canLoad, handleOpenPending, location.pathname, location.state, navigate]);
 
-  const pendingPaymentAnomalies = useMemo(
-    () => citas.filter((item) => normalizeEstado(item?.estado_cita_codigo) === 'pendiente_pago'),
-    [citas]
-  );
   const upcoming = useMemo(
     () => citas.filter((item) => {
       const estado = normalizeEstado(item?.estado_cita_codigo);
-      return isUpcoming(item) && ['confirmada', 'en_salon', 'en_atencion'].includes(estado);
+      return ACTIVE_STATES.has(estado);
     }),
     [citas]
   );
   const history = useMemo(
-    () => citas.filter((item) => normalizeEstado(item?.estado_cita_codigo) === 'completada'),
+    () => citas.filter((item) => HISTORY_STATES.has(normalizeEstado(item?.estado_cita_codigo))),
     [citas]
   );
 
-  const handleOpenDetail = useCallback(async (cita) => {
+  const handleOpenDetail = useCallback(async (cita, trigger) => {
     const citaId = String(cita?.id_cita || '').trim();
     if (!citaId) return;
+    detailTriggerRef.current = trigger;
     setSelectedCita(cita);
     setDetailOpen(true);
     setDetailLoading(true);
@@ -426,7 +467,7 @@ export default function ClienteHistorialCitasPage() {
 
   return (
     <>
-      <div className="space-y-5">
+      <div className="client-citas-page space-y-4">
         <section className="mf-glass-surface rounded-[24px] border border-[var(--mf-nav-border)] p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -444,25 +485,44 @@ export default function ClienteHistorialCitasPage() {
             </button>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            <span className="inline-flex rounded-full border border-[var(--mf-btn-border)] bg-[var(--mf-btn-bg)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
-              Próximas: <strong className="ml-1 text-[var(--mf-text)]">{upcoming.length}</strong>
-            </span>
-            <span className="inline-flex rounded-full border border-[var(--mf-nav-border)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
-              Historial: <strong className="ml-1 text-[var(--mf-text)]">{history.length}</strong>
-            </span>
-            <span className="inline-flex rounded-full border border-[var(--mf-nav-border)] px-3 py-1 text-xs text-[var(--mf-text-2)]">
-              Total: <strong className="ml-1 text-[var(--mf-text)]">{citas.length}</strong>
-            </span>
-          </div>
+          <p className="mt-3 text-xs text-[var(--mf-text-2)]">
+            Total: <strong className="text-[var(--mf-text)]">{totals.total}</strong> citas
+          </p>
         </section>
 
-        {loading || (!canLoad && isHydrating) ? (
-          <div className="space-y-3">
-            {Array.from({ length: 3 }).map((_, idx) => <div key={idx} className="mf-skeleton h-28 rounded-2xl" />)}
-          </div>
-        ) : (
-          <>
+        <div className="space-y-3">
+          <div className="inline-flex rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab('proximas')}
+              aria-label={`Próximas (${totals.proximas})`}
+              aria-pressed={activeTab === 'proximas'}
+              className={[
+                'rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
+                activeTab === 'proximas'
+                  ? 'bg-[var(--mf-accent)] text-black'
+                  : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]',
+              ].join(' ')}
+            >
+              Próximas ({totals.proximas})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('historial')}
+              aria-label={`Historial (${totals.historial})`}
+              aria-pressed={activeTab === 'historial'}
+              className={[
+                'rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
+                activeTab === 'historial'
+                  ? 'bg-[var(--mf-accent)] text-black'
+                  : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]',
+              ].join(' ')}
+            >
+              Historial ({totals.historial})
+            </button>
+              </div>
+        </div>
+
             {pendingData ? (
               <section className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
                 <p className="font-semibold">Detectamos citas pendientes de pago. Si esto no corresponde, contacta al equipo de MasterFade.</p>
@@ -471,7 +531,7 @@ export default function ClienteHistorialCitasPage() {
                   <button
                     type="button"
                     onClick={handleOpenPending}
-                    className="inline-flex rounded-lg border border-amber-200/40 bg-amber-300/10 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:bg-amber-300/20"
+                          className="inline-flex rounded-lg border border-amber-200/40 bg-amber-300/10 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:bg-amber-300/20"
                   >
                     Continuar pago
                   </button>
@@ -487,50 +547,41 @@ export default function ClienteHistorialCitasPage() {
                   </button>
                 </div>
               </section>
-            ) : pendingPaymentAnomalies.length ? (
-              <section className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-                <p className="font-semibold">Detectamos citas pendientes de pago. Si esto no corresponde, contacta al equipo de MasterFade.</p>
-                <p className="mt-1 text-amber-100/90">Citas detectadas: {pendingPaymentAnomalies.length}</p>
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={handleOpenPending}
-                    className="inline-flex rounded-lg border border-amber-200/40 bg-amber-300/10 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:bg-amber-300/20"
-                  >
-                    Ver reserva pendiente
-                  </button>
-                </div>
+            ) : null}
+
+            {!pendingData && pendingError && !pendingOpen ? (
+              <section role="alert" className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                <p>{pendingError}</p>
+                <button
+                  type="button"
+                  onClick={() => void loadPendingReservation()}
+                  disabled={pendingLoading}
+                  className="mt-3 inline-flex rounded-lg border border-amber-200/40 px-3 py-1.5 text-xs font-semibold transition hover:bg-amber-300/10 disabled:opacity-70"
+                >
+                  {pendingLoading ? 'Verificando...' : 'Reintentar'}
+                </button>
               </section>
             ) : null}
 
-            <section className="space-y-3">
-              <div className="inline-flex rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-1">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('proximas')}
-                  className={[
-                    'rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
-                    activeTab === 'proximas'
-                      ? 'bg-[var(--mf-accent)] text-black'
-                      : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]',
-                  ].join(' ')}
-                >
-                  Próximas ({upcoming.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('historial')}
-                  className={[
-                    'rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
-                    activeTab === 'historial'
-                      ? 'bg-[var(--mf-accent)] text-black'
-                      : 'text-[var(--mf-text-2)] hover:text-[var(--mf-text)]',
-                  ].join(' ')}
-                >
-                  Historial ({history.length})
-                </button>
-              </div>
+        {loading || (!canLoad && isHydrating) || (!listError && canLoad && pagination?.key !== requestKey) ? (
+          <div className="space-y-3">
+            {Array.from({ length: 3 }).map((_, idx) => <div key={idx} className="mf-skeleton h-28 rounded-2xl" />)}
+          </div>
+        ) : listError ? (
+          <section role="alert" className="rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-4 text-sm">
+            <p>{listError}</p>
+            <button type="button" className="mt-3 min-h-11 rounded-xl border border-[var(--mf-btn-border)] px-4" onClick={() => void loadCitas()}>Reintentar</button>
+          </section>
+        ) : (
+          <>
 
+
+            <section className="space-y-3">
+              <nav aria-label="Paginación de citas" className="client-citas-pagination">
+                <button type="button" disabled={!pagination?.has_prev} onClick={() => setPages(prev => ({ ...prev, [activeTab]: page - 1 }))}>Anterior</button>
+                <span role="status" aria-live="polite">Página {page} de {pagination?.total_pages || 1}</span>
+                <button type="button" disabled={!pagination?.has_next} onClick={() => setPages(prev => ({ ...prev, [activeTab]: page + 1 }))}>Siguiente</button>
+              </nav>
               {activeTab === 'proximas' ? (
                 upcoming.length ? (
                   <CitasList items={upcoming} onOpenDetail={handleOpenDetail} />
@@ -698,7 +749,13 @@ export default function ClienteHistorialCitasPage() {
       </Dialog>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl" onCloseAutoFocus={event => {
+          // AM: El detalle controlado restaura el foco a la acción de la tarjeta que lo abrió.
+          if (detailTriggerRef.current?.isConnected) {
+            event.preventDefault();
+            detailTriggerRef.current.focus({ preventScroll: true });
+          }
+        }}>
           <DialogHeader>
             <DialogTitle>Detalle de cita</DialogTitle>
             <DialogDescription>
@@ -722,7 +779,7 @@ export default function ClienteHistorialCitasPage() {
             <div className="space-y-3">
               <div className="grid grid-cols-1 gap-2 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3 text-sm text-[var(--mf-text-2)] sm:grid-cols-2">
                 <p><span className="font-semibold text-[var(--mf-text)]">Fecha y hora:</span> {formatDateTime(detailCita?.inicio_at)}</p>
-                <p><span className="font-semibold text-[var(--mf-text)]">Estado:</span> {detailCita?.estado_cita_codigo || '-'}</p>
+                <p><span className="font-semibold text-[var(--mf-text)]">Estado:</span> {getAppointmentStatusLabel(detailCita?.estado_cita_codigo)}</p>
                 <p><span className="font-semibold text-[var(--mf-text)]">Sucursal:</span> {detailCita?.nombre_sucursal || '-'}</p>
                 <p><span className="font-semibold text-[var(--mf-text)]">Barbero:</span> {detailCita?.nombre_barbero || '-'}</p>
                 <p><span className="font-semibold text-[var(--mf-text)]">Duración:</span> {Number(detailCita?.duracion_total_min || 0)} min</p>
