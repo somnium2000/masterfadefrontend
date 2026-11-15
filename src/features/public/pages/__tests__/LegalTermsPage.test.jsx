@@ -17,21 +17,19 @@ vi.mock('../../../../context/AuthContext.jsx', async importOriginal => ({
 afterEach(cleanup);
 const mount = () => render(<ThemeProvider><MemoryRouter><LegalTermsPage /></MemoryRouter></ThemeProvider>);
 
-test('conserva QA íntegro y propone Producción sin inventar aprobación ni vigencia', () => {
-  const raw = readFileSync('docs/legal/release11/qa-original.v0.3-RC2-MP.json', 'utf8').replace(/\r\n/g, '\n');
+test('documentos aprobados son idénticos al texto QA, con cambios solo en metadatos', () => {
+  const raw = readFileSync('docs/legal/release11/qa-original.v0.3-RC2-MP.json', 'utf8').replace(/\\r\\n/g, '\\n');
   expect(createHash('sha256').update(raw).digest('hex')).toBe(legalTerms.source_sha256);
-  expect(JSON.parse(raw).version).toBe('0.3-RC2-MP');
-  expect(legalTerms.version).toBeNull();
-  expect(legalTerms.approval_date).toBeNull();
+  const qa = JSON.parse(raw);
+  expect(legalTerms.version).toBe('0.3-RC2-MP');
+  expect(legalTerms.approval_date).toBe('2026-11-15');
   expect(legalTerms.effective_date).toBeNull();
-  expect(legalTerms.publication_mode).toBe('production_proposal_pending_approval');
-  const rewards = legalTerms.documents.find(document => document.id === 'masterpuntos');
-  const rewardText = rewards.chapters.flatMap(chapter => chapter.blocks).map(block => block.text || '').join(' ');
-  expect(rewardText).toMatch(/pendientes de despliegue/);
-  expect(rewardText).toMatch(/papel/);
-  expect(rewardText).toMatch(/ni inicia una caducidad/);
-  expect(rewardText).toMatch(/acompañantes/);
-  expect(rewardText).not.toMatch(/se complete efectivamente/);
+  expect(legalTerms.effective_date_policy).toBe('upon_production_publication');
+  expect(legalTerms.publication_mode).toBe('production_approved');
+  for (let i = 0; i < qa.documents.length; i++) {
+    expect(legalTerms.documents[i].id).toBe(qa.documents[i].id);
+    expect(legalTerms.documents[i].chapters).toEqual(qa.documents[i].chapters);
+  }
   expect(legalTerms.documents).toHaveLength(8);
   const chapters = legalTerms.documents.flatMap(doc => doc.chapters);
   expect(chapters).toHaveLength(62);
@@ -44,7 +42,7 @@ test('renderiza cada título, párrafo y celda sin reescribir ni omitir contenid
   expect(screen.getAllByRole('article')).toHaveLength(8);
   expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(62);
   expect(screen.queryByText(/Borrador 0.3-RC1/)).not.toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: 'Propuesta para revisión' })).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Versión 0.3-RC2-MP');
   for (const doc of legalTerms.documents) {
     const article = document.getElementById(doc.id);
     expect(within(article).getByRole('heading', { level: 2 }).textContent).toBe(doc.title);
