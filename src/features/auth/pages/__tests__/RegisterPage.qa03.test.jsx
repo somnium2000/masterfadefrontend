@@ -23,7 +23,7 @@ function complete() {
 
 test.each([false, true])('marketing=%s se conserva sin cambiar el consentimiento', async (marketing) => {
   mount(); complete();
-  fireEvent.click(screen.getByLabelText('Acepto terminos y condiciones para crear mi cuenta.'));
+  fireEvent.click(screen.getByLabelText('Acepto términos y condiciones para crear mi cuenta.'));
   const checkbox = screen.getByLabelText('Acepto recibir comunicaciones por correo sobre servicios, novedades y promociones.');
   if (marketing) fireEvent.click(checkbox);
   fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
@@ -85,7 +85,7 @@ test.each(['Enter', ' '])('botón estándar conserva activación por teclado con
 
 test('error de red se anuncia una sola vez y libera el formulario', async () => {
   mocks.post.mockRejectedValue(new Error('No se pudo completar el registro.'));
-  mount(); complete(); fireEvent.click(screen.getByLabelText('Acepto terminos y condiciones para crear mi cuenta.'));
+  mount(); complete(); fireEvent.click(screen.getByLabelText('Acepto términos y condiciones para crear mi cuenta.'));
   fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
   await screen.findByRole('alert');
   expect(mocks.error).not.toHaveBeenCalled();

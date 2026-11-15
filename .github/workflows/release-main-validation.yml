@@ -43,3 +43,27 @@ jobs:
           VITE_VIP_MEMBERSHIPS_ENABLED: 'true'
           VITE_VIP_MEMBERSHIPS_PURCHASE_ENABLED: 'false'
       - run: git diff --check
+      - name: Chromium legal and consent review
+        env:
+          MASTERFADE_BROWSER_URL: http://127.0.0.1:4211
+          MASTERFADE_BROWSER_ENGINES: chromium
+          MASTERFADE_LEGAL_EVIDENCE: ${{ runner.temp }}/mf-legal-evidence
+        run: |
+          npm install --prefix "$RUNNER_TEMP/mf-legal-browser" --no-package-lock --no-audit --no-fund --ignore-scripts playwright@1.64.1
+          node "$RUNNER_TEMP/mf-legal-browser/node_modules/playwright/cli.js" install --with-deps chromium
+          export MASTERFADE_PLAYWRIGHT_MODULE="$RUNNER_TEMP/mf-legal-browser/node_modules/playwright"
+          npm run preview -- --host 127.0.0.1 --port 4211 --strictPort > "$RUNNER_TEMP/mf-legal-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4211/ > /dev/null; then break; fi
+            sleep 1
+          done
+          node --test --test-concurrency=1 test/legalTerms.browser.mjs test/releaseLegalConsent.browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release11-legal-chromium
+          path: ${{ runner.temp }}/mf-legal-evidence
+          if-no-files-found: ignore
+          retention-days: 7

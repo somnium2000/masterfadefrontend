@@ -1,6 +1,6 @@
 import { motion, useReducedMotion } from 'framer-motion';
 import { CalendarDays, Crown, House, LogIn, Plus, Scissors, Tag, Users } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import MasterfadeLogo from '../../../components/branding/MasterfadeLogo.jsx';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
 import ThemeSwitcher from '../../../components/theme/ThemeSwitcher.jsx';
@@ -230,6 +230,10 @@ export default function LandingPage() {
         </div>
       </div>
 
+      <footer className="relative z-10 mx-auto flex max-w-4xl flex-wrap justify-center gap-x-6 gap-y-2 px-4 pb-28 text-sm text-[var(--mf-text)]">
+        <Link className="inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4" to="/terminos-y-condiciones">Términos y condiciones</Link>
+        <Link className="inline-flex min-h-11 items-center underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4" to="/terminos-y-condiciones#politica-de-privacidad">Política de privacidad</Link>
+      </footer>
       </main>
       <PremiumBottomNav
         activeId="inicio"

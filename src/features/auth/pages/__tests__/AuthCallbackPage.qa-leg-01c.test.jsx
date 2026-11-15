@@ -53,7 +53,7 @@ test('terminos son obligatorios antes del segundo intento', async () => {
 test.each([false, true])('envia la decision explicita marketing=%s una sola vez', async marketing => {
   mocks.post.mockResolvedValueOnce({ ok: true, data: { session: { authenticated: true } } });
   mount({ strict: true }); await screen.findByText('COMPLETAR REGISTRO');
-  fireEvent.click(screen.getByLabelText('Acepto los terminos y condiciones para crear mi cuenta.'));
+  fireEvent.click(screen.getByLabelText('Acepto los términos y condiciones para crear mi cuenta.'));
   if (marketing) fireEvent.click(screen.getByLabelText('Acepto recibir comunicaciones comerciales.'));
   fireEvent.click(screen.getByRole('button', { name: 'Completar registro' }));
   await waitFor(() => expect(mocks.completeExchangeLogin).toHaveBeenCalledTimes(1));
@@ -67,7 +67,7 @@ test.each([false, true])('envia la decision explicita marketing=%s una sola vez'
 test('error de reintento conserva decisiones y permite intentar otra vez', async () => {
   mocks.post.mockRejectedValueOnce(new Error('Fallo temporal'));
   mount(); await screen.findByText('COMPLETAR REGISTRO');
-  const terms = screen.getByLabelText('Acepto los terminos y condiciones para crear mi cuenta.');
+  const terms = screen.getByLabelText('Acepto los términos y condiciones para crear mi cuenta.');
   fireEvent.click(terms); fireEvent.click(screen.getByRole('button', { name: 'Completar registro' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Fallo temporal');
   expect(terms).toBeChecked();

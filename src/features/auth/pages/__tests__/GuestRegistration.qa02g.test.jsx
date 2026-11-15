@@ -53,7 +53,7 @@ test('histórico 202 limpia contraseña inicial, muestra pendiente y no hace log
  api.post.mockResolvedValue({ok:true,data:{pending_verification:true}});mount(RegisterPage);
  for(const [name,value]of [['Nombre','New'],['Apellido','Owner'],['Correo (sera tu usuario/login)','guest@example.test'],['Contraseña','InitialOnly9!'],['Confirmar contraseña','InitialOnly9!']])fireEvent.change(screen.getByLabelText(name,{exact:true}),{target:{value}});
  fireEvent.click(screen.getByRole('button',{name:'Mostrar contraseña'}));fireEvent.click(screen.getByRole('button',{name:'Mostrar confirmación de contraseña'}));
- fireEvent.click(screen.getByLabelText('Acepto terminos y condiciones para crear mi cuenta.'));fireEvent.click(screen.getByRole('button',{name:'Crear cuenta'}));
+ fireEvent.click(screen.getByLabelText('Acepto términos y condiciones para crear mi cuenta.'));fireEvent.click(screen.getByRole('button',{name:'Crear cuenta'}));
  expect(await screen.findByRole('status')).toHaveTextContent('Registro pendiente');expect(api.login).not.toHaveBeenCalled();
  expect(screen.getByLabelText('Contraseña',{exact:true})).toHaveValue('');expect(screen.getByLabelText('Contraseña',{exact:true})).toHaveAttribute('type','password');
  expect(screen.getByLabelText('Confirmar contraseña',{exact:true})).toHaveAttribute('type','password');expect(screen.getByRole('button',{name:'Mostrar contraseña'})).toHaveAttribute('aria-pressed','false');
