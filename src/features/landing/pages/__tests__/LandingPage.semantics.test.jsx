@@ -130,3 +130,24 @@ test('recargas repetidas siempre completan la entrada de los CTA', async () => {
     view.unmount();
   }
 }, 10000);
+
+
+test('fotografía local decorativa y recorte móvil, sin recurso externo ni original pesado', () => {
+  render(<ThemeProvider><MemoryRouter><LandingPage /></MemoryRouter></ThemeProvider>);
+  const background = document.querySelector('.mf-landing__photo');
+  expect(background.parentElement).toHaveAttribute('aria-hidden', 'true');
+  expect(background).not.toHaveAttribute('role', 'img');
+  for (const [name, budget] of [['desktop', 150000], ['mobile', 100000]]) {
+    const bytes = readFileSync(`src/assets/landing/masterfade-barbershop-${name}.webp`);
+    expect(bytes.toString('ascii', 0, 4)).toBe('RIFF');
+    expect(bytes.toString('ascii', 8, 12)).toBe('WEBP');
+    expect(bytes.length).toBeLessThan(budget);
+  }
+  const source = readFileSync('src/features/landing/pages/LandingPage.jsx', 'utf8');
+  expect(source).not.toMatch(/pexels|\.DNG/i);
+  const css = readFileSync('src/features/landing/pages/LandingPage.css', 'utf8');
+  expect(css).toContain('(max-width: 767px)');
+  expect(css).toContain('masterfade-barbershop-mobile.webp');
+  expect(css).toContain('masterfade-barbershop-desktop.webp');
+  expect(css).not.toMatch(/(?:backdrop-)?filter\s*:|animation\s*:/);
+});
