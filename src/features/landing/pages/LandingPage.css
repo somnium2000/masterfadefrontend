@@ -1,0 +1,25 @@
+.mf-landing .mf-landing__photo {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background-image: url('../../../assets/landing/masterfade-barbershop-desktop.webp');
+  background-size: cover;
+  background-position: center;
+  opacity: 0.42;
+  pointer-events: none;
+}
+.mf-landing .mf-landing__shade {
+  pointer-events: none;
+  background-image:
+    radial-gradient(ellipse at 50% 42%, transparent 18%, rgba(10, 8, 5, 0.3) 66%, rgba(5, 4, 3, 0.72) 100%),
+    linear-gradient(180deg, rgba(10, 8, 5, 0.32) 0%, rgba(10, 8, 5, 0.45) 40%, rgba(7, 5, 3, 0.5) 70%, rgba(5, 4, 3, 0.66) 100%);
+}
+@media (max-width: 767px) {
+  .mf-landing .mf-landing__photo { background-image: url('../../../assets/landing/masterfade-barbershop-mobile.webp'); opacity: 0.28; }
+}
+:root[data-theme='light'] .mf-landing .mf-landing__photo { opacity: 0.6; }
+:root[data-theme='light'] .mf-landing .mf-landing__shade {
+  background-image:
+    radial-gradient(ellipse at 50% 42%, transparent 18%, rgba(250, 248, 245, 0.3) 66%, rgba(250, 248, 245, 0.65) 100%),
+    linear-gradient(180deg, rgba(250, 248, 245, 0.35) 0%, rgba(250, 248, 245, 0.65) 42%, rgba(250, 248, 245, 0.7) 72%, rgba(250, 248, 245, 0.85) 100%);
+}
