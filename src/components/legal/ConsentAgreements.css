@@ -1,0 +1,21 @@
+.mf-agreements { min-width: 0; width: 100%; border: 1px solid var(--mf-btn-border); border-radius: 18px; padding: 16px; background: var(--mf-card); color: var(--mf-text); text-align: left; }
+.mf-agreements__header { display: flex; align-items: center; gap: 9px; }
+.mf-agreements__header > svg { flex: none; color: var(--mf-accent); }
+.mf-agreements__header h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.5; }
+.mf-agreements .mf-agreements__intro { margin: 8px 0 0; font-size: 13px; line-height: 1.65; color: var(--mf-text-2); }
+.mf-agreements__links { display: grid; gap: 8px; margin: 14px 0; }
+.mf-agreements .mf-agreements__link { display: flex; min-height: 44px; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--mf-btn-border); border-radius: 10px; color: var(--mf-accent); background: var(--mf-btn-bg); font-size: 13px; font-weight: 600; line-height: 1.5; text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.mf-agreements__link > svg { flex: none; }
+.mf-agreements__link > span { flex: 1; min-width: 0; }
+.mf-agreements__choices { display: grid; gap: 12px; }
+.mf-agreements__item { min-width: 0; padding-top: 12px; border-top: 1px solid var(--mf-nav-border); }
+.mf-agreements .mf-agreements__tag { margin: 0; color: var(--mf-text-2); font-size: 11px; font-weight: 600; line-height: 1.6; letter-spacing: .02em; }
+.mf-agreements .mf-agreements__choice { display: flex; min-height: 44px; align-items: flex-start; gap: 10px; margin: 4px 0 0; padding: 7px 2px; border-radius: 8px; color: var(--mf-text); font-size: 13px; line-height: 1.65; cursor: pointer; }
+.mf-agreements__choice > input { flex: none; width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--mf-accent); }
+.mf-agreements__choice > span { min-width: 0; overflow-wrap: anywhere; }
+.mf-agreements .mf-agreements__help { margin: 3px 0 0 32px; color: var(--mf-text-2); font-size: 12px; line-height: 1.65; }
+.mf-agreements__link:focus-visible, .mf-agreements__choice:focus-within { outline: 2px solid var(--mf-accent); outline-offset: 3px; }
+.mf-agreements__records { display: grid; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--mf-nav-border); font-size: 13px; line-height: 1.6; }
+.mf-agreements__records dt { font-weight: 600; }
+.mf-agreements__records dd { margin: 2px 0 0; color: var(--mf-text-2); }
+@media (max-width: 359px) { .mf-agreements { padding: 12px; } }
