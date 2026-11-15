@@ -96,6 +96,7 @@ import useBookingPayment, { isPixelPaySalePreflightRejection } from './hooks/use
 import usePublicAgendaEvents, { parseAgendaSseEnabled } from './hooks/usePublicAgendaEvents.js';
 import useBookingWizardNavigation from './hooks/useBookingWizardNavigation.js';
 import { resolvePaymentResumeContext } from './paymentResumeContext.js';
+import { isPixelPaySaleAuthorized } from '../../payments/pixelPaySaleCapability.js';
 import BookingLayout from './components/BookingLayout.jsx';
 import BookingErrorState from './components/BookingErrorState.jsx';
 import { PublicBookingProvider } from './BookingFlowContext.jsx';
@@ -3816,7 +3817,7 @@ const agendaAutoLoadKeyRef = useRef('');
   ).trim().toLowerCase();
   const backendPaymentAmount = Number(paymentResult?.monto_hnl ?? paymentIntent?.monto_hnl);
   const paymentCanExecuteSale = Boolean(
-    pixelpaySale !== false
+    isPixelPaySaleAuthorized(pixelpaySale)
     && !paymentRestoring
     && !paymentResult?.booking_confirmed
     && !hasUnresolvedPaymentEvidence(paymentResult)
