@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { http } from '../services/httpClient.js';
+import { requiresExplicitPixelPaySaleAuthorization } from '../features/payments/pixelPaySaleCapability.js';
 
 export default function usePrivateCommerce() {
   const { user, isAuthenticated, isHydrating } = useAuth();
   const identity = isAuthenticated && !isHydrating ? user?.id_usuario : null;
+  const explicitSaleRequired = requiresExplicitPixelPaySaleAuthorization();
   const [confirmed, setConfirmed] = useState(null);
   const [refreshing, setRefreshing] = useState(null);
   if (confirmed && confirmed.identity !== identity) setConfirmed(null);
@@ -21,7 +23,11 @@ export default function usePrivateCommerce() {
         });
         if (!controller.signal.aborted && current === generation) setConfirmed({ identity, data: response?.data });
       } catch {
-        if (!controller.signal.aborted && current === generation) setConfirmed({ identity, data: null });
+        if (!controller.signal.aborted && current === generation) {
+          // AM: Preserve QA checkout context on refresh failure, but revoke any Sale grant.
+          setConfirmed(previous => ({ identity, data: explicitSaleRequired && previous?.identity === identity
+            && previous.data?.booking === true ? { ...previous.data, pixelpaySale: false } : null }));
+        }
       } finally {
         if (!controller.signal.aborted) {
           setRefreshing((active) => (
@@ -33,12 +39,14 @@ export default function usePrivateCommerce() {
     void refresh();
     window.addEventListener('focus', refresh);
     return () => { controller.abort(); window.removeEventListener('focus', refresh); };
-  }, [identity]);
+  }, [identity, explicitSaleRequired]);
   // AM: A previous user's eligibility must never survive logout or identity changes.
   const data = identity && confirmed?.identity === identity ? confirmed.data : null;
+  const checking = Boolean(identity && (
+    confirmed?.identity !== identity || refreshing?.identity === identity
+  ));
   return { booking: data?.booking === true, vipPurchase: data?.vipPurchase === true,
-    ...(typeof data?.pixelpaySale === 'boolean' ? { pixelpaySale: data.pixelpaySale } : {}),
-    checking: Boolean(identity && (
-      confirmed?.identity !== identity || refreshing?.identity === identity
-    )) };
+    ...(explicitSaleRequired ? { pixelpaySale: !checking && data?.booking === true && data?.pixelpaySale === true }
+      : typeof data?.pixelpaySale === 'boolean' ? { pixelpaySale: data.pixelpaySale } : {}),
+    checking };
 }

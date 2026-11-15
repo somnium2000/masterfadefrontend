@@ -10,6 +10,7 @@ import TodoPagoHostedModal, {
 } from './components/TodoPagoHostedModal.jsx';
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 import { getPixelPayPresentation } from '../../payments/pixelPayPresentation.js';
+import { isPixelPaySaleAuthorized } from '../../payments/pixelPaySaleCapability.js';
 import { PaymentCheckoutHero, PaymentCheckoutSteps } from '../../payments/PaymentCheckoutPresentation.jsx';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
@@ -375,7 +376,7 @@ export default function PublicBookingPaymentStep() {
   });
   const paymentSimulationAction = resolvePaymentSimulationAction();
   const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
-  const pixelPaySaleSuspended = isPixelPayProvider && pixelpaySale === false;
+  const pixelPaySaleSuspended = isPixelPayProvider && !isPixelPaySaleAuthorized(pixelpaySale);
   const qaVideoDemoMode = resolveQaVideoDemoMode();
   const usesProductionCheckoutDesign = isPixelPayProvider || qaVideoDemoMode;
   const pixelPayPresentation = getPixelPayPresentation();
