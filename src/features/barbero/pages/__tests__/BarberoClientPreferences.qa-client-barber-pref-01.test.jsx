@@ -27,6 +27,7 @@ vi.mock('../../../admin/lib/adminCitasApi.js', () => api);
 function appointment(preferences = 'Degradado bajo\nConservar largo en la parte superior y perfilar la barba cuidadosamente.') {
   return {
     id_cita: 'CITA',
+    id_empleado_barbero: 'E',
     nombre_cliente: 'Cliente QA',
     estado_cita_codigo: 'confirmada',
     inicio_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),

@@ -104,7 +104,7 @@ test('comercio privado denegado permite consultar sin reanudar ni iniciar reserv
  rows=dataset(6,0);fixture.get.mockImplementation(async url=>url==='/v1/commerce/eligibility'?{data:{booking:false,vipPurchase:false}}:url.endsWith('/pendiente')?{data:{pendiente:{id_grupo_cita:'group',citas:[]}}}:respond(url));await mount();
  // AM: Main delega la entrada nueva al shell, que conserva su guarda comercial.
  expect(screen.getByRole('button',{name:'Nueva cita'}).disabled).toBe(false);
- const continueButton=screen.getByRole('button',{name:'Continuar pago'});fireEvent.click(continueButton);expect(fixture.notify).toHaveBeenCalledWith('Pausa de reservas');
+ const continueButton=screen.getByRole('button',{name:'Continuar pago'});fireEvent.click(continueButton);expect(fixture.notify).toHaveBeenCalledWith('Pausa de reservas',{dedupeKey:'cliente-booking-disabled'});
  expect(screen.queryByRole('dialog')).toBeNull();expect(fixture.post).not.toHaveBeenCalled();await next();expect(screen.getByText('Página 2 de 2')).toBeTruthy();
 });
 test('CLIENT_CITAS_ENABLED desactivado mantiene la pantalla bloqueada',async()=>{

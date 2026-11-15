@@ -95,7 +95,7 @@ test.each([false,true])('pausa bloquea reanudacion por acceso guardado %s',async
   api.getClienteCitaPendiente.mockResolvedValue({pendiente:{id_grupo_cita:'GRUPO',citas:[],sucursal:{},total_pendiente_hnl:0}});
   render(<ClienteHistorialCitasPage />);
   if(!saved)fireEvent.click(await screen.findByRole('button',{name:'Continuar pago'}));
-  await waitFor(()=>expect(notifications.info).toHaveBeenCalledWith(flags.CLIENT_LOCK_MESSAGE));
+  await waitFor(()=>expect(notifications.info).toHaveBeenCalledWith(flags.CLIENT_LOCK_MESSAGE,{dedupeKey:'cliente-booking-disabled'}));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(api.retomarClienteCitaPendiente).not.toHaveBeenCalled();
   expect(startNewAppointment).not.toHaveBeenCalled();
