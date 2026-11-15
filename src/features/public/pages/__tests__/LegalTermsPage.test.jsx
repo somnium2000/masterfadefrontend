@@ -18,7 +18,7 @@ afterEach(cleanup);
 const mount = () => render(<ThemeProvider><MemoryRouter><LegalTermsPage /></MemoryRouter></ThemeProvider>);
 
 test('documentos aprobados son idénticos al texto QA, con cambios solo en metadatos', () => {
-  const raw = readFileSync('docs/legal/release11/qa-original.v0.3-RC2-MP.json', 'utf8').replace(/\\r\\n/g, '\\n');
+  const raw = readFileSync('docs/legal/release11/qa-original.v0.3-RC2-MP.json', 'utf8').replace(/\r\n/g, '\n');
   expect(createHash('sha256').update(raw).digest('hex')).toBe(legalTerms.source_sha256);
   const qa = JSON.parse(raw);
   expect(legalTerms.version).toBe('0.3-RC2-MP');
