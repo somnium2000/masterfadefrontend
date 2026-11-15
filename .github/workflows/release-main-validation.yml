@@ -1,0 +1,47 @@
+name: Release main validation
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  frontend:
+    if: startsWith(github.head_ref, 'release/prod-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TZ: America/Tegucigalpa
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: C0-PR97
+            ref: 3eaa85e72921cf03c0d95933d40fee4325dae28a
+          - target: D1
+            ref: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - run: git rev-parse HEAD
+      - name: Vitest (Node suites run separately)
+        run: >-
+          node node_modules/vitest/vitest.mjs run --maxWorkers=1
+          --exclude test/accountDeletionClientFlow.test.js
+          --exclude test/adminAccountDeletionFlow.test.js
+          --exclude test/internalAccountDeletionFlow.test.js
+      - run: npm run test:node
+      - run: npm run lint
+      - run: npm run build
+        env:
+          VITE_CLIENT_BOOKING_ENABLED: 'false'
+          VITE_PUBLIC_BOOKING_ENABLED: 'false'
+          VITE_CLIENT_CITAS_ENABLED: 'true'
+          VITE_CLIENT_PLAN_PURCHASE_ENABLED: 'false'
+          VITE_VIP_MEMBERSHIPS_ENABLED: 'true'
+          VITE_VIP_MEMBERSHIPS_PURCHASE_ENABLED: 'false'
+      - run: git diff --check

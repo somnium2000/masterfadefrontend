@@ -6,7 +6,7 @@ import ClientePlanesPage from '../../../cliente/pages/ClientePlanesPage.jsx';
 const mocks = vi.hoisted(() => ({
   dialog: null, poll: null,
   notifications: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
-  api: { getClientePlanEstado: vi.fn(), createMembershipOrder: vi.fn(), createMembershipPaymentIntent: vi.fn(), confirmMembershipPayment: vi.fn(), queryMembershipPaymentStatus: vi.fn(), cancelClientePlanBySubscription: vi.fn() },
+  api: { listClientePlanConsumosPorCita: vi.fn().mockResolvedValue({citas:[],membresias:[],pagination:{page:1,total_pages:1,total:0}}), getClientePlanEstado: vi.fn(), createMembershipOrder: vi.fn(), createMembershipPaymentIntent: vi.fn(), confirmMembershipPayment: vi.fn(), queryMembershipPaymentStatus: vi.fn(), cancelClientePlanBySubscription: vi.fn() },
 }));
 // AM: El caso aprobado requiere elegibilidad explicita; las guardas reales se prueban por separado.
 vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ booking: true, vipPurchase: true }) }));
@@ -33,7 +33,7 @@ afterEach(() => { cleanup(); vi.unstubAllEnvs(); });
 async function purchase() {
   render(<ClientePlanesPage />);
   await screen.findByRole('option', { name: 'Centro' });
-  fireEvent.change(screen.getByRole('combobox'), { target: { value: BRANCH } });
+  fireEvent.change(screen.getByLabelText('Sucursal'), { target: { value: BRANCH } });
   fireEvent.click(await screen.findByRole('button', { name: 'Quiero este plan' }));
   await act(async () => {});
   await act(async () => mocks.dialog.onContinueToPayment());

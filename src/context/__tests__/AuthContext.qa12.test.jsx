@@ -18,7 +18,7 @@ function Probe() {
     <button onClick={() => void auth.logout().then(r => setResult(r.ok ? 'Confirmado' : 'No confirmado'))}>Salir</button></>;
 }
 function mount() { return render(<MemoryRouter initialEntries={['/home/cliente']} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><AuthProvider><Probe /></AuthProvider></MemoryRouter>); }
-async function ready() { const view = mount(); fireEvent.click(screen.getByText('Hidratar')); await screen.findByText('Cuenta sintética'); return view; }
+async function ready() { const view = mount(); fireEvent.click(screen.getByText('Hidratar')); await screen.findByText('Cuenta sintética'); await act(async () => {}); return view; }
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 beforeEach(() => { vi.useRealTimers(); localStorage.clear(); localStorage.setItem('mf_session_last_backend_touch_at', String(Date.now())); sessionStorage.clear(); api.get.mockReset().mockResolvedValue(user); api.post.mockReset().mockResolvedValue({ ok: true, data: { logged_out: true } }); api.abort.mockReset(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); });

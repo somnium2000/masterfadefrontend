@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, expect, test, vi } from 'vitest';
 import Page from '../ClientePlanesPage.jsx';
-const api=vi.hoisted(()=>({getClientePlanEstado:vi.fn().mockResolvedValue({estado_plan:'sin_plan',planes_activos:[],historial_consumos:[]}),cancelClientePlanBySubscription:vi.fn(),confirmMembershipPayment:vi.fn(),createMembershipOrder:vi.fn(),createMembershipPaymentIntent:vi.fn(),queryMembershipPaymentStatus:vi.fn()}));
+const api=vi.hoisted(()=>({listClientePlanConsumosPorCita:vi.fn().mockResolvedValue({citas:[],membresias:[],pagination:{page:1,total_pages:1,total:0}}),getClientePlanEstado:vi.fn().mockResolvedValue({estado_plan:'sin_plan',planes_activos:[],historial_consumos:[]}),cancelClientePlanBySubscription:vi.fn(),confirmMembershipPayment:vi.fn(),createMembershipOrder:vi.fn(),createMembershipPaymentIntent:vi.fn(),queryMembershipPaymentStatus:vi.fn()}));
 const notices=vi.hoisted(()=>({error:vi.fn(),success:vi.fn(),warning:vi.fn()}));
 vi.mock('../../lib/clienteApi.js',()=>api);
 vi.mock('../../../../context/AuthContext.jsx',()=>({useAuth:()=>({user:{id_usuario:'U',cliente_id:'C'},clienteId:'C'})}));
