@@ -38,13 +38,7 @@ export default function LegalTermsPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--mf-accent)]">Documentos legales</p>
             <h1 id="legal-page-title" className="mf-font-display mt-3 text-4xl leading-tight sm:text-5xl">Términos y condiciones</h1>
             <p className="mt-4 text-base leading-7 text-[var(--mf-text-2)]">Consulta los ocho documentos completos de MASTERFADE y sus condiciones de uso.</p>
-            <aside className="mt-5 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-surface)] p-5 text-sm leading-6" aria-labelledby="legal-proposal-status">
-              <h2 id="legal-proposal-status" className="font-semibold">Propuesta para revisión</h2>
-              <p>{legalTerms.approval_status}</p>
-              <p className="mt-2">La lectura no acepta condiciones ni modifica consentimientos anteriores. La versión y las fechas de aprobación y vigencia se incorporarán solo después de su aprobación.</p>
-              <p className="mt-2">Las compras, reservas y membresías se rigen por la disponibilidad indicada en la aplicación. Esta página no habilita operaciones pausadas. La acreditación automática de puntos al pagar y los nuevos ciclos anuales se presentan como funciones futuras.</p>
-              <p className="mt-2">Los puntos legítimos trasladados desde papel conservan sus derechos de uso, sin caducidad retroactiva por su captura digital.</p>
-            </aside>
+            <p className="mt-4 text-sm leading-6 text-[var(--mf-text-2)]" role="status">Versión {legalTerms.version} · Aprobada el 15/11/2026 · Vigente desde su publicación en Producción.</p>
           </header>
           <div className="legal-terms__layout">
             <nav id="indice-legal" aria-label="Índice de documentos legales" className="legal-terms__index">
