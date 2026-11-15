@@ -26,7 +26,7 @@ vi.mock('../../../../components/theme/ThemeSwitcher.jsx',()=>({default:()=>null}
 const GROUP='11111111-1111-4111-8111-111111111111', INTENT='22222222-2222-4222-8222-222222222222';
 const KEY='masterfade.publicBookingPayment.v1';
 function Back(){const go=useNavigate();return <button onClick={()=>go(-1)}>Atrás navegador</button>;}
-function Probe(){const flow=useBookingFlow();return <><button onClick={()=>flow.cancelBookingFlow('payment_step')}>Salida de prueba</button><button onClick={()=>flow.completePixelPayPayment({card:{},billing:{}})}>Invocar pago de prueba</button><output data-testid="can-execute-sale">{String(flow.paymentCanExecuteSale)}</output><Payment/></>;}
+function Probe(){const flow=useBookingFlow();return <><button onClick={()=>flow.cancelBookingFlow('payment_step')}>Salida de prueba</button><button onClick={()=>flow.completePixelPayPayment({card:{},billing:{}})}>Invocar pago de prueba</button><button onClick={()=>flow.observePixelPay3ds({card:{},billing:{}}).catch(()=>{})}>Invocar observación de prueba</button><output data-testid="can-execute-sale">{String(flow.paymentCanExecuteSale)}</output><output data-testid="can-observe-3ds">{String(flow.paymentCanObserve3ds)}</output><Payment/></>;}
 function Where(){return <output data-testid="where">{useLocation().pathname}</output>;}
 function mount(resume=true,flowProps={}){return render(<MemoryRouter initialEntries={['/agendar/confirmar','/agendar/pagar'+(resume?'?id_grupo_cita='+GROUP+'&id_intent='+INTENT:'')]}><Where/><Back/><Routes><Route path="/" element={<p>Landing</p>}/><Route path="/home/cliente" element={<p>Cliente</p>}/><Route path="/agendar" element={<Flow {...flowProps}/>}><Route path="pagar" element={<Probe/>}/><Route path="confirmar" element={<p>Resumen</p>}/><Route path="exito" element={<p>Éxito</p>}/></Route></Routes></MemoryRouter>);}
 beforeEach(()=>{
@@ -141,4 +141,71 @@ test.each([undefined,true])('capacidad %s conserva el callback legacy sin reinte
  expect(screen.getByTestId('can-execute-sale')).toHaveTextContent('true');
  fireEvent.click(screen.getByRole('button',{name:'Invocar pago de prueba'}));
  await waitFor(()=>expect(sale).toHaveBeenCalledOnce());
+});
+
+function prepareDiagnostic({ pending=false, expired=false, authenticated=true, marked=true }={}){
+ vi.stubEnv('VITE_ENTORNO','qa');
+ if(authenticated)Object.assign(auth,{user:{id_usuario:'U',cliente_id:'C',email:'synthetic@example.test'},roles:['cliente'],isAuthenticated:true});
+ mocks.data.hold={id_grupo_cita:GROUP,total_pagar_hnl:1,expires_at:expired?'2000-01-01T00:00:00Z':'2099-01-01T00:00:00Z'};
+ mocks.data.paymentIntent={id_grupo_cita:GROUP,id_intent:INTENT,estado_intent_codigo:pending?'pendiente_confirmacion':'link_generado',monto_hnl:1,
+  pending_confirmation:pending,...(marked?{qa_3ds_diagnostic:true}:{})};
+ mocks.data.paymentResult={...mocks.data.paymentIntent};
+ sessionStorage.setItem(KEY,JSON.stringify({id_grupo_cita:GROUP,id_intent:INTENT,titular_email:'synthetic@example.test',paymentIntent:mocks.data.paymentIntent}));
+ mocks.data.observePixelPay3dsOnce=vi.fn().mockResolvedValue({qa_3ds_diagnostic:true,pending_confirmation:true});
+ mocks.data.salePixelPayOnce=vi.fn();
+}
+test('estado fresh marcado permite solo callback diagnóstico con sesión QA y hold vigente',async()=>{
+ prepareDiagnostic();mount(true,{pixelpaySale:false,pixelpay3dsDiagnostic:true});
+ expect(screen.getByTestId('can-observe-3ds')).toHaveTextContent('true');
+ expect(screen.getByTestId('can-execute-sale')).toHaveTextContent('false');
+ expect(screen.getByRole('button',{name:'Observar respuesta Sandbox (una operación)'})).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Invocar pago de prueba'}));
+ fireEvent.click(screen.getByRole('button',{name:'Invocar observación de prueba'}));
+ await waitFor(()=>expect(mocks.data.observePixelPay3dsOnce).toHaveBeenCalledOnce());
+ expect(mocks.data.salePixelPayOnce).not.toHaveBeenCalled();
+ expect(mocks.data.observePixelPay3dsOnce.mock.calls[0][0]).toMatchObject({groupId:GROUP,intentId:INTENT,titularEmail:'synthetic@example.test'});
+});
+test.each([
+ {label:'capacidad ausente',cap:undefined},
+ {label:'capacidad falsa',cap:false},
+ {label:'capacidad no booleana',cap:'true'},
+ {label:'sin sesión',cap:true,authenticated:false},
+ {label:'hold vencido',cap:true,expired:true},
+ {label:'intento ya pendiente',cap:true,pending:true},
+ {label:'Live',cap:true,live:true},
+])('callback directo diagnóstico permanece bloqueado: $label',async scenario=>{
+ prepareDiagnostic(scenario);if(scenario.live)vi.stubEnv('VITE_PIXELPAY_ENV','live');
+ mount(true,{pixelpaySale:false,pixelpay3dsDiagnostic:scenario.cap});
+ expect(screen.getByTestId('can-observe-3ds')).toHaveTextContent('false');
+ fireEvent.click(screen.getByRole('button',{name:'Invocar observación de prueba'}));
+ await act(async()=>{});
+ expect(mocks.data.observePixelPay3dsOnce).not.toHaveBeenCalled();expect(mocks.data.salePixelPayOnce).not.toHaveBeenCalled();
+ expect(screen.queryByRole('button',{name:'Observar respuesta Sandbox (una operación)'})).not.toBeInTheDocument();
+});
+test('la verificación diagnóstica en Flow usa /estado aunque se solicite Status y el permiso ya esté apagado',async()=>{
+ prepareDiagnostic({pending:true});
+ mocks.data.fetchPaymentStatusOnce=vi.fn().mockResolvedValue(mocks.data.paymentResult);
+ mocks.data.queryPixelPayStatusOnce=vi.fn();
+ mount(true,{pixelpaySale:false,pixelpay3dsDiagnostic:false});
+ fireEvent.click(screen.getByRole('button',{name:'Verificar estado del pago'}));
+ await waitFor(()=>expect(mocks.data.fetchPaymentStatusOnce).toHaveBeenCalled());
+ expect(mocks.data.queryPixelPayStatusOnce).not.toHaveBeenCalled();
+ expect(mocks.data.observePixelPay3dsOnce).not.toHaveBeenCalled();
+});
+test.each(['clear','group-change'])('rechazo tardío tras %s no recrea estado de pago ni notifica al nuevo contexto',async mode=>{
+ prepareDiagnostic();let reject;let current=true;
+ mocks.data.observePixelPay3dsOnce=vi.fn(()=>new Promise((_resolve,no)=>{reject=no;}));
+ mocks.data.isCurrentPaymentGroup=vi.fn(()=>current);
+ mocks.data.setPaymentResult=vi.fn();
+ mount(true,{pixelpaySale:false,pixelpay3dsDiagnostic:true});
+ fireEvent.click(screen.getByRole('button',{name:'Invocar observación de prueba'}));
+ expect(mocks.data.observePixelPay3dsOnce).toHaveBeenCalledOnce();
+ current=false;
+ mocks.data.hold=mode==='clear'?null:{id_grupo_cita:'33333333-3333-4333-8333-333333333333',total_pagar_hnl:1};
+ mocks.data.paymentIntent=null;mocks.data.paymentResult=null;
+ mocks.data.setPaymentResult.mockClear();mocks.noop.mockClear();
+ await act(async()=>reject(Object.assign(new Error('synthetic abort'),{name:'AbortError'})));
+ expect(mocks.data.setPaymentResult).not.toHaveBeenCalled();
+ expect(mocks.noop).not.toHaveBeenCalledWith(expect.stringMatching(/No se pudo completar la observación/),expect.anything());
+ delete mocks.data.isCurrentPaymentGroup;delete mocks.data.setPaymentResult;
 });

@@ -45,7 +45,13 @@ function writeStoredPaymentContext(context) {
       window.sessionStorage.removeItem(PENDING_PAYMENT_CONTEXT_STORAGE_KEY);
       return true;
     }
-    window.sessionStorage.setItem(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY, JSON.stringify(context));
+    // AM: Diagnostic context stores only recovery fields, never observation payloads or card data.
+    const intent = context.paymentIntent;
+    const stored = intent?.qa_3ds_diagnostic === true ? { ...context, paymentIntent: Object.fromEntries([
+      'id_grupo_cita', 'id_intent', 'estado_intent_codigo', 'monto_hnl', 'moneda_codigo', 'expires_at',
+      'pending_confirmation', 'booking_confirmed', 'qa_3ds_diagnostic',
+    ].filter(key => intent[key] !== undefined).map(key => [key, intent[key]])) } : context;
+    window.sessionStorage.setItem(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY, JSON.stringify(stored));
     return true;
   } catch {
     return false;
@@ -349,14 +355,15 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
         if (unresolvedSale && !responseMatches) return null;
         const definitive = responseMatches && (receivedPayload?.booking_confirmed === true
           || receivedPayload?.estado_intent_codigo === 'fallido');
-        if (definitive) {
+        if (definitive || (responseMatches && receivedPayload?.qa_3ds_diagnostic === true)) {
           const intent = {
             ...paymentIntentRef.current,
             id_grupo_cita: normalizedGroupId,
             id_intent: normalizedIntentId,
             estado_intent_codigo: receivedPayload.estado_intent_codigo,
             booking_confirmed: receivedPayload.booking_confirmed === true,
-            pending_confirmation: false,
+            pending_confirmation: definitive ? false : unresolvedSale || receivedPayload.pending_confirmation === true,
+            ...(receivedPayload?.qa_3ds_diagnostic === true ? { qa_3ds_diagnostic: true } : {}),
           };
           paymentIntentRef.current = intent;
           setPaymentIntentState(intent);
@@ -427,7 +434,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     return payload || true;
   }, [authenticated, isCurrentPaymentGroup]);
 
-  const salePixelPayOnce = useCallback(async ({ groupId, intentId, titularEmail, card, billing }) => {
+  const salePixelPayOnce = useCallback(async ({ groupId, intentId, titularEmail, card, billing, diagnostic = false }) => {
     const normalizedGroupId = safeText(groupId);
     const normalizedIntentId = safeText(intentId);
     const normalizedEmail = safeText(titularEmail).toLowerCase();
@@ -438,6 +445,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
       && paymentIntentRef.current.id_intent !== normalizedIntentId) return null;
     if (paymentIntentRef.current?.id_intent === normalizedIntentId
       && (paymentIntentRef.current.pending_confirmation === true
+        || (paymentIntentRef.current.qa_3ds_diagnostic === true && !diagnostic)
         || paymentIntentRef.current.booking_confirmed === true
         || ['confirmado', 'fallido', 'expirado'].includes(paymentIntentRef.current.estado_intent_codigo))) return null;
 
@@ -452,6 +460,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
         && paymentIntentRef.current.id_intent !== normalizedIntentId) return false;
       const intent = {
         ...previousIntent,
+        ...(diagnostic ? { qa_3ds_diagnostic: true } : {}),
         pending_confirmation: pending,
         ...(terminal ? {
           estado_intent_codigo: terminal.estado_intent_codigo,
@@ -494,7 +503,8 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
       }, { authenticated, signal: controller.signal });
       const definitive = response?.booking_confirmed === true || response?.estado_intent_codigo === 'fallido';
       if (definitive) persistSaleState(false, response);
-      const result = definitive ? response : { ...response, pending_confirmation: true };
+      const result = { ...(definitive ? response : { ...response, pending_confirmation: true }),
+        ...(diagnostic ? { qa_3ds_diagnostic: true } : {}) };
       if (mountedRef.current && paymentStateSeqRef.current === saleStateSeq
         && isCurrentPaymentGroup(normalizedGroupId)) {
         setPaymentResultState(result);
@@ -512,12 +522,17 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     }
   }, [authenticated, isCurrentPaymentGroup]);
 
+  const observePixelPay3dsOnce = useCallback(args => salePixelPayOnce({ ...args, diagnostic: true }), [salePixelPayOnce]);
+
   const queryPixelPayStatusOnce = useCallback(async ({ groupId, intentId, titularEmail }) => {
     const normalizedGroupId = safeText(groupId);
     const normalizedIntentId = safeText(intentId);
     const normalizedEmail = safeText(titularEmail).toLowerCase();
     if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return null;
     if (!isCurrentPaymentGroup(normalizedGroupId)) return null;
+    if (paymentIntentRef.current?.id_intent === normalizedIntentId && paymentIntentRef.current?.qa_3ds_diagnostic === true) {
+      return fetchPaymentStatusOnce({ groupId: normalizedGroupId, intentId: normalizedIntentId, titularEmail: normalizedEmail });
+    }
     const requestKey = `${normalizedGroupId}|${normalizedIntentId}|${normalizedEmail}`;
     if (pixelPayStatusRef.current?.key === requestKey) return pixelPayStatusRef.current.promise;
 
@@ -546,7 +561,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
       if (pixelPayStatusRef.current?.promise === promise) pixelPayStatusRef.current = null;
       if (mountedRef.current) setCheckingPaymentStatus(false);
     }
-  }, [authenticated, isCurrentPaymentGroup]);
+  }, [authenticated, fetchPaymentStatusOnce, isCurrentPaymentGroup]);
 
   return {
     paymentIntent: paymentIntentState,
@@ -564,6 +579,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     completeMockPaymentOnce,
     completeSimulatorPaymentOnce,
     salePixelPayOnce,
+    observePixelPay3dsOnce,
     queryPixelPayStatusOnce,
     isCurrentPaymentGroup,
   };

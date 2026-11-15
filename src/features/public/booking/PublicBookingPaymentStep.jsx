@@ -10,7 +10,7 @@ import TodoPagoHostedModal, {
 } from './components/TodoPagoHostedModal.jsx';
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 import { getPixelPayPresentation } from '../../payments/pixelPayPresentation.js';
-import { isPixelPaySaleAuthorized } from '../../payments/pixelPaySaleCapability.js';
+import { isPixelPaySaleAuthorized, isQaPixelPay3dsDiagnosticAuthorized } from '../../payments/pixelPaySaleCapability.js';
 import { PaymentCheckoutHero, PaymentCheckoutSteps } from '../../payments/PaymentCheckoutPresentation.jsx';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
@@ -348,6 +348,9 @@ export default function PublicBookingPaymentStep() {
     paymentRestoring = false,
     paymentCanExecuteSale = true,
     pixelpaySale,
+    pixelpay3dsDiagnostic = false,
+    paymentCanObserve3ds = false,
+    observePixelPay3ds,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
@@ -377,6 +380,9 @@ export default function PublicBookingPaymentStep() {
   const paymentSimulationAction = resolvePaymentSimulationAction();
   const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
   const pixelPaySaleSuspended = isPixelPayProvider && !isPixelPaySaleAuthorized(pixelpaySale);
+  const diagnosticContext = paymentIntent?.qa_3ds_diagnostic === true || paymentResult?.qa_3ds_diagnostic === true;
+  const diagnosticCanSubmit = isPixelPayProvider && isQaPixelPay3dsDiagnosticAuthorized(pixelpay3dsDiagnostic)
+    && pixelPaySaleSuspended && paymentCanObserve3ds === true;
   const qaVideoDemoMode = resolveQaVideoDemoMode();
   const usesProductionCheckoutDesign = isPixelPayProvider || qaVideoDemoMode;
   const pixelPayPresentation = getPixelPayPresentation();
@@ -403,6 +409,8 @@ export default function PublicBookingPaymentStep() {
     || ['payment_attempt_id', 'payment_uuid', 'provider_session_id', 'transaction_id', 'provider_tx_id', 'referencia_externa']
       .some(field => Boolean(String(state?.[field] || '').trim())));
   const suspendedBeforePayment = pixelPaySaleSuspended
+    && !diagnosticCanSubmit
+    && !diagnosticContext
     && !processingPayment
     && !pixelPayPendingConfirmation
     && ['', 'creado', 'link_generado', 'expirado', 'expired'].includes(suspendedIntentState)
@@ -548,7 +556,7 @@ export default function PublicBookingPaymentStep() {
 
   const handleVerifyPaymentStatus = async () => {
     if (checkingPaymentStatus) return;
-    await refreshPaymentStatus({ queryPixelPayProvider: pixelPayPendingConfirmation });
+    await refreshPaymentStatus({ queryPixelPayProvider: pixelPayPendingConfirmation && !diagnosticContext });
   };
 
   const handleOpenHostedModal = () => {
@@ -570,7 +578,8 @@ export default function PublicBookingPaymentStep() {
   };
 
   const handleMockPay = async () => {
-    if (paymentSubmissionInFlightRef.current || processingPayment || paymentRestoring || pixelPaySaleSuspended || !paymentCanExecuteSale) return;
+    if (paymentSubmissionInFlightRef.current || processingPayment || paymentRestoring
+      || (!diagnosticCanSubmit && (pixelPaySaleSuspended || !paymentCanExecuteSale))) return;
     const validationErrors = validatePaymentForm(
       paymentForm,
       new Date(),
@@ -596,7 +605,8 @@ export default function PublicBookingPaymentStep() {
         }
       }
       if (paymentSimulationAction.type === 'pixelpay') {
-        await completePixelPayPayment({
+        const execute = diagnosticCanSubmit ? observePixelPay3ds : completePixelPayPayment;
+        await execute({
           card: {
             number: paymentForm.cardNumber,
             holder: paymentForm.cardholderName,
@@ -697,7 +707,7 @@ export default function PublicBookingPaymentStep() {
         ) : null}
 
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
-          {paymentSimulationAction.canShow && !pixelPaySaleSuspended && !pixelPayPendingConfirmation && !paymentRestoring ? (
+          {paymentSimulationAction.canShow && (!pixelPaySaleSuspended || diagnosticCanSubmit) && !pixelPayPendingConfirmation && !paymentRestoring ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card" aria-busy={processingPayment}>
             <h4 className="citas-confirm-subtitle mt-4">
               {qaVideoDemoMode ? 'Datos de pago' : paymentSimulationAction.type === 'pixelpay' ? 'Información de pago' : 'Datos para la simulacion'}
@@ -822,7 +832,9 @@ export default function PublicBookingPaymentStep() {
               </>
             ) : null}
             <div className="mt-3 rounded-xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-3 text-xs leading-relaxed text-[var(--mf-text-2)]">
-              {qaVideoDemoMode
+              {diagnosticCanSubmit
+                ? 'Observación inicial de Sandbox: una sola operación. No garantiza un desafío 3DS. Si PixelPay requiere continuación, el proceso se detiene sin enviar otra Sale.'
+                : qaVideoDemoMode
                 ? 'Usa únicamente datos de prueba. No ingreses una tarjeta real; la información se elimina al terminar.'
                 : paymentSimulationAction.type === 'pixelpay'
                 ? pixelPayPresentation.privacyNotice
@@ -833,9 +845,13 @@ export default function PublicBookingPaymentStep() {
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
               <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
                 <ShieldCheck size={30} className="text-[var(--mf-accent)]" />
-                <h4 className="citas-confirm-subtitle">{suspendedBeforePayment ? 'Pago deshabilitado en QA' : qaVideoDemoMode ? 'Confirmando tu pago' : pixelPayPresentation.paymentTitle}</h4>
+                <h4 className="citas-confirm-subtitle">{diagnosticContext ? paymentResult?.booking_confirmed === true ? 'Pago Sandbox confirmado' : 'Observación Sandbox detenida' : suspendedBeforePayment ? 'Pago deshabilitado en QA' : qaVideoDemoMode ? 'Confirmando tu pago' : pixelPayPresentation.paymentTitle}</h4>
                 <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
-                  {suspendedBeforePayment
+                  {diagnosticContext
+                    ? paymentResult?.booking_confirmed === true
+                      ? 'El backend verificó el pago Sandbox y confirmó la cita.'
+                      : 'Consulta únicamente el estado local. No repitas la operación: cualquier continuación 3DS está detenida. La cita requiere un pago verificado por el backend.'
+                    : suspendedBeforePayment
                     ? suspendedHoldExpired
                       ? 'El pago con PixelPay Sandbox aún no está habilitado. La reserva temporal venció; consulta su estado y vuelve a la agenda para elegir otro horario.'
                       : paymentRestoring
@@ -993,15 +1009,17 @@ export default function PublicBookingPaymentStep() {
                   </select>
                 </div>
               ) : null}
-              {paymentSimulationAction.canShow && !pixelPaySaleSuspended && !pixelPayPendingConfirmation && !paymentRestoring ? (
+              {paymentSimulationAction.canShow && (!pixelPaySaleSuspended || diagnosticCanSubmit) && !pixelPayPendingConfirmation && !paymentRestoring ? (
                 <Button
                   className="mf-checkout-submit w-full sm:w-auto"
                   onClick={handleMockPay}
-                  disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation || !paymentCanExecuteSale}
+                  disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation || (!diagnosticCanSubmit && !paymentCanExecuteSale)}
                 >
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
                   {processingPayment
                     ? 'Procesando…'
+                    : diagnosticCanSubmit
+                    ? 'Observar respuesta Sandbox (una operación)'
                     : qaVideoDemoMode
                     ? 'Pagar'
                     : paymentSimulationAction.type === 'pixelpay'
