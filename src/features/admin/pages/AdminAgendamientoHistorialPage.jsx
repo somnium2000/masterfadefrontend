@@ -1,7 +1,8 @@
-﻿import { getAppointmentStatusLabel } from '../../../lib/appointmentStatus.js';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+import { getAppointmentStatusLabel } from '../../../lib/appointmentStatus.js';
 import { useNavigate } from 'react-router-dom';
 import { CalendarRange, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { compareAppointmentHistory } from '../lib/adminAppointmentOrdering.js';
 import { Button } from '../../../components/ui/button.jsx';
 import { Input } from '../../../components/ui/input.jsx';
 import { Label } from '../../../components/ui/label.jsx';
@@ -204,10 +205,11 @@ export default function AdminAgendamientoHistorialPage() {
         ...buildFilterParams(filters, search),
         page: historialPage,
         limit: HISTORIAL_PAGE_SIZE,
+        zona_horaria: 'America/Tegucigalpa',
       });
       const payload = response?.data ?? response;
       const rows = Array.isArray(payload?.citas) ? payload.citas : [];
-      rows.sort((left, right) => new Date(right?.inicio_at || '').getTime() - new Date(left?.inicio_at || '').getTime());
+      rows.sort(compareAppointmentHistory);
       setCitas(rows);
       const pagination = payload?.pagination || null;
       setHistorialPagination({

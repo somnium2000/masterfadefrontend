@@ -1,6 +1,7 @@
-﻿import { getAppointmentStatusLabel } from '../../../lib/appointmentStatus.js';
-import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
+﻿import UnsavedChangesDialog from '../../../components/feedback/UnsavedChangesDialog.jsx';
+import { getAppointmentStatusLabel } from '../../../lib/appointmentStatus.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { operationalDay, compareAppointmentStart as sortCitasByStart } from '../lib/adminAppointmentOrdering.js';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -60,10 +61,8 @@ const CONTAINER_META = {
 };
 
 const VISIBLE_OPERATIONAL_STATES = ['confirmada', 'en_salon', 'en_atencion'];
+const EMERGENCY_STATES = ['en_espera', 'pendiente_pago', ...VISIBLE_OPERATIONAL_STATES];
 
-function sortCitasByStart(a, b) {
-  return new Date(a?.inicio_at || '').getTime() - new Date(b?.inicio_at || '').getTime();
-}
 
 function extractMessage(err) {
   return err?.data?.error?.message || err?.message || 'Error desconocido.';
@@ -115,12 +114,12 @@ function extractSafeEstadoMessage(err) {
 function toInputDateTime(isoValue) {
   const parsed = new Date(isoValue || '');
   if (Number.isNaN(parsed.getTime())) return '';
-  const adjusted = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000);
-  return adjusted.toISOString().slice(0, 16);
+  const time = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Tegucigalpa', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(parsed);
+  return `${operationalDay(parsed)}T${time}`;
 }
 
 function toIsoDateTime(localValue) {
-  const parsed = new Date(String(localValue || '').trim());
+  const parsed = new Date(`${String(localValue || '').trim()}-06:00`);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toISOString();
 }
@@ -128,16 +127,13 @@ function toIsoDateTime(localValue) {
 function formatDateTime(isoValue) {
   const parsed = new Date(isoValue || '');
   if (Number.isNaN(parsed.getTime())) return '-';
-  return new Intl.DateTimeFormat('es-HN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(parsed);
+  return new Intl.DateTimeFormat('es-HN', { timeZone: 'America/Tegucigalpa', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(parsed);
 }
 
 function toDateKey(isoValue) {
   const parsed = new Date(isoValue || '');
   if (Number.isNaN(parsed.getTime())) return '';
-  const y = parsed.getFullYear();
-  const m = String(parsed.getMonth() + 1).padStart(2, '0');
-  const d = String(parsed.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return operationalDay(parsed);
 }
 
 function buildSlotsForPicker(payload) {
@@ -223,10 +219,11 @@ function getServicioNombre(item) {
 }
 
 function getServiciosLegibles(cita) {
+  const serviciosDetalle = Array.isArray(cita?.servicios_detalle) ? cita.servicios_detalle : [];
   const serviciosManual = Array.isArray(cita?.servicios_manual) ? cita.servicios_manual : [];
   const serviciosIncluidos = Array.isArray(cita?.servicios_incluidos) ? cita.servicios_incluidos : [];
   const serviciosExtra = Array.isArray(cita?.servicios_extra) ? cita.servicios_extra : [];
-  const servicios = [...serviciosManual, ...serviciosIncluidos, ...serviciosExtra];
+  const servicios = [...serviciosDetalle, ...serviciosManual, ...serviciosIncluidos, ...serviciosExtra];
   const nombres = servicios.map(getServicioNombre).filter(Boolean);
   return [...new Set(nombres)];
 }
@@ -258,30 +255,10 @@ function buildFilterParams(filters, search) {
   const params = {};
   if (filters.idSucursal !== 'all') params.id_sucursal = filters.idSucursal;
   if (filters.idBarbero !== 'all') params.id_empleado_barbero = filters.idBarbero;
-  if (filters.fechaDesde) params.fecha_desde = filters.fechaDesde;
-  if (filters.fechaHasta) params.fecha_hasta = filters.fechaHasta;
   if (search.trim()) params.q = search.trim();
   return params;
 }
 
-function toTimestamp(value) {
-  const parsed = new Date(value || '');
-  const ts = parsed.getTime();
-  return Number.isFinite(ts) ? ts : 0;
-}
-
-function compareOperationalByProximity(a, b, nowMs) {
-  const aMs = toTimestamp(a?.inicio_at);
-  const bMs = toTimestamp(b?.inicio_at);
-  const aDiff = aMs - nowMs;
-  const bDiff = bMs - nowMs;
-  const aIsUpcoming = aDiff >= 0;
-  const bIsUpcoming = bDiff >= 0;
-
-  if (aIsUpcoming !== bIsUpcoming) return aIsUpcoming ? -1 : 1;
-  if (aIsUpcoming && bIsUpcoming) return aDiff - bDiff;
-  return bDiff - aDiff;
-}
 
 function joinEventUrl(baseUrl, path) {
   const base = String(baseUrl || '').trim();
@@ -342,6 +319,9 @@ export default function AdminAgendamientoCitasPage() {
   const [selectedSucursalId, setSelectedSucursalId] = useState('');
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [dateRange, setDateRange] = useState(null);
+  const [dateDraft, setDateDraft] = useState({ desde: '', hasta: '' });
+  const [dateError, setDateError] = useState('');
   const [liveStatus, setLiveStatus] = useState('idle');
 
   const [stateDialog, setStateDialog] = useState({ open: false, cita: null, estadoDestino: '' });
@@ -364,6 +344,17 @@ export default function AdminAgendamientoCitasPage() {
   const [batchPickerLoadingId, setBatchPickerLoadingId] = useState('');
   const batchBusy = batchSaving || batchLoading || Boolean(batchPickerLoadingId);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const operationalDate = operationalDay(nowMs);
+  const fechaDesde = dateRange?.desde || operationalDate;
+  const fechaHasta = dateRange?.hasta || operationalDate;
+  const isDateQuery = fechaDesde !== operationalDate || fechaHasta !== operationalDate;
+  const citasDelDia = useMemo(
+    () => citas.filter(item => {
+      const day = operationalDay(item.inicio_at);
+      return day && day >= fechaDesde && day <= fechaHasta;
+    }),
+    [citas, fechaDesde, fechaHasta]
+  );
   const [activeMobileContainer, setActiveMobileContainer] = useState('confirmada');
   const fetchInFlightRef = useRef(false);
   const pendingRefreshRef = useRef(false);
@@ -400,29 +391,41 @@ export default function AdminAgendamientoCitasPage() {
     const timerId = window.setInterval(() => setNowMs(Date.now()), 30000);
     return () => window.clearInterval(timerId);
   }, []);
+  useEffect(() => {
+    const nextDay = new Date(operationalDate + 'T00:00:00-06:00').getTime() + 86400000;
+    const timer = window.setTimeout(() => setNowMs(Date.now()), Math.max(1, nextDay - Date.now()));
+    const update = () => setNowMs(Date.now());
+    window.addEventListener('focus', update);
+    document.addEventListener('visibilitychange', update);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('focus', update);
+      document.removeEventListener('visibilitychange', update);
+    };
+  }, [operationalDate]);
 
   const activeFilterCount = useMemo(
-    () => Object.values(filters).filter((value) => value !== 'all' && value !== '').length + (search.trim() ? 1 : 0),
-    [filters, search]
+    () => Object.values(filters).filter((value) => value !== 'all' && value !== '').length + (search.trim() ? 1 : 0) + (isDateQuery ? 1 : 0),
+    [filters, search, isDateQuery]
   );
 
   const citasConfirmadas = useMemo(
-    () => citas
+    () => citasDelDia
       .filter((item) => String(item?.estado_cita_codigo || '').toLowerCase() === 'confirmada')
-      .sort((a, b) => compareOperationalByProximity(a, b, nowMs)),
-    [citas, nowMs]
+      .sort(sortCitasByStart),
+    [citasDelDia]
   );
   const citasEnSalon = useMemo(
-    () => citas
+    () => citasDelDia
       .filter((item) => String(item?.estado_cita_codigo || '').toLowerCase() === 'en_salon')
-      .sort((a, b) => compareOperationalByProximity(a, b, nowMs)),
-    [citas, nowMs]
+      .sort(sortCitasByStart),
+    [citasDelDia]
   );
   const citasEnAtencion = useMemo(
-    () => citas
+    () => citasDelDia
       .filter((item) => String(item?.estado_cita_codigo || '').toLowerCase() === 'en_atencion')
-      .sort((a, b) => compareOperationalByProximity(a, b, nowMs)),
-    [citas, nowMs]
+      .sort(sortCitasByStart),
+    [citasDelDia]
   );
   const containerItemsByKey = useMemo(
     () => ({
@@ -494,8 +497,8 @@ export default function AdminAgendamientoCitasPage() {
   }, [selectedSucursalId, sucursales]);
 
   const hiddenOperationalCount = useMemo(
-    () => citas.filter((item) => ['en_espera', 'pendiente_pago'].includes(String(item?.estado_cita_codigo || '').toLowerCase())).length,
-    [citas]
+    () => citasDelDia.filter((item) => ['en_espera', 'pendiente_pago'].includes(String(item?.estado_cita_codigo || '').toLowerCase())).length,
+    [citasDelDia]
   );
 
   const canManageEmergency = useMemo(() => {
@@ -551,19 +554,35 @@ export default function AdminAgendamientoCitasPage() {
     setListError('');
     try {
       const params = buildFilterParams(filters, search);
+      params.fecha_desde = fechaDesde;
+      params.fecha_hasta = fechaHasta;
+      params.zona_horaria = 'America/Tegucigalpa';
       params.id_sucursal = selectedSucursalId;
-      const operativasResponse = await listAdminCitasOperativas(params, {
-        cache: false,
-        dedupe: !force,
-      });
-      const operativas = Array.isArray((operativasResponse?.data ?? operativasResponse)?.citas) ? (operativasResponse?.data ?? operativasResponse).citas : [];
+      const operativas = [];
+      let page = 1;
+      let hasNext;
+      do {
+        const response = await listAdminCitasOperativas({ ...params, page, limit: 400 }, {
+          cache: false,
+          dedupe: !force,
+        });
+        // AM: Descartar también las páginas de una consulta que dejó de estar seleccionada.
+        if (fetchCitasRef.current !== fetchCitas) return;
+        const payload = response?.data ?? response;
+        if (!payload?.pagination && payload?.citas?.length >= 400) {
+          throw new Error('No fue posible recuperar el rango completo. Actualiza e inténtalo de nuevo.');
+        }
+        operativas.push(...(Array.isArray(payload?.citas) ? payload.citas : []));
+        hasNext = payload?.pagination?.has_next === true;
+        page += 1;
+      } while (hasNext);
       const byId = new Map();
       operativas.forEach((item) => {
         if (item?.id_cita) byId.set(item.id_cita, item);
       });
       setCitas(Array.from(byId.values()).sort(sortCitasByStart));
     } catch (err) {
-      if (isAbortError(err)) return;
+      if (fetchCitasRef.current !== fetchCitas || isAbortError(err)) return;
       if (handleAuthError(err)) return;
       setListError(mapAdminCitasErrorMessage(err));
     } finally {
@@ -577,25 +596,26 @@ export default function AdminAgendamientoCitasPage() {
         }
       }
     }
-  }, [canOperateWithSucursal, filters, handleAuthError, isAuthenticated, search, selectedSucursalId]);
+  }, [canOperateWithSucursal, filters, handleAuthError, isAuthenticated, fechaDesde, fechaHasta, search, selectedSucursalId]);
   fetchCitasRef.current = fetchCitas;
   const scheduleLiveRefresh = useCallback((options = {}) => {
     if (!isAuthenticated) return;
     if (!canOperateWithSucursal) return;
-    const { immediate = false } = options;
+    const { immediate = false, silent = true } = options;
     if (liveRefreshTimeoutRef.current) {
       window.clearTimeout(liveRefreshTimeoutRef.current);
       liveRefreshTimeoutRef.current = null;
     }
     const runRefresh = () => {
-      void fetchCitas({ silent: true, force: true });
+      liveRefreshTimeoutRef.current = null;
+      void fetchCitasRef.current?.({ silent, force: true });
     };
     if (immediate) {
       runRefresh();
       return;
     }
     liveRefreshTimeoutRef.current = window.setTimeout(runRefresh, LIVE_REFRESH_DEBOUNCE_MS);
-  }, [canOperateWithSucursal, fetchCitas, isAuthenticated]);
+  }, [canOperateWithSucursal, isAuthenticated]);
   const handleManualRefresh = useCallback(() => {
     void fetchCitas({ silent: false, force: true });
   }, [fetchCitas]);
@@ -606,11 +626,9 @@ export default function AdminAgendamientoCitasPage() {
   useEffect(() => {
     if (!isAuthenticated) return undefined;
     if (!canOperateWithSucursal) return undefined;
-    const timer = setTimeout(() => {
-      void fetchCitas();
-    }, 260);
-    return () => clearTimeout(timer);
-  }, [canOperateWithSucursal, fetchCitas, isAuthenticated]);
+    scheduleLiveRefresh({ silent: false });
+    return () => window.clearTimeout(liveRefreshTimeoutRef.current);
+  }, [canOperateWithSucursal, fetchCitas, isAuthenticated, scheduleLiveRefresh]);
   useEffect(() => {
     if (!isAuthenticated || !canOperateWithSucursal || !selectedSucursalId) {
       setLiveStatus('idle');
@@ -620,13 +638,15 @@ export default function AdminAgendamientoCitasPage() {
     const source = new EventSource(buildOperationalEventsUrl(selectedSucursalId), { withCredentials: true });
     setLiveStatus('connecting');
 
-    source.onopen = () => {
+    let connected = false;
+    const resync = () => {
       setLiveStatus('connected');
+      if (connected) return;
+      connected = true;
+      scheduleLiveRefresh();
     };
-
-    source.addEventListener('ready', () => {
-      setLiveStatus('connected');
-    });
+    source.onopen = resync;
+    source.addEventListener('ready', resync);
 
     source.addEventListener('ping', () => {
       // Heartbeat del backend; no dispara refresh.
@@ -638,6 +658,7 @@ export default function AdminAgendamientoCitasPage() {
     });
 
     source.onerror = () => {
+      connected = false;
       setLiveStatus('reconnecting');
     };
 
@@ -675,6 +696,7 @@ export default function AdminAgendamientoCitasPage() {
   }
 
   function clearAllFilters() {
+    returnToToday();
     setSearch('');
     setFilters({
       ...FILTER_DEFAULTS,
@@ -682,9 +704,45 @@ export default function AdminAgendamientoCitasPage() {
     });
   }
 
+  function returnToToday() {
+    setDateRange(null);
+    setDateDraft({ desde: operationalDate, hasta: operationalDate });
+    setDateError('');
+    setCitas([]);
+  }
+
+  function openFilters() {
+    setDateDraft({ desde: fechaDesde, hasta: fechaHasta });
+    setDateError('');
+    setFiltersOpen(true);
+  }
+
+  function applyDates() {
+    const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value)
+      && !Number.isNaN(Date.parse(value + 'T00:00:00Z'))
+      && new Date(value + 'T00:00:00Z').toISOString().slice(0, 10) === value;
+    if (!validDate(dateDraft.desde) || !validDate(dateDraft.hasta)) {
+      setDateError('Selecciona una fecha válida en Desde y Hasta.');
+      return;
+    }
+    if (dateDraft.desde > dateDraft.hasta) {
+      setDateError('Hasta debe ser igual o posterior a Desde.');
+      return;
+    }
+    setDateRange(dateDraft.desde === operationalDate && dateDraft.hasta === operationalDate ? null : { ...dateDraft });
+    if (fechaDesde !== dateDraft.desde || fechaHasta !== dateDraft.hasta) setCitas([]);
+    setDateError('');
+    setFiltersOpen(false);
+  }
+
+  function canChangeOperationalState(cita) {
+    const day = operationalDay(cita?.inicio_at);
+    return !isDateQuery && Boolean(day) && day <= operationalDate && canOperateOnCita(cita);
+  }
+
   function openStatusDialog(cita, estadoDestino) {
     if (!cita?.id_cita || !estadoDestino) return;
-    if (!selectedSucursalId || !canOperateOnCita(cita)) {
+    if (!canChangeOperationalState(cita)) {
       notifications.warning('Selecciona la sucursal correcta para operar esta cita.', { dedupeKey: 'agendamiento-citas-sucursal-required' });
       return;
     }
@@ -693,7 +751,7 @@ export default function AdminAgendamientoCitasPage() {
 
   async function submitEstadoChange() {
     if (!stateDialog?.cita?.id_cita || !stateDialog?.estadoDestino) return;
-    if (!selectedSucursalId || !canOperateOnCita(stateDialog.cita)) {
+    if (!canChangeOperationalState(stateDialog.cita)) {
       notifications.warning('Selecciona la sucursal correcta para operar esta cita.', { dedupeKey: 'agendamiento-citas-sucursal-required' });
       return;
     }
@@ -739,6 +797,10 @@ export default function AdminAgendamientoCitasPage() {
   }
 
   function openSingleReschedule(cita) {
+    reservationRequest.current?.abort();
+    setReservationOpen(false);
+    setReservationResults(null);
+    setReservationLoading(false);
     setSingleTarget(cita);
     setSingleForm({ fecha_inicio_nueva: toInputDateTime(cita?.inicio_at), id_empleado_barbero_nuevo: '', motivo: 'Reagendación por emergencia operativa.' });
     setSinglePickerDate(toDateKey(cita?.inicio_at));
@@ -951,7 +1013,7 @@ export default function AdminAgendamientoCitasPage() {
     const operationCode = state === 'confirmada' ? 'registrar_llegada' : state === 'en_salon' ? 'iniciar_atencion' : 'finalizar_atencion';
     const actionLabel = state === 'confirmada' ? 'Registrar llegada' : state === 'en_salon' ? 'Iniciar atención' : 'Finalizar atención';
 
-    const actionBlocked = !selectedSucursalId || !canOperateOnCita(cita);
+    const actionBlocked = !canChangeOperationalState(cita);
     return (
       <Button type="button" size="sm" className={`gap-2 ${fitClass}`} disabled={stateActionLoadingId === cita.id_cita || actionBlocked} onClick={() => { setReservationOpen(false); setReservationResults(null); openStatusDialog(cita, operationCode); }}>
         <CalendarCheck2 size={14} />
@@ -962,7 +1024,7 @@ export default function AdminAgendamientoCitasPage() {
 
   function renderSecondaryActions(cita, options = {}) {
     const { compact = false } = options;
-    if (!canManageEmergency) return null;
+    if (!canManageEmergency || !canOperateOnCita(cita) || !EMERGENCY_STATES.includes(cita.estado_cita_codigo)) return null;
     return (
       <div className={`flex items-center ${compact ? 'justify-center' : 'justify-start'}`}>
         <Button type="button" size="sm" variant="ghost" className="gap-2 text-xs" onClick={() => openSingleReschedule(cita)}>
@@ -1064,6 +1126,8 @@ export default function AdminAgendamientoCitasPage() {
                     <p className="font-semibold text-[var(--mf-accent)]">{cita.id_grupo_cita ? buildBookingShortCode(cita.id_grupo_cita, 5) : 'Sin grupo de reserva'}</p>
                     {viewInfo.titularNombre}
                     <p className="text-xs text-[var(--mf-text-2)]">{viewInfo.aliasIntegrante}</p>
+                    <p className="text-xs text-[var(--mf-text-2)]">{getServicioResumen(cita)}</p>
+                    {renderCitaDetail(cita, false)}
                     {cita.telefono_cliente ? <p className="text-xs text-[var(--mf-text-2)]">{cita.telefono_cliente}</p> : null}
                   </TableCell>
                   <TableCell>
@@ -1111,12 +1175,12 @@ export default function AdminAgendamientoCitasPage() {
     <div className="space-y-4 overflow-x-hidden px-3 pb-24 sm:px-4 sm:pb-6">
       <header className="admin-citas-header rounded-2xl border border-[var(--mf-nav-border)] bg-[color:color-mix(in_srgb,var(--mf-card)_86%,transparent)] p-4 sm:p-5" aria-label="Herramientas de citas">
         <div className="admin-citas-header__context space-y-1">
-          <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · Operación</p>
+          <p className="text-[11px] uppercase tracking-[0.3em] text-[var(--mf-accent)]">Agendamiento · {isDateQuery ? 'Consulta' : 'Operación'}</p>
           <h1 className="mf-font-display text-3xl text-[var(--mf-text)] sm:text-4xl">Citas</h1>
           <p className="text-sm text-[var(--mf-text-2)]">Gestiona confirmadas, en salón y en atención sin salir de la operación.</p>
         </div>
         <div className="admin-citas-header__status text-sm text-[var(--mf-text-2)]" role="status">
-          <span className="font-semibold">{loading ? 'Cargando...' : `${citas.length} cita(s)`}</span>
+          <span className="font-semibold">{loading ? 'Cargando...' : `${citasDelDia.length} cita(s)`}</span>
           {liveStatusLabel ? <span>{liveStatusLabel}</span> : null}
         </div>
         <div className="admin-citas-header__branch rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
@@ -1133,7 +1197,7 @@ export default function AdminAgendamientoCitasPage() {
           {search.trim() ? <button type="button" aria-label="Borrar búsqueda" onClick={() => setSearch('')} className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-[var(--mf-text-2)] hover:bg-[var(--mf-btn-bg)]"><X size={12} /></button> : null}
         </div>
         <Button type="button" variant="outline" className="admin-citas-header__lookup gap-2" onClick={() => setReservationOpen(true)}><Ticket size={15} />Buscar reserva</Button>
-        <Button type="button" variant="outline" className="admin-citas-header__filters gap-2" onClick={() => setFiltersOpen(true)}>
+        <Button type="button" variant="outline" className="admin-citas-header__filters gap-2" onClick={openFilters}>
           <SlidersHorizontal size={15} />Filtros
           {activeFilterCount > 0 ? <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--mf-accent)] px-1.5 text-xs text-[var(--mf-accent-text)]">{activeFilterCount}</span> : null}
         </Button>
@@ -1144,6 +1208,15 @@ export default function AdminAgendamientoCitasPage() {
         {canManageEmergency ? <Button type="button" variant="outline" className="admin-citas-header__emergency gap-2" onClick={() => setBatchDialogOpen(true)}><AlertTriangle size={14} />Reagendación masiva</Button> : null}
         <div className="admin-citas-header__view"><ViewToggle defaultView={view} onViewChange={setView} storageKey="agendamiento-citas" /></div>
       </header>
+
+      <section aria-label="Período consultado" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3 text-sm">
+        <div>
+          <p className="font-semibold">{isDateQuery ? 'Modo consulta — Honduras' : 'Hoy — Honduras'}</p>
+          <p>{fechaDesde === fechaHasta ? fechaDesde : `${fechaDesde} → ${fechaHasta}`}</p>
+          {isDateQuery ? <p className="text-[var(--mf-text-2)]">Solo consulta: sin cambios de estado operativos. La reagendación de emergencia autorizada sigue disponible en Ver detalle.</p> : null}
+        </div>
+        {isDateQuery ? <Button variant="outline" onClick={returnToToday}>Volver a hoy</Button> : null}
+      </section>
 
       <section className="border-b border-[var(--mf-nav-border)] pb-1 lg:hidden">
         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
@@ -1191,9 +1264,9 @@ export default function AdminAgendamientoCitasPage() {
               activeMobileContainer === 'confirmada'
                 ? 'No hay citas confirmadas pendientes.'
                 : activeMobileContainer === 'en_salon'
-                  ? 'No hay citas en salón en este momento.'
+                  ? `No hay citas en salón ${isDateQuery ? 'en las fechas consultadas' : 'en este momento'}.`
                   : activeMobileContainer === 'en_atencion'
-                    ? 'No hay citas en atención en este momento.'
+                    ? `No hay citas en atención ${isDateQuery ? 'en las fechas consultadas' : 'en este momento'}.`
                     : 'No hay citas confirmadas pendientes.'
           )}
 
@@ -1204,7 +1277,7 @@ export default function AdminAgendamientoCitasPage() {
                 En salón
               </p>
               <p className="mt-2 text-xs text-[var(--mf-text-2)]">
-                {citasEnSalon.length > 0 ? `${citasEnSalon.length} cita(s) esperando inicio.` : 'No hay citas en salón hoy.'}
+                {citasEnSalon.length > 0 ? `${citasEnSalon.length} cita(s) esperando inicio.` : `No hay citas en salón ${isDateQuery ? 'en las fechas consultadas' : 'hoy'}.`}
               </p>
             </div>
             <div className="rounded-2xl border border-indigo-400/30 bg-[color:color-mix(in_srgb,var(--mf-card)_90%,rgba(99,102,241,0.12))] p-3">
@@ -1213,7 +1286,7 @@ export default function AdminAgendamientoCitasPage() {
                 En atención
               </p>
               <p className="mt-2 text-xs text-[var(--mf-text-2)]">
-                {citasEnAtencion.length > 0 ? `${citasEnAtencion.length} cita(s) en servicio.` : 'No hay citas en atención hoy.'}
+                {citasEnAtencion.length > 0 ? `${citasEnAtencion.length} cita(s) en servicio.` : `No hay citas en atención ${isDateQuery ? 'en las fechas consultadas' : 'hoy'}.`}
               </p>
             </div>
           </div>
@@ -1223,8 +1296,8 @@ export default function AdminAgendamientoCitasPage() {
       {canRenderCitasContent ? (
         <div className="hidden grid-cols-1 gap-4 xl:grid-cols-3 lg:grid">
           {renderContainer('confirmada', citasConfirmadas, 'No hay citas confirmadas pendientes.')}
-          {renderContainer('en_salon', citasEnSalon, 'No hay citas en salón en este momento.')}
-          {renderContainer('en_atencion', citasEnAtencion, 'No hay citas en atención en este momento.')}
+          {renderContainer('en_salon', citasEnSalon, `No hay citas en salón ${isDateQuery ? 'en las fechas consultadas' : 'en este momento'}.`)}
+          {renderContainer('en_atencion', citasEnAtencion, `No hay citas en atención ${isDateQuery ? 'en las fechas consultadas' : 'en este momento'}.`)}
         </div>
       ) : null}
 
@@ -1234,42 +1307,44 @@ export default function AdminAgendamientoCitasPage() {
           <form onSubmit={lookupReservation} className="flex flex-wrap gap-2"><Label htmlFor="reservation-code" className="w-full">Código de reserva</Label><Input id="reservation-code" value={reservationCode} onChange={(event) => { reservationRequest.current?.abort(); setReservationLoading(false); setReservationCode(event.target.value.toUpperCase()); setReservationResults(null); }} maxLength={5} autoCapitalize="characters" autoComplete="off" className="min-w-0 flex-1" /><Button type="submit" disabled={reservationLoading}>{reservationLoading ? 'Buscando…' : 'Buscar'}</Button></form>
           <div role="status" aria-live="polite">{reservationError ? <p className="text-sm text-[var(--mf-text-2)]">{reservationError}</p> : null}{reservationResults?.length === 0 ? <p>No hay reservas coincidentes dentro de tu alcance.</p> : null}</div>
           {reservationResults?.length > 1 ? <p className="text-sm text-[var(--mf-text-2)]">El código coincide con varias reservas. Verifica titular y fecha.</p> : null}
-          {reservationResults?.map((group) => <section key={group.id_grupo_cita} className="rounded-2xl border border-[var(--mf-nav-border)] p-3"><h3 className="font-semibold text-[var(--mf-accent)]">Reserva {group.codigo_reserva}</h3>{group.citas.map((cita) => <div key={cita.id_cita} className="border-b border-[var(--mf-nav-border)] py-3 last:border-0"><p className="break-words font-semibold">{getAppointmentDisplayInfo(cita).aliasIntegrante}</p><p className="text-sm">Titular: {getAppointmentDisplayInfo(cita).titularNombre}</p><p className="text-sm">{formatDateTime(cita.inicio_at)} · {cita.nombre_barbero}</p><p className="text-sm">{getServicioResumen(cita)} · {getAppointmentStatusLabel(cita.estado_cita_codigo)}</p>{VISIBLE_OPERATIONAL_STATES.includes(cita.estado_cita_codigo) ? <div className="mt-2">{renderItemActions(cita, { compact: true })}</div> : null}{renderCitaDetail(cita, false)}</div>)}</section>)}
+          {reservationResults?.map((group) => <section key={group.id_grupo_cita} className="rounded-2xl border border-[var(--mf-nav-border)] p-3"><h3 className="font-semibold text-[var(--mf-accent)]">Reserva {group.codigo_reserva}</h3>{group.citas.map((cita) => <div key={cita.id_cita} className="border-b border-[var(--mf-nav-border)] py-3 last:border-0"><p className="break-words font-semibold">{getAppointmentDisplayInfo(cita).aliasIntegrante}</p><p className="text-sm">Titular: {getAppointmentDisplayInfo(cita).titularNombre}</p><p className="text-sm">{formatDateTime(cita.inicio_at)} · {cita.nombre_barbero}</p><p className="text-sm">{getServicioResumen(cita)} · {getAppointmentStatusLabel(cita.estado_cita_codigo)}</p>{VISIBLE_OPERATIONAL_STATES.includes(cita.estado_cita_codigo) ? <div className="mt-2">{renderItemActions(cita, { compact: true })}</div> : null}{renderSecondaryActions(cita)}{renderCitaDetail(cita, false)}</div>)}</section>)}
         </DialogContent>
       </Dialog>
       <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Filtros de Citas</DialogTitle>
-            <DialogDescription>Filtra la vista operativa por sucursal, barbero y rango de fechas.</DialogDescription>
+            <DialogDescription>Hoy — Honduras por defecto. Selecciona otras fechas para consultar sin adelantar operaciones.</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <Label className="mf-label">Sucursal</Label>
-              <select className="mf-select mt-1" value={selectedSucursalId || filters.idSucursal} onChange={(event) => handleSucursalSelectionChange(event.target.value)}>
+              <Label htmlFor="citas-sucursal" className="mf-label">Sucursal</Label>
+              <select id="citas-sucursal" className="mf-select mt-1" value={selectedSucursalId || filters.idSucursal} onChange={(event) => handleSucursalSelectionChange(event.target.value)}>
                 {hasMultipleSucursales ? <option value="">Selecciona una sucursal</option> : null}
                 {sucursales.map((sucursal) => <option key={sucursal.id_sucursal} value={sucursal.id_sucursal}>{sucursal.nombre_sucursal}</option>)}
               </select>
             </div>
             <div>
-              <Label className="mf-label">Barbero</Label>
-              <select className="mf-select mt-1" value={filters.idBarbero} onChange={(event) => setFilters((prev) => ({ ...prev, idBarbero: event.target.value }))}>
+              <Label htmlFor="citas-barbero" className="mf-label">Barbero</Label>
+              <select id="citas-barbero" className="mf-select mt-1" value={filters.idBarbero} onChange={(event) => setFilters((prev) => ({ ...prev, idBarbero: event.target.value }))}>
                 <option value="all">Todos</option>
                 {barberos.map((barbero) => <option key={barbero.id_empleado} value={barbero.id_empleado}>{barbero.nombre_completo}</option>)}
               </select>
             </div>
             <div>
-              <Label className="mf-label">Desde</Label>
-              <Input type="date" className="mf-input mt-1" value={filters.fechaDesde} onChange={(event) => setFilters((prev) => ({ ...prev, fechaDesde: event.target.value }))} />
+              <Label htmlFor="citas-desde" className="mf-label">Desde</Label>
+              <Input id="citas-desde" type="date" className="mf-input mt-1" value={dateDraft.desde} onChange={event => setDateDraft(prev => ({ ...prev, desde: event.target.value }))} />
             </div>
             <div>
-              <Label className="mf-label">Hasta</Label>
-              <Input type="date" className="mf-input mt-1" value={filters.fechaHasta} onChange={(event) => setFilters((prev) => ({ ...prev, fechaHasta: event.target.value }))} />
+              <Label htmlFor="citas-hasta" className="mf-label">Hasta</Label>
+              <Input id="citas-hasta" type="date" className="mf-input mt-1" value={dateDraft.hasta} onChange={event => setDateDraft(prev => ({ ...prev, hasta: event.target.value }))} />
             </div>
           </div>
+          {dateError ? <p role="alert" className="text-sm text-[var(--mf-text)]">{dateError}</p> : null}
           <DialogFooter>
             <Button variant="outline" onClick={clearAllFilters}>Limpiar filtros</Button>
             <Button onClick={() => setFiltersOpen(false)}>Cerrar</Button>
+            <Button onClick={applyDates}>Consultar fechas</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
