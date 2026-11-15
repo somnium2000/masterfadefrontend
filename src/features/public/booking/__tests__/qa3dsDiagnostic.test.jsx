@@ -94,6 +94,14 @@ test('fresh checkout never reads an unreserved bridge state',()=>{
   mountPayment({pixelpaySongbirdBridge:true,paymentOwnerId:'synthetic-owner'});
   expect(requestSongbirdBridge).not.toHaveBeenCalled();
 });
+
+test('QA test-session presentation keeps an uncertain payment blocked without requesting provider Status',()=>{
+  const context=mountPayment({paymentIntent:{...pending,qa_sandbox_session:true},paymentResult:pending,paymentCanObserve3ds:false});
+  expect(screen.getByRole('note').textContent).toContain('Cada reserva nueva');
+  expect(screen.queryByLabelText('CVV')).toBeNull();
+  expect(context.observePixelPay3ds).not.toHaveBeenCalled();expect(salePublicPixelPay).not.toHaveBeenCalled();
+  expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+});
 test('terminal verified approval remains a confirmed payment in diagnostic presentation', () => {
   mountPayment({ paymentIntent: { ...fresh, booking_confirmed: true }, paymentResult: { ...fresh, booking_confirmed: true },
     paymentCanObserve3ds: false, pixelpay3dsDiagnostic: false });

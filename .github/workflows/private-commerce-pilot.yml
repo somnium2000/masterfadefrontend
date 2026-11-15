@@ -19,6 +19,7 @@ jobs:
           npx vitest run src/hooks/usePrivateCommerce.test.jsx
           src/features/payments/__tests__/pixelPaySaleCapability.test.js
           src/features/payments/__tests__/songbirdSession.test.jsx
+          src/features/payments/__tests__/officialPixelPaySdk.test.jsx
           src/features/payments/__tests__/SongbirdBridgePanel.test.jsx
           src/features/cliente/pages/__tests__/ClienteAppShell.qa15.test.jsx
           src/features/cliente/pages/__tests__/ClienteBookingEntry.qa-mp-entry-05.test.jsx
