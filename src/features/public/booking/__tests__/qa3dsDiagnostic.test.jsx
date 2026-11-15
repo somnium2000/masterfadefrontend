@@ -171,6 +171,27 @@ test('local /estado can restore fresh diagnostic selection before first operatio
   await act(async () => view.result.current.observePixelPay3dsOnce(input));
   expect(salePublicPixelPay).toHaveBeenCalledOnce();
 });
+
+test('empty storage after backend restart recovers durable session marker and every later verification stays local',async()=>{
+  const durable={...pending,qa_sandbox_session:true,pending_confirmation:true};
+  const first=renderHook(()=>useBookingPayment({currentGroupId:GROUP,authenticated:true}));
+  queryPublicPixelPayStatus.mockRejectedValue(Object.assign(new Error('use local state'),{code:'QA_3DS_EXTERNAL_STATUS_DISABLED'}));
+  let finish;
+  getPublicPaymentStatus.mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));
+  getPublicPaymentStatus.mockResolvedValue(durable);
+  let verifying;
+  await act(async()=>{verifying=first.result.current.queryPixelPayStatusOnce(input);await Promise.resolve();});
+  expect(first.result.current.checkingPaymentStatus).toBe(true);
+  await act(async()=>{finish(durable);await verifying;});
+  expect(first.result.current.paymentIntent).toMatchObject({qa_3ds_diagnostic:true,qa_sandbox_session:true,pending_confirmation:true});
+  expect(queryPublicPixelPayStatus).toHaveBeenCalledOnce();
+  first.unmount();
+  const second=renderHook(()=>useBookingPayment({currentGroupId:GROUP,authenticated:true}));
+  act(()=>second.result.current.restorePaymentContext(GROUP));
+  await act(async()=>{await second.result.current.queryPixelPayStatusOnce(input);await second.result.current.observePixelPay3dsOnce(input);});
+  expect(queryPublicPixelPayStatus).toHaveBeenCalledOnce();expect(salePublicPixelPay).not.toHaveBeenCalled();
+  expect(JSON.parse(sessionStorage.getItem(KEY)).paymentIntent.qa_sandbox_session).toBe(true);
+});
 test('missing durable browser recovery prevents any diagnostic POST', async () => {
   const view = renderHook(() => useBookingPayment({ currentGroupId: GROUP, authenticated: true }));
   const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage unavailable'); });

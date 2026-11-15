@@ -364,6 +364,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
             booking_confirmed: receivedPayload.booking_confirmed === true,
             pending_confirmation: definitive ? false : unresolvedSale || receivedPayload.pending_confirmation === true,
             ...(receivedPayload?.qa_3ds_diagnostic === true ? { qa_3ds_diagnostic: true } : {}),
+            ...(receivedPayload?.qa_sandbox_session === true ? { qa_sandbox_session: true } : {}),
           };
           paymentIntentRef.current = intent;
           setPaymentIntentState(intent);
@@ -557,6 +558,12 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     pixelPayStatusRef.current = { key: requestKey, controller, promise };
     try {
       return await promise;
+    } catch (error) {
+      // AM: A tab without browser storage can learn the durable QA marker from the server denial.
+      if (error?.code === 'QA_3DS_EXTERNAL_STATUS_DISABLED') return await fetchPaymentStatusOnce({
+        groupId: normalizedGroupId, intentId: normalizedIntentId, titularEmail: normalizedEmail,
+      });
+      throw error;
     } finally {
       if (pixelPayStatusRef.current?.promise === promise) pixelPayStatusRef.current = null;
       if (mountedRef.current) setCheckingPaymentStatus(false);
