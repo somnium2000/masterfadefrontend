@@ -362,7 +362,6 @@ export default function PublicBookingPaymentStep() {
     registerPaymentNavigation?.({ dirty: paymentFormDirty, processing: processingPayment || loadingIntent || creatingPaymentIntent });
     return () => registerPaymentNavigation?.({ dirty: false, processing: false });
   }, [registerPaymentNavigation, paymentFormDirty, processingPayment, loadingIntent, creatingPaymentIntent]);
-  const reconciliationNotice = getPixelPayReconciliationNotice(paymentResult);
   const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(() => {
     if (typeof window === 'undefined') return TODO_PAGO_APPROVED_SIMULATION_AMOUNT;
     try {
@@ -389,7 +388,28 @@ export default function PublicBookingPaymentStep() {
     providerType: paymentSimulationAction.type,
     paymentIntent,
     paymentResult,
-  });
+  }) || (pixelPaySaleSuspended && Boolean(getPixelPayReconciliationNotice(paymentIntent)));
+  const reconciliationNotice = getPixelPayReconciliationNotice(paymentResult)
+    || (pixelPaySaleSuspended ? getPixelPayReconciliationNotice(paymentIntent) : '');
+  // AM: A created intent or context reload does not prove a Sale was submitted.
+  const suspendedIntentState = String(paymentResult?.estado_intent_codigo || paymentResult?.status
+    || paymentIntent?.estado_intent_codigo || '').trim().toLowerCase();
+  const hasReportedPaymentEvidence = [paymentResult, paymentIntent].some(state =>
+    state?.booking_confirmed === true
+    || ['processing', 'procesando', 'confirmando', 'confirmado', 'pagado', 'paid', 'capturado', 'capturada'].includes(
+      String(state?.estado_intent_codigo || state?.status || '').trim().toLowerCase()
+    )
+    || ['payment_attempt_id', 'payment_uuid', 'provider_session_id', 'transaction_id', 'provider_tx_id', 'referencia_externa']
+      .some(field => Boolean(String(state?.[field] || '').trim())));
+  const suspendedBeforePayment = pixelPaySaleSuspended
+    && !processingPayment
+    && !pixelPayPendingConfirmation
+    && ['', 'creado', 'link_generado', 'expirado', 'expired'].includes(suspendedIntentState)
+    && !hasReportedPaymentEvidence;
+  const suspendedHoldExpired = holdExpired || paymentUiState.status === 'expired';
+  const paymentProcessing = processingPayment || pixelPayPendingConfirmation
+    || (pixelPaySaleSuspended && paymentUiState.status === 'processing')
+    || (paymentRestoring && !pixelPaySaleSuspended);
   const paymentLaunch = paymentIntent?.launch;
   const paymentLaunchKey = createTodoPagoLaunchKey(paymentLaunch);
   const hasHostedLaunch = paymentLaunch?.type === 'iframe_post';
@@ -628,7 +648,7 @@ export default function PublicBookingPaymentStep() {
     <div className={`citas-confirm-wrap public-booking-payment-wrap ${usesProductionCheckoutDesign ? 'mf-checkout' : ''}`}>
       <div className="citas-surface p-3 sm:p-5">
         {usesProductionCheckoutDesign ? (
-          <><PaymentCheckoutHero commercialPreview={qaVideoDemoMode} /><PaymentCheckoutSteps processing={processingPayment || pixelPayPendingConfirmation || paymentRestoring} confirmed={paymentResult?.booking_confirmed === true} /></>
+          <><PaymentCheckoutHero commercialPreview={qaVideoDemoMode} /><PaymentCheckoutSteps processing={paymentProcessing} confirmed={paymentResult?.booking_confirmed === true} /></>
         ) : (
         <BookingStepHeader
           title="Pasarela de pago segura"
@@ -675,11 +695,6 @@ export default function PublicBookingPaymentStep() {
           </div>
         ) : null}
 
-        {pixelPaySaleSuspended && !pixelPayPendingConfirmation ? (
-          <p role="status" className="public-booking-payment-note mt-3">
-            El pago con PixelPay Sandbox aún no está habilitado. Puedes revisar tu reserva sin enviar un pago.
-          </p>
-        ) : null}
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
           {paymentSimulationAction.canShow && !pixelPaySaleSuspended && !pixelPayPendingConfirmation && !paymentRestoring ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card" aria-busy={processingPayment}>
@@ -817,9 +832,15 @@ export default function PublicBookingPaymentStep() {
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
               <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
                 <ShieldCheck size={30} className="text-[var(--mf-accent)]" />
-                <h4 className="citas-confirm-subtitle">{qaVideoDemoMode ? 'Confirmando tu pago' : pixelPayPresentation.paymentTitle}</h4>
+                <h4 className="citas-confirm-subtitle">{suspendedBeforePayment ? 'Pago deshabilitado en QA' : qaVideoDemoMode ? 'Confirmando tu pago' : pixelPayPresentation.paymentTitle}</h4>
                 <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
-                  {qaVideoDemoMode
+                  {suspendedBeforePayment
+                    ? suspendedHoldExpired
+                      ? 'El pago con PixelPay Sandbox aún no está habilitado. La reserva temporal venció; consulta su estado y vuelve a la agenda para elegir otro horario.'
+                      : paymentRestoring
+                        ? 'El pago con PixelPay Sandbox aún no está habilitado. Estamos consultando el estado de la reserva temporal; todavía no es una cita confirmada.'
+                        : 'El pago con PixelPay Sandbox aún no está habilitado. Tu reserva está temporalmente retenida y pendiente de pago; todavía no es una cita confirmada.'
+                    : qaVideoDemoMode
                     ? 'Estamos verificando el resultado del pago. No vuelvas a realizarlo.'
                     : 'Estamos verificando el resultado del pago con PixelPay. No vuelvas a realizar el pago.'}
                 </p>
