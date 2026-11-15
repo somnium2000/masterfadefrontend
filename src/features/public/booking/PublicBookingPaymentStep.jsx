@@ -11,6 +11,7 @@ import TodoPagoHostedModal, {
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 import { getPixelPayPresentation } from '../../payments/pixelPayPresentation.js';
 import { isPixelPaySaleAuthorized, isQaPixelPay3dsDiagnosticAuthorized } from '../../payments/pixelPaySaleCapability.js';
+import SongbirdBridgePanel from '../../payments/SongbirdBridgePanel.jsx';
 import { PaymentCheckoutHero, PaymentCheckoutSteps } from '../../payments/PaymentCheckoutPresentation.jsx';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
@@ -349,6 +350,9 @@ export default function PublicBookingPaymentStep() {
     paymentCanExecuteSale = true,
     pixelpaySale,
     pixelpay3dsDiagnostic = false,
+    pixelpaySongbirdBridge = false,
+    paymentOwnerId,
+    holdResult,
     paymentCanObserve3ds = false,
     observePixelPay3ds,
   } = usePublicBookingFlow();
@@ -706,6 +710,9 @@ export default function PublicBookingPaymentStep() {
           </div>
         ) : null}
 
+        <SongbirdBridgePanel enabled={isQaPixelPay3dsDiagnosticAuthorized(pixelpaySongbirdBridge)&&diagnosticContext
+          &&paymentResult?.booking_confirmed!==true} groupId={holdResult?.id_grupo_cita||paymentIntent?.id_grupo_cita}
+          intentId={paymentIntent?.id_intent} email={paymentTitularEmail} identity={paymentOwnerId} allowStart={!holdExpired}/>
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
           {paymentSimulationAction.canShow && (!pixelPaySaleSuspended || diagnosticCanSubmit) && !pixelPayPendingConfirmation && !paymentRestoring ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card" aria-busy={processingPayment}>

@@ -26,7 +26,7 @@ export default function usePrivateCommerce() {
         if (!controller.signal.aborted && current === generation) {
           // AM: Preserve QA checkout context on refresh failure, but revoke any Sale grant.
           setConfirmed(previous => ({ identity, data: explicitSaleRequired && previous?.identity === identity
-            && previous.data?.booking === true ? { ...previous.data, pixelpaySale: false, pixelpay3dsDiagnostic: false } : null }));
+            && previous.data?.booking === true ? { ...previous.data, pixelpaySale: false, pixelpay3dsDiagnostic: false, pixelpaySongbirdBridge: false } : null }));
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -46,6 +46,8 @@ export default function usePrivateCommerce() {
     confirmed?.identity !== identity || refreshing?.identity === identity
   ));
   return { booking: data?.booking === true, vipPurchase: data?.vipPurchase === true,
+    pixelpaySongbirdBridge: !checking && data?.booking === true
+      && isQaPixelPay3dsDiagnosticAuthorized(data?.pixelpaySongbirdBridge),
     pixelpay3dsDiagnostic: !checking && data?.booking === true
       && isQaPixelPay3dsDiagnosticAuthorized(data?.pixelpay3dsDiagnostic),
     ...(explicitSaleRequired ? { pixelpaySale: !checking && data?.booking === true && data?.pixelpaySale === true }
