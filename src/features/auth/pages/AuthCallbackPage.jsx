@@ -465,7 +465,7 @@ export default function AuthCallbackPage() {
           >
             <p className="font-semibold uppercase tracking-[0.08em] text-[var(--mf-accent)]">COMPLETAR REGISTRO</p>
             <p className="text-xs leading-5 text-[var(--mf-text-2)]">
-              Confirma tus decisiones para crear tu perfil. Los documentos legales publicos aun estan pendientes de aprobacion.
+              Confirma tus decisiones para crear tu perfil. Consulta los términos y condiciones aprobados y la política de privacidad.
             </p>
             <ConsentAgreements
               termsLabel="Acepto los términos y condiciones para crear mi cuenta."
