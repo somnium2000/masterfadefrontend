@@ -2,7 +2,8 @@ import {useCallback,useEffect,useRef,useState} from 'react';
 import {requestSongbirdBridge} from '../public/booking/publicBookingApi.js';
 
 const safeView=value=>({state:value?.state||'unavailable',can_start:value?.can_start===true,
-  can_resume:false,financial_finalization_enabled:false});
+  can_resume:false,financial_finalization_enabled:false,
+  block_code:value?.block_code==='PIXELPAY_SONGBIRD_AUTH_RESULT_UNACCREDITED'?value.block_code:null});
 export default function SongbirdBridgePanel({enabled=false,groupId,intentId,email,identity,allowStart=true}) {
   const [view,setView]=useState({state:'loading',can_start:false});
   const [busyScope,setBusyScope]=useState(null);
@@ -45,6 +46,8 @@ export default function SongbirdBridgePanel({enabled=false,groupId,intentId,emai
       const {createSongbirdSession}=await import('./songbirdSession.js');
       const activeSession=await createSongbirdSession({handoff:response.handoff,signal:controller.signal,
         transport:(action,fields)=>call(action,fields,{signal:controller.signal}),
+        // AM: Interruption is a local state change and must survive aborting the browser request epoch.
+        onInterrupt:fields=>call('interrupt',fields).catch(()=>{}),
         onState:r=>{if(current===generation.current&&key.current===currentScope)setView({...safeView(r),scope});}});
       if(current!==generation.current||key.current!==currentScope){activeSession.stop();return;}
       session.current=activeSession;await activeSession.run;
@@ -54,9 +57,13 @@ export default function SongbirdBridgePanel({enabled=false,groupId,intentId,emai
   if(!canRead)return null;
   return <section aria-label="Autenticación 3DS de Sandbox" className="mt-4 rounded-xl border p-4">
     <h4>Autenticación 3DS de Sandbox</h4>
-    <p role="status">{view.state==='contract_blocked'?'El puente conservó el intento. La continuación requiere un contrato de PixelPay.'
+    <p role="status">{view.block_code==='PIXELPAY_SONGBIRD_AUTH_RESULT_UNACCREDITED'?'La respuesta de autenticación requiere verificación de PixelPay. La finalización financiera sigue bloqueada.'
+      :view.state==='contract_blocked'?'El puente conservó el intento. La continuación requiere un contrato de PixelPay.'
       :view.state==='authentication_complete'||view.state==='financial_finalization_blocked'?'La autenticación no confirma el pago. La finalización financiera permanece bloqueada.'
       :view.state==='handoff_ready'?'La autenticación está preparada para este intento.'
+      :view.state==='challenge_ready'?'Completa el desafío de tu banco. Todavía no se ha confirmado el pago.'
+      :view.state==='authentication_failed'?'La autenticación no fue aprobada. No repitas el pago.'
+      :view.state==='authentication_unverified'?'La autenticación requiere verificación del proveedor. No repitas el pago.'
       :view.state==='expired'?'La sesión de autenticación venció. No repitas el pago.'
       :'El resultado sigue pendiente. No inicies otro pago.'}</p>
     {view.scope===scope&&view.can_start===true?<button type="button" onClick={start} disabled={busyScope===scope||!allowStart}>Iniciar autenticación 3DS</button>:null}
