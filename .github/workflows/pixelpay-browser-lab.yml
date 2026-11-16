@@ -1,0 +1,18 @@
+name: PixelPay Browser Lab (offline)
+on:
+  pull_request:
+    branches: [dev]
+permissions:
+  contents: read
+jobs:
+  native-sdk-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Native browser SDK with zero external dispatches
+        run: npm run test:pixelpay:browser
