@@ -715,7 +715,8 @@ export default function PublicBookingPaymentStep() {
           &&pixelPayPendingConfirmation&&!processingPayment&&paymentResult?.booking_confirmed!==true} groupId={holdResult?.id_grupo_cita||paymentIntent?.id_grupo_cita}
           intentId={paymentIntent?.id_intent} email={paymentTitularEmail} identity={paymentOwnerId} allowStart={!holdExpired}/>
         {sandboxSession ? <p role="note">Sesión de pruebas Sandbox. Cada reserva nueva permite una operación inicial.
-          Un resultado pendiente no se reenvía. La continuación 3DS permanece bloqueada.</p> : null}
+            Un resultado pendiente no se reenvía. La autenticación 3DS depende de la autorización del backend;
+            solo un pago verificado permite confirmar la cita.</p> : null}
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
           {paymentSimulationAction.canShow && (!pixelPaySaleSuspended || diagnosticCanSubmit) && !pixelPayPendingConfirmation && !paymentRestoring ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card" aria-busy={processingPayment}>

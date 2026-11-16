@@ -55,3 +55,29 @@ test('reload before upstream completion can explicitly recover metadata without 
   expect(requestSongbirdBridge.mock.calls.map(c=>c[0].action)).toEqual(['status','status']);
   expect(createSongbirdSession).not.toHaveBeenCalled();
 });
+
+test.each([
+  [{state:'authentication_failed'},/La autenticación no fue aprobada/],
+  [{state:'challenge_ready'},/Completa el desafío de tu banco/],
+  [{state:'contract_blocked',block_code:'PIXELPAY_SONGBIRD_AUTH_RESULT_UNACCREDITED'},/respuesta de autenticación requiere verificación de PixelPay/],
+])('real bridge state %j remains distinct from a paid booking',async(response,message)=>{
+  requestSongbirdBridge.mockResolvedValue({...response,can_start:false,financial_finalization_enabled:false});
+  render(<SongbirdBridgePanel {...props}/>);await screen.findByText(message);
+  expect(screen.queryByRole('button',{name:'Iniciar autenticación 3DS'})).toBeNull();
+  expect(createSongbirdSession).not.toHaveBeenCalled();
+});
+
+test('active browser lease reports a local interrupt outside its aborted request epoch',async()=>{
+  let resolveRun;let options;
+  requestSongbirdBridge.mockImplementation(body=>Promise.resolve(body.action==='status'
+    ?{state:'handoff_ready',can_start:true}:body.action==='claim'?{state:'browser_leased',handoff:{jwt:'opaque'}}:{}));
+  const stop=vi.fn();createSongbirdSession.mockImplementation(async input=>{
+    options=input;return{stop,run:new Promise(resolve=>{resolveRun=resolve;})};
+  });
+  const view=render(<SongbirdBridgePanel {...props}/>);fireEvent.click(await screen.findByRole('button'));
+  await waitFor(()=>expect(createSongbirdSession).toHaveBeenCalledOnce());view.unmount();
+  expect(options.signal.aborted).toBe(true);await options.onInterrupt({lease_id:'lease'});
+  const call=requestSongbirdBridge.mock.calls.find(c=>c[0].action==='interrupt');
+  expect(call[0].lease_id).toBe('lease');expect(call[1].signal).toBeUndefined();
+  await act(async()=>resolveRun({state:'interrupted'}));
+});
