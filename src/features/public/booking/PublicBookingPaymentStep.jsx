@@ -351,6 +351,7 @@ export default function PublicBookingPaymentStep() {
     pixelpaySale,
     pixelpay3dsDiagnostic = false,
     pixelpaySongbirdBridge = false,
+    songbirdEligibilityChecking = false,
     paymentOwnerId,
     holdResult,
     paymentCanObserve3ds = false,
@@ -714,7 +715,7 @@ export default function PublicBookingPaymentStep() {
         ) : null}
 
         <SongbirdBridgePanel enabled={songbirdBridgeEnabled} groupId={holdResult?.id_grupo_cita||paymentIntent?.id_grupo_cita}
-          intentId={paymentIntent?.id_intent} email={paymentTitularEmail} identity={paymentOwnerId} allowStart={!holdExpired}/>
+          intentId={paymentIntent?.id_intent} email={paymentTitularEmail} identity={paymentOwnerId} allowStart={!holdExpired} eligibilityChecking={songbirdEligibilityChecking}/>
         {sandboxSession ? <p role="note">Sesión de pruebas Sandbox. Cada reserva nueva permite una operación inicial.
             Un resultado pendiente no se reenvía. La autenticación 3DS depende de la autorización del backend;
             solo un pago verificado permite confirmar la cita.</p> : null}

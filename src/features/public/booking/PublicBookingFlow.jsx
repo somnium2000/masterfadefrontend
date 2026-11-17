@@ -327,7 +327,7 @@ function persistRewardBookingContext(context) {
   window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, JSON.stringify(context));
 }
 
-export default function PublicBookingFlow({ pixelpaySale, pixelpay3dsDiagnostic = false, pixelpaySongbirdBridge = false } = {}) {
+export default function PublicBookingFlow({ pixelpaySale, pixelpay3dsDiagnostic = false, pixelpaySongbirdBridge = false, songbirdEligibilityChecking = false } = {}) {
   const { user: rewardUser } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -4148,6 +4148,7 @@ const agendaAutoLoadKeyRef = useRef('');
       observePixelPay3ds,
       pixelpay3dsDiagnostic,
       pixelpaySongbirdBridge,
+      songbirdEligibilityChecking,
       paymentOwnerId: rewardUser?.id_usuario,
       pixelpaySale,
       bookingSuccessResult,
@@ -4304,6 +4305,7 @@ const agendaAutoLoadKeyRef = useRef('');
       observePixelPay3ds,
       pixelpay3dsDiagnostic,
       pixelpaySongbirdBridge,
+      songbirdEligibilityChecking,
       rewardUser?.id_usuario,
       pixelpaySale,
       bookingSuccessResult,

@@ -1,5 +1,6 @@
 export const SONGBIRD_SANDBOX_URL = 'https://songbirdstag.cardinalcommerce.com/edge/v1/songbird.js';
 const ACS_ORIGINS = new Set(['https://songbirdstag.cardinalcommerce.com','https://centinelapistag.cardinalcommerce.com']);
+const INTERRUPT_REASONS = new Set(['PANEL_CLEANUP','CONTEXT_CHANGED','SIGNAL_ABORT','HANDOFF_EXPIRED','UI_CLOSED','SDK_HANDLER_ERROR','SDK_RUN_ERROR','SESSION_INIT_ERROR','CHALLENGE_INVALID','USER_CANCEL']);
 let active = false;
 const EMV_FIELDS = ['browser_java_enabled','browser_language','browser_color_depth','browser_screen_height',
   'browser_screen_width','browser_time_zone','user_agent','browser_javascript_enabled'];
@@ -50,18 +51,19 @@ export async function createSongbirdSession({ handoff, transport, onState=()=>{}
   let terminalBlockCode=null;
   let setupClaimed=false;let validationClaimed=false;
   const emit=value=>onState(stateOnly(value));
-  const stop=(notify=true)=>{
+  const stop=(notify=true,reason='USER_CANCEL')=>{
     if(stopped)return;stopped=true;clearTimeout(timer);
     sessionAbort.abort();
     try{cleanupSdk?.();for(const name of handlers)cardinal?.off(name);}catch{/* AM: Cleanup must still erase the token and release the browser lock. */}
     if(facadeInstalled){if(previous===undefined)delete window.Cardinal;else window.Cardinal=previous;}
     delete handoff.jwt;
-    if(notify){try{Promise.resolve(onInterrupt({lease_id:handoff.lease_id})).catch(()=>{});}catch{/* AM: Durable server expiry also closes an interrupted lease. */}}
+    if(notify){try{Promise.resolve(onInterrupt({lease_id:handoff.lease_id,interrupt_reason:INTERRUPT_REASONS.has(reason)?reason:'USER_CANCEL'})).catch(()=>{});}catch{/* AM: Durable server expiry also closes an interrupted lease. */}}
     settleStop({state:notify?'interrupted':terminalState});
-    active=false;signal?.removeEventListener('abort',stop);
+    active=false;signal?.removeEventListener('abort',onAbort);
   };
-  signal?.addEventListener('abort',stop,{once:true});
-  timer=setTimeout(()=>{emit({state:'expired'});stop();},Math.max(0,Date.parse(handoff.expires_at)-Date.now()));
+  const onAbort=()=>stop(true,INTERRUPT_REASONS.has(signal?.reason)?signal.reason:'SIGNAL_ABORT');
+  signal?.addEventListener('abort',onAbort,{once:true});
+  timer=setTimeout(()=>{emit({state:'expired'});stop(true,'HANDOFF_EXPIRED');},Math.max(0,Date.parse(handoff.expires_at)-Date.now()));
   try {
     const {sdk,Manager,Modal}=await loadSdk();
     if(stopped||signal?.aborted)throw new Error('SONGBIRD_INTERRUPTED');
@@ -84,9 +86,11 @@ export async function createSongbirdSession({ handoff, transport, onState=()=>{}
           return;
         }
         try {
-          Promise.resolve(handler(...args)).catch(()=>{emit({state:'interrupted'});stop();});
+          Promise.resolve(handler(...args)).catch(()=>{emit({state:'interrupted'});stop(true,'SDK_HANDLER_ERROR');});
+        } catch {
+          emit({state:'interrupted'});stop(true,'SDK_HANDLER_ERROR');
         } finally {
-          if(name==='ui.close'){emit({state:'interrupted'});stop();}
+          if(name==='ui.close'){emit({state:'interrupted'});stop(true,'UI_CLOSED');}
         }
       });},
       off:name=>cardinal.off(name),setup:(...args)=>cardinal.setup(...args),continue:(...args)=>cardinal.continue(...args),
@@ -107,7 +111,7 @@ export async function createSongbirdSession({ handoff, transport, onState=()=>{}
         const r=await transport('setup',{lease_id:handoff.lease_id,reference:value.reference,emv});
         if(stopped)return halted;terminalState=r.state;terminalBlockCode=r.block_code;emit(r);
         if(r.state!=='challenge_ready')return failure();
-        if(!validChallenge(r.challenge)){terminalState='interrupted';emit({state:'interrupted'});stop();return halted;}
+        if(!validChallenge(r.challenge)){terminalState='interrupted';emit({state:'interrupted'});stop(true,'CHALLENGE_INVALID');return halted;}
         const response=new sdk.Responses.SuccessResponse();response.setStatus(200);response.success=true;response.action='continue';
         response.data={identifier:r.challenge.authenticationId,continue_url:r.challenge.acsUrl,
           continue_payload:r.challenge.payload,transaction_id:r.challenge.transactionId};return response;
@@ -127,7 +131,7 @@ export async function createSongbirdSession({ handoff, transport, onState=()=>{}
     window.Cardinal.onSetupCompleteBusy=false;window.Cardinal.onValidatedBusy=false;
     const native=manager.startCardinalTransaction(handoff.jwt,manager);
     delete handoff.jwt;
-    const run=Promise.race([native.then(()=>({state:terminalState}),()=>{emit({state:'interrupted'});stop();return{state:'interrupted'};}),stoppedPromise]).finally(()=>stop(false));
+    const run=Promise.race([native.then(()=>({state:terminalState}),()=>{emit({state:'interrupted'});stop(true,'SDK_RUN_ERROR');return{state:'interrupted'};}),stoppedPromise]).finally(()=>stop(false));
     return { stop, run };
-  } catch {stop();throw new Error('SONGBIRD_SESSION_UNAVAILABLE');}
+  } catch {stop(true,'SESSION_INIT_ERROR');throw new Error('SONGBIRD_SESSION_UNAVAILABLE');}
 }

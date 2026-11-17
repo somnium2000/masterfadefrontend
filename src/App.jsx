@@ -160,7 +160,7 @@ function App() {
         element={
           <RouteErrorBoundary>
             <BookingSuspense>
-              {privateCommerce.booking ? <PublicBookingFlow pixelpaySale={privateCommerce.pixelpaySale} pixelpay3dsDiagnostic={privateCommerce.pixelpay3dsDiagnostic} pixelpaySongbirdBridge={privateCommerce.pixelpaySongbirdBridge} /> : <p role="status" className="p-8 text-center">El agendamiento privado no está disponible para esta sesión.</p>}
+              {privateCommerce.booking ? <PublicBookingFlow pixelpaySale={privateCommerce.pixelpaySale} pixelpay3dsDiagnostic={privateCommerce.pixelpay3dsDiagnostic} pixelpaySongbirdBridge={privateCommerce.pixelpaySongbirdBridge} songbirdEligibilityChecking={privateCommerce.checking} /> : <p role="status" className="p-8 text-center">El agendamiento privado no está disponible para esta sesión.</p>}
             </BookingSuspense>
           </RouteErrorBoundary>
         }

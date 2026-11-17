@@ -46,7 +46,8 @@ export default function usePrivateCommerce() {
     confirmed?.identity !== identity || refreshing?.identity === identity
   ));
   return { booking: data?.booking === true, vipPurchase: data?.vipPurchase === true,
-    pixelpaySongbirdBridge: !checking && data?.booking === true
+    // AM: Revalidation is not revocation; keep an existing 3DS session until the result, error or identity change.
+    pixelpaySongbirdBridge: data?.booking === true
       && isQaPixelPay3dsDiagnosticAuthorized(data?.pixelpaySongbirdBridge),
     pixelpay3dsDiagnostic: !checking && data?.booking === true
       && isQaPixelPay3dsDiagnosticAuthorized(data?.pixelpay3dsDiagnostic),

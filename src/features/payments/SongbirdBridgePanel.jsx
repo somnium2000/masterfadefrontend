@@ -7,7 +7,7 @@ const safeView=value=>({state:value?.state||'unavailable',can_start:value?.can_s
   expires_at:value?.expires_at,
   can_resume:false,financial_finalization_enabled:false,
   block_code:value?.block_code==='PIXELPAY_SONGBIRD_AUTH_RESULT_UNACCREDITED'?value.block_code:null});
-export default function SongbirdBridgePanel({enabled=false,groupId,intentId,email,identity,allowStart=true}) {
+export default function SongbirdBridgePanel({enabled=false,groupId,intentId,email,identity,allowStart=true,eligibilityChecking=false}) {
   const [view,setView]=useState({state:'loading',can_start:false});
   const [busyScope,setBusyScope]=useState(null);
   const generation=useRef(0);const inFlight=useRef(false);const session=useRef(null);
@@ -19,12 +19,12 @@ export default function SongbirdBridgePanel({enabled=false,groupId,intentId,emai
     titular_email:email,action,...fields},options),[groupId,intentId,email]);
   useEffect(()=>{
     const current=++generation.current;const controller=new AbortController();
-    abortRef.current?.abort();session.current?.stop();session.current=null;inFlight.current=false;
+    abortRef.current?.abort('PANEL_CLEANUP');session.current?.stop(true,'PANEL_CLEANUP');session.current=null;inFlight.current=false;
     if(canRead)call('status',{}, {signal:controller.signal}).then(r=>{
       if(!controller.signal.aborted&&current===generation.current)setView({...safeView(r),scope});
     }).catch(()=>{if(!controller.signal.aborted&&current===generation.current)setView({state:'unavailable',can_start:false,scope});});
     // eslint-disable-next-line react-hooks/exhaustive-deps -- AM: This ref is a request epoch, not a DOM ref.
-    return ()=>{controller.abort();abortRef.current?.abort();generation.current++;session.current?.stop();session.current=null;};
+    return ()=>{controller.abort();abortRef.current?.abort('PANEL_CLEANUP');generation.current++;session.current?.stop(true,'PANEL_CLEANUP');session.current=null;};
   },[call,canRead,scope]);
   useEffect(()=>{
     if(view.scope!==scope||view.state!=='handoff_ready')return;
@@ -46,7 +46,7 @@ export default function SongbirdBridgePanel({enabled=false,groupId,intentId,emai
     finally{controller.abort();if(current===generation.current){inFlight.current=false;setBusyScope(null);}}
   };
   const start=async()=>{
-    if(!canRead||!allowStart||inFlight.current||view.scope!==scope||view.state!=='handoff_ready'||view.can_start!==true)return;
+    if(!canRead||!allowStart||eligibilityChecking||inFlight.current||view.scope!==scope||view.state!=='handoff_ready'||view.can_start!==true)return;
     if(Date.parse(view.expires_at)<=Date.now()){setView({...view,state:'expired',can_start:false});return;}
     const current=generation.current;const currentScope=scope;inFlight.current=true;setBusyScope(scope);
     const controller=new AbortController();
@@ -68,7 +68,7 @@ export default function SongbirdBridgePanel({enabled=false,groupId,intentId,emai
         // AM: Interruption is a local state change and must survive aborting the browser request epoch.
         onInterrupt:fields=>call('interrupt',fields).catch(()=>{}),
         onState:r=>{if(current===generation.current&&key.current===currentScope)setView({...safeView(r),scope});}});
-      if(current!==generation.current||key.current!==currentScope){activeSession.stop();return;}
+      if(current!==generation.current||key.current!==currentScope){activeSession.stop(true,'CONTEXT_CHANGED');return;}
       session.current=activeSession;await activeSession.run;
     }catch{if(current===generation.current)setView({state:'interrupted',can_start:false,scope});}
     finally{controller.abort();if(current===generation.current){setBusyScope(null);inFlight.current=false;}}
@@ -89,7 +89,7 @@ export default function SongbirdBridgePanel({enabled=false,groupId,intentId,emai
       :view.state==='authentication_unverified'?'La autenticación requiere verificación del proveedor. No repitas el pago.'
       :view.state==='expired'?'La sesión de autenticación 3DS venció. Este intento no se puede reabrir. No repitas el pago.'
       :'El resultado sigue pendiente. No inicies otro pago.'}</p>
-    {view.scope===scope&&view.state==='handoff_ready'&&view.can_start===true?<Button type="button" size="lg" className="mt-4 w-full whitespace-normal sm:w-auto" onClick={start} disabled={busyScope===scope||!allowStart}>
+    {view.scope===scope&&view.state==='handoff_ready'&&view.can_start===true?<Button type="button" size="lg" className="mt-4 w-full whitespace-normal sm:w-auto" onClick={start} disabled={busyScope===scope||!allowStart||eligibilityChecking}>
       {busyScope===scope?<Loader2 size={18} className="animate-spin" aria-hidden="true"/>:null}
       {busyScope===scope?'Iniciando autenticación 3DS…':'Iniciar autenticación 3DS'}
     </Button>:null}

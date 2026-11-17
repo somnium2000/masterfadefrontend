@@ -128,3 +128,22 @@ test('active browser lease reports a local interrupt outside its aborted request
   expect(call[0].lease_id).toBe('lease');expect(call[1].signal).toBeUndefined();
   await act(async()=>resolveRun({state:'interrupted'}));
 });
+
+test('eligibility revalidation prevents a new claim but preserves an active lease; revocation still aborts',async()=>{
+  let resolveRun;let options;const stop=vi.fn();
+  requestSongbirdBridge.mockImplementation(body=>Promise.resolve(body.action==='status'?{state:'handoff_ready',can_start:true}:{state:'browser_leased',handoff:{jwt:'opaque'}}));
+  createSongbirdSession.mockImplementation(async input=>{options=input;return{stop,run:new Promise(resolve=>{resolveRun=resolve;})};});
+  const view=render(<SongbirdBridgePanel {...props} eligibilityChecking/>);
+  const button=await screen.findByRole('button',{name:'Iniciar autenticación 3DS'});
+  expect(button.disabled).toBe(true);fireEvent.click(button);expect(createSongbirdSession).not.toHaveBeenCalled();
+  view.rerender(<SongbirdBridgePanel {...props} eligibilityChecking={false}/>);
+  fireEvent.click(button);await waitFor(()=>expect(createSongbirdSession).toHaveBeenCalledOnce());
+  view.rerender(<SongbirdBridgePanel {...props} eligibilityChecking/>);
+  expect(options.signal.aborted).toBe(false);expect(stop).not.toHaveBeenCalled();
+  view.rerender(<SongbirdBridgePanel {...props}/>);
+  expect(options.signal.aborted).toBe(false);
+  view.rerender(<SongbirdBridgePanel {...props} enabled={false}/>);
+  expect(options.signal.aborted).toBe(true);expect(options.signal.reason).toBe('PANEL_CLEANUP');
+  await act(async()=>resolveRun({state:'interrupted'}));
+  expect(requestSongbirdBridge.mock.calls.filter(c=>c[0].action==='claim')).toHaveLength(1);
+});
