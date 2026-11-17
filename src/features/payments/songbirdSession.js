@@ -1,5 +1,5 @@
 export const SONGBIRD_SANDBOX_URL = 'https://songbirdstag.cardinalcommerce.com/edge/v1/songbird.js';
-const ACS_ORIGINS = new Set(['https://songbirdstag.cardinalcommerce.com','https://centinelapistag.cardinalcommerce.com']);
+const ACS_ORIGINS = new Set(['https://songbirdstag.cardinalcommerce.com','https://centinelapistag.cardinalcommerce.com', 'https://cas.client.cardinaltrusted.com']);
 const INTERRUPT_REASONS = new Set(['PANEL_CLEANUP','CONTEXT_CHANGED','SIGNAL_ABORT','HANDOFF_EXPIRED','UI_CLOSED','SDK_HANDLER_ERROR','SDK_RUN_ERROR','SESSION_INIT_ERROR','CHALLENGE_INVALID','USER_CANCEL']);
 let active = false;
 const EMV_FIELDS = ['browser_java_enabled','browser_language','browser_color_depth','browser_screen_height',
