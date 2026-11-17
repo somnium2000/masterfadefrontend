@@ -35,6 +35,22 @@ test('missing/expired/unaccredited handoff loads neither SDK nor external script
     expect(load).not.toHaveBeenCalled();
   }
 });
+
+test('native inline handler mounts the bank iframe in the browser without another Sale',async()=>{
+  const api=cardinal('abandon');const transport=vi.fn().mockResolvedValue(challenge);
+  api.continue.mockImplementation(()=>{});
+  const session=await createSongbirdSession({handoff:handoff(),transport,loadCardinal:async()=>api});mounted.push(session);
+  api.emit('payments.setupComplete',{sessionId:'synthetic-reference'});
+  await vi.waitFor(()=>expect(api.continue).toHaveBeenCalledOnce());
+  expect(api.continue.mock.calls[0][2].OrderDetails.OrderNumber).toBe('MF-OFFLINE');
+  const resolve=vi.fn();const reject=vi.fn();
+  api.emit('ui.inline.setup','<iframe title="Banco de prueba" class="pixelpay-modal-iframe"></iframe>',
+    {paymentType:'CCA',data:{mode:'static',challengeWindowSizeId:'02'}},resolve,reject);
+  const frame=document.querySelector('.pixelpay-modal-container iframe');
+  expect(reject.mock.calls).toEqual([]);expect(resolve).toHaveBeenCalledOnce();expect(frame?.title).toBe('Banco de prueba');
+  expect(transport.mock.calls.map(c=>c[0])).toEqual(['setup']);
+  session.stop();await session.run;
+});
 test('two simultaneous sessions cannot initialize Cardinal twice; abort settles the lost challenge',async()=>{
   const api=cardinal('abandon');const controller=new AbortController();
   const session=await createSongbirdSession({handoff:handoff(),transport:vi.fn(),signal:controller.signal,loadCardinal:async()=>api});mounted.push(session);
@@ -92,7 +108,7 @@ test('unverified continue response remains blocked, with no browser finalization
   expect(views.every(v=>v.financial_finalization_enabled===false)).toBe(true);
 });
 
-test.each([['foreign_host','https://evil.invalid/challenge'],['http','http://centinelapistag.cardinalcommerce.com/challenge'],
+test.each([['foreign_host','https://evil.invalid/challenge'],['live_cardinal','https://centinelapi.cardinalcommerce.com/challenge'],['http','http://centinelapistag.cardinalcommerce.com/challenge'],
   ['embedded_credentials','https://user:pass@centinelapistag.cardinalcommerce.com/challenge']])('untrusted challenge URL category %s never enters Cardinal.continue',async(_category,acsUrl)=>{
   const api=cardinal();const interrupt=vi.fn();const transport=vi.fn().mockResolvedValue({...challenge,challenge:{...challenge.challenge,acsUrl}});
   const session=await createSongbirdSession({handoff:handoff(),transport,onInterrupt:interrupt,loadCardinal:async()=>api});mounted.push(session);
