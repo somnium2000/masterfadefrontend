@@ -1,4 +1,5 @@
 export const SONGBIRD_SANDBOX_URL = 'https://songbirdstag.cardinalcommerce.com/edge/v1/songbird.js';
+const ACS_ORIGINS = new Set(['https://songbirdstag.cardinalcommerce.com','https://centinelapistag.cardinalcommerce.com']);
 let active = false;
 const EMV_FIELDS = ['browser_java_enabled','browser_language','browser_color_depth','browser_screen_height',
   'browser_screen_width','browser_time_zone','user_agent','browser_javascript_enabled'];
@@ -9,7 +10,7 @@ function validChallenge(value){
   if(!value||typeof value.payload!=='string'||!value.payload||value.payload.length>16000
     ||![value.authenticationId,value.transactionId].every(id=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,160}$/.test(id)))return false;
   try{const url=new URL(value.acsUrl);return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&!url.hash
-    &&url.hostname.endsWith('.cardinalcommerce.com');}catch{return false;}
+    &&ACS_ORIGINS.has(url.origin);}catch{return false;}
 }
 
 function loadSongbird(signal) {
