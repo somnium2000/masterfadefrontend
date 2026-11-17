@@ -196,3 +196,19 @@ test('native setup rejection emits fixed SDK error without serializing error tex
   expect(interrupt).toHaveBeenCalledExactlyOnceWith({lease_id:'11111111-1111-4111-8111-111111111111',interrupt_reason:'SDK_HANDLER_ERROR'});
   expect(JSON.stringify(interrupt.mock.calls)).not.toContain('SENSITIVE_ERROR');
 });
+
+test.each([
+  ['https://cas.client.cardinaltrusted.com',true],
+  ['https://client.cardinaltrusted.com',false],
+  ['https://evil.cas.client.cardinaltrusted.com',false],
+  ['https://cas.client.cardinaltrusted.com.evil.invalid',false],
+  ['http://cas.client.cardinaltrusted.com',false],
+  ['https://cas.client.cardinaltrusted.com:8443',false],
+])('CAS origin %s is allowed only by exact match',async(origin,allowed)=>{
+  const api=cardinal();const transport=vi.fn(action=>Promise.resolve(action==='setup'
+    ?{...challenge,challenge:{...challenge.challenge,acsUrl:origin+'/merchantacs/threeds/v2/creq'}}
+    :{state:'contract_blocked',financial_finalization_enabled:false}));
+  const session=await createSongbirdSession({handoff:handoff(),transport,loadCardinal:async()=>api});mounted.push(session);
+  await session.run;expect(api.continue.mock.calls.length).toBe(allowed?1:0);
+  expect(transport.mock.calls.map(c=>c[0])).toEqual(allowed?['setup','validated']:['setup']);
+});
