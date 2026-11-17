@@ -71,7 +71,8 @@ test('fresh marked intent can observe once, clears sensitive fields and never us
 });
 test('pending marked intent only verifies local state even after diagnostic capability expires', () => {
   const context = mountPayment({ paymentIntent: pending, paymentResult: pending, pixelpay3dsDiagnostic: false, paymentCanObserve3ds: false });
-  expect(screen.getByText('Observación Sandbox detenida')).toBeTruthy();
+  expect(screen.getByText('Segundo cobro bloqueado')).toBeTruthy();
+  expect(screen.getByText(/La autenticación 3DS no está disponible para esta sesión/)).toBeTruthy();
   expect(screen.queryByLabelText('CVV')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Observar respuesta Sandbox (una operación)' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Verificar estado del pago' }));
@@ -93,6 +94,21 @@ test('pending checkout exposes bridge metadata only with its own QA capability; 
 test('fresh checkout never reads an unreserved bridge state',()=>{
   mountPayment({pixelpaySongbirdBridge:true,paymentOwnerId:'synthetic-owner'});
   expect(requestSongbirdBridge).not.toHaveBeenCalled();
+});
+
+test('pending checkout keeps the ready 3DS CTA enabled while a second charge remains blocked',async()=>{
+  requestSongbirdBridge.mockResolvedValue({state:'handoff_ready',can_start:true});
+  const context=mountPayment({paymentIntent:pending,paymentResult:pending,paymentOwnerId:'synthetic-owner',
+    pixelpaySongbirdBridge:true,pixelpay3dsDiagnostic:false,paymentCanObserve3ds:false,paymentCanExecuteSale:false});
+  const button=await screen.findByRole('button',{name:'Iniciar autenticación 3DS'});
+  expect(button.disabled).toBe(false);expect(button.className).toContain('mf-accent-gradient');
+  expect(screen.getByText('Segundo cobro bloqueado')).toBeTruthy();
+  expect(screen.getByText(/pulsa «Iniciar autenticación 3DS» en el panel superior/)).toBeTruthy();
+  expect(screen.queryByText('Observación Sandbox detenida')).toBeNull();
+  expect(screen.queryByText(/cualquier continuación 3DS está detenida/)).toBeNull();
+  expect(screen.queryByRole('button',{name:'Observar respuesta Sandbox (una operación)'})).toBeNull();
+  expect(context.completePixelPayPayment).not.toHaveBeenCalled();expect(context.observePixelPay3ds).not.toHaveBeenCalled();
+  expect(salePublicPixelPay).not.toHaveBeenCalled();
 });
 
 test('QA test-session presentation keeps an uncertain payment blocked without requesting provider Status',()=>{
