@@ -1,12 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { CalendarDays, Info, X } from 'lucide-react';
 
-// Aviso temporal exclusivamente informativo. Martes 17/11/2026 00:00, Honduras (UTC-6).
-const EXPIRES_AT = Date.parse('2026-11-17T00:00:00-06:00');
+// Comunicado sin vencimiento automatico. Solo se retirara mediante un cambio aprobado.
+// Se conserva la clave de cierre por sesion para no alterar el comportamiento existente.
 const DISMISS_KEY = 'mf-agendamiento-aviso-2026-11-17';
 
 function shouldShowNotice() {
-  if (Date.now() >= EXPIRES_AT) return false;
   try {
     return window.sessionStorage.getItem(DISMISS_KEY) !== 'dismissed';
   } catch {
@@ -17,25 +16,13 @@ function shouldShowNotice() {
 export default function TemporaryBookingNotice() {
   const [visible, setVisible] = useState(shouldShowNotice);
 
-  useEffect(() => {
-    if (!visible) return undefined;
-    const remaining = EXPIRES_AT - Date.now();
-    if (remaining <= 0) {
-      // Verificación diferida para evitar trabajo adicional durante el render.
-      const timeout = window.setTimeout(() => setVisible(false), 0);
-      return () => window.clearTimeout(timeout);
-    }
-    const timeout = window.setTimeout(() => setVisible(false), remaining);
-    return () => window.clearTimeout(timeout);
-  }, [visible]);
-
   if (!visible) return null;
 
   function dismiss() {
     try {
       window.sessionStorage.setItem(DISMISS_KEY, 'dismissed');
     } catch {
-      // El aviso también se puede cerrar cuando el almacenamiento está deshabilitado.
+      // El comunicado tambien se puede cerrar si el almacenamiento esta deshabilitado.
     }
     setVisible(false);
   }
@@ -43,7 +30,7 @@ export default function TemporaryBookingNotice() {
   return (
     <aside
       role="status"
-      aria-label="Comunicado temporal sobre el agendamiento en MasterFade"
+      aria-label="Comunicado sobre el agendamiento en MasterFade"
       className="fixed bottom-4 left-4 right-4 z-[150] mx-auto max-h-[min(78vh,640px)] max-w-[460px] overflow-y-auto rounded-[22px] border border-[var(--mf-nav-border)] bg-[var(--mf-card)] p-5 text-[var(--mf-text)] shadow-[0_24px_70px_rgba(0,0,0,0.45)] sm:bottom-6 sm:left-auto sm:right-6 sm:mx-0 sm:w-[460px]"
       style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
     >
@@ -63,24 +50,28 @@ export default function TemporaryBookingNotice() {
         </button>
       </div>
       <h2 className="text-lg font-bold leading-snug sm:text-xl">
-        Información importante sobre el agendamiento
+        Aviso importante sobre el agendamiento de citas
       </h2>
       <p className="mt-2 text-sm leading-relaxed text-[var(--mf-text-2)]">
-        Debido a una incidencia técnica en un proveedor externo de procesamiento de pagos, el agendamiento en línea de <strong className="text-[var(--mf-text)]">MasterFade</strong> se encuentra temporalmente pausado. Esta situación no es atribuible a MasterFade.
+        Estimados clientes:
       </p>
-      <div className="mt-4 space-y-2 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
+      <div className="mt-4 rounded-2xl border border-[var(--mf-nav-border)] bg-[var(--mf-btn-bg)] p-3">
         <div className="flex items-start gap-3">
           <CalendarDays size={18} className="mt-0.5 shrink-0 text-[var(--mf-accent)]" aria-hidden="true" />
-          <p className="text-sm leading-relaxed"><strong>Martes 17 de noviembre:</strong> está prevista la reanudación del agendamiento en la web.</p>
-        </div>
-        <div className="border-t border-[var(--mf-nav-border)]" />
-        <div className="flex items-start gap-3">
-          <CalendarDays size={18} className="mt-0.5 shrink-0 text-[var(--mf-accent)]" aria-hidden="true" />
-          <p className="text-sm leading-relaxed"><strong>Miércoles 18 de noviembre:</strong> comenzará la atención de las citas programadas desde el martes.</p>
+          <p className="text-sm leading-relaxed">
+            La habilitación del <strong>agendamiento de citas en línea se encuentra temporalmente postergada hasta nuevo aviso.</strong>
+          </p>
         </div>
       </div>
+      <p className="mt-3 text-sm leading-relaxed text-[var(--mf-text-2)]">
+        Sabemos lo importante que es organizar sus visitas de manera cómoda y sencilla. Por eso, seguimos trabajando con prioridad en los ajustes y verificaciones necesarios para ofrecerles una experiencia de reserva segura, estable y confiable.
+      </p>
+      <p className="mt-3 text-sm leading-relaxed text-[var(--mf-text-2)]">
+        Nuestro objetivo es poner este servicio a su disposición lo antes posible. Les compartiremos cualquier novedad y anunciaremos su habilitación a través de nuestros canales oficiales.
+      </p>
       <p className="mt-3 text-xs leading-relaxed text-[var(--mf-text-2)]">
-        Somnium IA trabaja en coordinación con el proveedor para restablecer un proceso seguro y confiable. Agradecemos su comprensión.
+        Agradecemos sinceramente su paciencia, comprensión y confianza.
+        <strong className="mt-1 block text-[var(--mf-text)]">Equipo MasterFade</strong>
       </p>
     </aside>
   );
