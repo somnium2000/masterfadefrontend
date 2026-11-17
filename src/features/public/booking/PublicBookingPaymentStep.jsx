@@ -401,6 +401,8 @@ export default function PublicBookingPaymentStep() {
     paymentIntent,
     paymentResult,
   }) || (pixelPaySaleSuspended && Boolean(getPixelPayReconciliationNotice(paymentIntent)));
+  const songbirdBridgeEnabled = isQaPixelPay3dsDiagnosticAuthorized(pixelpaySongbirdBridge) && diagnosticContext
+    && pixelPayPendingConfirmation && !processingPayment && paymentResult?.booking_confirmed !== true;
   const reconciliationNotice = getPixelPayReconciliationNotice(paymentResult)
     || (pixelPaySaleSuspended ? getPixelPayReconciliationNotice(paymentIntent) : '');
   // AM: A created intent or context reload does not prove a Sale was submitted.
@@ -711,8 +713,7 @@ export default function PublicBookingPaymentStep() {
           </div>
         ) : null}
 
-        <SongbirdBridgePanel enabled={isQaPixelPay3dsDiagnosticAuthorized(pixelpaySongbirdBridge)&&diagnosticContext
-          &&pixelPayPendingConfirmation&&!processingPayment&&paymentResult?.booking_confirmed!==true} groupId={holdResult?.id_grupo_cita||paymentIntent?.id_grupo_cita}
+        <SongbirdBridgePanel enabled={songbirdBridgeEnabled} groupId={holdResult?.id_grupo_cita||paymentIntent?.id_grupo_cita}
           intentId={paymentIntent?.id_intent} email={paymentTitularEmail} identity={paymentOwnerId} allowStart={!holdExpired}/>
         {sandboxSession ? <p role="note">Sesión de pruebas Sandbox. Cada reserva nueva permite una operación inicial.
             Un resultado pendiente no se reenvía. La autenticación 3DS depende de la autorización del backend;
@@ -844,7 +845,7 @@ export default function PublicBookingPaymentStep() {
             ) : null}
             <div className="mt-3 rounded-xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-3 text-xs leading-relaxed text-[var(--mf-text-2)]">
               {diagnosticCanSubmit
-                ? 'Observación inicial de Sandbox: una sola operación. No garantiza un desafío 3DS. Si PixelPay requiere continuación, el proceso se detiene sin enviar otra Sale.'
+                ? 'Observación inicial de Sandbox: una sola operación. No garantiza un desafío 3DS. Si PixelPay solicita autenticación 3DS, solo podrá iniciarse desde el panel autorizado; no se enviará un segundo cobro.'
                 : qaVideoDemoMode
                 ? 'Usa únicamente datos de prueba. No ingreses una tarjeta real; la información se elimina al terminar.'
                 : paymentSimulationAction.type === 'pixelpay'
@@ -856,12 +857,14 @@ export default function PublicBookingPaymentStep() {
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
               <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
                 <ShieldCheck size={30} className="text-[var(--mf-accent)]" />
-                <h4 className="citas-confirm-subtitle">{diagnosticContext ? paymentResult?.booking_confirmed === true ? 'Pago Sandbox confirmado' : 'Observación Sandbox detenida' : suspendedBeforePayment ? 'Pago deshabilitado en QA' : qaVideoDemoMode ? 'Confirmando tu pago' : pixelPayPresentation.paymentTitle}</h4>
+                <h4 className="citas-confirm-subtitle">{diagnosticContext ? paymentResult?.booking_confirmed === true ? 'Pago Sandbox confirmado' : 'Segundo cobro bloqueado' : suspendedBeforePayment ? 'Pago deshabilitado en QA' : qaVideoDemoMode ? 'Confirmando tu pago' : pixelPayPresentation.paymentTitle}</h4>
                 <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
                   {diagnosticContext
                     ? paymentResult?.booking_confirmed === true
                       ? 'El backend verificó el pago Sandbox y confirmó la cita.'
-                      : 'Consulta únicamente el estado local. No repitas la operación: cualquier continuación 3DS está detenida. La cita requiere un pago verificado por el backend.'
+                      : songbirdBridgeEnabled
+                        ? 'No se enviará un segundo cobro. Si la autenticación está preparada, pulsa «Iniciar autenticación 3DS» en el panel superior. La cita solo se confirma con un pago verificado por el backend.'
+                        : 'No se enviará un segundo cobro. La autenticación 3DS no está disponible para esta sesión; consulta únicamente el estado local. La cita requiere un pago verificado por el backend.'
                     : suspendedBeforePayment
                     ? suspendedHoldExpired
                       ? 'El pago con PixelPay Sandbox aún no está habilitado. La reserva temporal venció; consulta su estado y vuelve a la agenda para elegir otro horario.'
