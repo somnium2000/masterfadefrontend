@@ -121,7 +121,7 @@ test('an abandoned browser claim records a local interruption once, even after s
   const session=await createSongbirdSession({handoff:handoff(),transport:vi.fn(),onInterrupt:interrupt,signal:controller.signal,loadCardinal:async()=>api});mounted.push(session);
   controller.abort();session.stop();await session.run;
   expect(interrupt).toHaveBeenCalledTimes(1);
-  expect(interrupt).toHaveBeenCalledWith({lease_id:'11111111-1111-4111-8111-111111111111'});
+  expect(interrupt).toHaveBeenCalledWith({lease_id:'11111111-1111-4111-8111-111111111111',interrupt_reason:'SIGNAL_ABORT'});
 });
 
 test('invalid script API erases the token and cannot leave the browser mutex locked',async()=>{
@@ -174,4 +174,25 @@ test('late lookup from an abandoned session cannot clear the new session Cardina
   const offBefore=newApi.off.mock.calls.length;
   finish({state:'contract_blocked'});await Promise.resolve();await Promise.resolve();await Promise.resolve();
   expect(newApi.off).toHaveBeenCalledTimes(offBefore);newSession.stop();await newSession.run;
+});
+
+test.each(['UI_CLOSED','PANEL_CLEANUP'])('interrupt reason %s is fixed and one-shot while lookup is pending',async reason=>{
+  const api=cardinal('abandon');const interrupt=vi.fn();let finish;
+  const transport=vi.fn(()=>new Promise(resolve=>{finish=resolve;}));
+  const controller=new AbortController();
+  const session=await createSongbirdSession({handoff:handoff(),transport,onInterrupt:interrupt,signal:controller.signal,loadCardinal:async()=>api});mounted.push(session);
+  api.emit('payments.setupComplete',{sessionId:'synthetic-reference'});
+  await vi.waitFor(()=>expect(transport).toHaveBeenCalledOnce());
+  if(reason==='UI_CLOSED')api.emit('ui.close');
+  else if(reason==='PANEL_CLEANUP')controller.abort('PANEL_CLEANUP');
+  await session.run;session.stop();
+  expect(interrupt).toHaveBeenCalledExactlyOnceWith({lease_id:'11111111-1111-4111-8111-111111111111',interrupt_reason:reason});
+  finish?.(challenge);await Promise.resolve();expect(api.continue).not.toHaveBeenCalled();
+});
+test('native setup rejection emits fixed SDK error without serializing error text',async()=>{
+  const api=cardinal();const interrupt=vi.fn();
+  const session=await createSongbirdSession({handoff:handoff(),transport:vi.fn().mockRejectedValue(new Error('SENSITIVE_ERROR')),onInterrupt:interrupt,loadCardinal:async()=>api});mounted.push(session);
+  await session.run;
+  expect(interrupt).toHaveBeenCalledExactlyOnceWith({lease_id:'11111111-1111-4111-8111-111111111111',interrupt_reason:'SDK_HANDLER_ERROR'});
+  expect(JSON.stringify(interrupt.mock.calls)).not.toContain('SENSITIVE_ERROR');
 });
