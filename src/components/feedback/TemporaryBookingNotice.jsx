@@ -59,15 +59,15 @@ export default function TemporaryBookingNotice() {
         <div className="flex items-start gap-3">
           <CalendarDays size={18} className="mt-0.5 shrink-0 text-[var(--mf-accent)]" aria-hidden="true" />
           <p className="text-sm leading-relaxed">
-            La habilitación del <strong>agendamiento de citas en línea ha sido postergada hasta nuevo aviso.</strong> La fecha anunciada anteriormente ya no está vigente.
+            La habilitación del <strong>agendamiento de citas en línea se encuentra temporalmente postergada hasta nuevo aviso.</strong>
           </p>
         </div>
       </div>
       <p className="mt-3 text-sm leading-relaxed text-[var(--mf-text-2)]">
-        Estamos realizando las verificaciones y ajustes necesarios para garantizar que el proceso de reserva y confirmación de citas funcione de manera segura y confiable.
+        Sabemos lo importante que es organizar sus visitas de manera cómoda y sencilla. Por eso, seguimos trabajando con prioridad en los ajustes y verificaciones necesarios para ofrecerles una experiencia de reserva segura, estable y confiable.
       </p>
       <p className="mt-3 text-sm leading-relaxed text-[var(--mf-text-2)]">
-        Nuestro compromiso es habilitar este servicio tan pronto como se encuentre completamente listo. Comunicaremos su disponibilidad a través de nuestros canales oficiales, sin establecer una nueva fecha hasta tener la certeza de su correcto funcionamiento.
+        Nuestro objetivo es poner este servicio a su disposición lo antes posible. Les compartiremos cualquier novedad y anunciaremos su habilitación a través de nuestros canales oficiales.
       </p>
       <p className="mt-3 text-xs leading-relaxed text-[var(--mf-text-2)]">
         Agradecemos sinceramente su paciencia, comprensión y confianza.
