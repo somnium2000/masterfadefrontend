@@ -22,9 +22,12 @@ afterEach(()=>{
 test('comunica la postergación sin fecha comprometida ni atribuir responsabilidades',()=>{
   render(<TemporaryBookingNotice/>);
   expect(screen.getByRole('status',{name:'Comunicado sobre el agendamiento en MasterFade'})).toBeVisible();
-  expect(screen.getByText(/agendamiento de citas en línea ha sido postergada hasta nuevo aviso/)).toBeInTheDocument();
-  expect(screen.getByText(/La fecha anunciada anteriormente ya no está vigente/)).toBeInTheDocument();
-  expect(screen.getByText(/proceso de reserva y confirmación de citas/)).toBeInTheDocument();
+  expect(screen.getByText(/agendamiento de citas en línea se encuentra temporalmente postergada hasta nuevo aviso/)).toBeInTheDocument();
+  expect(screen.getByText(/seguimos trabajando con prioridad en los ajustes y verificaciones necesarios/)).toBeInTheDocument();
+  expect(screen.getByText(/Nuestro objetivo es poner este servicio a su disposición lo antes posible/)).toBeInTheDocument();
+  expect(screen.getByText(/anunciaremos su habilitación a través de nuestros canales oficiales/)).toBeInTheDocument();
+  expect(screen.queryByText(/La fecha anunciada anteriormente/)).toBeNull();
+  expect(screen.queryByText(/sin establecer una nueva fecha/)).toBeNull();
   expect(screen.getByText('Equipo MasterFade')).toBeVisible();
   expect(screen.queryByText(/martes 17 de noviembre/i)).toBeNull();
   expect(screen.queryByText(/miércoles 18 de noviembre/i)).toBeNull();
