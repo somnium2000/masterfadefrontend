@@ -74,6 +74,8 @@ function isAbortError(error) {
 
 export function isPixelPaySalePreflightRejection(error) {
   const code = String(error?.data?.error?.code || error?.error?.code || error?.code || '').trim().toUpperCase();
+  // AM: This exact backend guard runs before claiming an attempt or contacting PixelPay.
+  if (Number(error?.status) === 503 && code === 'PIXELPAY_3DS_INTEGRATION_UNAVAILABLE') return true;
   return Number(error?.status) >= 400 && Number(error?.status) < 500 && [
     'PRIVATE_COMMERCE_RESTRICTED', 'AUTH_TOKEN_REQUIRED', 'AUTH_TOKEN_INVALID',
     'AUTH_SESSION_NOT_FOUND', 'AUTH_SESSION_INVALID', 'AUTH_SESSION_IDLE_EXPIRED',
@@ -436,6 +438,8 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
   }, [authenticated, isCurrentPaymentGroup]);
 
   const salePixelPayOnce = useCallback(async ({ groupId, intentId, titularEmail, card, billing, diagnostic = false }) => {
+    // AM: A stale diagnostic callback cannot start the retired Node-to-Songbird flow.
+    if (diagnostic) return null;
     const normalizedGroupId = safeText(groupId);
     const normalizedIntentId = safeText(intentId);
     const normalizedEmail = safeText(titularEmail).toLowerCase();

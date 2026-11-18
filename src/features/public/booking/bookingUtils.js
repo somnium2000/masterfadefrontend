@@ -77,6 +77,7 @@ const PUBLIC_BOOKING_ERROR_MESSAGES = {
   PAYMENT_AMOUNT_MISMATCH: 'El monto de pago ya no coincide con la reserva. Vuelve a revisar el resumen.',
   PIXELPAY_PAYMENT_DECLINED: 'El pago fue rechazado. Verifica los datos o utiliza otra tarjeta.',
   PIXELPAY_PAYMENT_DATA_INVALID: 'Revisa los datos de la tarjeta y la facturación antes de intentar nuevamente.',
+  PIXELPAY_3DS_INTEGRATION_UNAVAILABLE: 'El pago con autenticación no está disponible en esta sesión de QA.',
   PIXELPAY_PRECONDITION_FAILED: 'No fue posible procesar el pago con la configuración actual. No se realizó ningún cobro.',
   PIXELPAY_PAYMENT_PENDING: 'El resultado del pago está pendiente de verificación. No realices otro cobro.',
   PIXELPAY_PAYMENT_PROCESSING_FAILED: 'No fue posible completar el pago. Intenta nuevamente más tarde.',

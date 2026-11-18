@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { http } from '../services/httpClient.js';
-import { requiresExplicitPixelPaySaleAuthorization, isQaPixelPay3dsDiagnosticAuthorized } from '../features/payments/pixelPaySaleCapability.js';
+import { requiresExplicitPixelPaySaleAuthorization } from '../features/payments/pixelPaySaleCapability.js';
 
 export default function usePrivateCommerce() {
   const { user, isAuthenticated, isHydrating } = useAuth();
@@ -46,11 +46,9 @@ export default function usePrivateCommerce() {
     confirmed?.identity !== identity || refreshing?.identity === identity
   ));
   return { booking: data?.booking === true, vipPurchase: data?.vipPurchase === true,
-    // AM: Revalidation is not revocation; keep an existing 3DS session until the result, error or identity change.
-    pixelpaySongbirdBridge: data?.booking === true
-      && isQaPixelPay3dsDiagnosticAuthorized(data?.pixelpaySongbirdBridge),
-    pixelpay3dsDiagnostic: !checking && data?.booking === true
-      && isQaPixelPay3dsDiagnosticAuthorized(data?.pixelpay3dsDiagnostic),
+    // AM: Retired experimental capabilities stay closed even against an older QA backend.
+    pixelpaySongbirdBridge: false,
+    pixelpay3dsDiagnostic: false,
     ...(explicitSaleRequired ? { pixelpaySale: !checking && data?.booking === true && data?.pixelpaySale === true }
       : typeof data?.pixelpaySale === 'boolean' ? { pixelpaySale: data.pixelpaySale } : {}),
     checking };

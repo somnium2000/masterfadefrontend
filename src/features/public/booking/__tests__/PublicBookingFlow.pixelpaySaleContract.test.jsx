@@ -168,8 +168,11 @@ test('recarga durante Sale sin respuesta conserva bloqueo aunque GET todavía di
   await act(async () => { finish({ pending_confirmation: true }); await pending; });
 });
 
-test.each(['PRIVATE_COMMERCE_RESTRICTED', 'AUTH_TOKEN_INVALID', 'CSRF_TOKEN_INVALID', 'FST_ERR_VALIDATION', 'AUTH_SESSION_INVALID'])('rechazo preflight %s no inventa evidencia de Sale', async (code) => {
-  const error = Object.assign(new Error('Rechazado'), { status: 403, data: { error: { code } } });
+test.each([
+  ['PRIVATE_COMMERCE_RESTRICTED', 403], ['AUTH_TOKEN_INVALID', 403], ['CSRF_TOKEN_INVALID', 403],
+  ['FST_ERR_VALIDATION', 403], ['AUTH_SESSION_INVALID', 403], ['PIXELPAY_3DS_INTEGRATION_UNAVAILABLE', 503],
+])('rechazo preflight %s no inventa evidencia de Sale', async (code, status) => {
+  const error = Object.assign(new Error('Rechazado'), { status, data: { error: { code } } });
   salePublicPixelPay.mockRejectedValue(error);
   mount();
   await waitFor(() => expect(flow.paymentCanExecuteSale).toBe(true));
