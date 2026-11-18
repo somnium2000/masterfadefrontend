@@ -112,14 +112,17 @@ describe('useBookingPayment PixelPay guards', () => {
   });
 
   it.each([
-    ['PIXELPAY_3DS_INTEGRATION_UNAVAILABLE', false],
-    ['UNKNOWN_SERVER_CODE', true],
-  ])('503 %s preserves whether the operation could have started', async (code, pending) => {
+    [503, 'PIXELPAY_3DS_INTEGRATION_UNAVAILABLE', false],
+    [503, 'UNKNOWN_SERVER_CODE', true],
+    [422, 'PIXELPAY_SANDBOX_CARD_NOT_ALLOWED', false],
+    [422, 'UNKNOWN_SERVER_CODE', true],
+    [undefined, 'NETWORK_ERROR', true],
+  ])('%s %s preserves whether the operation could have started', async (status, code, pending) => {
     const fresh = { id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, estado_intent_codigo: 'link_generado' };
     window.sessionStorage.setItem('masterfade.publicBookingPayment.v1', JSON.stringify({
       id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, titular_email: EMAIL, paymentIntent: fresh,
     }));
-    const error = Object.assign(new Error('Servicio no disponible'), { status: 503, data: { error: { code } } });
+    const error = Object.assign(new Error('Servicio no disponible'), { status, data: { error: { code } } });
     salePublicPixelPay.mockRejectedValueOnce(error);
     const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
     act(() => result.current.restorePaymentContext(GROUP_ID));
