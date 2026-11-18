@@ -74,6 +74,7 @@ function isAbortError(error) {
 
 export function isPixelPaySalePreflightRejection(error) {
   const code = String(error?.data?.error?.code || error?.error?.code || error?.code || '').trim().toUpperCase();
+  if (Number(error?.status) === 422 && code === 'PIXELPAY_SANDBOX_CARD_NOT_ALLOWED') return true;
   // AM: This exact backend guard runs before claiming an attempt or contacting PixelPay.
   if (Number(error?.status) === 503 && code === 'PIXELPAY_3DS_INTEGRATION_UNAVAILABLE') return true;
   return Number(error?.status) >= 400 && Number(error?.status) < 500 && [

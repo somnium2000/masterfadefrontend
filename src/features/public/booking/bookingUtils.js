@@ -82,7 +82,7 @@ const PUBLIC_BOOKING_ERROR_MESSAGES = {
   PIXELPAY_PAYMENT_PENDING: 'El resultado del pago está pendiente de verificación. No realices otro cobro.',
   PIXELPAY_PAYMENT_PROCESSING_FAILED: 'No fue posible completar el pago. Intenta nuevamente más tarde.',
   PIXELPAY_TEST_CARD_FORBIDDEN_IN_LIVE: 'La tarjeta ingresada no está disponible para pagos reales.',
-  PIXELPAY_SANDBOX_CARD_NOT_ALLOWED: 'Utiliza una tarjeta oficial de prueba para continuar en este ambiente.',
+  PIXELPAY_SANDBOX_CARD_NOT_ALLOWED: 'Esta tarjeta no está permitida en este flujo Sandbox. Corrige los datos con una tarjeta de prueba permitida.',
   PIXELPAY_REQUEST_REJECTED: 'No fue posible procesar el pago. Verifica los datos e intenta nuevamente.',
   BOOKING_IDEMPOTENCY_PAYLOAD_MISMATCH: 'Ya hay un intento de reserva en curso con datos diferentes. Revisa el resumen e intenta nuevamente.',
   BOOKING_IDEMPOTENCY_INCOMPLETE: 'Estamos terminando de preparar tu reserva. Intenta nuevamente en unos segundos.',
