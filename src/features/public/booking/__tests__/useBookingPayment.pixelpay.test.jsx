@@ -111,6 +111,28 @@ describe('useBookingPayment PixelPay guards', () => {
     expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['PIXELPAY_3DS_INTEGRATION_UNAVAILABLE', false],
+    ['UNKNOWN_SERVER_CODE', true],
+  ])('503 %s preserves whether the operation could have started', async (code, pending) => {
+    const fresh = { id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, estado_intent_codigo: 'link_generado' };
+    window.sessionStorage.setItem('masterfade.publicBookingPayment.v1', JSON.stringify({
+      id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, titular_email: EMAIL, paymentIntent: fresh,
+    }));
+    const error = Object.assign(new Error('Servicio no disponible'), { status: 503, data: { error: { code } } });
+    salePublicPixelPay.mockRejectedValueOnce(error);
+    const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+    act(() => result.current.restorePaymentContext(GROUP_ID));
+    await act(async () => expect(result.current.salePixelPayOnce({
+      groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL, card: {}, billing: {},
+    })).rejects.toBe(error));
+    expect(result.current.paymentIntent).toMatchObject({ ...fresh, pending_confirmation: pending });
+    expect(JSON.parse(window.sessionStorage.getItem('masterfade.publicBookingPayment.v1')).paymentIntent)
+      .toMatchObject({ ...fresh, pending_confirmation: pending });
+    expect(salePublicPixelPay).toHaveBeenCalledOnce();
+    expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+  });
+
   it('no envía Sale si sessionStorage no permite guardar la recuperación', async () => {
     const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
     const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Quota'); });

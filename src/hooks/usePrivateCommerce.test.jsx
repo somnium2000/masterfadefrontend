@@ -83,12 +83,13 @@ test.each([undefined, null, 'false', 0])('omits absent or invalid legacy Sale ca
   expect(view.result.current).toEqual({ booking: true, vipPurchase: false, pixelpay3dsDiagnostic: false, pixelpaySongbirdBridge: false, checking: false });
 });
 
-test('diagnostic grant requires QA Sandbox and explicit eligibility; refresh revokes it without losing booking', async () => {
+test('retired diagnostic stays closed even with stale QA eligibility and preserves booking on refresh failure', async () => {
   vi.stubEnv('VITE_ENTORNO', 'qa'); vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay'); vi.stubEnv('VITE_PIXELPAY_ENV', 'sandbox');
   login(); state.get.mockResolvedValue({ data: { booking: true, vipPurchase: false, pixelpaySale: false, pixelpay3dsDiagnostic: true } });
   const view = renderHook(usePrivateCommerce);
   expect(view.result.current.pixelpay3dsDiagnostic).toBe(false);
-  await waitFor(() => expect(view.result.current.pixelpay3dsDiagnostic).toBe(true));
+  await waitFor(() => expect(view.result.current.checking).toBe(false));
+  expect(view.result.current.pixelpay3dsDiagnostic).toBe(false);
   let rejectRefresh;
   state.get.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectRefresh = reject; }));
   act(() => window.dispatchEvent(new Event('focus')));
@@ -116,26 +117,28 @@ test('Live cannot acquire a diagnostic grant from the backend boolean', async ()
   expect(view.result.current.pixelpay3dsDiagnostic).toBe(false);
 });
 
-test('Songbird capability requires a confirmed QA boolean and is revoked on refresh error and logout',async()=>{
+test('retired Songbird capability stays closed with stale backend grant and logout',async()=>{
   vi.stubEnv('VITE_ENTORNO','qa');vi.stubEnv('VITE_PAYMENT_PROVIDER','pixelpay');vi.stubEnv('VITE_PIXELPAY_ENV','sandbox');
   login();state.get.mockResolvedValue({data:{booking:true,pixelpaySale:false,pixelpaySongbirdBridge:true}});
   const view=renderHook(usePrivateCommerce);
   expect(view.result.current.pixelpaySongbirdBridge).toBe(false);
-  await waitFor(()=>expect(view.result.current.pixelpaySongbirdBridge).toBe(true));
+  await waitFor(()=>expect(view.result.current.checking).toBe(false));
+  expect(view.result.current.pixelpaySongbirdBridge).toBe(false);
   expect(view.result.current.pixelpaySale).toBe(false);
   state.get.mockRejectedValue(new Error('unavailable'));await act(async()=>window.dispatchEvent(new Event('focus')));
   expect(view.result.current.pixelpaySongbirdBridge).toBe(false);expect(view.result.current.booking).toBe(true);
   state.auth={isAuthenticated:false};view.rerender();expect(view.result.current.pixelpaySongbirdBridge).toBe(false);
 });
 
-test.each(['allowed','denied','error'])('focus revalidation preserves existing Songbird capability until %s result',async outcome=>{
+test.each(['allowed','denied','error'])('focus revalidation never reopens the retired Songbird capability: %s',async outcome=>{
   vi.stubEnv('VITE_ENTORNO','qa');vi.stubEnv('VITE_PAYMENT_PROVIDER','pixelpay');vi.stubEnv('VITE_PIXELPAY_ENV','sandbox');
   login();state.get.mockResolvedValue({data:{booking:true,pixelpaySongbirdBridge:true,pixelpaySale:false}});
-  const view=renderHook(usePrivateCommerce);await waitFor(()=>expect(view.result.current.pixelpaySongbirdBridge).toBe(true));
+  const view=renderHook(usePrivateCommerce);await waitFor(()=>expect(view.result.current.checking).toBe(false));
+  expect(view.result.current.pixelpaySongbirdBridge).toBe(false);
   let resolve,reject;state.get.mockReturnValueOnce(new Promise((yes,no)=>{resolve=yes;reject=no;}));
   act(()=>window.dispatchEvent(new Event('focus')));
-  expect(view.result.current).toMatchObject({checking:true,pixelpaySongbirdBridge:true,pixelpaySale:false});
+  expect(view.result.current).toMatchObject({checking:true,pixelpaySongbirdBridge:false,pixelpaySale:false});
   await act(async()=>outcome==='error'?reject(new Error('offline')):resolve({data:{booking:true,pixelpaySongbirdBridge:outcome==='allowed'}}));
   expect(view.result.current.checking).toBe(false);
-  expect(view.result.current.pixelpaySongbirdBridge).toBe(outcome==='allowed');
+  expect(view.result.current.pixelpaySongbirdBridge).toBe(false);
 });

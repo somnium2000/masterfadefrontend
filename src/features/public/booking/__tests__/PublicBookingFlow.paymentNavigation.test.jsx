@@ -154,17 +154,18 @@ function prepareDiagnostic({ pending=false, expired=false, authenticated=true, m
  mocks.data.observePixelPay3dsOnce=vi.fn().mockResolvedValue({qa_3ds_diagnostic:true,pending_confirmation:true});
  mocks.data.salePixelPayOnce=vi.fn();
 }
-test('estado fresh marcado permite solo callback diagnóstico con sesión QA y hold vigente',async()=>{
+test('stale diagnostic eligibility cannot initiate a fresh marked attempt',async()=>{
  prepareDiagnostic();mount(true,{pixelpaySale:false,pixelpay3dsDiagnostic:true});
- expect(screen.getByTestId('can-observe-3ds')).toHaveTextContent('true');
+ expect(screen.getByTestId('can-observe-3ds')).toHaveTextContent('false');
  expect(screen.getByTestId('can-execute-sale')).toHaveTextContent('false');
- expect(screen.getByRole('button',{name:'Observar respuesta Sandbox (una operación)'})).toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Observar respuesta Sandbox (una operación)'})).not.toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'Invocar pago de prueba'}));
  fireEvent.click(screen.getByRole('button',{name:'Invocar observación de prueba'}));
- await waitFor(()=>expect(mocks.data.observePixelPay3dsOnce).toHaveBeenCalledOnce());
+ await act(async()=>{});
+ expect(mocks.data.observePixelPay3dsOnce).not.toHaveBeenCalled();
  expect(mocks.data.salePixelPayOnce).not.toHaveBeenCalled();
- expect(mocks.data.observePixelPay3dsOnce.mock.calls[0][0]).toMatchObject({groupId:GROUP,intentId:INTENT,titularEmail:'synthetic@example.test'});
 });
+
 test.each([
  {label:'capacidad ausente',cap:undefined},
  {label:'capacidad falsa',cap:false},
@@ -191,21 +192,4 @@ test('la verificación diagnóstica en Flow usa /estado aunque se solicite Statu
  await waitFor(()=>expect(mocks.data.fetchPaymentStatusOnce).toHaveBeenCalled());
  expect(mocks.data.queryPixelPayStatusOnce).not.toHaveBeenCalled();
  expect(mocks.data.observePixelPay3dsOnce).not.toHaveBeenCalled();
-});
-test.each(['clear','group-change'])('rechazo tardío tras %s no recrea estado de pago ni notifica al nuevo contexto',async mode=>{
- prepareDiagnostic();let reject;let current=true;
- mocks.data.observePixelPay3dsOnce=vi.fn(()=>new Promise((_resolve,no)=>{reject=no;}));
- mocks.data.isCurrentPaymentGroup=vi.fn(()=>current);
- mocks.data.setPaymentResult=vi.fn();
- mount(true,{pixelpaySale:false,pixelpay3dsDiagnostic:true});
- fireEvent.click(screen.getByRole('button',{name:'Invocar observación de prueba'}));
- expect(mocks.data.observePixelPay3dsOnce).toHaveBeenCalledOnce();
- current=false;
- mocks.data.hold=mode==='clear'?null:{id_grupo_cita:'33333333-3333-4333-8333-333333333333',total_pagar_hnl:1};
- mocks.data.paymentIntent=null;mocks.data.paymentResult=null;
- mocks.data.setPaymentResult.mockClear();mocks.noop.mockClear();
- await act(async()=>reject(Object.assign(new Error('synthetic abort'),{name:'AbortError'})));
- expect(mocks.data.setPaymentResult).not.toHaveBeenCalled();
- expect(mocks.noop).not.toHaveBeenCalledWith(expect.stringMatching(/No se pudo completar la observación/),expect.anything());
- delete mocks.data.isCurrentPaymentGroup;delete mocks.data.setPaymentResult;
 });
