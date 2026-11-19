@@ -100,6 +100,13 @@ export function shouldQueryPixelPayProviderOnManualVerify({
 }
 
 export function getPixelPayReconciliationNotice(paymentResult) {
+  if (paymentResult?.pending_confirmation === true && [
+    'PIXELPAY_3DS_ADAPTER_LOAD_FAILED',
+    'PIXELPAY_3DS_SDK_LOAD_FAILED',
+    'PIXELPAY_3DS_SDK_INIT_FAILED',
+  ].includes(paymentResult.qa_3ds_browser_diagnostic?.code)) {
+    return 'No se pudo iniciar la autenticación 3DS. El resultado del pago está pendiente de verificación.';
+  }
   const intentState = String(paymentResult?.estado_intent_codigo || '')
     .trim()
     .toLowerCase();

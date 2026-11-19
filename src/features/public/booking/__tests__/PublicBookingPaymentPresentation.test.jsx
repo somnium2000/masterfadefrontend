@@ -72,6 +72,18 @@ it('mantiene pendiente sin CTA de cobro y conserva la verificación', () => {
   expect(context.completePixelPayPayment).not.toHaveBeenCalled();
 });
 
+it('muestra el aviso de inicio 3DS y conserva la verificación del intento pendiente', () => {
+  const context = renderPayment({
+    paymentResult: { pending_confirmation: true, qa_3ds_browser_diagnostic: { code: 'PIXELPAY_3DS_SDK_INIT_FAILED' } },
+    paymentCanExecuteSale: false,
+  });
+  expect(screen.getByText('No se pudo iniciar la autenticación 3DS. El resultado del pago está pendiente de verificación.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /^Pagar con/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Verificar estado del pago' }));
+  expect(context.refreshPaymentStatus).toHaveBeenCalledOnce();
+  expect(context.completePixelPayPayment).not.toHaveBeenCalled();
+});
+
 it('capacidad Sale suspendida oculta tarjeta y cobro sin bloquear la consulta existente', () => {
   const context = renderPayment({ pixelpaySale: false, paymentCanExecuteSale: true });
   expect(screen.getByText(/El pago con PixelPay Sandbox aún no está habilitado/)).toBeTruthy();
