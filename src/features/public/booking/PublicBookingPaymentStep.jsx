@@ -348,6 +348,7 @@ export default function PublicBookingPaymentStep() {
     paymentTitularEmail,
     paymentRestoring = false,
     paymentCanExecuteSale = true,
+    paymentUsesQaDelegated = false,
     pixelpaySale,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
@@ -377,8 +378,8 @@ export default function PublicBookingPaymentStep() {
   });
   const paymentSimulationAction = resolvePaymentSimulationAction();
   const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
-  const pixelPaySaleSuspended = isPixelPayProvider && !isPixelPaySaleAuthorized(pixelpaySale);
-  const qaDelegated = paymentIntent?.qa_3ds_delegated === true || paymentResult?.qa_3ds_delegated === true;
+  const qaDelegated = paymentUsesQaDelegated;
+  const pixelPaySaleSuspended = isPixelPayProvider && !qaDelegated && !isPixelPaySaleAuthorized(pixelpaySale);
   const diagnosticContext = !qaDelegated
     && (paymentIntent?.qa_3ds_diagnostic === true || paymentResult?.qa_3ds_diagnostic === true);
   const sandboxSession = paymentIntent?.qa_sandbox_session === true || paymentResult?.qa_sandbox_session === true;

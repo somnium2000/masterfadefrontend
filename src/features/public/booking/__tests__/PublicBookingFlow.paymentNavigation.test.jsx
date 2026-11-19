@@ -167,6 +167,23 @@ test('stale diagnostic eligibility cannot initiate a fresh marked attempt',async
 });
 
 test.each([
+  { label: 'QA seleccionado', selected: true, authenticated: true, enabled: true },
+  { label: 'QA no seleccionado', selected: false, authenticated: true, enabled: false },
+  { label: 'QA sin sesión', selected: true, authenticated: false, enabled: false },
+])('la Sale delegada requiere autorización del intento: $label', async ({ selected, authenticated, enabled }) => {
+  prepareDiagnostic({ authenticated });
+  mocks.data.paymentIntent.qa_3ds_delegated = selected;
+  mocks.data.paymentResult.qa_3ds_delegated = selected;
+  mount(true, { pixelpaySale: false });
+  expect(screen.getByTestId('can-execute-sale')).toHaveTextContent(String(enabled));
+  if (enabled) expect(screen.getByLabelText('CVV')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Invocar pago de prueba' }));
+  await act(async () => {});
+  if (enabled) expect(mocks.data.salePixelPayOnce).toHaveBeenCalledWith(expect.objectContaining({ delegated: true }));
+  else expect(mocks.data.salePixelPayOnce).not.toHaveBeenCalled();
+});
+
+test.each([
  {label:'capacidad ausente',cap:undefined},
  {label:'capacidad falsa',cap:false},
  {label:'capacidad no booleana',cap:'true'},
