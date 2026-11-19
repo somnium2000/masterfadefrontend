@@ -198,3 +198,26 @@ it('capacidad ausente conserva el checkout anterior', () => {
   expect(screen.getByLabelText('CVV')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Pagar con PixelPay Sandbox' }).disabled).toBe(false);
 });
+
+
+it('3DS HTTP 202 pendiente solo consulta estado local y evita reenvio de Sale', () => {
+  const intent = {
+    id_intent: 'intent-1',
+    id_grupo_cita: 'group-1',
+    monto_hnl: 300,
+    estado_intent_codigo: 'pendiente_confirmacion',
+    qa_3ds_delegated: true,
+    pending_confirmation: true,
+  };
+  const context = renderPayment({
+    paymentIntent: intent,
+    paymentResult: { ...intent, code: 'PIXELPAY_3DS_AUTH_PENDING' },
+    paymentUsesQaDelegated: true,
+    paymentCanExecuteSale: false,
+  });
+  expect(screen.getByText(/La autenticación 3D Secure sigue pendiente/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /^Pagar con/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Consultar estado local' }));
+  expect(context.refreshPaymentStatus).toHaveBeenCalledWith({ queryPixelPayProvider: false });
+  expect(context.completePixelPayPayment).not.toHaveBeenCalled();
+});
