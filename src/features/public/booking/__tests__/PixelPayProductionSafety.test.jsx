@@ -39,7 +39,7 @@ function renderVip(props = {}) {
 
 function fillVip() {
   for (const [label, value] of [
-    ['Nombre del titular', 'Cliente sintetico'], ['Numero de tarjeta', '4111111111111111'],
+    ['Nombre del titular', 'Cliente sintetico'], ['Número de tarjeta', '4111111111111111'],
     ['Vencimiento', '1230'], ['CVV', '987'], ['Teléfono', '99999999'],
     ['Dirección de facturación', 'Blvd Suyapa'], ['Ciudad', 'Tegucigalpa'], ['Departamento', 'HN-CR'],
   ]) fireEvent.change(screen.getByLabelText(new RegExp(`^${label}`)), { target: { value } });
@@ -112,7 +112,7 @@ it.each(['', 'sandbox', 'invalid'])('produccion VIP bloquea entorno %j antes del
   fillVip();
   const button = screen.getByRole('button', { name: 'Pagar con PixelPay' });
   expect(button.disabled).toBe(true);
-  expect(screen.getByLabelText('Numero de tarjeta').closest('fieldset').disabled).toBe(true);
+  expect(screen.getByLabelText('Número de tarjeta').closest('fieldset').disabled).toBe(true);
   fireEvent.click(button);
   expect(onConfirmPayment).not.toHaveBeenCalled();
   expect(screen.getByRole('alert').textContent).toMatch(/pago.*no.*disponible/i);

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isDelegatedContinuationError } from '../../../payments/experimental/delegatedContinuationCodes.js';
 import {
   completePublicMockPayment,
   completePublicSimulatorPayment,
   createPublicPaymentIntent,
   getPublicPaymentStatus,
   queryPublicPixelPayStatus,
+  requestQaDelegatedPayment,
   salePublicPixelPay,
 } from '../publicBookingApi.js';
 import {
@@ -38,21 +40,51 @@ function createClientRequestId() {
 }
 
 function writeStoredPaymentContext(context) {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') return false;
   try {
     if (!context) {
       window.sessionStorage.removeItem(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY);
-      return;
+      window.sessionStorage.removeItem(PENDING_PAYMENT_CONTEXT_STORAGE_KEY);
+      return true;
     }
-    window.sessionStorage.setItem(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY, JSON.stringify(context));
+    // AM: Diagnostic context stores only recovery fields, never observation payloads or card data.
+    const intent = context.paymentIntent;
+    const stored = intent?.qa_3ds_diagnostic === true ? { ...context, paymentIntent: Object.fromEntries([
+      'id_grupo_cita', 'id_intent', 'estado_intent_codigo', 'monto_hnl', 'moneda_codigo', 'expires_at',
+      'pending_confirmation', 'booking_confirmed', 'qa_3ds_diagnostic', 'qa_sandbox_session', 'qa_3ds_delegated',
+    ].filter(key => intent[key] !== undefined).map(key => [key, intent[key]])) } : context;
+    window.sessionStorage.setItem(BOOKING_PAYMENT_CONTEXT_STORAGE_KEY, JSON.stringify(stored));
+    return true;
   } catch {
-    // no-op
+    return false;
+  }
+}
+
+function clearStoredPendingPaymentContext() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(PENDING_PAYMENT_CONTEXT_STORAGE_KEY);
+  } catch {
+    // AM: El almacenamiento puede estar bloqueado; el backend mantiene el estado canónico.
   }
 }
 
 function isAbortError(error) {
   return error?.name === 'AbortError'
     || String(error?.message || '').toLowerCase().includes('aborted');
+}
+
+export function isPixelPaySalePreflightRejection(error) {
+  const code = String(error?.data?.error?.code || error?.error?.code || error?.code || '').trim().toUpperCase();
+  if (Number(error?.status) === 422 && code === 'PIXELPAY_SANDBOX_CARD_NOT_ALLOWED') return true;
+  // AM: This exact backend guard runs before claiming an attempt or contacting PixelPay.
+  if (Number(error?.status) === 503 && code === 'PIXELPAY_3DS_INTEGRATION_UNAVAILABLE') return true;
+  return Number(error?.status) >= 400 && Number(error?.status) < 500 && [
+    'PRIVATE_COMMERCE_RESTRICTED', 'AUTH_TOKEN_REQUIRED', 'AUTH_TOKEN_INVALID',
+    'AUTH_SESSION_NOT_FOUND', 'AUTH_SESSION_INVALID', 'AUTH_SESSION_IDLE_EXPIRED',
+    'AUTH_FORBIDDEN', 'CSRF_TOKEN_INVALID', 'FST_ERR_VALIDATION',
+    'PIXELPAY_RECOVERY_CONTEXT_UNAVAILABLE',
+  ].includes(code);
 }
 
 function waitAbortable(ms, signal) {
@@ -302,6 +334,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     }
 
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const requestSeq = paymentStateSeqRef.current;
     const promise = (async () => {
       setCheckingPaymentStatus(true);
       let lastPayload = null;
@@ -315,11 +348,45 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
           authenticated,
           signal: controller?.signal,
         });
-        const payload = response?.data ?? response;
+        const receivedPayload = response?.data ?? response;
+        if (!mountedRef.current || paymentStateSeqRef.current !== requestSeq
+          || !isCurrentPaymentGroup(normalizedGroupId)) return null;
+        if (paymentIntentRef.current?.id_intent
+          && paymentIntentRef.current.id_intent !== normalizedIntentId) return null;
+        const unresolvedSale = paymentIntentRef.current?.id_intent === normalizedIntentId
+          && paymentIntentRef.current?.pending_confirmation === true;
+        const responseMatches = receivedPayload?.id_grupo_cita === normalizedGroupId
+          && receivedPayload?.id_intent === normalizedIntentId;
+        if (unresolvedSale && !responseMatches) return null;
+        const definitive = responseMatches && (receivedPayload?.booking_confirmed === true
+          || receivedPayload?.estado_intent_codigo === 'fallido');
+        if (definitive || (responseMatches && receivedPayload?.qa_3ds_diagnostic === true)) {
+          const intent = {
+            ...paymentIntentRef.current,
+            id_grupo_cita: normalizedGroupId,
+            id_intent: normalizedIntentId,
+            estado_intent_codigo: receivedPayload.estado_intent_codigo,
+            booking_confirmed: receivedPayload.booking_confirmed === true,
+            pending_confirmation: definitive ? false : unresolvedSale || receivedPayload.pending_confirmation === true,
+            ...(receivedPayload?.qa_3ds_diagnostic === true ? { qa_3ds_diagnostic: true } : {}),
+            ...(receivedPayload?.qa_sandbox_session === true ? { qa_sandbox_session: true } : {}),
+            ...(receivedPayload?.qa_3ds_diagnostic === true ? { qa_3ds_delegated: receivedPayload.qa_3ds_delegated === true } : {}),
+          };
+          paymentIntentRef.current = intent;
+          setPaymentIntentState(intent);
+          writeStoredPaymentContext(buildPaymentContextPayload({
+            groupId: normalizedGroupId, intentId: normalizedIntentId,
+            titularEmail: normalizedEmail, paymentIntent: intent,
+          }));
+        }
+        // AM: Un GET transitorio no demuestra que una Sale enviada pueda repetirse.
+        const payload = unresolvedSale && !definitive
+          ? { ...receivedPayload, pending_confirmation: true }
+          : receivedPayload;
         lastPayload = payload;
 
-        if (!mountedRef.current || !isCurrentPaymentGroup(normalizedGroupId)) return null;
         setPaymentResultState(payload);
+        if (payload?.booking_confirmed === true) clearStoredPendingPaymentContext();
 
         const retry = typeof shouldRetry === 'function' && shouldRetry(payload);
         if (!retry || attempt >= maxAttempts - 1) break;
@@ -371,24 +438,65 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
       amountForSimulation,
     }), { authenticated });
     const payload = response?.data ?? response;
-    const normalizedStatus = safeText(payload?.normalized_status).toUpperCase();
-    if (normalizedStatus && normalizedStatus !== 'PAID') {
-      throw new Error(safeText(payload?.message) || 'El pago no fue aprobado por el simulador.');
-    }
     return payload || true;
   }, [authenticated, isCurrentPaymentGroup]);
 
-  const salePixelPayOnce = useCallback(async ({ groupId, intentId, titularEmail, card, billing }) => {
+  const salePixelPayOnce = useCallback(async ({ groupId, intentId, titularEmail, card, billing, diagnostic = false, delegated = false }) => {
+    // AM: A stale diagnostic callback cannot start the retired Node-to-Songbird flow.
+    if (diagnostic) return null;
     const normalizedGroupId = safeText(groupId);
     const normalizedIntentId = safeText(intentId);
     const normalizedEmail = safeText(titularEmail).toLowerCase();
     if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return null;
     if (!isCurrentPaymentGroup(normalizedGroupId)) return null;
     if (pixelPaySaleRef.current?.promise) return pixelPaySaleRef.current.promise;
+    if (paymentIntentRef.current?.id_intent
+      && paymentIntentRef.current.id_intent !== normalizedIntentId) return null;
+    if (paymentIntentRef.current?.id_intent === normalizedIntentId
+      && (paymentIntentRef.current.pending_confirmation === true
+        || (paymentIntentRef.current.qa_3ds_diagnostic === true && !delegated)
+        || paymentIntentRef.current.booking_confirmed === true
+        || ['confirmado', 'fallido', 'expirado'].includes(paymentIntentRef.current.estado_intent_codigo))) return null;
 
+    const saleStateSeq = paymentStateSeqRef.current;
+    const previousIntent = paymentIntentRef.current?.id_intent === normalizedIntentId
+      ? paymentIntentRef.current
+      : { id_grupo_cita: normalizedGroupId, id_intent: normalizedIntentId };
+    const persistSaleState = (pending, terminal = null) => {
+      if (!mountedRef.current || paymentStateSeqRef.current !== saleStateSeq
+        || !isCurrentPaymentGroup(normalizedGroupId)) return false;
+      if (paymentIntentRef.current?.id_intent
+        && paymentIntentRef.current.id_intent !== normalizedIntentId) return false;
+      const intent = {
+        ...previousIntent,
+        ...(diagnostic ? { qa_3ds_diagnostic: true } : {}),
+        pending_confirmation: pending,
+        ...(terminal ? {
+          estado_intent_codigo: terminal.estado_intent_codigo,
+          booking_confirmed: terminal.booking_confirmed === true,
+        } : {}),
+      };
+      const stored = writeStoredPaymentContext(buildPaymentContextPayload({
+        groupId: normalizedGroupId,
+        intentId: normalizedIntentId,
+        titularEmail: normalizedEmail,
+        paymentIntent: intent,
+      }));
+      if (stored) {
+        paymentIntentRef.current = intent;
+        if (mountedRef.current) setPaymentIntentState(intent);
+      }
+      return stored;
+    };
+    // AM: Persistir antes del envío protege también una recarga sin catch; nunca incluye tarjeta.
+    if (!persistSaleState(true)) {
+      throw Object.assign(new Error('No fue posible guardar el contexto del pago. Revisa el almacenamiento del navegador.'), {
+        code: 'PIXELPAY_RECOVERY_CONTEXT_UNAVAILABLE', status: 409,
+      });
+    }
     const controller = new AbortController();
     const promise = (async () => {
-      const response = await salePublicPixelPay({
+      let response = await salePublicPixelPay({
         id_grupo_cita: normalizedGroupId,
         id_intent: normalizedIntentId,
         titular_email: normalizedEmail,
@@ -402,18 +510,63 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
         billing_city: safeText(billing?.city),
         billing_phone: safeText(billing?.phone),
       }, { authenticated, signal: controller.signal });
-      if (mountedRef.current && isCurrentPaymentGroup(normalizedGroupId)) {
-        setPaymentResultState(response);
+      if (response?.qa_3ds_handoff) {
+        const requestId = response.__meta?.headers?.get?.('x-request-id');
+        const { qa_3ds_handoff: handoff, ...pending } = response;
+        response = pending;
+        if (authenticated && delegated && handoff.expiresAt > Date.now()) {
+          if (mountedRef.current && paymentStateSeqRef.current === saleStateSeq && isCurrentPaymentGroup(normalizedGroupId)) {
+            setPaymentResultState({ ...pending, qa_3ds_delegated: true, qa_3ds_challenge_active: true,
+              id_intent: normalizedIntentId, id_grupo_cita: normalizedGroupId });
+          }
+          const scope = { id_grupo_cita: normalizedGroupId, id_intent: normalizedIntentId, titular_email: normalizedEmail };
+          let adapterLoaded = false;
+          try {
+            const { runDelegatedPixelPay } = await import('../../../payments/experimental/delegatedPixelPay.js');
+            adapterLoaded = true;
+            const recovered = await runDelegatedPixelPay({ handoff, signal: controller.signal,
+              transport: (operation, data, signal) => operation === 'status'
+                ? queryPublicPixelPayStatus(scope, { authenticated, signal })
+                : requestQaDelegatedPayment({ ...scope, token: handoff.token, operation, data }, { signal }),
+            });
+            if (recovered?.booking_confirmed) response = recovered;
+          } catch (error) {
+            let code = 'PIXELPAY_3DS_CHALLENGE_INTERRUPTED';
+            if (!adapterLoaded) code = 'PIXELPAY_3DS_ADAPTER_LOAD_FAILED';
+            else if (error?.code === 'PIXELPAY_3DS_SDK_LOAD_FAILED') code = 'PIXELPAY_3DS_SDK_LOAD_FAILED';
+            else if (error?.code === 'PIXELPAY_3DS_SDK_INIT_FAILED') code = 'PIXELPAY_3DS_SDK_INIT_FAILED';
+            else if (isDelegatedContinuationError(error?.code)) code = error.code;
+            // AM: Keep the local diagnostic correlated with the Sale without copying the handoff or exception.
+            response = { ...pending, qa_3ds_browser_diagnostic: {
+              code, id_intent: normalizedIntentId,
+              ...(typeof requestId === 'string' && /^(?:req-[a-z0-9]{1,16}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i.test(requestId)
+                ? { request_id: requestId } : {}),
+            } };
+          }
+        }
       }
-      return response;
+      const definitive = response?.booking_confirmed === true || response?.estado_intent_codigo === 'fallido';
+      if (definitive) persistSaleState(false, response);
+      const result = { ...(definitive ? response : { ...response, pending_confirmation: true }),
+        ...(diagnostic ? { qa_3ds_diagnostic: true } : {}) };
+      if (mountedRef.current && paymentStateSeqRef.current === saleStateSeq
+        && isCurrentPaymentGroup(normalizedGroupId)) {
+        setPaymentResultState(result);
+      }
+      return result;
     })();
     pixelPaySaleRef.current = { controller, promise };
     try {
       return await promise;
+    } catch (error) {
+      if (isPixelPaySalePreflightRejection(error)) persistSaleState(false);
+      throw error;
     } finally {
       if (pixelPaySaleRef.current?.promise === promise) pixelPaySaleRef.current = null;
     }
   }, [authenticated, isCurrentPaymentGroup]);
+
+  const observePixelPay3dsOnce = useCallback(args => salePixelPayOnce({ ...args, diagnostic: true }), [salePixelPayOnce]);
 
   const queryPixelPayStatusOnce = useCallback(async ({ groupId, intentId, titularEmail }) => {
     const normalizedGroupId = safeText(groupId);
@@ -421,6 +574,10 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     const normalizedEmail = safeText(titularEmail).toLowerCase();
     if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return null;
     if (!isCurrentPaymentGroup(normalizedGroupId)) return null;
+    if (paymentIntentRef.current?.id_intent === normalizedIntentId && paymentIntentRef.current?.qa_3ds_diagnostic === true
+      && paymentIntentRef.current?.qa_3ds_delegated !== true) {
+      return fetchPaymentStatusOnce({ groupId: normalizedGroupId, intentId: normalizedIntentId, titularEmail: normalizedEmail });
+    }
     const requestKey = `${normalizedGroupId}|${normalizedIntentId}|${normalizedEmail}`;
     if (pixelPayStatusRef.current?.key === requestKey) return pixelPayStatusRef.current.promise;
 
@@ -445,11 +602,17 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     pixelPayStatusRef.current = { key: requestKey, controller, promise };
     try {
       return await promise;
+    } catch (error) {
+      // AM: A tab without browser storage can learn the durable QA marker from the server denial.
+      if (error?.code === 'QA_3DS_EXTERNAL_STATUS_DISABLED') return await fetchPaymentStatusOnce({
+        groupId: normalizedGroupId, intentId: normalizedIntentId, titularEmail: normalizedEmail,
+      });
+      throw error;
     } finally {
       if (pixelPayStatusRef.current?.promise === promise) pixelPayStatusRef.current = null;
       if (mountedRef.current) setCheckingPaymentStatus(false);
     }
-  }, [authenticated, isCurrentPaymentGroup]);
+  }, [authenticated, fetchPaymentStatusOnce, isCurrentPaymentGroup]);
 
   return {
     paymentIntent: paymentIntentState,
@@ -467,6 +630,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     completeMockPaymentOnce,
     completeSimulatorPaymentOnce,
     salePixelPayOnce,
+    observePixelPay3dsOnce,
     queryPixelPayStatusOnce,
     isCurrentPaymentGroup,
   };

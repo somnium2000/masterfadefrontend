@@ -61,3 +61,24 @@ test('histórico 202 limpia contraseña inicial, muestra pendiente y no hace log
  expect(screen.getByRole('button',{name:'Reenviar en 60s'})).toBeDisabled();
  await waitFor(()=>expect(api.post).toHaveBeenCalledOnce());
 });
+
+test('confirmación conserva borrador y consentimientos al leer términos y privacidad', () => {
+  mount(GuestRegistrationConfirmPage);
+  for (const [label, value] of [['Nombre', 'New'], ['Apellido', 'Owner'], ['Contraseña final', 'FinalOwner9!'], ['Confirmar contraseña', 'FinalOwner9!']]) fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } });
+  const terms = screen.getByRole('checkbox', { name: 'Acepto términos y condiciones para crear mi cuenta.' });
+  const marketing = screen.getByRole('checkbox', { name: 'Acepto recibir comunicaciones comerciales.' });
+  for (const [name, hash] of [['Términos y condiciones', 'terminos-y-condiciones'], ['Política de privacidad', 'politica-de-privacidad']]) {
+    const link = screen.getByRole('link', { name, exact: true });
+    expect(link).toHaveAttribute('href', `/terminos-y-condiciones#${hash}`);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    fireEvent.click(link);
+  }
+  expect(terms).toBeRequired(); expect(terms).not.toBeChecked();
+  expect(marketing).not.toBeRequired(); expect(marketing).not.toBeChecked();
+  expect(screen.getByLabelText('Nombre', { exact: true })).toHaveValue('New');
+  expect(screen.getByLabelText('Contraseña final', { exact: true })).toHaveValue('FinalOwner9!');
+  fireEvent.submit(document.querySelector('form'));
+  expect(screen.getByRole('alert')).toHaveTextContent('aceptación de términos');
+  expect(api.post).not.toHaveBeenCalled();
+});

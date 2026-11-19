@@ -82,7 +82,7 @@ export default function PublicBookingBarberosStep() {
           <div className="public-booking-barber-grid" aria-hidden="true">
             {Array.from({ length: 6 }).map((_, index) => (
               <article key={`barber-skeleton-${index}`} className="public-booking-barber-card public-booking-barber-card-skeleton">
-                <div className="public-booking-skeleton public-booking-skeleton-image" />
+                <div className="public-booking-barber-card-media public-booking-skeleton public-booking-skeleton-image" />
                 <div className="public-booking-barber-card-body">
                   <div className="public-booking-skeleton public-booking-skeleton-title" />
                   <div className="public-booking-skeleton public-booking-skeleton-text" />

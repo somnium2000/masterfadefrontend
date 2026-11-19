@@ -43,3 +43,13 @@ simulados en pruebas: no hay trafico financiero ni cambios de credenciales/Supab
 
 La publicacion es para revision en dev; ninguna fusion ni despliegue. CI distingue los checks
 del piloto de los contratos heredados: los fallos originales no se ocultan ni se declaran verdes.
+
+## Integracion dev
+
+Se parte de dev `5d7e65e`, conservando paginacion, navegacion de pagos y cambios posteriores
+de acompanantes; no se incorpora la historia divergente de main. Comparacion focalizada en
+este arbol: 72 casos, 61 PASS y los mismos 11 FAIL originales. Checks afectados del piloto:
+191/191 PASS antes de agregar comprobaciones de rutas App y paginacion a CI. No se repite
+la suite completa ni se cambian las once aserciones. Lint sin errores/advertencias; build PASS.
+Los nombres de variables locales reutilizados reciben exclusivamente usePrivateCommerce();
+no se activa ningun flag Vite ni se modifica configuracion de produccion.

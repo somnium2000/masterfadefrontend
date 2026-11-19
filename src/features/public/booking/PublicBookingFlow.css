@@ -96,7 +96,8 @@
 
 .public-booking-barber-card-media {
   width: 100%;
-  min-height: 212px;
+  height: 212px;
+  flex: 0 0 212px;
   border-radius: 16px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--mf-nav-border) 78%, transparent);
@@ -107,9 +108,12 @@
 }
 
 .public-booking-barber-card-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center;
   display: block;
 }
 
@@ -166,7 +170,6 @@
 
 .public-booking-skeleton-image {
   width: 100%;
-  min-height: 212px;
 }
 
 .public-booking-skeleton-title {
@@ -614,7 +617,8 @@
 }
 
 .public-booking-agenda-secondary-cta {
-  margin-top: -2px;
+  margin-top: 12px;
+  gap: 16px;
   align-items: flex-end;
 }
 
@@ -1145,14 +1149,13 @@
 
   .public-booking-barber-card {
     min-height: 0;
-    aspect-ratio: 1 / 1;
     border-radius: 16px;
     padding: 10px 10px 12px;
   }
 
   .public-booking-barber-card-media {
-    min-height: 0;
-    height: 72%;
+    height: 200px;
+    flex-basis: 200px;
     border-radius: 12px;
   }
 
@@ -1196,4 +1199,27 @@
   .public-booking-barber-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* AM: Dorado oficial también en tema claro; controles separados y táctiles. */
+.public-booking-selection-tabs {
+  display: flex;
+  gap: 12px;
+  margin-block: 16px;
+}
+
+.public-booking-selection-tabs > button {
+  min-height: 44px;
+  flex: 1;
+  border: 1px solid var(--mf-nav-border);
+}
+
+.public-booking-selection-tabs > button[aria-pressed="true"] {
+  background: #c9a96e;
+  color: #17130b;
+  border-color: #c9a96e;
+}
+
+.public-booking-contact-card {
+  scroll-margin-top: 112px;
 }

@@ -6,7 +6,9 @@
 .mf-checkout > .citas-surface { padding: clamp(16px, 3vw, 32px); }
 .mf-checkout-hero { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; padding: 12px 4px 24px; }
 .mf-checkout-eyebrow, .mf-checkout-section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .22em; color: var(--mf-accent); }
-.mf-checkout-brand { margin: 8px 0; font-size: clamp(32px, 6vw, 52px); line-height: 1.1; font-weight: 700; letter-spacing: -.04em; color: #1682ed; }
+.mf-checkout-brand { margin: 8px 0; line-height: 1; }
+.mf-checkout-brand-logo { display: block; width: clamp(170px, 34vw, 260px); height: auto; }
+.mf-checkout-demo-badge { display: inline-flex; align-items: center; min-height: 28px; border: 1px solid color-mix(in srgb, var(--mf-accent) 48%, transparent); border-radius: 999px; padding: 5px 10px; background: color-mix(in srgb, var(--mf-accent) 10%, transparent); color: var(--mf-accent); font-size: 11px; font-weight: 600; letter-spacing: .03em; }
 .mf-checkout-environment { display: inline-block; border: 1px solid var(--mf-nav-border); border-radius: 99px; padding: 4px 9px; font-size: 11px; color: var(--mf-accent); }
 .mf-checkout-intro { margin-top: 12px; max-width: 36em; color: var(--mf-text-2); font-size: 14px; line-height: 1.6; }
 .mf-checkout-trust { display: grid; gap: 12px; margin-top: 20px; font-size: 13px; color: var(--mf-text-2); }
@@ -16,7 +18,7 @@
 .mf-checkout-art-card, .mf-checkout-art-back { width: min(90%, 320px); aspect-ratio: 1.6; border-radius: 20px; border: 1px solid #bb9b60; transform: rotate(-8deg); background: linear-gradient(135deg, #343431, #131414 65%); box-shadow: 0 18px 40px #0004; }
 .mf-checkout-art-back { position: absolute; transform: rotate(13deg); background: linear-gradient(145deg, #3e3425, #c9a56a); }
 .mf-checkout-art-card { display: flex; position: relative; flex-direction: column; justify-content: space-between; padding: 22px; color: #ece8e0; }
-.mf-checkout-art-brand { color: #3299fb; font-size: 24px; font-weight: 700; }
+.mf-checkout-art-brand-logo { display: block; width: 118px; max-width: 48%; height: auto; }
 .mf-checkout-chip { width: 38px; height: 28px; border-radius: 6px; background: linear-gradient(135deg, #f1d99d, #b68a45); border: 1px solid #f1d99d; }
 .mf-checkout-dots { letter-spacing: .12em; font-size: 18px; }
 .mf-checkout-art-caption { text-align: right; font-size: 10px; letter-spacing: .2em; }
@@ -39,13 +41,16 @@
 .mf-checkout .citas-confirm-services { margin-top: 0; margin-bottom: 20px; padding: 0; border: 0; background: transparent; }
 .mf-checkout .citas-confirm-service-item { display: grid; gap: 6px; padding: 14px 0; border-bottom: 1px solid var(--mf-nav-border); }
 .mf-checkout .citas-confirm-service-item > span:first-child { color: var(--mf-text); font-weight: 600; }
+.mf-checkout .citas-confirm-row { align-items: baseline; gap: 16px; }
+.mf-checkout .citas-confirm-row > span:first-child { min-width: 0; }
+.mf-checkout .citas-confirm-row > span:last-child { flex: 0 0 auto; text-align: right; white-space: nowrap; }
 .mf-checkout-summary-details { display: grid; gap: 5px; margin-top: 4px; color: var(--mf-text-2); font-size: 13px; line-height: 1.5; }
 .mf-checkout-summary-details p, .mf-checkout .public-booking-payment-meta p { overflow-wrap: anywhere; }
 .mf-checkout .public-booking-payment-meta { font-size: 12px; }
 .mf-checkout .public-booking-payment-note { display: flex; align-items: flex-start; line-height: 1.5; }
 .mf-checkout .public-booking-payment-note svg { flex-shrink: 0; margin-top: 2px; }
 .mf-checkout .public-booking-payment-actions { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 16px; }
-.mf-checkout .public-booking-payment-actions > button { min-height: 46px; flex: 1 1 180px; }
+.mf-checkout .public-booking-payment-actions > button { min-height: 46px; flex: 0 0 auto; }
 .mf-checkout .mf-checkout-primary-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
 .mf-checkout .mf-checkout-submit { order: -1; min-height: 52px !important; font-weight: 600; font-size: 15px; }
 .mf-checkout .mf-checkout-primary-actions > button:not(.mf-checkout-submit) { justify-self: center; width: auto; }
@@ -72,6 +77,7 @@
 @container (min-width: 520px) { .mf-payment-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } .mf-payment-form label:nth-child(5) { grid-column: 1 / -1; } }
 @media (min-width: 640px) { .mf-payment-dialog { left: 50%; right: auto; } }
 @media (min-width: 640px) { .membership-confirmation-dialog, .payment-result-dialog { left: 50%; right: auto; } }
+@media (min-width: 640px) { .mf-checkout .public-booking-payment-actions > button { flex: 1 1 180px; } }
 @media (min-width: 768px) {
   .mf-checkout-hero { grid-template-columns: 1.15fr 1fr; align-items: center; padding-bottom: 32px; }
   .mf-checkout-art { display: flex; }

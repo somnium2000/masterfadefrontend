@@ -72,7 +72,7 @@ export default function PremiumBottomNav({
   isDesktop = false,
   mobilePreset = 'default',
 }) {
-  const hasFab = Boolean(fabItem?.icon && typeof fabItem?.onClick === 'function');
+  const hasFab = Boolean(fabItem?.icon && (fabItem.disabled || typeof fabItem?.onClick === 'function'));
   const FabIcon = fabItem?.icon;
   const items = Array.isArray(sideItems) ? sideItems : [];
   const compactBarberPreset = mobilePreset === 'barber';

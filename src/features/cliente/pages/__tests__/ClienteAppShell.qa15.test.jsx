@@ -2,6 +2,7 @@
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import { CLIENT_LOCK_MESSAGE } from '../../lib/clientFeatureFlags.js';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 const auth = vi.hoisted(() => ({ logout: vi.fn() }));
 const nav = vi.hoisted(() => vi.fn());

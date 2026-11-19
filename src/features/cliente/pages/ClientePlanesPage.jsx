@@ -36,6 +36,8 @@ import {
   queryMembershipPaymentStatus,
 } from "../lib/clienteApi.js";
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
+import { isQaVipCommercialVideoModeEnabled } from "../../plans/lib/qaVipCommercialVideoMode.js";
+import { isQaVipPurchaseSimulationEnabled } from "../../plans/lib/qaVipPurchaseSimulation.js";
 import useMembershipPaymentPolling from "../../plans/hooks/useMembershipPaymentPolling.js";
 import { CLIENT_LOCK_MESSAGE } from "../lib/clientFeatureFlags.js";
 import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
@@ -69,6 +71,7 @@ const MEMBERSHIP_SIMULATION_SCENARIOS = [
   { value: 1.56, label: "CVV incorrecto (1.56)" },
   { value: 1.57, label: "Timeout (1.57)" },
 ];
+const APPROVED_MEMBERSHIP_SIMULATION_AMOUNT = MEMBERSHIP_SIMULATION_SCENARIOS[0].value;
 const CLIENT_PURCHASE_ATTEMPT_STORAGE_KEY = "mf_cliente_vip_purchase_attempt_v1";
 const PURCHASE_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -111,26 +114,6 @@ function resolvePlanOfferId(plan) {
     if (normalized) return normalized;
   }
   return null;
-}
-
-function readEnvFlag(value, fallback = false) {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (!normalized) return fallback;
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  return fallback;
-}
-
-function shouldShowMembershipSimulator() {
-  if (import.meta.env.PROD) return false;
-  const provider = String(
-    import.meta.env.VITE_PAYMENT_PROVIDER
-    || import.meta.env.VITE_PAYMENT_PROVIDER_CODE
-    || ""
-  ).trim().toLowerCase();
-  if (provider !== "todopago" && provider !== "simulator") return false;
-  return readEnvFlag(import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR, false)
-    && readEnvFlag(import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION, false);
 }
 
 function formatPrice(value) {
@@ -410,7 +393,8 @@ export default function ClientePlanesPage() {
   readIdentityRef.current = purchaseIdentity;
   const membershipState = membershipSnapshot?.identity === purchaseIdentity ? membershipSnapshot.data : null;
   const consumptionPage = consumptionSnapshot?.identity === purchaseIdentity ? consumptionSnapshot : null;
-  const showMembershipSimulator = shouldShowMembershipSimulator();
+  const showMembershipSimulator = isQaVipPurchaseSimulationEnabled();
+  const showVipCommercialVideo = showMembershipSimulator && isQaVipCommercialVideoModeEnabled();
 
   const fetchPlans = useCallback(async (selectedBranchId) => {
     const request = ++catalogRequestRef.current;
@@ -656,7 +640,9 @@ export default function ClientePlanesPage() {
     try {
       const paymentResult = await confirmMembershipPayment(paymentIntentId, {
         ...paymentDetails,
-        monto_prueba_hnl: showMembershipSimulator ? selectedSimulationAmount : undefined,
+        monto_prueba_hnl: showMembershipSimulator
+          ? (showVipCommercialVideo ? APPROVED_MEMBERSHIP_SIMULATION_AMOUNT : selectedSimulationAmount)
+          : undefined,
       });
       if (paymentResult?.pending_confirmation) {
         setPurchasePendingConfirmation(true);
@@ -982,7 +968,7 @@ export default function ClientePlanesPage() {
         <p className="mt-1 text-sm text-[var(--mf-text-2)]">
           Consulta las membresías disponibles y sus beneficios en la sucursal que prefieras.
         </p>
-        {showMembershipSimulator ? (
+        {showMembershipSimulator && !showVipCommercialVideo ? (
           <div className="mt-4 w-full max-w-sm">
             <label className="mf-label">Escenario simulator</label>
             <select
@@ -1129,6 +1115,8 @@ export default function ClientePlanesPage() {
         disableClose={purchaseLoading || purchasePendingConfirmation}
         pendingConfirmation={purchasePendingConfirmation}
         paymentConfirmation={purchaseConfirmation}
+        simulatorMode={showMembershipSimulator}
+        videoDemoMode={showVipCommercialVideo}
         onCancel={membershipPaymentIntent ? resetPurchaseFlow : discardPurchaseFlow}
         onBackToSummary={() => setPurchaseStep("summary")}
         onContinueToPayment={handleContinueToPayment}

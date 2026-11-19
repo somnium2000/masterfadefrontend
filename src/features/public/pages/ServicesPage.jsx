@@ -20,6 +20,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import PublicNavigationHeader from '../../../components/layout/PublicNavigationHeader.jsx';
 import PremiumBottomNav from '../../../components/navigation/PremiumBottomNav.jsx';
 import { useAuth } from '../../../context/AuthContext.jsx';
+import usePrivateCommerce from '../../../hooks/usePrivateCommerce.js';
 import {
   listPublicCatalogBranches,
   listPublicCatalogPackages,
@@ -326,6 +327,8 @@ function CatalogLoadError({ message, onRetry }) {
 export default function ServicesPage() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const { booking, publicBooking } = usePrivateCommerce();
+  const bookingAvailable = booking || publicBooking;
   const isMountedRef = useRef(true);
   const selectedBranchRef = useRef('');
   const validBranchIdsRef = useRef(new Set());
@@ -475,6 +478,7 @@ export default function ServicesPage() {
   }
 
   function handleAgendar() {
+    if (!bookingAvailable) return;
     navigate('/agendar/barberos');
   }
 
@@ -652,7 +656,7 @@ export default function ServicesPage() {
       <PremiumBottomNav
         activeId="servicios"
         sideItems={navItems}
-        fabItem={{ id: 'agendar', label: 'Agendar', icon: Plus, onClick: handleAgendar }}
+        fabItem={{ id: 'agendar', label: bookingAvailable ? 'Agendar' : 'Pausado', icon: Plus, onClick: handleAgendar, disabled: !bookingAvailable }}
         isDesktop
       />
     </div>
