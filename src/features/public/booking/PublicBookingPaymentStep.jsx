@@ -11,6 +11,7 @@ import TodoPagoHostedModal, {
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 import { getPixelPayPresentation } from '../../payments/pixelPayPresentation.js';
 import { isPixelPaySaleAuthorized } from '../../payments/pixelPaySaleCapability.js';
+import { isDelegatedContinuationError } from '../../payments/experimental/delegatedContinuationCodes.js';
 import QaPixelPayChallengeNotice from '../../payments/experimental/QaPixelPayChallengeNotice.jsx';
 import { PaymentCheckoutHero, PaymentCheckoutSteps } from '../../payments/PaymentCheckoutPresentation.jsx';
 
@@ -100,11 +101,13 @@ export function shouldQueryPixelPayProviderOnManualVerify({
 }
 
 export function getPixelPayReconciliationNotice(paymentResult) {
-  if (paymentResult?.pending_confirmation === true && [
+  const browserCode = paymentResult?.qa_3ds_browser_diagnostic?.code;
+  if (paymentResult?.pending_confirmation === true && (isDelegatedContinuationError(paymentResult.qa_3ds_continuation_code)
+    || isDelegatedContinuationError(browserCode) || [
     'PIXELPAY_3DS_ADAPTER_LOAD_FAILED',
     'PIXELPAY_3DS_SDK_LOAD_FAILED',
     'PIXELPAY_3DS_SDK_INIT_FAILED',
-  ].includes(paymentResult.qa_3ds_browser_diagnostic?.code)) {
+  ].includes(browserCode))) {
     return 'No se pudo iniciar la autenticación 3DS. El resultado del pago está pendiente de verificación.';
   }
   const intentState = String(paymentResult?.estado_intent_codigo || '')

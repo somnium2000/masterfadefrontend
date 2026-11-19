@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isDelegatedContinuationError } from '../../../payments/experimental/delegatedContinuationCodes.js';
 import {
   completePublicMockPayment,
   completePublicSimulatorPayment,
@@ -534,6 +535,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
             if (!adapterLoaded) code = 'PIXELPAY_3DS_ADAPTER_LOAD_FAILED';
             else if (error?.code === 'PIXELPAY_3DS_SDK_LOAD_FAILED') code = 'PIXELPAY_3DS_SDK_LOAD_FAILED';
             else if (error?.code === 'PIXELPAY_3DS_SDK_INIT_FAILED') code = 'PIXELPAY_3DS_SDK_INIT_FAILED';
+            else if (isDelegatedContinuationError(error?.code)) code = error.code;
             // AM: Keep the local diagnostic correlated with the Sale without copying the handoff or exception.
             response = { ...pending, qa_3ds_browser_diagnostic: {
               code, id_intent: normalizedIntentId,
