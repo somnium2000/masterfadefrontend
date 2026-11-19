@@ -510,6 +510,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
         billing_phone: safeText(billing?.phone),
       }, { authenticated, signal: controller.signal });
       if (response?.qa_3ds_handoff) {
+        const requestId = response.__meta?.headers?.get?.('x-request-id');
         const { qa_3ds_handoff: handoff, ...pending } = response;
         response = pending;
         if (authenticated && delegated && handoff.expiresAt > Date.now()) {
@@ -518,16 +519,27 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
               id_intent: normalizedIntentId, id_grupo_cita: normalizedGroupId });
           }
           const scope = { id_grupo_cita: normalizedGroupId, id_intent: normalizedIntentId, titular_email: normalizedEmail };
+          let adapterLoaded = false;
           try {
             const { runDelegatedPixelPay } = await import('../../../payments/experimental/delegatedPixelPay.js');
+            adapterLoaded = true;
             const recovered = await runDelegatedPixelPay({ handoff, signal: controller.signal,
               transport: (operation, data, signal) => operation === 'status'
                 ? queryPublicPixelPayStatus(scope, { authenticated, signal })
                 : requestQaDelegatedPayment({ ...scope, token: handoff.token, operation, data }, { signal }),
             });
             if (recovered?.booking_confirmed) response = recovered;
-          } catch {
-            // AM: Leave the persisted pending state intact after an interrupted challenge.
+          } catch (error) {
+            let code = 'PIXELPAY_3DS_CHALLENGE_INTERRUPTED';
+            if (!adapterLoaded) code = 'PIXELPAY_3DS_ADAPTER_LOAD_FAILED';
+            else if (error?.code === 'PIXELPAY_3DS_SDK_LOAD_FAILED') code = 'PIXELPAY_3DS_SDK_LOAD_FAILED';
+            else if (error?.code === 'PIXELPAY_3DS_SDK_INIT_FAILED') code = 'PIXELPAY_3DS_SDK_INIT_FAILED';
+            // AM: Keep the local diagnostic correlated with the Sale without copying the handoff or exception.
+            response = { ...pending, qa_3ds_browser_diagnostic: {
+              code, id_intent: normalizedIntentId,
+              ...(typeof requestId === 'string' && /^(?:req-[a-z0-9]{1,16}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i.test(requestId)
+                ? { request_id: requestId } : {}),
+            } };
           }
         }
       }

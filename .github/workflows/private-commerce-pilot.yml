@@ -47,6 +47,8 @@ jobs:
           VITE_PAYMENT_PROVIDER: pixelpay
           VITE_PIXELPAY_ENV: sandbox
         run: npm run build
+      - name: Verify the compiled PixelPay browser SDK offline
+        run: node scripts/pixelpay-delegated-browser-bundle.mjs
       - run: git diff --check
   original-contracts:
     runs-on: ubuntu-24.04
