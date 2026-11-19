@@ -606,6 +606,7 @@ export default function PublicBookingPaymentStep() {
   const handleMockPay = async () => {
     if (paymentSubmissionInFlightRef.current || processingPayment || paymentRestoring
       || pixelPaySaleSuspended || !paymentCanExecuteSale || diagnosticContext) return;
+    if (isPixelPayProvider && !pixelPayPresentation.canPay) return;
     const validationErrors = validatePaymentForm(
       paymentForm,
       new Date(),
@@ -740,6 +741,7 @@ export default function PublicBookingPaymentStep() {
             <h4 className="citas-confirm-subtitle mt-4">
               {qaVideoDemoMode ? 'Datos de pago' : paymentSimulationAction.type === 'pixelpay' ? 'Información de pago' : 'Datos para la simulacion'}
             </h4>
+            <fieldset className="min-w-0" disabled={isPixelPayProvider && !pixelPayPresentation.canPay}>
             <div className="public-booking-form-row mt-2">
               <label className="mf-label" htmlFor="pay-cardholder-name">Nombre del titular</label>
               <input
@@ -866,6 +868,7 @@ export default function PublicBookingPaymentStep() {
                 ? pixelPayPresentation.privacyNotice
                 : 'Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.'}
             </div>
+            </fieldset>
             </div>
           ) : usesProductionCheckoutDesign ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
@@ -1037,7 +1040,8 @@ export default function PublicBookingPaymentStep() {
                 <Button
                   className="mf-checkout-submit w-full sm:w-auto"
                   onClick={handleMockPay}
-                  disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation || !paymentCanExecuteSale}
+                  disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation || !paymentCanExecuteSale
+                    || (isPixelPayProvider && !pixelPayPresentation.canPay)}
                 >
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
                   {processingPayment
