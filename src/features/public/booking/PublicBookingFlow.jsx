@@ -3586,8 +3586,10 @@ const agendaAutoLoadKeyRef = useRef('');
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
 
     try {
-      const payload = options?.queryPixelPayProvider === true && !diagnosticPaymentContext
-        && storedContext?.paymentIntent?.qa_3ds_diagnostic !== true
+      const delegatedRecovery = paymentIntent?.qa_3ds_delegated === true
+        || storedContext?.paymentIntent?.qa_3ds_delegated === true;
+      const payload = options?.queryPixelPayProvider === true && (delegatedRecovery
+        || (!diagnosticPaymentContext && storedContext?.paymentIntent?.qa_3ds_diagnostic !== true))
         ? await queryPixelPayStatusOnce({ groupId, intentId, titularEmail })
         : await fetchPaymentStatusOnce({
             groupId,
@@ -3819,9 +3821,10 @@ const agendaAutoLoadKeyRef = useRef('');
     paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || ''
   ).trim().toLowerCase();
   const backendPaymentAmount = Number(paymentResult?.monto_hnl ?? paymentIntent?.monto_hnl);
+  const paymentUsesQaDelegated = paymentResult?.qa_3ds_delegated === true || paymentIntent?.qa_3ds_delegated === true;
   const paymentCanExecuteSale = Boolean(
     isPixelPaySaleAuthorized(pixelpaySale)
-    && !diagnosticPaymentContext
+    && (!diagnosticPaymentContext || paymentUsesQaDelegated)
     && !paymentRestoring
     && !paymentResult?.booking_confirmed
     && !hasUnresolvedPaymentEvidence(paymentResult)
@@ -3843,7 +3846,8 @@ const agendaAutoLoadKeyRef = useRef('');
     if (!paymentCanExecuteSale) return null;
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
     try {
-      const result = await salePixelPayOnce({ groupId, intentId, titularEmail, card, billing });
+      const result = await salePixelPayOnce({ groupId, intentId, titularEmail, card, billing,
+        ...(paymentUsesQaDelegated ? { delegated: true } : {}) });
       if (result?.booking_confirmed) {
         await refreshPaymentStatus();
       }
@@ -3868,6 +3872,7 @@ const agendaAutoLoadKeyRef = useRef('');
   }, [
     notifications,
     paymentCanExecuteSale,
+    paymentUsesQaDelegated,
     paymentExecutionContext,
     refreshPaymentStatus,
     salePixelPayOnce,

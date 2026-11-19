@@ -124,6 +124,37 @@ test.runIf(Boolean(process.env.PIXELPAY_PROTOTYPE_BACKEND))('React -> loopback H
   }
 }, 25000);
 
+test('QA handoff stays active beyond a minute of valid challenge time and does not issue start', async () => {
+  const fixture = browserFixture();
+  const { sdk, Manager } = await loadDelegatedSdk();
+  let finishChallenge;
+  class DelayedManager extends Manager {
+    init(...args) {
+      return new Promise(resolve => {
+        finishChallenge = async () => resolve(await super.init(...args));
+      });
+    }
+  }
+  vi.useFakeTimers();
+  try {
+    const transport = vi.fn(async operation => {
+      if (operation === 'lookup') return { status: 202, success: true, action: 'continue',
+        data: { identifier: 'auth-A', continue_url: 'https://acs.offline.invalid', continue_payload: 'opaque', transaction_id: 'tx-A' } };
+      if (operation === 'status') return { booking_confirmed: true };
+      return { status: 200, success: true, data: {} };
+    });
+    const handoff = { expiresAt: Date.now() + 240000, state: 'challenge', order: { id: 'A', amount: 1, currency: 'HNL' },
+      sdk: { endpoint: 'https://offline.invalid', environment: 'sandbox' },
+      continuation: { transaction_type: 'songbird', payload: 'opaque-setup', collection_url: null } };
+    const result = runDelegatedPixelPay({ handoff, transport, loadSdk: async () => ({ sdk, Manager: DelayedManager }) });
+    await vi.advanceTimersByTimeAsync(150000);
+    expect(finishChallenge).toBeTypeOf('function');
+    await finishChallenge();
+    expect(await result).toEqual({ booking_confirmed: true });
+    expect(transport.mock.calls.map(([operation]) => operation)).toEqual(['lookup', 'continue', 'retry', 'status']);
+  } finally { vi.useRealTimers(); fixture.finish(); }
+});
+
 test('transport failure keeps uncertain state, aborts advancement and cannot start another page session', async () => {
   const fixture = browserFixture();
   try {
