@@ -3588,7 +3588,12 @@ const agendaAutoLoadKeyRef = useRef('');
     try {
       const delegatedRecovery = paymentIntent?.qa_3ds_delegated === true
         || storedContext?.paymentIntent?.qa_3ds_delegated === true;
-      const payload = options?.queryPixelPayProvider === true && (delegatedRecovery
+      // PixelPay #9834: an unfinished 3DS HTTP 202 has no consultable
+      // provider Status. Explicitly prefer the local intent state.
+      const threeDsLocalOnly = [paymentIntent, paymentResult, storedContext?.paymentIntent].some(
+        state => state?.qa_3ds_delegated === true || state?.code === 'PIXELPAY_3DS_AUTH_PENDING'
+      );
+      const payload = options?.queryPixelPayProvider === true && !threeDsLocalOnly && (delegatedRecovery
         || (!diagnosticPaymentContext && storedContext?.paymentIntent?.qa_3ds_diagnostic !== true))
         ? await queryPixelPayStatusOnce({ groupId, intentId, titularEmail })
         : await fetchPaymentStatusOnce({
