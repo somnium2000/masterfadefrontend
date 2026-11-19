@@ -11,6 +11,7 @@ import TodoPagoHostedModal, {
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 import { getPixelPayPresentation } from '../../payments/pixelPayPresentation.js';
 import { isPixelPaySaleAuthorized } from '../../payments/pixelPaySaleCapability.js';
+import QaPixelPayChallengeNotice from '../../payments/experimental/QaPixelPayChallengeNotice.jsx';
 import { PaymentCheckoutHero, PaymentCheckoutSteps } from '../../payments/PaymentCheckoutPresentation.jsx';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
@@ -347,6 +348,7 @@ export default function PublicBookingPaymentStep() {
     paymentTitularEmail,
     paymentRestoring = false,
     paymentCanExecuteSale = true,
+    paymentUsesQaDelegated = false,
     pixelpaySale,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
@@ -376,8 +378,10 @@ export default function PublicBookingPaymentStep() {
   });
   const paymentSimulationAction = resolvePaymentSimulationAction();
   const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
-  const pixelPaySaleSuspended = isPixelPayProvider && !isPixelPaySaleAuthorized(pixelpaySale);
-  const diagnosticContext = paymentIntent?.qa_3ds_diagnostic === true || paymentResult?.qa_3ds_diagnostic === true;
+  const qaDelegated = paymentUsesQaDelegated;
+  const pixelPaySaleSuspended = isPixelPayProvider && !qaDelegated && !isPixelPaySaleAuthorized(pixelpaySale);
+  const diagnosticContext = !qaDelegated
+    && (paymentIntent?.qa_3ds_diagnostic === true || paymentResult?.qa_3ds_diagnostic === true);
   const sandboxSession = paymentIntent?.qa_sandbox_session === true || paymentResult?.qa_sandbox_session === true;
   const qaVideoDemoMode = resolveQaVideoDemoMode();
   const usesProductionCheckoutDesign = isPixelPayProvider || qaVideoDemoMode;
@@ -698,6 +702,7 @@ export default function PublicBookingPaymentStep() {
           </div>
         </div>
         ) : null}
+        {qaDelegated && paymentResult?.qa_3ds_challenge_active === true ? <QaPixelPayChallengeNotice /> : null}
         {membershipUxMessage ? (
           <div className="public-booking-payment-note mt-3">
             <ShieldCheck size={14} />

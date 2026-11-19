@@ -96,7 +96,7 @@ import useBookingPayment, { isPixelPaySalePreflightRejection } from './hooks/use
 import usePublicAgendaEvents, { parseAgendaSseEnabled } from './hooks/usePublicAgendaEvents.js';
 import useBookingWizardNavigation from './hooks/useBookingWizardNavigation.js';
 import { resolvePaymentResumeContext } from './paymentResumeContext.js';
-import { isPixelPaySaleAuthorized } from '../../payments/pixelPaySaleCapability.js';
+import { isPixelPaySaleAuthorized, isQaPixelPay3dsDiagnosticAuthorized } from '../../payments/pixelPaySaleCapability.js';
 import BookingLayout from './components/BookingLayout.jsx';
 import BookingErrorState from './components/BookingErrorState.jsx';
 import { PublicBookingProvider } from './BookingFlowContext.jsx';
@@ -3586,8 +3586,10 @@ const agendaAutoLoadKeyRef = useRef('');
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
 
     try {
-      const payload = options?.queryPixelPayProvider === true && !diagnosticPaymentContext
-        && storedContext?.paymentIntent?.qa_3ds_diagnostic !== true
+      const delegatedRecovery = paymentIntent?.qa_3ds_delegated === true
+        || storedContext?.paymentIntent?.qa_3ds_delegated === true;
+      const payload = options?.queryPixelPayProvider === true && (delegatedRecovery
+        || (!diagnosticPaymentContext && storedContext?.paymentIntent?.qa_3ds_diagnostic !== true))
         ? await queryPixelPayStatusOnce({ groupId, intentId, titularEmail })
         : await fetchPaymentStatusOnce({
             groupId,
@@ -3819,9 +3821,14 @@ const agendaAutoLoadKeyRef = useRef('');
     paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || ''
   ).trim().toLowerCase();
   const backendPaymentAmount = Number(paymentResult?.monto_hnl ?? paymentIntent?.monto_hnl);
+  const paymentUsesQaDelegated = canUseClienteHold && isQaPixelPay3dsDiagnosticAuthorized(
+    [paymentResult, paymentIntent].some(payment => payment?.qa_3ds_delegated === true
+      && payment.id_intent === paymentExecutionContext.intentId
+      && payment.id_grupo_cita === paymentExecutionContext.groupId),
+  );
   const paymentCanExecuteSale = Boolean(
-    isPixelPaySaleAuthorized(pixelpaySale)
-    && !diagnosticPaymentContext
+    (paymentUsesQaDelegated || isPixelPaySaleAuthorized(pixelpaySale))
+    && (!diagnosticPaymentContext || paymentUsesQaDelegated)
     && !paymentRestoring
     && !paymentResult?.booking_confirmed
     && !hasUnresolvedPaymentEvidence(paymentResult)
@@ -3843,7 +3850,8 @@ const agendaAutoLoadKeyRef = useRef('');
     if (!paymentCanExecuteSale) return null;
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
     try {
-      const result = await salePixelPayOnce({ groupId, intentId, titularEmail, card, billing });
+      const result = await salePixelPayOnce({ groupId, intentId, titularEmail, card, billing,
+        ...(paymentUsesQaDelegated ? { delegated: true } : {}) });
       if (result?.booking_confirmed) {
         await refreshPaymentStatus();
       }
@@ -3868,6 +3876,7 @@ const agendaAutoLoadKeyRef = useRef('');
   }, [
     notifications,
     paymentCanExecuteSale,
+    paymentUsesQaDelegated,
     paymentExecutionContext,
     refreshPaymentStatus,
     salePixelPayOnce,
@@ -4124,6 +4133,7 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentTitularEmail,
       paymentRestoring,
       paymentCanExecuteSale,
+      paymentUsesQaDelegated,
       paymentCanObserve3ds,
       observePixelPay3ds,
       pixelpaySale,
@@ -4277,6 +4287,7 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentTitularEmail,
       paymentRestoring,
       paymentCanExecuteSale,
+      paymentUsesQaDelegated,
       paymentCanObserve3ds,
       observePixelPay3ds,
       pixelpaySale,

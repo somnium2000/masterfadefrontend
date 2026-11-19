@@ -5,6 +5,7 @@ import useBookingPayment from '../hooks/useBookingPayment.js';
 import {
   getPublicPaymentStatus,
   queryPublicPixelPayStatus,
+  requestQaDelegatedPayment,
   salePublicPixelPay,
 } from '../publicBookingApi.js';
 
@@ -14,7 +15,15 @@ vi.mock('../publicBookingApi.js', () => ({
   createPublicPaymentIntent: vi.fn(),
   getPublicPaymentStatus: vi.fn(),
   queryPublicPixelPayStatus: vi.fn(),
+  requestQaDelegatedPayment: vi.fn(),
   salePublicPixelPay: vi.fn(),
+}));
+
+vi.mock('../../../payments/experimental/delegatedPixelPay.js', () => ({
+  runDelegatedPixelPay: async ({ transport }) => {
+    await transport('lookup', { reference: 'opaque-reference' });
+    return transport('status', {});
+  },
 }));
 
 const GROUP_ID = '11111111-2222-4333-8444-555555555555';
@@ -27,6 +36,24 @@ describe('useBookingPayment PixelPay guards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
+  });
+
+  it('uses QA handoff in memory and keeps an interrupted attempt pending without a second Sale', async () => {
+    const handoff = { token: 'memory-only-token', expiresAt: Date.now() + 240000,
+      continuation: { payload: 'memory-only-payload' } };
+    salePublicPixelPay.mockResolvedValueOnce({ pending_confirmation: true, qa_3ds_handoff: handoff });
+    requestQaDelegatedPayment.mockRejectedValueOnce(new Error('transport interrupted'));
+    const args = { groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL, card: {}, billing: {}, delegated: true };
+    const hook = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID, authenticated: true }));
+    await act(async () => { await hook.result.current.salePixelPayOnce(args); });
+    expect(requestQaDelegatedPayment).toHaveBeenCalledWith({
+      id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, titular_email: EMAIL, token: handoff.token,
+      operation: 'lookup', data: { reference: 'opaque-reference' },
+    }, expect.anything());
+    expect(hook.result.current.paymentResult).toMatchObject({ pending_confirmation: true });
+    expect(JSON.stringify(window.sessionStorage)).not.toContain('memory-only');
+    await act(async () => { expect(await hook.result.current.salePixelPayOnce(args)).toBeNull(); });
+    expect(salePublicPixelPay).toHaveBeenCalledTimes(1);
   });
 
   it('deduplica consultas concurrentes de status y no reintenta', async () => {

@@ -199,6 +199,12 @@ export async function requestSongbirdBridge(payload, options = {}) {
   }));
 }
 
+export async function requestQaDelegatedPayment(payload, { signal } = {}) {
+  return unwrapResponseData(await http.post('/v1/pagos/reservas/pixelpay/3ds/delegated', payload, {
+    ...bookingPaymentRequestOptions({ authenticated: true, signal }), sensitiveBody: true, dedupe: false, cache: false,
+  }));
+}
+
 // AM: Consulta de estado de membresía para propuesta automática de servicios cubiertos en booking autenticado.
 export async function getClienteMembershipEstado(options = {}) {
   return http.get('/v1/cliente/planes/estado', options);
