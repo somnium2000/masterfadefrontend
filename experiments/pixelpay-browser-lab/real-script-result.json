@@ -1,0 +1,69 @@
+{
+  "mode": "real_script_only",
+  "sdkVersion": "2.5.8",
+  "browserVersion": "157.0.8103.79",
+  "observedAtUTC": "2026-11-16T00:06:54.876Z",
+  "sdkBrowserSha256": "762380fba627c785d33662e3386c80d757a94311bea874155254051c9a342293",
+  "counts": {
+    "publicKey": 1,
+    "saleAttempts": 1,
+    "saleDispatched": 0,
+    "secondSaleBlocked": 0,
+    "lookup": 0,
+    "continue": 0,
+    "externalDispatched": 2,
+    "realScriptAttempts": 2,
+    "blocked": 0,
+    "cardinalRequestsBlocked": 0,
+    "websocketsBlocked": 0
+  },
+  "trace": [
+    "public_key",
+    "sale",
+    "sale_202_fixture",
+    "songbird_real_get",
+    "songbird_real_get"
+  ],
+  "scriptHttp": 200,
+  "scriptTransportFailure": false,
+  "deadlineReached": false,
+  "blockedCardinalStages": [],
+  "realScriptResponses": [
+    {
+      "code": "SONGBIRD_ENTRY",
+      "http": 200,
+      "sha256": "bc4713dcdb7e6b38180053a20858aeda73f9bd670975e5e5c47792ed997606b4"
+    },
+    {
+      "code": "SONGBIRD_CHUNK",
+      "http": 200,
+      "sha256": "8fbe342adbdff73a5b3ce23bc7cf241b9d68c05ce72979cd086f0dba5a817f26"
+    }
+  ],
+  "native": {
+    "constructed": true,
+    "authenticationRequested": true,
+    "publicSandboxPreset": true,
+    "sdkMethodsUnchanged": true,
+    "scriptLoaded": true,
+    "cardinalApiPresent": true,
+    "finished": true,
+    "responseType": "FailureResponse",
+    "responseStatus": 520,
+    "financialApproval": false,
+    "cardinalValidationFailed": true,
+    "cardinalJwtRejected": false,
+    "cardinalErrorNumber": "10004",
+    "hashValidationRequiresBackend": true,
+    "rejected": false,
+    "pageError": false,
+    "fixtureStages": []
+  },
+  "presetHeadersPresent": true,
+  "encryptedCardPresent": true,
+  "finalizationIdentityMatches": false,
+  "finalizationIdentifierPresent": false,
+  "realDdcCompleted": false,
+  "realChallengeCompleted": false,
+  "stopCode": "CARDINAL_VALIDATION_FAILED_WITH_SYNTHETIC_INPUT"
+}
