@@ -101,6 +101,9 @@ export function shouldQueryPixelPayProviderOnManualVerify({
 }
 
 export function getPixelPayReconciliationNotice(paymentResult) {
+  if (paymentResult?.code === 'PIXELPAY_3DS_AUTH_PENDING') {
+    return 'La autenticación 3D Secure sigue pendiente. Solo puedes consultar el estado local de la reserva; no repitas el pago.';
+  }
   const browserCode = paymentResult?.qa_3ds_browser_diagnostic?.code;
   if (paymentResult?.pending_confirmation === true && (isDelegatedContinuationError(paymentResult.qa_3ds_continuation_code)
     || isDelegatedContinuationError(browserCode) || [
@@ -389,6 +392,9 @@ export default function PublicBookingPaymentStep() {
   const paymentSimulationAction = resolvePaymentSimulationAction();
   const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
   const qaDelegated = paymentUsesQaDelegated;
+  const qaThreeDsStatusIsLocal = [paymentIntent, paymentResult].some(
+    state => state?.qa_3ds_delegated === true || state?.code === 'PIXELPAY_3DS_AUTH_PENDING'
+  );
   const pixelPaySaleSuspended = isPixelPayProvider && !qaDelegated && !isPixelPaySaleAuthorized(pixelpaySale);
   const diagnosticContext = !qaDelegated
     && (paymentIntent?.qa_3ds_diagnostic === true || paymentResult?.qa_3ds_diagnostic === true);
@@ -576,7 +582,7 @@ export default function PublicBookingPaymentStep() {
 
   const handleVerifyPaymentStatus = async () => {
     if (checkingPaymentStatus) return;
-    await refreshPaymentStatus({ queryPixelPayProvider: pixelPayPendingConfirmation && !diagnosticContext });
+    await refreshPaymentStatus({ queryPixelPayProvider: pixelPayPendingConfirmation && !diagnosticContext && !qaThreeDsStatusIsLocal });
   };
 
   const handleOpenHostedModal = () => {
@@ -600,7 +606,6 @@ export default function PublicBookingPaymentStep() {
   const handleMockPay = async () => {
     if (paymentSubmissionInFlightRef.current || processingPayment || paymentRestoring
       || pixelPaySaleSuspended || !paymentCanExecuteSale || diagnosticContext) return;
-    if (isPixelPayProvider && !pixelPayPresentation.canPay) return;
     const validationErrors = validatePaymentForm(
       paymentForm,
       new Date(),
@@ -735,7 +740,6 @@ export default function PublicBookingPaymentStep() {
             <h4 className="citas-confirm-subtitle mt-4">
               {qaVideoDemoMode ? 'Datos de pago' : paymentSimulationAction.type === 'pixelpay' ? 'Información de pago' : 'Datos para la simulacion'}
             </h4>
-            <fieldset className="min-w-0" disabled={isPixelPayProvider && !pixelPayPresentation.canPay}>
             <div className="public-booking-form-row mt-2">
               <label className="mf-label" htmlFor="pay-cardholder-name">Nombre del titular</label>
               <input
@@ -862,7 +866,6 @@ export default function PublicBookingPaymentStep() {
                 ? pixelPayPresentation.privacyNotice
                 : 'Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.'}
             </div>
-            </fieldset>
             </div>
           ) : usesProductionCheckoutDesign ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
@@ -1009,7 +1012,7 @@ export default function PublicBookingPaymentStep() {
                   disabled={!paymentIntent?.id_intent || checkingPaymentStatus}
                 >
                   {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
-                  Verificar estado del pago
+                  {qaThreeDsStatusIsLocal ? 'Consultar estado local' : 'Verificar estado del pago'}
                 </Button>
               ) : null}
               {paymentSimulationAction.canShow && paymentSimulationAction.type === 'simulator' && !qaVideoDemoMode ? (
@@ -1034,8 +1037,7 @@ export default function PublicBookingPaymentStep() {
                 <Button
                   className="mf-checkout-submit w-full sm:w-auto"
                   onClick={handleMockPay}
-                  disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation || !paymentCanExecuteSale
-                    || (isPixelPayProvider && !pixelPayPresentation.canPay)}
+                  disabled={!paymentIntent?.id_intent || processingPayment || pixelPayPendingConfirmation || !paymentCanExecuteSale}
                 >
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
                   {processingPayment
