@@ -72,9 +72,13 @@ it('mantiene pendiente sin CTA de cobro y conserva la verificación', () => {
   expect(context.completePixelPayPayment).not.toHaveBeenCalled();
 });
 
-it('muestra el aviso de inicio 3DS y conserva la verificación del intento pendiente', () => {
+it.each([
+  { qa_3ds_browser_diagnostic: { code: 'PIXELPAY_3DS_SDK_INIT_FAILED' } },
+  { qa_3ds_browser_diagnostic: { code: 'PIXELPAY_3DS_COLLECTION_URL_INVALID' } },
+  { qa_3ds_continuation_code: 'PIXELPAY_3DS_COLLECTION_URL_ABSENT' },
+])('muestra el aviso de inicio 3DS y conserva la verificación del intento pendiente (%j)', diagnostic => {
   const context = renderPayment({
-    paymentResult: { pending_confirmation: true, qa_3ds_browser_diagnostic: { code: 'PIXELPAY_3DS_SDK_INIT_FAILED' } },
+    paymentResult: { pending_confirmation: true, ...diagnostic },
     paymentCanExecuteSale: false,
   });
   expect(screen.getByText('No se pudo iniciar la autenticación 3DS. El resultado del pago está pendiente de verificación.')).toBeTruthy();

@@ -125,7 +125,23 @@ test.runIf(Boolean(process.env.PIXELPAY_PROTOTYPE_BACKEND))('React -> loopback H
 }, 25000);
 
 test('QA handoff stays active beyond a minute of valid challenge time and does not issue start', async () => {
-  const fixture = browserFixture();
+  const cas = 'https://cas.client.cardinaltrusted.com';
+  const endpoint = 'https://pixelpay.dev';
+  const submit = vi.spyOn(window.HTMLFormElement.prototype, 'submit').mockImplementation(function () {
+    queueMicrotask(() => {
+      if (this.id === 'cardinal_collection_form') {
+        window.dispatchEvent(new window.MessageEvent('message', {
+          origin: cas, source: document.getElementById('cardinal_collection_iframe').contentWindow,
+          data: { MessageType: 'profile.completed', SessionId: 'opaque-reference' },
+        }));
+      } else {
+        window.dispatchEvent(new window.MessageEvent('message', {
+          origin: endpoint, source: document.querySelector('iframe[name="step-up-iframe"]').contentWindow,
+          data: { name: 'pixelpay_continue', identifier: 'opaque-callback' },
+        }));
+      }
+    });
+  });
   const { sdk, Manager } = await loadDelegatedSdk();
   let finishChallenge;
   class DelayedManager extends Manager {
@@ -139,20 +155,21 @@ test('QA handoff stays active beyond a minute of valid challenge time and does n
   try {
     const transport = vi.fn(async operation => {
       if (operation === 'lookup') return { status: 202, success: true, action: 'continue',
-        data: { identifier: 'auth-A', continue_url: 'https://acs.offline.invalid', continue_payload: 'opaque', transaction_id: 'tx-A' } };
+        data: { identifier: 'auth-A', continue_url: `${cas}/centinelapi/V2/Cruise/StepUp`, continue_payload: 'opaque', transaction_id: 'tx-A' } };
       if (operation === 'status') return { booking_confirmed: true };
       return { status: 200, success: true, data: {} };
     });
-    const handoff = { expiresAt: Date.now() + 240000, state: 'challenge', order: { id: 'A', amount: 1, currency: 'HNL' },
-      sdk: { endpoint: 'https://offline.invalid', environment: 'sandbox' },
-      continuation: { transaction_type: 'songbird', payload: 'opaque-setup', collection_url: null } };
+    const handoff = { expiresAt: Date.now() + 240000, state: 'challenge', continuation_mode: 'direct_api',
+      order: { id: 'A', amount: 1, currency: 'HNL' }, sdk: { endpoint, environment: 'sandbox' },
+      continuation: { status: 202, transaction_type: 'songbird', payload: 'opaque-setup',
+        collection_url: `${cas}/centinelapi/V1/Cruise/Collect` } };
     const result = runDelegatedPixelPay({ handoff, transport, loadSdk: async () => ({ sdk, Manager: DelayedManager }) });
     await vi.advanceTimersByTimeAsync(150000);
     expect(finishChallenge).toBeTypeOf('function');
     await finishChallenge();
     expect(await result).toEqual({ booking_confirmed: true });
-    expect(transport.mock.calls.map(([operation]) => operation)).toEqual(['lookup', 'continue', 'retry', 'status']);
-  } finally { vi.useRealTimers(); fixture.finish(); }
+    expect(transport.mock.calls.map(([operation]) => operation)).toEqual(['lookup', 'retry', 'status']);
+  } finally { vi.useRealTimers(); submit.mockRestore(); }
 });
 
 test('transport failure keeps uncertain state, aborts advancement and cannot start another page session', async () => {
