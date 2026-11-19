@@ -6,7 +6,7 @@ import ClientePlanesPage from '../../../cliente/pages/ClientePlanesPage.jsx';
 const mocks = vi.hoisted(() => ({
   dialog: null, poll: null,
   notifications: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
-  api: { listClientePlanConsumosPorCita: vi.fn().mockResolvedValue({citas:[],membresias:[],pagination:{page:1,total_pages:1,total:0}}), getClientePlanEstado: vi.fn(), createMembershipOrder: vi.fn(), createMembershipPaymentIntent: vi.fn(), confirmMembershipPayment: vi.fn(), queryMembershipPaymentStatus: vi.fn(), cancelClientePlanBySubscription: vi.fn() },
+  api: { getClientePlanEstado: vi.fn(), listClientePlanConsumosPorCita: vi.fn().mockResolvedValue({citas:[],membresias:[],pagination:{page:1,total:0,total_pages:1,limit:5},total_consumos:0}), createMembershipOrder: vi.fn(), createMembershipPaymentIntent: vi.fn(), confirmMembershipPayment: vi.fn(), queryMembershipPaymentStatus: vi.fn(), cancelClientePlanBySubscription: vi.fn() },
 }));
 // AM: El caso aprobado requiere elegibilidad explicita; las guardas reales se prueban por separado.
 vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ booking: true, vipPurchase: true }) }));
@@ -14,6 +14,8 @@ const BRANCH = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => ({ user: { id_usuario: 'user-a', cliente_id: 'client-a' }, clienteId: 'client-a' }) }));
 vi.mock('../../../../context/NotificationsContext.jsx', () => ({ useNotifications: () => mocks.notifications }));
 vi.mock('../../../cliente/lib/clientFeatureFlags.js', () => ({ CLIENT_PLAN_PURCHASE_ENABLED: true, CLIENT_LOCK_MESSAGE: '' }));
+// AM: Este escenario simula comercio autorizado; la pausa se cubre por separado con el guard real.
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => ({ booking: true, vipPurchase: true }) }));
 vi.mock('../../../public/lib/catalogApi.js', () => ({
   listPublicCatalogBranches: async () => ({ branches: [{ id_sucursal: BRANCH, nombre_sucursal: 'Centro' }] }),
   listPublicPlansByBranch: async () => ({ plans: [{ id_plan: 'plan-a', id_plan_sucursal: 'offer-a', nombre_plan: 'VIP prueba', precio_hnl: 300, beneficios: [] }] }),

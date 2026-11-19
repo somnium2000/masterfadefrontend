@@ -7,7 +7,8 @@ import BookingLoadingState from './BookingLoadingState.jsx';
 export default function PublicBookingAccess({ commerce, children }) {
   const { isAuthenticated, isHydrating, isHydrated, roles = [] } = useAuth();
   const location = useLocation();
-  if (isHydrating || isHydrated === false || commerce.checking) return <BookingLoadingState />;
+  const previouslyAllowed = isAuthenticated ? commerce.booking : commerce.publicBooking;
+  if (isHydrating || isHydrated === false || (commerce.checking && !previouslyAllowed)) return <BookingLoadingState />;
   if (!isAuthenticated) {
     if (!commerce.publicBooking) return <BookingUnavailablePage />;
     const next = getSafeLoginReturnPath(location.pathname + location.search) || '/agendar/barberos';

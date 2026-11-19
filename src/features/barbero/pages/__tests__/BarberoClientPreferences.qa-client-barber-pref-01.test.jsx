@@ -30,7 +30,7 @@ function appointment(preferences = 'Degradado bajo\nConservar largo en la parte 
     id_empleado_barbero: 'E',
     nombre_cliente: 'Cliente QA',
     estado_cita_codigo: 'confirmada',
-    inicio_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    inicio_at: new Date().toISOString(),
     fin_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
     duracion_total_min: 60,
     servicios_detalle: [{ id_servicio: 'S', nombre_servicio: 'Corte QA' }],

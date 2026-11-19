@@ -14,6 +14,8 @@ const api = vi.hoisted(() => ({
 }));
 const sync = vi.hoisted(() => ({ callback: null, unsubscribe: vi.fn() }));
 const navigate = vi.hoisted(() => vi.fn());
+const eligibility = vi.hoisted(() => ({ booking: true }));
+vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => eligibility }));
 
 vi.mock('../../lib/catalogApi.js', () => api);
 vi.mock('../../../../lib/catalogSync.js', () => ({
@@ -27,7 +29,7 @@ vi.mock('../../../../context/AuthContext.jsx', () => ({ useAuth: () => ({ isAuth
 vi.mock('../../../../components/branding/MasterfadeLogo.jsx', () => ({ default: () => null }));
 vi.mock('../../../../components/theme/ThemeSwitcher.jsx', () => ({ default: () => null }));
 vi.mock('../../../../components/navigation/PremiumBottomNav.jsx', () => ({
-  default: ({ fabItem }) => <button type="button" onClick={fabItem.onClick}>{fabItem.label}</button>,
+  default: ({ fabItem }) => <button type="button" onClick={fabItem.onClick} disabled={fabItem.disabled}>{fabItem.label}</button>,
 }));
 
 const branches = [
@@ -54,6 +56,7 @@ const catalogCalls = () => [...api.listPublicCatalogServices.mock.calls, ...api.
 beforeEach(() => {
   Object.values(api).forEach((mock) => mock.mockReset());
   navigate.mockReset();
+  eligibility.booking = true;
   sync.callback = null;
   sync.unsubscribe.mockReset();
   api.listPublicCatalogBranches.mockResolvedValue({ branches });
@@ -491,6 +494,15 @@ describe('membresías VIP como primera sección informativa', () => {
   });
 });
 
+test('Servicios conserva el botón central pausado y no permite entrar a reservar', async () => {
+  eligibility.booking = false;
+  render(<ServicesPage />);
+  await screen.findByText('Corte A');
+  const fab = screen.getByRole('button', { name: 'Pausado', exact: true });
+  expect(fab).toBeDisabled();
+  fireEvent.click(fab);
+  expect(navigate).not.toHaveBeenCalled();
+});
 
 describe('VIP compacto y detalle informativo', () => {
   test('resume beneficios largos y conserva íntegros descripción, cantidades y nombres en detalle', async () => {

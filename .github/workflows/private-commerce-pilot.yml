@@ -17,18 +17,38 @@ jobs:
       - name: Eligibility, customer entry, VIP and payment regressions
         run: >-
           npx vitest run src/hooks/usePrivateCommerce.test.jsx
+          src/features/payments/__tests__/pixelPaySaleCapability.test.js
+          src/features/payments/__tests__/songbirdSession.test.jsx
+          src/features/payments/__tests__/officialPixelPaySdk.test.jsx
+          src/features/payments/__tests__/delegatedPixelPay.test.jsx
+          src/features/payments/__tests__/SongbirdBridgePanel.test.jsx
           src/features/cliente/pages/__tests__/ClienteAppShell.qa15.test.jsx
           src/features/cliente/pages/__tests__/ClienteBookingEntry.qa-mp-entry-05.test.jsx
           src/features/cliente/pages/__tests__/MasterPuntos.qa18b.test.jsx
           src/features/cliente/pages/__tests__/MasterPuntos.qa18c.test.jsx
           src/features/public/booking/__tests__/PublicBookingPaymentPresentation.test.jsx
           src/features/public/booking/__tests__/PublicBookingFlow.paymentReload.test.jsx
+          src/features/public/booking/__tests__/PublicBookingFlow.pixelpaySaleContract.test.jsx
+          src/features/public/booking/__tests__/useBookingPayment.pixelpay.test.jsx
+          src/features/public/booking/__tests__/qa3dsDiagnostic.test.jsx
+          src/features/public/booking/__tests__/PublicBookingFlow.paymentNavigation.test.jsx
           src/features/public/pages/__tests__/MembershipPlansPage.catalog.test.jsx
           src/features/public/pages/__tests__/MembershipPlansPage.identity.test.jsx
           src/features/landing/pages/__tests__/LandingPage.semantics.test.jsx
+          src/features/cliente/pages/__tests__/ClientePlanes.pagination.test.jsx
+          src/__tests__/App.dashboardSuperOnly.test.jsx
+          src/__tests__/App.promotionsRoutes.test.js
           --maxWorkers=2
       - run: npm run lint
       - run: npm run build
+      - name: Build QA Sandbox with bridge capability closed by backend
+        env:
+          VITE_ENTORNO: qa
+          VITE_PAYMENT_PROVIDER: pixelpay
+          VITE_PIXELPAY_ENV: sandbox
+        run: npm run build
+      - name: Verify the compiled PixelPay browser SDK offline
+        run: node scripts/pixelpay-delegated-browser-bundle.mjs
       - run: git diff --check
   original-contracts:
     runs-on: ubuntu-24.04

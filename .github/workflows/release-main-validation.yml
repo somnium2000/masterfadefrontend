@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   frontend:
-    if: startsWith(github.head_ref, 'release/prod-')
+    if: startsWith(github.head_ref, 'release/prod-') || github.head_ref == 'release/reconcile-main-dev-20261119'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -38,6 +38,9 @@ jobs:
         env:
           VITE_CLIENT_BOOKING_ENABLED: 'false'
           VITE_PUBLIC_BOOKING_ENABLED: 'false'
+          VITE_APP_URL: https://masterfadeapp.com
+          VITE_PAYMENT_PROVIDER: pixelpay
+          VITE_PIXELPAY_ENV: live
           VITE_CLIENT_CITAS_ENABLED: 'true'
           VITE_CLIENT_PLAN_PURCHASE_ENABLED: 'false'
           VITE_VIP_MEMBERSHIPS_ENABLED: 'true'

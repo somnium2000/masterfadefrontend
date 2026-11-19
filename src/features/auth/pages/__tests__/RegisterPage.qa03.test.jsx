@@ -107,3 +107,23 @@ test('error claro alcanza AA sobre el fondo compuesto conservador y oscuro se co
   expect(contrast([114, 28, 28], lightBackground)).toBeGreaterThanOrEqual(4.5);
   expect(contrast([253, 162, 155], darkBackground)).toBeGreaterThanOrEqual(4.5);
 });
+
+test('lectura legal en otra pestaña conserva campos y no acepta términos ni marketing', () => {
+  mount(); complete();
+  const terms = screen.getByRole('checkbox', { name: 'Acepto términos y condiciones para crear mi cuenta.' });
+  const marketing = screen.getByRole('checkbox', { name: /Acepto recibir comunicaciones/ });
+  for (const [name, hash] of [['Términos y condiciones', 'terminos-y-condiciones'], ['Política de privacidad', 'politica-de-privacidad']]) {
+    const link = screen.getByRole('link', { name, exact: true });
+    expect(link).toHaveAttribute('href', `/terminos-y-condiciones#${hash}`);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    fireEvent.click(link);
+    expect(terms).not.toBeChecked();
+    expect(marketing).not.toBeChecked();
+  }
+  expect(screen.getByLabelText('Nombre', { exact: true })).toHaveValue(' Persona ');
+  expect(screen.getByLabelText('Contraseña', { exact: true })).toHaveValue('SoloLocal9!');
+  fireEvent.click(screen.getByRole('button', { name: 'Crear cuenta' }));
+  expect(screen.getByRole('alert')).toHaveTextContent('Debes aceptar los términos');
+  expect(mocks.post).not.toHaveBeenCalled();
+});

@@ -1,5 +1,5 @@
 import { ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../../../components/ui/button.jsx';
 import { usePublicBookingFlow } from './BookingFlowContext.jsx';
 import { formatCurrencyHnl, formatDateOnly, formatTime12Hour, normalizeBookingPaymentUiState } from './bookingUtils.js';
@@ -10,6 +10,9 @@ import TodoPagoHostedModal, {
 } from './components/TodoPagoHostedModal.jsx';
 import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 import { getPixelPayPresentation } from '../../payments/pixelPayPresentation.js';
+import { isPixelPaySaleAuthorized } from '../../payments/pixelPaySaleCapability.js';
+import { isDelegatedContinuationError } from '../../payments/experimental/delegatedContinuationCodes.js';
+import QaPixelPayChallengeNotice from '../../payments/experimental/QaPixelPayChallengeNotice.jsx';
 import { PaymentCheckoutHero, PaymentCheckoutSteps } from '../../payments/PaymentCheckoutPresentation.jsx';
 
 const TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY = 'masterfade.todopagoSimulation.amountHnl';
@@ -20,6 +23,7 @@ const TODO_PAGO_SIMULATION_SCENARIOS = [
   { value: '1.56', label: 'CVV incorrecto (1.56)' },
   { value: '1.57', label: 'Timeout (1.57)' },
 ];
+const TODO_PAGO_APPROVED_SIMULATION_AMOUNT = TODO_PAGO_SIMULATION_SCENARIOS[0].value;
 const INITIAL_PAYMENT_FORM = {
   cardholderName: '',
   phone: '',
@@ -97,6 +101,15 @@ export function shouldQueryPixelPayProviderOnManualVerify({
 }
 
 export function getPixelPayReconciliationNotice(paymentResult) {
+  const browserCode = paymentResult?.qa_3ds_browser_diagnostic?.code;
+  if (paymentResult?.pending_confirmation === true && (isDelegatedContinuationError(paymentResult.qa_3ds_continuation_code)
+    || isDelegatedContinuationError(browserCode) || [
+    'PIXELPAY_3DS_ADAPTER_LOAD_FAILED',
+    'PIXELPAY_3DS_SDK_LOAD_FAILED',
+    'PIXELPAY_3DS_SDK_INIT_FAILED',
+  ].includes(browserCode))) {
+    return 'No se pudo iniciar la autenticación 3DS. El resultado del pago está pendiente de verificación.';
+  }
   const intentState = String(paymentResult?.estado_intent_codigo || '')
     .trim()
     .toLowerCase();
@@ -200,7 +213,12 @@ function formatPhone(value) {
   return normalizeDigits(value).slice(0, 15);
 }
 
-export function validatePaymentForm(form, referenceDate = new Date(), pixelPayEnvironment = 'sandbox') {
+export function validatePaymentForm(
+  form,
+  referenceDate = new Date(),
+  pixelPayEnvironment = 'sandbox',
+  { requireBilling = true } = {},
+) {
   const errors = {};
   const expiryDigits = normalizeDigits(form.expiry);
   const expiryFormatValid = /^(0[1-9]|1[0-2])\/[0-9]{2}$/.test(String(form.expiry || '').trim());
@@ -225,14 +243,16 @@ export function validatePaymentForm(form, referenceDate = new Date(), pixelPayEn
   if (![3, 4].includes(normalizeDigits(form.cvv).length)) {
     errors.cvv = 'Ingresa un CVV de 3 o 4 digitos.';
   }
-  if (!String(form.billingAddress || '').trim() || isPixelPayBillingAddressPlaceholder(form.billingAddress)) {
-    errors.billingAddress = 'Ingresa una dirección de facturación válida.';
+  if (requireBilling) {
+    if (!String(form.billingAddress || '').trim() || isPixelPayBillingAddressPlaceholder(form.billingAddress)) {
+      errors.billingAddress = 'Ingresa una dirección de facturación válida.';
+    }
+    if (!String(form.billingCity || '').trim()) errors.billingCity = 'Ingresa la ciudad.';
+    if (!HONDURAS_DEPARTMENTS.some(([code]) => code === form.billingState)) {
+      errors.billingState = 'Selecciona un departamento valido.';
+    }
+    if (form.billingCountry !== 'HN') errors.billingCountry = 'El pais de facturacion debe ser Honduras.';
   }
-  if (!String(form.billingCity || '').trim()) errors.billingCity = 'Ingresa la ciudad.';
-  if (!HONDURAS_DEPARTMENTS.some(([code]) => code === form.billingState)) {
-    errors.billingState = 'Selecciona un departamento valido.';
-  }
-  if (form.billingCountry !== 'HN') errors.billingCountry = 'El pais de facturacion debe ser Honduras.';
 
   return errors;
 }
@@ -240,6 +260,10 @@ export function validatePaymentForm(form, referenceDate = new Date(), pixelPayEn
 function isLocalHostname(value) {
   const hostname = String(value || '').trim().toLowerCase();
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function isQaHostname(value) {
+  return String(value || '').trim().toLowerCase() === 'qa.masterfadeapp.com';
 }
 
 function readEnvFlag(value) {
@@ -252,15 +276,18 @@ function normalizePaymentProvider(value) {
 }
 
 export function resolvePaymentSimulationAction({
-  hostname = typeof window !== 'undefined' ? window.location?.hostname : '',
+  hostname = typeof globalThis !== 'undefined' ? globalThis.location?.hostname : '',
   provider = import.meta.env.VITE_PAYMENT_PROVIDER || import.meta.env.VITE_PAYMENT_PROVIDER_CODE || '',
   mockEnabled = import.meta.env.VITE_ENABLE_MOCK_PAYMENT,
   simulatorEnabled = import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR,
+  qaSimulatorEnabled = import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION,
 } = {}) {
   const localHost = isLocalHostname(hostname);
+  const qaHost = isQaHostname(hostname);
   const normalizedProvider = normalizePaymentProvider(provider);
   const canUseMock = readEnvFlag(mockEnabled);
   const canUseSimulator = readEnvFlag(simulatorEnabled);
+  const canUseQaSimulator = readEnvFlag(qaSimulatorEnabled);
 
   let action = { canShow: false, type: null, provider: normalizedProvider, reason: 'host_not_allowed' };
   if (!normalizedProvider) {
@@ -275,9 +302,28 @@ export function resolvePaymentSimulationAction({
     } else {
       action = { canShow: false, type: null, provider: normalizedProvider, reason: 'local_payment_simulation_not_configured' };
     }
+  } else if (qaHost
+    && normalizedProvider === 'todopago'
+    && canUseSimulator
+    && canUseQaSimulator) {
+    action = { canShow: true, type: 'simulator', provider: normalizedProvider, reason: 'qa_todopago_simulator_enabled' };
   }
 
   return action;
+}
+
+export function resolveQaVideoDemoMode({
+  hostname = typeof globalThis !== 'undefined' ? globalThis.location?.hostname : '',
+  provider = import.meta.env.VITE_PAYMENT_PROVIDER || import.meta.env.VITE_PAYMENT_PROVIDER_CODE || '',
+  simulatorEnabled = import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR,
+  qaSimulatorEnabled = import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION,
+  videoDemoEnabled = import.meta.env.VITE_QA_VIDEO_DEMO_MODE,
+} = {}) {
+  return isQaHostname(hostname)
+    && normalizePaymentProvider(provider) === 'todopago'
+    && readEnvFlag(simulatorEnabled)
+    && readEnvFlag(qaSimulatorEnabled)
+    && readEnvFlag(videoDemoEnabled);
 }
 
 function launchIsExpired(launch) {
@@ -291,6 +337,7 @@ export default function PublicBookingPaymentStep() {
     bookingBlocksSummary,
     selectedBranch,
     cancelBookingFlow,
+    registerPaymentNavigation,
     createPaymentIntentForHold,
     creatingPaymentIntent,
     goToConfirm,
@@ -311,29 +358,43 @@ export default function PublicBookingPaymentStep() {
     paymentTitularEmail,
     paymentRestoring = false,
     paymentCanExecuteSale = true,
+    paymentUsesQaDelegated = false,
+    pixelpaySale,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const paymentSubmissionInFlightRef = useRef(false);
   const [hostedModalOpen, setHostedModalOpen] = useState(false);
   const [hostedResultReceived, setHostedResultReceived] = useState(false);
   const [hostedModalError, setHostedModalError] = useState(null);
   const [hostedLaunchConsumed, setHostedLaunchConsumed] = useState(false);
   const [paymentForm, setPaymentForm] = useState(INITIAL_PAYMENT_FORM);
   const [fieldErrors, setFieldErrors] = useState({});
-  const reconciliationNotice = getPixelPayReconciliationNotice(paymentResult);
+  const paymentFormDirty = Object.keys(INITIAL_PAYMENT_FORM).some(key => paymentForm[key] !== INITIAL_PAYMENT_FORM[key]);
+  useEffect(() => {
+    registerPaymentNavigation?.({ dirty: paymentFormDirty, processing: processingPayment || loadingIntent || creatingPaymentIntent });
+    return () => registerPaymentNavigation?.({ dirty: false, processing: false });
+  }, [registerPaymentNavigation, paymentFormDirty, processingPayment, loadingIntent, creatingPaymentIntent]);
   const [selectedSimulationAmount, setSelectedSimulationAmount] = useState(() => {
-    if (typeof window === 'undefined') return TODO_PAGO_SIMULATION_SCENARIOS[0].value;
+    if (typeof window === 'undefined') return TODO_PAGO_APPROVED_SIMULATION_AMOUNT;
     try {
       const stored = String(window.sessionStorage.getItem(TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY) || '').trim();
       return TODO_PAGO_SIMULATION_SCENARIOS.some((scenario) => scenario.value === stored)
         ? stored
-        : TODO_PAGO_SIMULATION_SCENARIOS[0].value;
+        : TODO_PAGO_APPROVED_SIMULATION_AMOUNT;
     } catch {
-      return TODO_PAGO_SIMULATION_SCENARIOS[0].value;
+      return TODO_PAGO_APPROVED_SIMULATION_AMOUNT;
     }
   });
   const paymentSimulationAction = resolvePaymentSimulationAction();
   const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
+  const qaDelegated = paymentUsesQaDelegated;
+  const pixelPaySaleSuspended = isPixelPayProvider && !qaDelegated && !isPixelPaySaleAuthorized(pixelpaySale);
+  const diagnosticContext = !qaDelegated
+    && (paymentIntent?.qa_3ds_diagnostic === true || paymentResult?.qa_3ds_diagnostic === true);
+  const sandboxSession = paymentIntent?.qa_sandbox_session === true || paymentResult?.qa_sandbox_session === true;
+  const qaVideoDemoMode = resolveQaVideoDemoMode();
+  const usesProductionCheckoutDesign = isPixelPayProvider || qaVideoDemoMode;
   const pixelPayPresentation = getPixelPayPresentation();
   const paymentUiState = normalizeBookingPaymentUiState({
     paymentIntent,
@@ -344,7 +405,40 @@ export default function PublicBookingPaymentStep() {
     providerType: paymentSimulationAction.type,
     paymentIntent,
     paymentResult,
-  });
+  }) || (pixelPaySaleSuspended && Boolean(getPixelPayReconciliationNotice(paymentIntent)));
+  const reconciliationNotice = getPixelPayReconciliationNotice(paymentResult)
+    || (pixelPaySaleSuspended ? getPixelPayReconciliationNotice(paymentIntent) : '');
+  // AM: A created intent or context reload does not prove a Sale was submitted.
+  const suspendedIntentState = String(paymentResult?.estado_intent_codigo || paymentResult?.status
+    || paymentIntent?.estado_intent_codigo || '').trim().toLowerCase();
+  const hasReportedPaymentEvidence = [paymentResult, paymentIntent].some(state =>
+    state?.booking_confirmed === true
+    || ['processing', 'procesando', 'confirmando', 'confirmado', 'pagado', 'paid', 'capturado', 'capturada'].includes(
+      String(state?.estado_intent_codigo || state?.status || '').trim().toLowerCase()
+    )
+    || ['payment_attempt_id', 'payment_uuid', 'provider_session_id', 'transaction_id', 'provider_tx_id', 'referencia_externa']
+      .some(field => Boolean(String(state?.[field] || '').trim())));
+  const diagnosticPaymentTitle = paymentUiState.bookingConfirmed ? 'Pago Sandbox confirmado'
+    : paymentUiState.status === 'failed' ? 'Pago Sandbox no completado'
+    : paymentUiState.status === 'paid' ? 'Pago Sandbox confirmado'
+    : pixelPayPendingConfirmation || hasReportedPaymentEvidence ? 'Resultado pendiente de verificación'
+    : 'Pago con autenticación no disponible';
+  const diagnosticPaymentNotice = paymentUiState.bookingConfirmed ? 'El backend verificó el pago Sandbox y confirmó la cita.'
+    : paymentUiState.status === 'failed' ? 'El backend informó que el pago no pudo completarse. Puedes consultar su estado; esta sesión no inicia otra operación.'
+    : paymentUiState.status === 'paid' ? 'El backend informó el pago confirmado. Consulta el estado de la reserva.'
+    : pixelPayPendingConfirmation || hasReportedPaymentEvidence
+      ? 'El resultado de esta operación sigue pendiente de verificación. Consulta su estado y no inicies otro pago. La cita solo se confirma con un pago verificado por el backend.'
+      : 'El inicio de pagos con autenticación no está disponible en esta sesión de QA. Puedes consultar el estado de la reserva.';
+  const suspendedBeforePayment = pixelPaySaleSuspended
+    && !diagnosticContext
+    && !processingPayment
+    && !pixelPayPendingConfirmation
+    && ['', 'creado', 'link_generado', 'expirado', 'expired'].includes(suspendedIntentState)
+    && !hasReportedPaymentEvidence;
+  const suspendedHoldExpired = holdExpired || paymentUiState.status === 'expired';
+  const paymentProcessing = processingPayment || pixelPayPendingConfirmation
+    || (pixelPaySaleSuspended && paymentUiState.status === 'processing')
+    || (paymentRestoring && !pixelPaySaleSuspended);
   const paymentLaunch = paymentIntent?.launch;
   const paymentLaunchKey = createTodoPagoLaunchKey(paymentLaunch);
   const hasHostedLaunch = paymentLaunch?.type === 'iframe_post';
@@ -482,7 +576,7 @@ export default function PublicBookingPaymentStep() {
 
   const handleVerifyPaymentStatus = async () => {
     if (checkingPaymentStatus) return;
-    await refreshPaymentStatus({ queryPixelPayProvider: pixelPayPendingConfirmation });
+    await refreshPaymentStatus({ queryPixelPayProvider: pixelPayPendingConfirmation && !diagnosticContext });
   };
 
   const handleOpenHostedModal = () => {
@@ -504,20 +598,29 @@ export default function PublicBookingPaymentStep() {
   };
 
   const handleMockPay = async () => {
-    if (processingPayment || paymentRestoring || !paymentCanExecuteSale) return;
-    // AM: Una etiqueta segura no basta: bloquear tambien el handler ante una configuracion inconsistente.
+    if (paymentSubmissionInFlightRef.current || processingPayment || paymentRestoring
+      || pixelPaySaleSuspended || !paymentCanExecuteSale || diagnosticContext) return;
     if (isPixelPayProvider && !pixelPayPresentation.canPay) return;
-    const validationErrors = validatePaymentForm(paymentForm, new Date(), pixelPayPresentation.environment);
+    const validationErrors = validatePaymentForm(
+      paymentForm,
+      new Date(),
+      pixelPayPresentation.environment,
+      { requireBilling: paymentSimulationAction.type === 'pixelpay' },
+    );
     if (Object.keys(validationErrors).length > 0) {
       setFieldErrors(validationErrors);
       return;
     }
 
+    paymentSubmissionInFlightRef.current = true;
     setProcessingPayment(true);
     try {
       if (typeof window !== 'undefined') {
         if (paymentSimulationAction.type === 'simulator') {
-          window.sessionStorage.setItem(TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY, selectedSimulationAmount);
+          window.sessionStorage.setItem(
+            TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY,
+            qaVideoDemoMode ? TODO_PAGO_APPROVED_SIMULATION_AMOUNT : selectedSimulationAmount,
+          );
         } else {
           window.sessionStorage.removeItem(TODO_PAGO_SIMULATION_SCENARIO_STORAGE_KEY);
         }
@@ -543,18 +646,21 @@ export default function PublicBookingPaymentStep() {
       }
     } finally {
       resetSensitiveFields();
+      paymentSubmissionInFlightRef.current = false;
       setProcessingPayment(false);
     }
   };
 
   const handleReturnToConfirm = async () => {
-    resetSensitiveFields();
-    setFieldErrors({});
-    await goToConfirm();
+    if (paymentRestoring) {
+      await cancelBookingFlow('payment_summary');
+      return;
+    }
+    const navigated = await goToConfirm();
+    if (navigated) resetFormState();
   };
 
   const handleCancelFlow = async () => {
-    resetFormState();
     await cancelBookingFlow('payment_step');
   };
 
@@ -570,10 +676,10 @@ export default function PublicBookingPaymentStep() {
   })();
 
   return (
-    <div className={`citas-confirm-wrap public-booking-payment-wrap ${isPixelPayProvider ? 'mf-checkout' : ''}`}>
+    <div className={`citas-confirm-wrap public-booking-payment-wrap ${usesProductionCheckoutDesign ? 'mf-checkout' : ''}`}>
       <div className="citas-surface p-3 sm:p-5">
-        {isPixelPayProvider ? (
-          <><PaymentCheckoutHero /><PaymentCheckoutSteps processing={processingPayment || pixelPayPendingConfirmation || paymentRestoring} confirmed={paymentResult?.booking_confirmed === true} /></>
+        {usesProductionCheckoutDesign ? (
+          <><PaymentCheckoutHero commercialPreview={qaVideoDemoMode} /><PaymentCheckoutSteps processing={paymentProcessing} confirmed={paymentResult?.booking_confirmed === true} /></>
         ) : (
         <BookingStepHeader
           title="Pasarela de pago segura"
@@ -587,7 +693,7 @@ export default function PublicBookingPaymentStep() {
           subtitleClassName="citas-selected-date mt-2"
         />
         )}
-        {!isPixelPayProvider ? (
+        {!usesProductionCheckoutDesign ? (
         <div className="mt-3 grid gap-2 sm:gap-3">
           <div className="public-booking-payment-note">
             <ShieldCheck size={14} />
@@ -607,6 +713,7 @@ export default function PublicBookingPaymentStep() {
           </div>
         </div>
         ) : null}
+        {qaDelegated && paymentResult?.qa_3ds_challenge_active === true ? <QaPixelPayChallengeNotice /> : null}
         {membershipUxMessage ? (
           <div className="public-booking-payment-note mt-3">
             <ShieldCheck size={14} />
@@ -620,11 +727,13 @@ export default function PublicBookingPaymentStep() {
           </div>
         ) : null}
 
+        {sandboxSession ? <p role="note">Sesión de pruebas Sandbox. Consulta el resultado de esta operación sin repetir el pago.
+            Solo un pago verificado permite confirmar la cita.</p> : null}
         <div className="public-booking-form-grid public-booking-payment-grid mt-4 gap-4 lg:gap-5">
-          {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
-            <div className="public-booking-contact-card public-booking-payment-gateway-card">
+          {paymentSimulationAction.canShow && !pixelPaySaleSuspended && !diagnosticContext && !pixelPayPendingConfirmation && !paymentRestoring ? (
+            <div className="public-booking-contact-card public-booking-payment-gateway-card" aria-busy={processingPayment}>
             <h4 className="citas-confirm-subtitle mt-4">
-              {paymentSimulationAction.type === 'pixelpay' ? 'Información de pago' : 'Datos para la simulacion'}
+              {qaVideoDemoMode ? 'Datos de pago' : paymentSimulationAction.type === 'pixelpay' ? 'Información de pago' : 'Datos para la simulacion'}
             </h4>
             <fieldset className="min-w-0" disabled={isPixelPayProvider && !pixelPayPresentation.canPay}>
             <div className="public-booking-form-row mt-2">
@@ -634,13 +743,14 @@ export default function PublicBookingPaymentStep() {
                 className="mf-input"
                 placeholder="Ej. Carlos Ramirez"
                 autoComplete="cc-name"
+                disabled={processingPayment}
                 value={paymentForm.cardholderName}
                 onChange={handleFieldChange('cardholderName')}
               />
               {fieldErrors.cardholderName ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.cardholderName}</p> : null}
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-card-number">Numero de tarjeta</label>
+              <label className="mf-label" htmlFor="pay-card-number">{qaVideoDemoMode ? 'Tarjeta de prueba' : 'Numero de tarjeta'}</label>
               <input
                 id="pay-card-number"
                 className="mf-input"
@@ -648,6 +758,7 @@ export default function PublicBookingPaymentStep() {
                 autoComplete="cc-number"
                 inputMode="numeric"
                 maxLength={23}
+                disabled={processingPayment}
                 value={paymentForm.cardNumber}
                 onChange={handleFieldChange('cardNumber')}
               />
@@ -660,13 +771,14 @@ export default function PublicBookingPaymentStep() {
             </div>
             <div className="mt-2 grid gap-3 md:grid-cols-2">
               <div className="public-booking-form-row">
-                <label className="mf-label" htmlFor="pay-expiry">Expiracion</label>
+                <label className="mf-label" htmlFor="pay-expiry">{qaVideoDemoMode ? 'Vencimiento' : 'Expiracion'}</label>
                 <input
                   id="pay-expiry"
                   className="mf-input"
                   placeholder="MM/AA"
                   autoComplete="cc-exp"
                   inputMode="numeric"
+                  disabled={processingPayment}
                   value={paymentForm.expiry}
                   onChange={handleFieldChange('expiry')}
                 />
@@ -682,6 +794,7 @@ export default function PublicBookingPaymentStep() {
                   autoComplete="cc-csc"
                   inputMode="numeric"
                   maxLength={4}
+                  disabled={processingPayment}
                   value={paymentForm.cvv}
                   onChange={handleFieldChange('cvv')}
                 />
@@ -689,7 +802,7 @@ export default function PublicBookingPaymentStep() {
               </div>
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-receipt-email">Correo del titular para comprobante</label>
+              <label className="mf-label" htmlFor="pay-receipt-email">{qaVideoDemoMode ? 'Correo para comprobante' : 'Correo del titular para comprobante'}</label>
               <input
                 id="pay-receipt-email"
                 className="mf-input"
@@ -701,13 +814,14 @@ export default function PublicBookingPaymentStep() {
               <p className="mt-1 text-xs text-[var(--mf-text-2)]">Se usa el correo ya validado del titular de la reserva.</p>
             </div>
             <div className="public-booking-form-row mt-2">
-              <label className="mf-label" htmlFor="pay-phone">Telefono de contacto</label>
+              <label className="mf-label" htmlFor="pay-phone">{qaVideoDemoMode ? 'Teléfono de contacto' : 'Telefono de contacto'}</label>
               <input
                 id="pay-phone"
                 className="mf-input"
                 placeholder="99999999"
                 autoComplete="tel"
                 inputMode="tel"
+                disabled={processingPayment}
                 value={paymentForm.phone}
                 onChange={handleFieldChange('phone')}
               />
@@ -717,18 +831,18 @@ export default function PublicBookingPaymentStep() {
               <>
                 <div className="public-booking-form-row mt-2">
                   <label className="mf-label" htmlFor="pay-billing-address">Direccion de facturacion</label>
-                  <input id="pay-billing-address" className="mf-input" autoComplete="street-address" value={paymentForm.billingAddress} onChange={handleFieldChange('billingAddress')} />
+                  <input id="pay-billing-address" className="mf-input" autoComplete="street-address" disabled={processingPayment} value={paymentForm.billingAddress} onChange={handleFieldChange('billingAddress')} />
                   {fieldErrors.billingAddress ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingAddress}</p> : null}
                 </div>
                 <div className="mf-checkout-billing mt-2 grid gap-3">
                   <div className="public-booking-form-row">
                     <label className="mf-label" htmlFor="pay-billing-city">Ciudad</label>
-                    <input id="pay-billing-city" className="mf-input" autoComplete="address-level2" value={paymentForm.billingCity} onChange={handleFieldChange('billingCity')} />
+                    <input id="pay-billing-city" className="mf-input" autoComplete="address-level2" disabled={processingPayment} value={paymentForm.billingCity} onChange={handleFieldChange('billingCity')} />
                     {fieldErrors.billingCity ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingCity}</p> : null}
                   </div>
                   <div className="public-booking-form-row">
                     <label className="mf-label" htmlFor="pay-billing-state">Departamento</label>
-                    <select id="pay-billing-state" className="mf-select" autoComplete="address-level1" value={paymentForm.billingState} onChange={handleFieldChange('billingState')}>
+                    <select id="pay-billing-state" className="mf-select" autoComplete="address-level1" disabled={processingPayment} value={paymentForm.billingState} onChange={handleFieldChange('billingState')}>
                       {HONDURAS_DEPARTMENTS.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
                     </select>
                     {fieldErrors.billingState ? <p className="mt-1 text-xs text-[var(--mf-danger)]">{fieldErrors.billingState}</p> : null}
@@ -742,19 +856,31 @@ export default function PublicBookingPaymentStep() {
               </>
             ) : null}
             <div className="mt-3 rounded-xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-3 text-xs leading-relaxed text-[var(--mf-text-2)]">
-              {paymentSimulationAction.type === 'pixelpay'
+              {qaVideoDemoMode
+                ? 'Usa únicamente datos de prueba. No ingreses una tarjeta real; la información se elimina al terminar.'
+                : paymentSimulationAction.type === 'pixelpay'
                 ? pixelPayPresentation.privacyNotice
                 : 'Los datos de tarjeta se usan solo para validar la experiencia visual de esta pasarela simulada. No se envian al backend ni al proveedor.'}
             </div>
             </fieldset>
             </div>
-          ) : isPixelPayProvider ? (
+          ) : usesProductionCheckoutDesign ? (
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
               <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
                 <ShieldCheck size={30} className="text-[var(--mf-accent)]" />
-                <h4 className="citas-confirm-subtitle">{pixelPayPresentation.paymentTitle}</h4>
+                <h4 className="citas-confirm-subtitle">{diagnosticContext ? diagnosticPaymentTitle : suspendedBeforePayment ? 'Pago deshabilitado en QA' : qaVideoDemoMode ? 'Confirmando tu pago' : pixelPayPresentation.paymentTitle}</h4>
                 <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
-                  Estamos verificando el resultado del pago con PixelPay. No vuelvas a realizar el pago.
+                  {diagnosticContext
+                    ? diagnosticPaymentNotice
+                    : suspendedBeforePayment
+                    ? suspendedHoldExpired
+                      ? 'El pago con PixelPay Sandbox aún no está habilitado. La reserva temporal venció; consulta su estado y vuelve a la agenda para elegir otro horario.'
+                      : paymentRestoring
+                        ? 'El pago con PixelPay Sandbox aún no está habilitado. Estamos consultando el estado de la reserva temporal; todavía no es una cita confirmada.'
+                        : 'El pago con PixelPay Sandbox aún no está habilitado. Tu reserva está temporalmente retenida y pendiente de pago; todavía no es una cita confirmada.'
+                    : qaVideoDemoMode
+                    ? 'Estamos verificando el resultado del pago. No vuelvas a realizarlo.'
+                    : 'Estamos verificando el resultado del pago con PixelPay. No vuelvas a realizar el pago.'}
                 </p>
               </div>
             </div>
@@ -832,7 +958,7 @@ export default function PublicBookingPaymentStep() {
               <ShieldCheck size={14} />
               <span>{hostedStatusText}</span>
             </div>
-            {!paymentIntent?.id_intent ? (
+            {!paymentIntent?.id_intent && !qaVideoDemoMode ? (
               <Button className="mt-3 w-full gap-2 sm:w-auto" onClick={handleCreateIntent} disabled={loadingIntent || creatingPaymentIntent}>
                 {loadingIntent || creatingPaymentIntent ? <Loader2 size={16} className="animate-spin" /> : null}
                 Crear intento de pago
@@ -841,14 +967,15 @@ export default function PublicBookingPaymentStep() {
               <div className="mt-3 space-y-2 break-words text-sm leading-relaxed text-[var(--mf-text-2)] public-booking-payment-meta">
                 <p>Estado: {paymentUiState.text}</p>
                 <p>Monto: {paymentRestoring ? 'Verificando...' : formatCurrencyHnl(effectiveTotalToPay)}</p>
-                <p>Intent: {paymentIntent.id_intent}</p>
-                <p>Proveedor: {paymentSimulationAction.provider || 'no_configurado'}</p>
+                {!qaVideoDemoMode ? <p>Intent: {paymentIntent.id_intent}</p> : null}
+                {!qaVideoDemoMode ? <p>Proveedor: {paymentSimulationAction.provider || 'no_configurado'}</p> : null}
                 {reconciliationNotice ? (
                   <p role="status" className="rounded-lg border border-[var(--mf-warning)]/40 bg-[var(--mf-warning)]/10 p-3 font-medium text-[var(--mf-text-1)]">
                     {reconciliationNotice}
                   </p>
                 ) : null}
-                {paymentSimulationAction.canShow
+                {!qaVideoDemoMode
+                  && paymentSimulationAction.canShow
                   && paymentIntent.launch?.type === 'redirect'
                   && paymentIntent.launch?.action ? (
                   <a
@@ -874,16 +1001,18 @@ export default function PublicBookingPaymentStep() {
                   Continuar con TodoPago
                 </Button>
               ) : null}
-              <Button
-                className="w-full sm:w-auto"
-                variant="outline"
-                onClick={handleVerifyPaymentStatus}
-                disabled={!paymentIntent?.id_intent || checkingPaymentStatus}
-              >
-                {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
-                Verificar estado del pago
-              </Button>
-              {paymentSimulationAction.canShow && paymentSimulationAction.type === 'simulator' ? (
+              {!qaVideoDemoMode ? (
+                <Button
+                  className="w-full sm:w-auto"
+                  variant="outline"
+                  onClick={handleVerifyPaymentStatus}
+                  disabled={!paymentIntent?.id_intent || checkingPaymentStatus}
+                >
+                  {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
+                  Verificar estado del pago
+                </Button>
+              ) : null}
+              {paymentSimulationAction.canShow && paymentSimulationAction.type === 'simulator' && !qaVideoDemoMode ? (
                 <div className="flex w-full min-w-0 flex-col gap-1 sm:min-w-[220px] sm:flex-1">
                   <label className="mf-label text-left text-[11px]" htmlFor="booking-simulator-scenario">
                     Escenario simulator
@@ -892,7 +1021,7 @@ export default function PublicBookingPaymentStep() {
                     id="booking-simulator-scenario"
                     className="mf-select"
                     value={selectedSimulationAmount}
-                    onChange={(event) => setSelectedSimulationAmount(String(event.target.value || TODO_PAGO_SIMULATION_SCENARIOS[0].value))}
+                    onChange={(event) => setSelectedSimulationAmount(String(event.target.value || TODO_PAGO_APPROVED_SIMULATION_AMOUNT))}
                     disabled={processingPayment}
                   >
                     {TODO_PAGO_SIMULATION_SCENARIOS.map((scenario) => (
@@ -901,7 +1030,7 @@ export default function PublicBookingPaymentStep() {
                   </select>
                 </div>
               ) : null}
-              {paymentSimulationAction.canShow && !pixelPayPendingConfirmation && !paymentRestoring ? (
+              {paymentSimulationAction.canShow && !pixelPaySaleSuspended && !diagnosticContext && !pixelPayPendingConfirmation && !paymentRestoring ? (
                 <Button
                   className="mf-checkout-submit w-full sm:w-auto"
                   onClick={handleMockPay}
@@ -909,7 +1038,11 @@ export default function PublicBookingPaymentStep() {
                     || (isPixelPayProvider && !pixelPayPresentation.canPay)}
                 >
                   {processingPayment ? <Loader2 size={16} className="animate-spin" /> : null}
-                  {paymentSimulationAction.type === 'pixelpay'
+                  {processingPayment
+                    ? 'Procesando…'
+                    : qaVideoDemoMode
+                    ? 'Pagar'
+                    : paymentSimulationAction.type === 'pixelpay'
                     ? pixelPayPresentation.payButton
                     : paymentSimulationAction.type === 'simulator' ? 'Ejecutar simulator' : 'Simular pago exitoso'}
                 </Button>
@@ -920,11 +1053,11 @@ export default function PublicBookingPaymentStep() {
                 Volver al resumen
               </Button>
               <Button className="w-full sm:w-auto" variant="ghost" onClick={handleCancelFlow} disabled={processingPayment || loadingIntent}>
-                Cancelar reserva
+                {paymentIntent?.id_intent || paymentRestoring ? 'Salir del pago' : 'Cancelar reserva'}
               </Button>
             </BookingActions>
 
-        {!isPixelPayProvider ? (
+        {!usesProductionCheckoutDesign ? (
           <TodoPagoHostedModal
             open={hostedModalOpen}
             launch={paymentLaunch}

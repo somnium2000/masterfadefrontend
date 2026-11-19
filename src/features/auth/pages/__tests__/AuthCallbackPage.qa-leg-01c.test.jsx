@@ -38,6 +38,7 @@ const mount = ({ strict = false } = {}) => render(
 test('nuevo usuario no se aprovisiona automaticamente y marketing inicia desmarcado', async () => {
   mount();
   expect(await screen.findByText('COMPLETAR REGISTRO')).toBeInTheDocument();
+  expect(screen.queryByText(/pendientes de aprobacion|Borrador|entrada en vigor/i)).not.toBeInTheDocument();
   expect(mocks.post).toHaveBeenCalledTimes(1);
   expect(screen.getByLabelText('Acepto recibir comunicaciones comerciales.')).not.toBeChecked();
   expect(mocks.signOut).not.toHaveBeenCalled();

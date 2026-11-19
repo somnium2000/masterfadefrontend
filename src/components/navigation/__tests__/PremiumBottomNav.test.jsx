@@ -74,3 +74,20 @@ test('contraste AA incluso sobre el peor fondo compuesto de cada tema', () => {
     expect((values[0] + 0.05) / (values[1] + 0.05)).toBeGreaterThanOrEqual(4.5);
   }
 });
+
+test.each([true, false])('FAB pausado permanece visible, sin ejecutar la acción (callback: %s)', withCallback => {
+  const onClick = vi.fn();
+  const { rerender } = render(<PremiumBottomNav sideItems={createItems()} fabItem={{
+    label: 'Pausado', icon: Plus, disabled: true, ...(withCallback ? { onClick } : {}),
+  }} />);
+  const fab = screen.getByRole('button', { name: 'Pausado', exact: true });
+  expect(fab).toBeDisabled();
+  expect(fab).toHaveClass('h-14', 'w-14', 'mf-accent-gradient');
+  expect(fab.querySelector('svg')).toBeInTheDocument();
+  fireEvent.click(fab);
+  expect(onClick).not.toHaveBeenCalled();
+  expect(screen.getAllByRole('button')).toHaveLength(5);
+  rerender(<PremiumBottomNav sideItems={createItems()} fabItem={{ label: 'Agendar', icon: Plus, onClick }} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Agendar', exact: true }));
+  expect(onClick).toHaveBeenCalledOnce();
+});

@@ -1,14 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
+import {existsSync} from 'node:fs';
 import {mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 const engines=createRequire(import.meta.url)(process.env.MASTERFADE_PLAYWRIGHT_MODULE||'playwright');
 const base=process.env.MASTERFADE_BROWSER_URL||'http://127.0.0.1:4205';
 const active=['en_espera','pendiente_pago','confirmada','en_salon','en_atencion'],past=['completada','cancelada','cancelada_por_cliente','expirada','no_show','anulada'];
-for(const engine of ['chromium'])for(const width of [390,768,1440])for(const theme of ['light','dark'])test(`${engine} ${width} ${theme}: paginación Cliente independiente`,{timeout:45000},async()=>{
- const browser=await engines[engine].launch({channel:'chrome'});let inspected;try{
+for(const engine of ['chromium','webkit'])for(const width of [390,768,1440])for(const theme of ['light','dark'])test(`${engine} ${width} ${theme}: paginación Cliente independiente`,{skip:!existsSync(engines[engine].executablePath()),timeout:45000},async()=>{
+ const browser=await engines[engine].launch();let inspected;try{
   const context=await browser.newContext({viewport:{width,height:900},timezoneId:'Asia/Tokyo'}),page=await context.newPage(),errors=[],writes=[],queries=[];
   await page.addInitScript(theme=>{localStorage.setItem('mf_theme_variant',theme);sessionStorage.setItem('mf-agendamiento-aviso-2026-11-17','dismissed');},theme);
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});

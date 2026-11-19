@@ -2,9 +2,12 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import useBookingPayment from '../hooks/useBookingPayment.js';
+import { runDelegatedPixelPay } from '../../../payments/experimental/delegatedPixelPay.js';
+import { readBookingPaymentContext } from '../paymentResumeContext.js';
 import {
   getPublicPaymentStatus,
   queryPublicPixelPayStatus,
+  requestQaDelegatedPayment,
   salePublicPixelPay,
 } from '../publicBookingApi.js';
 
@@ -14,7 +17,15 @@ vi.mock('../publicBookingApi.js', () => ({
   createPublicPaymentIntent: vi.fn(),
   getPublicPaymentStatus: vi.fn(),
   queryPublicPixelPayStatus: vi.fn(),
+  requestQaDelegatedPayment: vi.fn(),
   salePublicPixelPay: vi.fn(),
+}));
+
+vi.mock('../../../payments/experimental/delegatedPixelPay.js', () => ({
+  runDelegatedPixelPay: vi.fn(async ({ transport }) => {
+    await transport('lookup', { reference: 'opaque-reference' });
+    return transport('status', {});
+  }),
 }));
 
 const GROUP_ID = '11111111-2222-4333-8444-555555555555';
@@ -27,6 +38,58 @@ describe('useBookingPayment PixelPay guards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
+  });
+
+  it('uses QA handoff in memory and keeps an interrupted attempt pending without a second Sale', async () => {
+    const handoff = { token: 'memory-only-token', expiresAt: Date.now() + 240000,
+      continuation: { payload: 'memory-only-payload' } };
+    salePublicPixelPay.mockResolvedValueOnce({ pending_confirmation: true, qa_3ds_handoff: handoff });
+    requestQaDelegatedPayment.mockRejectedValueOnce(new Error('transport interrupted'));
+    const args = { groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL, card: {}, billing: {}, delegated: true };
+    const hook = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID, authenticated: true }));
+    await act(async () => { await hook.result.current.salePixelPayOnce(args); });
+    expect(requestQaDelegatedPayment).toHaveBeenCalledWith({
+      id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, titular_email: EMAIL, token: handoff.token,
+      operation: 'lookup', data: { reference: 'opaque-reference' },
+    }, expect.anything());
+    expect(hook.result.current.paymentResult).toMatchObject({ pending_confirmation: true });
+    expect(JSON.stringify(window.sessionStorage)).not.toContain('memory-only');
+    await act(async () => { expect(await hook.result.current.salePixelPayOnce(args)).toBeNull(); });
+    expect(salePublicPixelPay).toHaveBeenCalledTimes(1);
+  });
+
+  it('correlaciona un fallo del SDK y conserva el intento pendiente para conciliación', async () => {
+    const response = {
+      estado_intent_codigo: 'pendiente_confirmacion',
+      booking_confirmed: false,
+      qa_3ds_handoff: {
+        token: 'private-handoff-marker',
+        expiresAt: Date.now() + 240000,
+        continuation: { payload: 'private-payload-marker' },
+      },
+    };
+    Object.defineProperty(response, '__meta', { value: { headers: new Headers({ 'X-Request-Id': 'req-i' }) } });
+    salePublicPixelPay.mockResolvedValueOnce(response);
+    runDelegatedPixelPay.mockRejectedValueOnce(Object.assign(new Error('private-error-marker'), {
+      code: 'PIXELPAY_3DS_SDK_LOAD_FAILED',
+    }));
+    const args = { groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL, card: {}, billing: {}, delegated: true };
+    const hook = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID, authenticated: true }));
+    await act(async () => { await hook.result.current.salePixelPayOnce(args); });
+
+    expect(hook.result.current.paymentResult).toMatchObject({
+      pending_confirmation: true,
+      estado_intent_codigo: 'pendiente_confirmacion',
+      booking_confirmed: false,
+      qa_3ds_browser_diagnostic: { code: 'PIXELPAY_3DS_SDK_LOAD_FAILED', id_intent: INTENT_ID, request_id: 'req-i' },
+    });
+    expect(readBookingPaymentContext()?.paymentIntent?.pending_confirmation).toBe(true);
+    expect(JSON.stringify([hook.result.current.paymentResult, window.sessionStorage])).not.toContain('private-');
+    await act(async () => { expect(await hook.result.current.salePixelPayOnce(args)).toBeNull(); });
+    expect(salePublicPixelPay).toHaveBeenCalledTimes(1);
+    expect(runDelegatedPixelPay).toHaveBeenCalledTimes(1);
+    expect(requestQaDelegatedPayment).not.toHaveBeenCalled();
+    expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
   });
 
   it('deduplica consultas concurrentes de status y no reintenta', async () => {
@@ -100,6 +163,150 @@ describe('useBookingPayment PixelPay guards', () => {
     expect(JSON.stringify(error)).not.toContain(GROUP_ID);
   });
 
+  it('bloquea invocación directa repetida tras pérdida de respuesta', async () => {
+    const error = Object.assign(new Error('Sin respuesta'), { status: 0, code: 'NETWORK_UNAVAILABLE' });
+    salePublicPixelPay.mockRejectedValue(error);
+    const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+    const input = { groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL, card: {}, billing: {} };
+    await act(async () => { await expect(result.current.salePixelPayOnce(input)).rejects.toBe(error); });
+    await act(async () => { expect(await result.current.salePixelPayOnce(input)).toBeNull(); });
+    expect(salePublicPixelPay).toHaveBeenCalledTimes(1);
+    expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [503, 'PIXELPAY_3DS_INTEGRATION_UNAVAILABLE', false],
+    [503, 'UNKNOWN_SERVER_CODE', true],
+    [422, 'PIXELPAY_SANDBOX_CARD_NOT_ALLOWED', false],
+    [422, 'UNKNOWN_SERVER_CODE', true],
+    [undefined, 'NETWORK_ERROR', true],
+  ])('%s %s preserves whether the operation could have started', async (status, code, pending) => {
+    const fresh = { id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, estado_intent_codigo: 'link_generado' };
+    window.sessionStorage.setItem('masterfade.publicBookingPayment.v1', JSON.stringify({
+      id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, titular_email: EMAIL, paymentIntent: fresh,
+    }));
+    const error = Object.assign(new Error('Servicio no disponible'), { status, data: { error: { code } } });
+    salePublicPixelPay.mockRejectedValueOnce(error);
+    const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+    act(() => result.current.restorePaymentContext(GROUP_ID));
+    await act(async () => expect(result.current.salePixelPayOnce({
+      groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL, card: {}, billing: {},
+    })).rejects.toBe(error));
+    expect(result.current.paymentIntent).toMatchObject({ ...fresh, pending_confirmation: pending });
+    expect(JSON.parse(window.sessionStorage.getItem('masterfade.publicBookingPayment.v1')).paymentIntent)
+      .toMatchObject({ ...fresh, pending_confirmation: pending });
+    expect(salePublicPixelPay).toHaveBeenCalledOnce();
+    expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+  });
+
+  it('no envía Sale si sessionStorage no permite guardar la recuperación', async () => {
+    const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Quota'); });
+    try {
+      await act(async () => {
+        await expect(result.current.salePixelPayOnce({
+          groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL, card: {}, billing: {},
+        })).rejects.toMatchObject({ code: 'PIXELPAY_RECOVERY_CONTEXT_UNAVAILABLE' });
+      });
+      expect(salePublicPixelPay).not.toHaveBeenCalled();
+      expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
+    } finally { write.mockRestore(); }
+  });
+
+  it.each(['confirmado', 'fallido'])('GET terminal %s actualiza el contexto persistido tras recarga', async (state) => {
+    window.sessionStorage.setItem('masterfade.publicBookingPayment.v1', JSON.stringify({
+      id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, titular_email: EMAIL,
+      paymentIntent: { id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, estado_intent_codigo: 'link_generado', pending_confirmation: true },
+    }));
+    const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+    act(() => { result.current.restorePaymentContext(GROUP_ID); });
+    getPublicPaymentStatus.mockResolvedValue({
+      id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, estado_intent_codigo: state, booking_confirmed: state === 'confirmado',
+    });
+    await act(async () => { await result.current.fetchPaymentStatusOnce({ groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL }); });
+    expect(result.current.paymentIntent).toMatchObject({ pending_confirmation: false, estado_intent_codigo: state });
+    expect(JSON.parse(window.sessionStorage.getItem('masterfade.publicBookingPayment.v1')).paymentIntent)
+      .toMatchObject({ pending_confirmation: false, estado_intent_codigo: state });
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+  });
+
+  it('GET tardío no reconstruye el contexto eliminado mientras esperaba', async () => {
+    let finish;
+    getPublicPaymentStatus.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+    let pending;
+    act(() => { pending = result.current.fetchPaymentStatusOnce({ groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL }); });
+    act(() => { result.current.clearPaymentState(); });
+    await act(async () => {
+      finish({ id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, booking_confirmed: true, estado_intent_codigo: 'confirmado' });
+      await pending;
+    });
+    expect(result.current.paymentIntent).toBeNull();
+    expect(result.current.paymentResult).toBeNull();
+    expect(window.sessionStorage.getItem('masterfade.publicBookingPayment.v1')).toBeNull();
+  });
+
+  it.each([ALTERNATE_INTENT_ID, undefined])('GET terminal con intent %s no elimina incertidumbre del intent solicitado', async (responseIntentId) => {
+    window.sessionStorage.setItem('masterfade.publicBookingPayment.v1', JSON.stringify({
+      id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, titular_email: EMAIL,
+      paymentIntent: { id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, pending_confirmation: true },
+    }));
+    const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+    act(() => { result.current.restorePaymentContext(GROUP_ID); });
+    getPublicPaymentStatus.mockResolvedValue({ id_grupo_cita: GROUP_ID, id_intent: responseIntentId, booking_confirmed: true });
+    await act(async () => {
+      expect(await result.current.fetchPaymentStatusOnce({ groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL })).toBeNull();
+    });
+    expect(result.current.paymentResult).toBeNull();
+    expect(result.current.paymentIntent.pending_confirmation).toBe(true);
+    expect(JSON.parse(window.sessionStorage.getItem('masterfade.publicBookingPayment.v1')).paymentIntent.pending_confirmation).toBe(true);
+    expect(salePublicPixelPay).not.toHaveBeenCalled();
+  });
+
+  it.each(['definitive', 'preflight'])('resultado tardío %s no reconstruye un contexto borrado', async (outcome) => {
+    let finish;
+    let fail;
+    salePublicPixelPay.mockReturnValue(new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+    const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+    let pending;
+    act(() => {
+      pending = result.current.salePixelPayOnce({ groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL, card: {}, billing: {} }).catch(() => null);
+    });
+    act(() => { result.current.clearPaymentState(); });
+    await act(async () => {
+      if (outcome === 'definitive') finish({ booking_confirmed: true, estado_intent_codigo: 'confirmado' });
+      else fail(Object.assign(new Error('Rechazado'), { status: 403, data: { error: { code: 'PRIVATE_COMMERCE_RESTRICTED' } } }));
+      await pending;
+    });
+    expect(result.current.paymentIntent).toBeNull();
+    expect(result.current.paymentResult).toBeNull();
+    expect(window.sessionStorage.getItem('masterfade.publicBookingPayment.v1')).toBeNull();
+    expect(salePublicPixelPay).toHaveBeenCalledTimes(1);
+  });
+
+  it('resultado del hook desmontado no sobrescribe el contexto de otro checkout', async () => {
+    let finish;
+    salePublicPixelPay.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    const { result, unmount } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+    let pending;
+    act(() => { pending = result.current.salePixelPayOnce({ groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL, card: {}, billing: {} }); });
+    unmount();
+    const nextContext = { id_grupo_cita: ALTERNATE_GROUP_ID, id_intent: ALTERNATE_INTENT_ID, titular_email: EMAIL };
+    window.sessionStorage.setItem('masterfade.publicBookingPayment.v1', JSON.stringify(nextContext));
+    await act(async () => { finish({ booking_confirmed: true, estado_intent_codigo: 'confirmado' }); await pending; });
+    expect(JSON.parse(window.sessionStorage.getItem('masterfade.publicBookingPayment.v1'))).toEqual(nextContext);
+  });
+
+  it.each(['confirmado', 'fallido'])('callback obsoleto no repite Sale después de %s', async (state) => {
+    salePublicPixelPay.mockResolvedValue({ estado_intent_codigo: state, booking_confirmed: state === 'confirmado' });
+    const { result } = renderHook(() => useBookingPayment({ currentGroupId: GROUP_ID }));
+    const callback = result.current.salePixelPayOnce;
+    const input = { groupId: GROUP_ID, intentId: INTENT_ID, titularEmail: EMAIL, card: {}, billing: {} };
+    await act(async () => { await callback(input); expect(await callback(input)).toBeNull(); });
+    expect(salePublicPixelPay).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(window.sessionStorage.getItem('masterfade.publicBookingPayment.v1')).paymentIntent.estado_intent_codigo).toBe(state);
+  });
+
   it('deduplica sale concurrente y nunca dispara status automaticamente', async () => {
     let resolveSale;
     salePublicPixelPay.mockReturnValue(new Promise((resolve) => {
@@ -124,7 +331,12 @@ describe('useBookingPayment PixelPay guards', () => {
     expect(salePublicPixelPay).toHaveBeenCalledTimes(1);
     expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
     expect(window.sessionStorage.getItem('4111111111111111')).toBeNull();
-    expect(JSON.stringify(window.sessionStorage)).not.toContain('999');
+    expect(JSON.parse(window.sessionStorage.getItem('masterfade.publicBookingPayment.v1'))).toEqual({
+      id_grupo_cita: GROUP_ID,
+      id_intent: INTENT_ID,
+      titular_email: EMAIL,
+      paymentIntent: { id_grupo_cita: GROUP_ID, id_intent: INTENT_ID, pending_confirmation: true },
+    });
   });
 
   it('hard reload restaura contexto antiguo y reconstruye pendiente_confirmacion desde backend', async () => {

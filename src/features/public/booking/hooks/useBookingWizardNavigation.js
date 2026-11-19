@@ -29,8 +29,10 @@ export function resolveConfirmStepRedirect({
   selectedBranchId,
   selectedBarberId,
   allBlocksComplete,
+  hasCheckoutContext = false,
 } = {}) {
   if (!startsAt(pathname, BOOKING_ROUTES.confirm)) return '';
+  if (hasCheckoutContext) return '';
   if (!selectedBranchId || !selectedBarberId) return BOOKING_ROUTES.barbers;
   if (!allBlocksComplete) return BOOKING_ROUTES.agenda;
   return '';
@@ -114,6 +116,7 @@ export default function useBookingWizardNavigation({
   isPendingPaymentResumeRoute,
   paymentConfirmed,
   holdResult,
+  hasCheckoutContext = false,
   availabilityError,
   barbersLoading,
 } = {}) {
@@ -125,9 +128,10 @@ export default function useBookingWizardNavigation({
       selectedBranchId,
       selectedBarberId,
       allBlocksComplete,
+      hasCheckoutContext,
     });
     if (target) navigate(target, { replace: true });
-  }, [allBlocksComplete, navigate, pathname, selectedBarberId, selectedBranchId]);
+  }, [allBlocksComplete, hasCheckoutContext, navigate, pathname, selectedBarberId, selectedBranchId]);
 
   useEffect(() => {
     const target = resolvePaymentStepRedirect({

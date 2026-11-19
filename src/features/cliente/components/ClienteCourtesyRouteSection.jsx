@@ -720,7 +720,7 @@ export default function ClienteCourtesyRouteSection() {
                   })}
                 </div>
               ) : (
-                <p className="mt-2 text-sm text-[var(--mf-text-2)]">Aún no tienes movimientos. Tus puntos aparecerán aquí después de tus visitas.</p>
+                <p className="mt-2 text-sm text-[var(--mf-text-2)]">Aún no tienes movimientos. Tus puntos aparecerán al confirmarse el pago y la reserva de las citas elegibles.</p>
               )}
             </section>
           </>

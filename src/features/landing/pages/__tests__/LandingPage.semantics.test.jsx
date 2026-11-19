@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -10,10 +10,26 @@ import LandingPage from '../LandingPage.jsx';
 import { ThemeProvider } from '../../../../context/ThemeContext.jsx';
 const eligibility = vi.hoisted(() => ({ booking: false, publicBooking: false }));
 vi.mock('../../../../hooks/usePrivateCommerce.js', () => ({ default: () => eligibility }));
+beforeEach(() => { eligibility.booking = false; eligibility.publicBooking = false; });
+
+test('elegibilidad negativa bloquea citas y conserva acceso al catálogo VIP', () => {
+  eligibility.booking = false;
+  render(<ThemeProvider><MemoryRouter><LandingPage /><LocationProbe /></MemoryRouter></ThemeProvider>);
+  for (const button of screen.getAllByRole('button', { name: 'Reservas pausadas', exact: true })) {
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+  }
+  const central = screen.getByRole('button', { name: 'Pausado', exact: true });
+  expect(central).toBeDisabled();
+  expect(central.querySelector('svg')).toBeInTheDocument();
+  fireEvent.click(central);
+  expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent('/');
+  fireEvent.click(screen.getAllByRole('button', { name: 'Planes de Membresía VIP', exact: true })[0]);
+  expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent('/membresias-vip');
+});
 
 afterEach(() => {
   eligibility.booking = false;
-  eligibility.publicBooking = false;
   cleanup();
   window.localStorage.removeItem('mf_theme_variant');
 });
@@ -131,6 +147,16 @@ test('recargas repetidas siempre completan la entrada de los CTA', async () => {
   }
 }, 10000);
 
+test('retirada de elegibilidad conserva el botón central y bloquea la navegación', () => {
+  eligibility.booking = true;
+  const view = render(<ThemeProvider><MemoryRouter><LandingPage /><LocationProbe /></MemoryRouter></ThemeProvider>);
+  expect(screen.getByRole('button', { name: 'Agendar', exact: true })).toBeEnabled();
+  eligibility.booking = false;
+  view.rerender(<ThemeProvider><MemoryRouter><LandingPage /><LocationProbe /></MemoryRouter></ThemeProvider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Pausado', exact: true }));
+  expect(screen.getByRole('button', { name: 'Pausado', exact: true })).toBeDisabled();
+  expect(screen.getByLabelText('Destino de navegación')).toHaveTextContent('/');
+});
 
 test('fotografía local decorativa y recorte móvil, sin recurso externo ni original pesado', () => {
   render(<ThemeProvider><MemoryRouter><LandingPage /></MemoryRouter></ThemeProvider>);

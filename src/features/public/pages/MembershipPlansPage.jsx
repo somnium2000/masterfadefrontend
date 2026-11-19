@@ -37,6 +37,8 @@ import {
   queryMembershipPaymentStatus,
 } from "../../cliente/lib/clienteApi.js";
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
+import { isQaVipCommercialVideoModeEnabled } from "../../plans/lib/qaVipCommercialVideoMode.js";
+import { isQaVipPurchaseSimulationEnabled } from "../../plans/lib/qaVipPurchaseSimulation.js";
 import useMembershipPaymentPolling from "../../plans/hooks/useMembershipPaymentPolling.js";
 import { getPixelPayCustomerMessage, isPixelPayUncertainError } from "../../payments/pixelPayPresentation.js";
 
@@ -79,26 +81,6 @@ function storePurchaseAttempt(record) {
   } catch {
     // AM: La referencia del componente conserva el intento si sessionStorage no esta disponible.
   }
-}
-
-function readEnvFlag(value, fallback = false) {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (!normalized) return fallback;
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  return fallback;
-}
-
-function shouldShowMembershipSimulator() {
-  if (import.meta.env.PROD) return false;
-  const provider = String(
-    import.meta.env.VITE_PAYMENT_PROVIDER
-    || import.meta.env.VITE_PAYMENT_PROVIDER_CODE
-    || ""
-  ).trim().toLowerCase();
-  if (provider !== "todopago" && provider !== "simulator") return false;
-  return readEnvFlag(import.meta.env.VITE_ENABLE_PAYMENT_SIMULATOR, false)
-    && readEnvFlag(import.meta.env.VITE_ENABLE_QA_PAYMENT_SIMULATION, false);
 }
 
 function resolvePlanOfferId(plan) {
@@ -292,7 +274,8 @@ export default function MembershipPlansPage() {
   const [purchasePendingConfirmation, setPurchasePendingConfirmation] = useState(false);
 
   const scrollRef = useRef(null);
-  const showMembershipSimulator = shouldShowMembershipSimulator();
+  const showMembershipSimulator = isQaVipPurchaseSimulationEnabled();
+  const showVipCommercialVideo = showMembershipSimulator && isQaVipCommercialVideoModeEnabled();
 
   useLayoutEffect(() => {
     const previousIdentity = purchaseAttemptRef.current?.identity || purchaseIdentityRef.current;
@@ -944,6 +927,8 @@ export default function MembershipPlansPage() {
         disableClose={purchaseLoading || purchasePendingConfirmation}
         pendingConfirmation={purchasePendingConfirmation}
         paymentConfirmation={purchaseConfirmation}
+        simulatorMode={showMembershipSimulator}
+        videoDemoMode={showVipCommercialVideo}
         onCancel={cancelPurchaseFlow}
         onContinueToPayment={handleContinueToPayment}
         onConfirmPayment={handleConfirmPayment}

@@ -92,10 +92,11 @@ import useBookingCatalogs from './hooks/useBookingCatalogs.js';
 import useBookingAvailability from './hooks/useBookingAvailability.js';
 import useBookingCompanions from './hooks/useBookingCompanions.js';
 import useBookingHold from './hooks/useBookingHold.js';
-import useBookingPayment from './hooks/useBookingPayment.js';
+import useBookingPayment, { isPixelPaySalePreflightRejection } from './hooks/useBookingPayment.js';
 import usePublicAgendaEvents, { parseAgendaSseEnabled } from './hooks/usePublicAgendaEvents.js';
 import useBookingWizardNavigation from './hooks/useBookingWizardNavigation.js';
 import { resolvePaymentResumeContext } from './paymentResumeContext.js';
+import { isPixelPaySaleAuthorized, isQaPixelPay3dsDiagnosticAuthorized } from '../../payments/pixelPaySaleCapability.js';
 import BookingLayout from './components/BookingLayout.jsx';
 import BookingErrorState from './components/BookingErrorState.jsx';
 import { PublicBookingProvider } from './BookingFlowContext.jsx';
@@ -326,7 +327,7 @@ function persistRewardBookingContext(context) {
   window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, JSON.stringify(context));
 }
 
-export default function PublicBookingFlow() {
+export default function PublicBookingFlow({ pixelpaySale } = {}) {
   const { user: rewardUser } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -379,6 +380,10 @@ export default function PublicBookingFlow() {
   const [profilePersistModal, setProfilePersistModal] = useState({ open: false, kind: '' });
   const [cancelBookingModal, setCancelBookingModal] = useState({ open: false, source: '' });
   const [cancelBookingProcessing, setCancelBookingProcessing] = useState(false);
+  const [paymentNavigation, setPaymentNavigation] = useState({ dirty: false, processing: false });
+  const registerPaymentNavigation = useCallback((next) => {
+    setPaymentNavigation(current => current.dirty === next.dirty && current.processing === next.processing ? current : next);
+  }, []);
   const [profileIncompleteState, setProfileIncompleteState] = useState({ message: '', missingFields: [] });
 
   const [rewardBookingContext, setRewardBookingContext] = useState(() => readRewardBookingContext());
@@ -919,6 +924,7 @@ const agendaAutoLoadKeyRef = useRef('');
     currentGroupId: holdResult?.id_grupo_cita || '',
     authenticated: canUseClienteHold,
   });
+  const diagnosticPaymentContext = paymentIntent?.qa_3ds_diagnostic === true || paymentResult?.qa_3ds_diagnostic === true;
 
   const handleSelectedSlotUnavailable = useCallback(() => {
     notifications.warning(
@@ -1662,11 +1668,6 @@ const agendaAutoLoadKeyRef = useRef('');
     const normalizedIndex = Number.isInteger(Number(block?.index))
       ? Math.max(0, Number(block.index))
       : (Number.isInteger(effectiveActiveBlockIndex) ? effectiveActiveBlockIndex : 0);
-    const label = String(
-      block?.alias
-      || (normalizedIndex === 0 ? BOOKING_HOLDER_ALIAS : `${BOOKING_COMPANION_ALIAS_PREFIX} ${normalizedIndex}`)
-    ).trim();
-
     invalidHoldSelectionFingerprintRef.current = bookingHoldFingerprint;
     clearSelectedTimes({ onlyIndex: normalizedIndex });
     setSlotConflict(block?.selectedDate && block?.selectedTime && block?.idBarbero
@@ -1674,10 +1675,9 @@ const agendaAutoLoadKeyRef = useRef('');
           dateKey: block.selectedDate,
           timeKey: block.selectedTime,
           barberId: block.idBarbero,
-          conflictingAlias: label,
         }
       : null);
-    notifications.warning(`Revisa el horario de ${label}. Selecciona una hora disponible.`, {
+    notifications.warning('Revisa el horario de la cita. Selecciona una hora disponible.', {
       dedupeKey: 'public-booking-submit-invalid-block-schedule',
     });
     setActiveBlockIndex(normalizedIndex);
@@ -2063,6 +2063,7 @@ const agendaAutoLoadKeyRef = useRef('');
     isPendingPaymentResumeRoute,
     paymentConfirmed: paymentResult?.booking_confirmed === true,
     holdResult,
+    hasCheckoutContext: Boolean(holdResult || paymentIntent?.id_intent),
     availabilityError,
     barbersLoading,
   });
@@ -2123,17 +2124,21 @@ const agendaAutoLoadKeyRef = useRef('');
 
   const executeCancelBooking = useCallback(async () => {
     const groupId = String(holdResult?.id_grupo_cita || '').trim();
-    if (groupId && paymentIntent?.id_intent && !paymentResult?.booking_confirmed) {
-      notifications.info('El pago ya fue iniciado. Verifica el estado del pago antes de cancelar la reserva temporal.', {
-        dedupeKey: 'public-booking-cancel-payment-started',
-      });
-      return false;
+    if (paymentNavigation.processing) return false;
+    if (paymentResult?.booking_confirmed) {
+      navigate(BOOKING_ROUTES.success, { replace: true });
+      return true;
+    }
+    if (paymentIntent?.id_intent || pendingResumeContext?.id_intent) {
+      notifications.info('Conservamos el contexto del pago. Verifica su resultado antes de reintentar; salir no cancela el pago ni confirma una cancelación.', { dedupeKey: 'public-booking-exit-preserve-payment' });
+      navigate(homePath, { replace: true });
+      return true;
     }
     if (groupId) {
       try {
         await releaseHold();
       } catch {
-        notifications.warning('No se pudo liberar la reserva temporal en este momento, pero se canceló el flujo local.', {
+        notifications.warning('No se pudo confirmar la liberación de la reserva temporal. Puede mantenerse hasta su vencimiento.', {
           dedupeKey: 'public-booking-release-hold-warning',
         });
       }
@@ -2154,7 +2159,7 @@ const agendaAutoLoadKeyRef = useRef('');
     holderProfileHydratedRef.current = false;
     resetAvailabilityData();
     setSlotConflict(null);
-    navigate(BOOKING_ROUTES.home, { replace: true });
+    navigate(homePath, { replace: true });
     return true;
   }, [
     clearHoldLocalState,
@@ -2165,6 +2170,9 @@ const agendaAutoLoadKeyRef = useRef('');
     notifications,
     paymentIntent?.id_intent,
     paymentResult?.booking_confirmed,
+    paymentNavigation.processing,
+    pendingResumeContext?.id_intent,
+    homePath,
     releaseHold,
     resetAvailabilityData,
     setContextError,
@@ -2637,7 +2645,6 @@ const agendaAutoLoadKeyRef = useRef('');
         dateKey: selectedDate,
         timeKey: nextTime,
         barberId: activeBlockBarberId,
-        conflictingAlias: conflictingBlock.alias || `Integrante ${conflictingBlock.index + 1}`,
       });
       notifications.warning('Ese bloque se solapa con otra reserva del grupo para el mismo barbero.', {
         dedupeKey: 'public-booking-duplicate-barber-slot',
@@ -2862,7 +2869,6 @@ const agendaAutoLoadKeyRef = useRef('');
             dateKey: block.selectedDate,
             timeKey: block.selectedTime,
             barberId: block.idBarbero,
-            conflictingAlias: previous.alias || 'Integrante',
           });
           return rejectInvalidScheduleBlock(block);
         }
@@ -2945,11 +2951,6 @@ const agendaAutoLoadKeyRef = useRef('');
       const conflictReason = String(apiError?.reason || '').trim().toUpperCase();
       const safeConflictMessage = mapPublicBookingErrorMessage(conflictCode, extractMessage(err));
       const fallbackConflictIndex = Number.isInteger(effectiveActiveBlockIndex) ? effectiveActiveBlockIndex : 0;
-      const affectedIndex = detailIndex != null ? Math.max(0, Math.trunc(detailIndex)) : fallbackConflictIndex;
-      const affectedSummaryBlock = bookingBlocksSummary[affectedIndex] || null;
-      const affectedLabel = affectedIndex === 0
-        ? 'titular'
-        : (affectedSummaryBlock?.alias || `${BOOKING_COMPANION_ALIAS_PREFIX} ${affectedIndex}`);
 
       if (conflictCode === 'CLIENT_PROFILE_INCOMPLETE') {
         // AM: Fallback de contrato backend Fase 1A para perfil incompleto.
@@ -3109,8 +3110,8 @@ const agendaAutoLoadKeyRef = useRef('');
             : fallbackConflictIndex;
           const isSameBarberConflict = conflictReason === 'AGENDA_INTERNAL_GROUP_CONFLICT';
           const conflictMessage = isSameBarberConflict
-            ? `${affectedLabel} usa el mismo barbero en un horario que se cruza. Selecciona una hora posterior o cambia de barbero.`
-            : `El horario seleccionado para ${affectedLabel} ya no está disponible.`;
+            ? 'Horario no disponible: coincide con otra cita del grupo'
+            : 'El horario seleccionado ya no está disponible. Selecciona otra hora.';
           invalidHoldSelectionFingerprintRef.current = bookingHoldFingerprint;
           setActiveBlockIndex(affectedIndex);
           recoverToAgendaForReselection(
@@ -3249,7 +3250,12 @@ const agendaAutoLoadKeyRef = useRef('');
     const contactos = buildContactValidationPayload();
     if (contactos.length === 0) return true;
     try {
-      await validatePublicBookingContacts({ contactos });
+      const validation = await validatePublicBookingContacts({ contactos });
+      if (canUseClienteHold && Array.isArray(validation?.warnings) && validation.warnings.some(warning => warning.code === 'COMPANION_POINTS_POLICY')) {
+        notifications.info('Al confirmarse el pago y la reserva, los MasterPuntos de las citas elegibles del grupo se acreditan solo a tu cuenta, incluso si un acompa\u00f1ante ya tiene cuenta propia.', {
+          dedupeKey: 'booking-companion-points-policy',
+        });
+      }
       return true;
     } catch (err) {
       if (handleContactValidationError(err)) return false;
@@ -3258,9 +3264,23 @@ const agendaAutoLoadKeyRef = useRef('');
       });
       return false;
     }
-  }, [buildContactValidationPayload, handleContactValidationError, notifications]);
+  }, [buildContactValidationPayload, canUseClienteHold, handleContactValidationError, notifications]);
 
   const goToConfirm = useCallback(async () => {
+    if (location.pathname.startsWith(BOOKING_ROUTES.payment)) {
+      if (paymentNavigation.processing) return false;
+      if (paymentResult?.booking_confirmed) {
+        navigate(BOOKING_ROUTES.success, { replace: true });
+        return true;
+      }
+      const status = String(paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || '').toLowerCase();
+      if (!allBlocksComplete || hasUnresolvedPaymentEvidence(paymentResult) || hasUnresolvedPaymentEvidence(paymentIntent) || ['processing', 'procesando', 'confirmando'].includes(status)) {
+        requestCancelBooking('payment_summary');
+        return false;
+      }
+      navigate(BOOKING_ROUTES.confirm);
+      return true;
+    }
     if (holdSubmitting) return false;
     if (bookingMode === 'loading') {
       notifications.info('Estamos verificando tu sesion antes de continuar.', {
@@ -3288,6 +3308,11 @@ const agendaAutoLoadKeyRef = useRef('');
     return true;
   }, [
     allBlocksComplete,
+    location.pathname,
+    paymentNavigation.processing,
+    paymentResult,
+    paymentIntent,
+    requestCancelBooking,
     blocksToSubmitSummary,
     bookingBlockingReason,
     bookingMode,
@@ -3561,7 +3586,10 @@ const agendaAutoLoadKeyRef = useRef('');
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
 
     try {
-      const payload = options?.queryPixelPayProvider === true
+      const delegatedRecovery = paymentIntent?.qa_3ds_delegated === true
+        || storedContext?.paymentIntent?.qa_3ds_delegated === true;
+      const payload = options?.queryPixelPayProvider === true && (delegatedRecovery
+        || (!diagnosticPaymentContext && storedContext?.paymentIntent?.qa_3ds_diagnostic !== true))
         ? await queryPixelPayStatusOnce({ groupId, intentId, titularEmail })
         : await fetchPaymentStatusOnce({
             groupId,
@@ -3710,6 +3738,7 @@ const agendaAutoLoadKeyRef = useRef('');
     }
   }, [
     bookingBlocks,
+    diagnosticPaymentContext,
     confirmHoldWithoutPaymentRequest,
     fetchPaymentStatusOnce,
     holdResult,
@@ -3792,8 +3821,18 @@ const agendaAutoLoadKeyRef = useRef('');
     paymentResult?.estado_intent_codigo || paymentIntent?.estado_intent_codigo || ''
   ).trim().toLowerCase();
   const backendPaymentAmount = Number(paymentResult?.monto_hnl ?? paymentIntent?.monto_hnl);
+  const paymentUsesQaDelegated = canUseClienteHold && isQaPixelPay3dsDiagnosticAuthorized(
+    [paymentResult, paymentIntent].some(payment => payment?.qa_3ds_delegated === true
+      && payment.id_intent === paymentExecutionContext.intentId
+      && payment.id_grupo_cita === paymentExecutionContext.groupId),
+  );
   const paymentCanExecuteSale = Boolean(
-    !paymentRestoring
+    (paymentUsesQaDelegated || isPixelPaySaleAuthorized(pixelpaySale))
+    && (!diagnosticPaymentContext || paymentUsesQaDelegated)
+    && !paymentRestoring
+    && !paymentResult?.booking_confirmed
+    && !hasUnresolvedPaymentEvidence(paymentResult)
+    && !hasUnresolvedPaymentEvidence(paymentIntent)
     && backendPaymentState === 'link_generado'
     && Number.isFinite(backendPaymentAmount)
     && backendPaymentAmount > 0
@@ -3802,12 +3841,17 @@ const agendaAutoLoadKeyRef = useRef('');
     && isValidEmail(paymentExecutionContext.titularEmail)
   );
 
+  // AM: Preserve pending-attempt recovery without offering the retired diagnostic operation.
+  const paymentCanObserve3ds = false;
+  const observePixelPay3ds = useCallback(async () => null, []);
+
   const completePixelPayPayment = useCallback(async ({ card, billing }) => {
     const { groupId, intentId, titularEmail } = paymentExecutionContext;
     if (!paymentCanExecuteSale) return null;
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
     try {
-      const result = await salePixelPayOnce({ groupId, intentId, titularEmail, card, billing });
+      const result = await salePixelPayOnce({ groupId, intentId, titularEmail, card, billing,
+        ...(paymentUsesQaDelegated ? { delegated: true } : {}) });
       if (result?.booking_confirmed) {
         await refreshPaymentStatus();
       }
@@ -3819,11 +3863,12 @@ const agendaAutoLoadKeyRef = useRef('');
           pending_confirmation: false,
           estado_intent_codigo: 'fallido',
         });
-      } else if (!errorCode || errorCode === 'PIXELPAY_SALE_ERROR') {
-        setPaymentResult({
+      } else if (!isPixelPaySalePreflightRejection(err)) {
+        setPaymentResult((current) => ({
+          ...(current && typeof current === 'object' ? current : {}),
           pending_confirmation: true,
           estado_intent_codigo: 'pendiente_confirmacion',
-        });
+        }));
       }
       notifications.error(extractMessage(err), { dedupeKey: 'public-booking-pixelpay-error' });
       throw err;
@@ -3831,6 +3876,7 @@ const agendaAutoLoadKeyRef = useRef('');
   }, [
     notifications,
     paymentCanExecuteSale,
+    paymentUsesQaDelegated,
     paymentExecutionContext,
     refreshPaymentStatus,
     salePixelPayOnce,
@@ -3984,7 +4030,7 @@ const agendaAutoLoadKeyRef = useRef('');
     const checkKey = `${location.pathname}|${location.search}|${groupId}|${intentId}`;
     if (paymentReturnStatusCheckRef.current === checkKey) return;
     paymentReturnStatusCheckRef.current = checkKey;
-    // AM: Restoring updates paymentIntent; claim the effect before scheduling that render.
+    // AM: Restaurar cambia paymentIntent; reclamar primero evita reentrar en el efecto.
     restorePaymentContext(groupId, pendingResumeContext);
 
     const isProviderReturn = isSuccessRoute
@@ -4050,6 +4096,7 @@ const agendaAutoLoadKeyRef = useRef('');
       rewardBranchMismatch,
       cancelRewardRedemptionUsage,
       cancelBookingFlow,
+      registerPaymentNavigation,
       branchList,
       canAddCompanionBlock,
       canUseClienteHold,
@@ -4086,6 +4133,10 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentTitularEmail,
       paymentRestoring,
       paymentCanExecuteSale,
+      paymentUsesQaDelegated,
+      paymentCanObserve3ds,
+      observePixelPay3ds,
+      pixelpaySale,
       bookingSuccessResult,
       pendingCompanionFocusId,
       pendingFieldFocus,
@@ -4199,6 +4250,7 @@ const agendaAutoLoadKeyRef = useRef('');
       rewardBranchMismatch,
       cancelRewardRedemptionUsage,
       cancelBookingFlow,
+      registerPaymentNavigation,
       branchList,
       canAddCompanionBlock,
       canUseClienteHold,
@@ -4235,6 +4287,10 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentTitularEmail,
       paymentRestoring,
       paymentCanExecuteSale,
+      paymentUsesQaDelegated,
+      paymentCanObserve3ds,
+      observePixelPay3ds,
+      pixelpaySale,
       bookingSuccessResult,
       pendingCompanionFocusId,
       pendingFieldFocus,
@@ -4317,6 +4373,14 @@ const agendaAutoLoadKeyRef = useRef('');
     <BookingLayout
       homePath={homePath}
       homeLabel={homeLabel}
+      onHome={() => {
+        if (paymentResult?.booking_confirmed) {
+          navigate(homePath);
+          return;
+        }
+        if (holdResult || paymentIntent?.id_intent || pendingResumeContext?.id_intent || paymentNavigation.dirty || paymentNavigation.processing) requestCancelBooking('home');
+        else navigate(homePath);
+      }}
       loading={contextLoading}
       error={contextError}
       onRetry={fetchContext}
@@ -4376,9 +4440,13 @@ const agendaAutoLoadKeyRef = useRef('');
         >
           <DialogContent className="sm:max-w-md booking-cancel-modal">
             <DialogHeader>
-              <DialogTitle>Cancelar agendamiento</DialogTitle>
+              <DialogTitle>¿Salir del pago o agendamiento?</DialogTitle>
               <DialogDescription>
-                Se perderán los datos seleccionados y se liberará la reserva temporal si existe.
+                {paymentNavigation.processing
+                  ? 'El pago se está procesando o verificando. Espera el resultado antes de salir; no vuelvas a iniciar el cobro.'
+                  : paymentIntent?.id_intent || pendingResumeContext?.id_intent
+                    ? 'Salir no cancela el pago ni la reserva. Conservaremos la recuperación: verifica el resultado antes de volver a pagar.'
+                    : 'Se perderán los datos introducidos y se intentará liberar la reserva temporal si existe.'}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -4388,7 +4456,7 @@ const agendaAutoLoadKeyRef = useRef('');
                 onClick={closeCancelBookingModal}
                 disabled={cancelBookingProcessing}
               >
-                Continuar agendando
+                {location.pathname.startsWith(BOOKING_ROUTES.payment) ? 'Continuar pagando' : 'Continuar agendando'}
               </Button>
               <Button
                 type="button"
@@ -4396,9 +4464,9 @@ const agendaAutoLoadKeyRef = useRef('');
                 onClick={() => {
                   void confirmCancelBooking();
                 }}
-                disabled={cancelBookingProcessing || holdSubmitting}
+                disabled={cancelBookingProcessing || holdSubmitting || paymentNavigation.processing}
               >
-                {cancelBookingProcessing ? 'Cancelando...' : 'Cancelar agendamiento'}
+                {cancelBookingProcessing ? 'Saliendo...' : 'Salir'}
               </Button>
             </DialogFooter>
           </DialogContent>

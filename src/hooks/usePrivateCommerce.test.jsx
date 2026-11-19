@@ -5,10 +5,10 @@ import usePrivateCommerce from './usePrivateCommerce.js';
 const state = vi.hoisted(() => ({ auth: {}, get: vi.fn() }));
 vi.mock('../context/AuthContext.jsx', () => ({ useAuth: () => state.auth }));
 vi.mock('../services/httpClient.js', () => ({ http: { get: state.get } }));
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllEnvs(); });
 const login = () => { state.auth = { isAuthenticated: true, user: { id_usuario: 'owner' } }; };
 
-const closed = { booking: false, vipPurchase: false, publicBooking: false, publicVipPurchase: false, checking: false };
+const closed = { booking: false, vipPurchase: false, publicBooking: false, publicVipPurchase: false, pixelpay3dsDiagnostic: false, pixelpaySongbirdBridge: false, checking: false };
 
 test('guest fetches public availability but cannot gain personal permission', async () => {
   state.auth = { isAuthenticated: false };
@@ -47,7 +47,7 @@ test('same-identity focus refresh preserves a valid checkout while pending, then
   let finish;
   state.get.mockReturnValue(new Promise(resolve => { finish = resolve; }));
   await act(async () => window.dispatchEvent(new Event('focus')));
-  expect(view.result.current).toEqual({ ...closed, booking: true, publicBooking: true });
+  expect(view.result.current).toEqual({ ...closed, booking: true, publicBooking: true, checking: true });
   await act(async () => finish({ data: { booking: false, publicBooking: false } }));
   expect(view.result.current).toEqual(closed);
 });
@@ -81,4 +81,82 @@ test('a slower focus response cannot override the latest decision', async () => 
   await act(async () => window.dispatchEvent(new Event('focus')));
   await act(async () => stale({ data: { booking: true } }));
   expect(view.result.current).toEqual(closed);
+});
+
+test.each([false, true])('preserves an explicit PixelPay Sale capability (%s)', async (pixelpaySale) => {
+  login();
+  state.get.mockResolvedValue({ data: { booking: true, vipPurchase: false, pixelpaySale } });
+  const view = renderHook(usePrivateCommerce);
+  await waitFor(() => expect(view.result.current.checking).toBe(false));
+  expect(view.result.current).toMatchObject({ booking: true, vipPurchase: false, pixelpaySale });
+  state.auth = { isAuthenticated: false }; view.rerender();
+  expect(view.result.current).not.toHaveProperty('pixelpaySale');
+});
+
+test.each([undefined, null, 'false', 0])('omits absent or invalid legacy Sale capability (%s)', async (pixelpaySale) => {
+  login();
+  state.get.mockResolvedValue({ data: { booking: true, vipPurchase: false, pixelpaySale } });
+  const view = renderHook(usePrivateCommerce);
+  await waitFor(() => expect(view.result.current.checking).toBe(false));
+  expect(view.result.current).toEqual({ ...closed, booking: true });
+});
+
+test('retired diagnostic stays closed even with stale QA eligibility and preserves booking on refresh failure', async () => {
+  vi.stubEnv('VITE_ENTORNO', 'qa'); vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay'); vi.stubEnv('VITE_PIXELPAY_ENV', 'sandbox');
+  login(); state.get.mockResolvedValue({ data: { booking: true, vipPurchase: false, pixelpaySale: false, pixelpay3dsDiagnostic: true } });
+  const view = renderHook(usePrivateCommerce);
+  expect(view.result.current.pixelpay3dsDiagnostic).toBe(false);
+  await waitFor(() => expect(view.result.current.checking).toBe(false));
+  expect(view.result.current.pixelpay3dsDiagnostic).toBe(false);
+  let rejectRefresh;
+  state.get.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectRefresh = reject; }));
+  act(() => window.dispatchEvent(new Event('focus')));
+  expect(view.result.current).toMatchObject({ booking: true, pixelpaySale: false, pixelpay3dsDiagnostic: false, pixelpaySongbirdBridge: false, checking: true });
+  await act(async () => rejectRefresh(new Error('unavailable')));
+  expect(view.result.current).toMatchObject({ booking: true, vipPurchase: false, pixelpaySale: false, pixelpay3dsDiagnostic: false, pixelpaySongbirdBridge: false, checking: false });
+  state.auth = { isAuthenticated: false }; view.rerender();
+  expect(view.result.current.booking).toBe(false);
+  expect(view.result.current.pixelpay3dsDiagnostic).toBe(false);
+});
+
+test.each([undefined, false, 'true', 1])('diagnostic eligibility %s never follows booking or Sale', async capability => {
+  vi.stubEnv('VITE_ENTORNO', 'qa'); vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay'); vi.stubEnv('VITE_PIXELPAY_ENV', 'sandbox');
+  login(); state.get.mockResolvedValue({ data: { booking: true, pixelpaySale: true, pixelpay3dsDiagnostic: capability } });
+  const view = renderHook(usePrivateCommerce);
+  await waitFor(() => expect(view.result.current.checking).toBe(false));
+  expect(view.result.current.pixelpay3dsDiagnostic).toBe(false);
+});
+
+test('Live cannot acquire a diagnostic grant from the backend boolean', async () => {
+  vi.stubEnv('VITE_ENTORNO', 'qa'); vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay'); vi.stubEnv('VITE_PIXELPAY_ENV', 'live');
+  login(); state.get.mockResolvedValue({ data: { booking: true, pixelpay3dsDiagnostic: true } });
+  const view = renderHook(usePrivateCommerce);
+  await waitFor(() => expect(view.result.current.checking).toBe(false));
+  expect(view.result.current.pixelpay3dsDiagnostic).toBe(false);
+});
+
+test('retired Songbird capability stays closed with stale backend grant and logout',async()=>{
+  vi.stubEnv('VITE_ENTORNO','qa');vi.stubEnv('VITE_PAYMENT_PROVIDER','pixelpay');vi.stubEnv('VITE_PIXELPAY_ENV','sandbox');
+  login();state.get.mockResolvedValue({data:{booking:true,pixelpaySale:false,pixelpaySongbirdBridge:true}});
+  const view=renderHook(usePrivateCommerce);
+  expect(view.result.current.pixelpaySongbirdBridge).toBe(false);
+  await waitFor(()=>expect(view.result.current.checking).toBe(false));
+  expect(view.result.current.pixelpaySongbirdBridge).toBe(false);
+  expect(view.result.current.pixelpaySale).toBe(false);
+  state.get.mockRejectedValue(new Error('unavailable'));await act(async()=>window.dispatchEvent(new Event('focus')));
+  expect(view.result.current.pixelpaySongbirdBridge).toBe(false);expect(view.result.current.booking).toBe(true);
+  state.auth={isAuthenticated:false};view.rerender();expect(view.result.current.pixelpaySongbirdBridge).toBe(false);
+});
+
+test.each(['allowed','denied','error'])('focus revalidation never reopens the retired Songbird capability: %s',async outcome=>{
+  vi.stubEnv('VITE_ENTORNO','qa');vi.stubEnv('VITE_PAYMENT_PROVIDER','pixelpay');vi.stubEnv('VITE_PIXELPAY_ENV','sandbox');
+  login();state.get.mockResolvedValue({data:{booking:true,pixelpaySongbirdBridge:true,pixelpaySale:false}});
+  const view=renderHook(usePrivateCommerce);await waitFor(()=>expect(view.result.current.checking).toBe(false));
+  expect(view.result.current.pixelpaySongbirdBridge).toBe(false);
+  let resolve,reject;state.get.mockReturnValueOnce(new Promise((yes,no)=>{resolve=yes;reject=no;}));
+  act(()=>window.dispatchEvent(new Event('focus')));
+  expect(view.result.current).toMatchObject({checking:true,pixelpaySongbirdBridge:false,pixelpaySale:false});
+  await act(async()=>outcome==='error'?reject(new Error('offline')):resolve({data:{booking:true,pixelpaySongbirdBridge:outcome==='allowed'}}));
+  expect(view.result.current.checking).toBe(false);
+  expect(view.result.current.pixelpaySongbirdBridge).toBe(false);
 });

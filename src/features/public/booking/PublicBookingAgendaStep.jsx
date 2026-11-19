@@ -368,6 +368,7 @@ export default function PublicBookingAgendaStep() {
 
   const hasSelectedDate = Boolean(selectedDate);
   const slotsSectionRef = useRef(null);
+  const previousScrollSelectionRef = useRef({ blockId: activeBlock?.id, date: selectedDate });
   const contactCardRef = useRef(null);
   const contactNameInputRef = useRef(null);
   const contactEmailInputRef = useRef(null);
@@ -559,7 +560,7 @@ export default function PublicBookingAgendaStep() {
         && titularBlock.idBarbero === activeBlock.idBarbero
         && titularBlock.selectedTime === slot.hora
       ) {
-        return { disabled: true, variant: 'danger', reason: 'Hora del titular (mismo barbero)' };
+        return { disabled: true, variant: 'danger', reason: 'Horario no disponible: coincide con otra cita del grupo' };
       }
 
       const conflictingBlock = bookingBlocksSummary.find((block) =>
@@ -573,7 +574,7 @@ export default function PublicBookingAgendaStep() {
         return {
           disabled: true,
           variant: 'muted',
-          reason: `Solapa con ${conflictingBlock.alias || `integrante ${conflictingBlock.index + 1}`}`,
+          reason: 'Horario no disponible: coincide con otra cita del grupo',
         };
       }
 
@@ -597,9 +598,12 @@ export default function PublicBookingAgendaStep() {
   }, [bookingBlocks.length, services.length, servicesScrollRef, syncServicesScrollState]);
 
   useEffect(() => {
+    const previous = previousScrollSelectionRef.current;
+    previousScrollSelectionRef.current = { blockId: activeBlock?.id, date: selectedDate };
+    if (previous.blockId !== activeBlock?.id || previous.date === selectedDate || pendingCompanionFocusId) return;
     if (!selectedDate || !slotsSectionRef.current) return;
     slotsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [selectedDate]);
+  }, [activeBlock?.id, pendingCompanionFocusId, selectedDate]);
 
   useLayoutEffect(() => {
     if (!pendingCompanionFocusId) return;
@@ -910,6 +914,7 @@ export default function PublicBookingAgendaStep() {
           <div className="public-booking-selection-tabs">
             <Button
               type="button"
+              aria-pressed={effectiveCatalogTab === 'services'}
               variant={effectiveCatalogTab === 'services' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCatalogTab('services')}
@@ -918,6 +923,7 @@ export default function PublicBookingAgendaStep() {
             </Button>
             <Button
               type="button"
+              aria-pressed={effectiveCatalogTab === 'packages'}
               variant={effectiveCatalogTab === 'packages' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCatalogTab('packages')}
@@ -925,14 +931,7 @@ export default function PublicBookingAgendaStep() {
             >
               Paquetes
             </Button>
-            <Button
-              type="button"
-              variant={catalogTab === 'promotions' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setCatalogTab('promotions')}
-            >
-              Promociones
-            </Button>
+
           </div>
 
           <div className="citas-services-scroll scrollbar-hide" ref={servicesScrollRef}>
@@ -1237,8 +1236,7 @@ export default function PublicBookingAgendaStep() {
                 {slotConflict ? (
                   <div className="public-booking-slot-conflict">
                     <p>
-                      {slotConflict.conflictingAlias || 'Otro integrante'} ya tiene este barbero en{' '}
-                      {formatTime12Hour(slotConflict.timeKey)}.
+                      Horario no disponible: coincide con otra cita del grupo
                     </p>
                     {slotSuggestionsLoading ? (
                       <p className="citas-selected-date">Buscando barberos disponibles para la misma hora...</p>

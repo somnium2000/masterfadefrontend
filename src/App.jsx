@@ -161,7 +161,7 @@ function App() {
         element={
           <RouteErrorBoundary>
             <BookingSuspense>
-              <PublicBookingAccess commerce={privateCommerce}><PublicBookingFlow /></PublicBookingAccess>
+              <PublicBookingAccess commerce={privateCommerce}><PublicBookingFlow pixelpaySale={privateCommerce.pixelpaySale} /></PublicBookingAccess>
             </BookingSuspense>
           </RouteErrorBoundary>
         }

@@ -114,40 +114,27 @@ export default function useBookingCompanions({
   }, [bookingBlocks, resetAvailabilityViewState, setActiveBlockIndex]);
 
   const addCompanionBlock = useCallback(() => {
-    let createdBlockId = '';
-    setBookingBlocks((prev) => {
-      if (!allowCompanions || prev.length >= (Number(maxCompanions || 0) + 1)) return prev;
-      const source = prev.length > 0 ? prev : [createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })];
-      const companionNumber = source.length;
-      const inheritedBarberId = source[effectiveActiveBlockIndex]?.idBarbero || source[0]?.idBarbero || '';
-      const inheritedDate = source[0]?.selectedDate || '';
-      const nextBlock = normalizeBookingBlock(
-        {
-          ...createBookingBlock({
-            alias: `${BOOKING_COMPANION_ALIAS_PREFIX} ${companionNumber}`,
-            idBarbero: inheritedBarberId,
-          }),
-          selectedDate: inheritedDate,
-          selectedTime: '',
-          selectedDateTime: '',
-        },
-        companionNumber
-      );
-      createdBlockId = nextBlock.id;
-      const nextBlocks = [...source, nextBlock];
-      setActiveBlockIndex(nextBlocks.length - 1);
-      return nextBlocks;
-    });
-    if (createdBlockId) {
-      setPendingCompanionFocusId(createdBlockId);
-    }
+    if (!canAddCompanionBlock) return;
+    const source = bookingBlocks.length ? bookingBlocks : [createBookingBlock({ alias: BOOKING_HOLDER_ALIAS })];
+    const companionNumber = source.length;
+    const nextBlock = normalizeBookingBlock({
+      ...createBookingBlock({
+        alias: `${BOOKING_COMPANION_ALIAS_PREFIX} ${companionNumber}`,
+        idBarbero: source[effectiveActiveBlockIndex]?.idBarbero || source[0]?.idBarbero || '',
+      }),
+      selectedDate: source[0]?.selectedDate || '',
+    }, companionNumber);
+    // AM: No depender de cuándo React evalúe el actualizador para solicitar el foco.
+    setBookingBlocks([...source, nextBlock]);
+    setActiveBlockIndex(companionNumber);
+    setPendingCompanionFocusId(nextBlock.id);
     if (typeof resetAvailabilityViewState === 'function') {
       resetAvailabilityViewState();
     }
   }, [
-    allowCompanions,
+    bookingBlocks,
+    canAddCompanionBlock,
     effectiveActiveBlockIndex,
-    maxCompanions,
     resetAvailabilityViewState,
     setActiveBlockIndex,
     setBookingBlocks,
