@@ -242,7 +242,7 @@ it('monta el desafío público y permite cancelarlo manteniendo bloqueado el pag
   const dialog = screen.getByRole('dialog', { name: 'Autenticación 3DS' });
   expect(dialog.parentElement).toBe(document.body);
   expect(dialog.className).toContain('fixed');
-  expect(dialog).toHaveAttribute('aria-modal', 'true');
+  expect(dialog.getAttribute('aria-modal')).toBe('true');
   expect(dialog.querySelector('.pixelpay-modal-container')).toBeTruthy();
   expect(dialog.querySelector('iframe')).toBeNull();
   fireEvent.click(within(dialog).getByRole('button', { name: 'Cancelar autenticación' }));
