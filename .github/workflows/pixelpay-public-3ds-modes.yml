@@ -31,6 +31,7 @@ jobs:
           npx vitest run src/features/payments/__tests__/publicPixelPayModes.test.jsx
           src/features/payments/__tests__/publicPixelPay3dsDiagnostics.test.js
           src/features/payments/__tests__/publicPixelPayUrlContract.test.jsx
+          src/features/cliente/lib/__tests__/clienteApi.membership-order.test.js
           src/features/payments/__tests__/delegatedPixelPay.test.jsx
           src/features/payments/__tests__/songbirdSession.test.jsx
           src/features/public/booking/__tests__/useBookingPayment.pixelpay.test.jsx
