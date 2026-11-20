@@ -362,6 +362,7 @@ export default function PublicBookingPaymentStep() {
     paymentRestoring = false,
     paymentCanExecuteSale = true,
     paymentUsesQaDelegated = false,
+    paymentUsesLiveDelegated = false,
     pixelpaySale,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
@@ -392,10 +393,13 @@ export default function PublicBookingPaymentStep() {
   const paymentSimulationAction = resolvePaymentSimulationAction();
   const isPixelPayProvider = paymentSimulationAction.type === 'pixelpay';
   const qaDelegated = paymentUsesQaDelegated;
+  const liveDelegated = paymentUsesLiveDelegated;
   const qaThreeDsStatusIsLocal = [paymentIntent, paymentResult].some(
-    state => state?.qa_3ds_delegated === true || state?.code === 'PIXELPAY_3DS_AUTH_PENDING'
+    state => state?.qa_3ds_delegated === true || state?.live_3ds_delegated === true
+      || state?.code === 'PIXELPAY_3DS_AUTH_PENDING'
   );
-  const pixelPaySaleSuspended = isPixelPayProvider && !qaDelegated && !isPixelPaySaleAuthorized(pixelpaySale);
+  const pixelPaySaleSuspended = isPixelPayProvider && !qaDelegated && !liveDelegated
+    && !isPixelPaySaleAuthorized(pixelpaySale);
   const diagnosticContext = !qaDelegated
     && (paymentIntent?.qa_3ds_diagnostic === true || paymentResult?.qa_3ds_diagnostic === true);
   const sandboxSession = paymentIntent?.qa_sandbox_session === true || paymentResult?.qa_sandbox_session === true;

@@ -441,7 +441,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     return payload || true;
   }, [authenticated, isCurrentPaymentGroup]);
 
-  const salePixelPayOnce = useCallback(async ({ groupId, intentId, titularEmail, card, billing, diagnostic = false, delegated = false }) => {
+  const salePixelPayOnce = useCallback(async ({ groupId, intentId, titularEmail, card, billing, diagnostic = false, delegated = false, liveDelegated = false }) => {
     // AM: A stale diagnostic callback cannot start the retired Node-to-Songbird flow.
     if (diagnostic) return null;
     const normalizedGroupId = safeText(groupId);
@@ -525,9 +525,22 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
             const { runDelegatedPixelPay } = await import('../../../payments/experimental/delegatedPixelPay.js');
             adapterLoaded = true;
             const recovered = await runDelegatedPixelPay({ handoff, signal: controller.signal,
-              transport: (operation, data, signal) => operation === 'status'
-                ? queryPublicPixelPayStatus(scope, { authenticated, signal })
-                : requestQaDelegatedPayment({ ...scope, token: handoff.token, operation, data }, { signal }),
+              transport: async (operation, data, signal) => {
+                if (operation === 'status') {
+                  if (liveDelegated) {
+                    // Only the local database reflects a Live 3DS response until
+                    // the final server-verified Sale has been reconciled.
+                    const result = await getPublicPaymentStatus(
+                      buildPaymentStatusParams({ groupId: normalizedGroupId,
+                        intentId: normalizedIntentId, titularEmail: normalizedEmail }),
+                      { authenticated, signal },
+                    );
+                    return result?.data ?? result;
+                  }
+                  return queryPublicPixelPayStatus(scope, { authenticated, signal });
+                }
+                return requestQaDelegatedPayment({ ...scope, token: handoff.token, operation, data }, { signal });
+              },
             });
             if (recovered?.booking_confirmed) response = recovered;
           } catch (error) {
