@@ -9,7 +9,7 @@ const STEP_UP_FRAME = 'iframe[name="step-up-iframe"]';
 let active = false;
 const unwrap = module => module.default || module;
 
-// AM: Native manager is an internal SDK import, enabled only for the selected QA checkout.
+// AM: Native manager is an internal SDK import, enabled only by server-authorized QA or private Live checkout.
 export async function loadDelegatedSdk() {
   const [core, manager] = await Promise.all([import('@pixelpay/sdk-core'),
     import('@pixelpay/sdk-core/lib/libraries/CardinalManager.js')]);
@@ -38,20 +38,32 @@ function isCasUrl(value, paths) {
     && paths.some(path => value.split('?', 1)[0] === CAS_ORIGIN + path);
 }
 
-function validateDirectHandoff(handoff) {
-  const continuation = handoff.continuation;
+function isAllowedLiveEndpoint(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' && url.pathname === '/' && !url.username
+      && !url.password && !url.search && !url.hash && url.hostname !== 'pixelpay.dev'
+      && url.hostname !== 'localhost';
+  } catch { return false; }
+}
+
+export function validateDirectHandoff(handoff) {
+  const continuation = handoff?.continuation;
+  const sdk = handoff?.sdk;
+  const validEnvironment = (sdk?.environment === 'sandbox' && sdk.endpoint === QA_ENDPOINT)
+    || (sdk?.environment === 'live' && isAllowedLiveEndpoint(sdk.endpoint));
   let code;
   if (!continuation || !Object.hasOwn(continuation, 'collection_url')) code = 'PIXELPAY_3DS_COLLECTION_URL_ABSENT';
   else if (continuation.collection_url === null) code = 'PIXELPAY_3DS_COLLECTION_URL_NULL';
   else if (continuation.collection_url === '') code = 'PIXELPAY_3DS_COLLECTION_URL_EMPTY';
   else if (!isCasUrl(continuation.collection_url, COLLECTION_PATHS)) code = 'PIXELPAY_3DS_COLLECTION_URL_INVALID';
-  else if (handoff.state !== 'challenge' || handoff.continuation_mode !== 'direct_api' || handoff.sdk?.endpoint !== QA_ENDPOINT
-    || handoff.sdk?.environment !== 'sandbox' || continuation.status !== 202 || continuation.transaction_type !== 'songbird'
+  else if (handoff.state !== 'challenge' || handoff.continuation_mode !== 'direct_api' || !validEnvironment
+    || continuation.status !== 202 || continuation.transaction_type !== 'songbird'
     || typeof continuation.payload !== 'string' || !continuation.payload) code = 'PIXELPAY_3DS_CONTINUATION_INVALID';
   if (code) throw browserFailure(code);
 }
 
-function bindDirectApiFrames(manager, isClosed, stop) {
+function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin) {
   if (typeof manager.startCardinalDirectApiTransaction !== 'function' || typeof manager.submitChallengeForm !== 'function'
     || typeof manager.handleDirectApiLookup !== 'function'
     || document.getElementById('cardinal_collection_iframe') || document.getElementById('cardinal_collection_form')
@@ -80,7 +92,7 @@ function bindDirectApiFrames(manager, isClosed, stop) {
       if (isClosed()) { stop(); return; }
       if (!event.source) return;
       if (event.data?.name === 'pixelpay_continue') {
-        if (callbackAccepted || event.origin !== QA_ENDPOINT || event.source !== challengeFrame?.contentWindow) return;
+        if (callbackAccepted || event.origin !== callbackOrigin || event.source !== challengeFrame?.contentWindow) return;
         callbackAccepted = true;
       } else if (event.origin !== CAS_ORIGIN || event.source !== collectionFrame?.contentWindow) return;
       return nativeListener(event);
@@ -152,7 +164,8 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
       settings.setupEnvironment(handoff.sdk.environment);
       manager = new Manager(settings, clientRequest);
       if (typeof manager.validationLookupResponse !== 'function') throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
-      if (suppliedHandoff) closeDirectApi = bindDirectApiFrames(manager, isClosed, stop);
+      if (suppliedHandoff) closeDirectApi = bindDirectApiFrames(
+        manager, isClosed, stop, new URL(handoff.sdk.endpoint).origin);
     } catch {
       throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
     }
