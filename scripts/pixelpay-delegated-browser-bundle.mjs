@@ -89,6 +89,7 @@ const lookupResponse = {
 const pending = { state: 'pending', booking_confirmed: false };
 const CAS = 'https://cas.client.cardinaltrusted.com';
 const ENDPOINT = 'https://pixelpay.dev';
+const LIVE_ENDPOINT = 'https://merchant.offline.invalid';
 const COLLECTION_URL = `${CAS}/centinelapi/V1/Cruise/Collect?fixture=%2B%3D`;
 const STEP_UP_URL = `${CAS}/centinelapi/V2/Cruise/StepUp?fixture=%25`;
 const directHandoff = () => ({
@@ -283,10 +284,14 @@ async function verifyDirectCallbackIdentifier(sdk, Manager) {
   }
 }
 
-async function verifyNativeDirectApi(status) {
-  const adapter = await import(`${bundleUrl}#direct-${status}`);
+async function verifyNativeDirectApi(scenario, { status = 202, live = false, payment, callbackError } = {}) {
+  const adapter = await import(`${bundleUrl}#direct-${scenario}`);
   const fixture = directFixture();
   const operations = [];
+  const challengeStates = [];
+  const endpoint = live ? LIVE_ENDPOINT : ENDPOINT;
+  const suppliedHandoff = directHandoff();
+  if (live) suppliedHandoff.sdk = { endpoint: 'https://MERCHANT.offline.invalid:443', environment: 'live' };
   let challengeWindow;
   // AM: The public checkout hosts the native frame inside its own dialog.
   const host = window.document.createElement('section');
@@ -298,8 +303,9 @@ async function verifyNativeDirectApi(status) {
   try {
     const token = 'synthetic-operation-token';
     const run = await adapter.preparePublicPixelPay3ds();
-    const result = adapter.completePublicPixelPay3ds({ public_3ds_handoff: { ...directHandoff(), token } }, {
+    const result = adapter.completePublicPixelPay3ds({ public_3ds_handoff: { ...suppliedHandoff, token } }, {
       run,
+      onChallenge: active => challengeStates.push(active),
       advance: async ({ token: currentToken, operation, data }) => {
         assert.equal(currentToken, token);
         operations.push(operation);
@@ -309,7 +315,7 @@ async function verifyNativeDirectApi(status) {
         }
         if (operation === 'retry') {
           assert.deepEqual(data, {});
-          return { status: 200, success: true, data: {} };
+          return { status: 200, success: true, data: {}, ...(payment ? { payment } : {}) };
         }
         throw new Error('Unexpected Direct API operation');
       },
@@ -318,7 +324,7 @@ async function verifyNativeDirectApi(status) {
     await fixture.collection;
     const collectWindow = collectionFrame().contentWindow;
     fixture.emit(CAS, window, profile);
-    fixture.emit(ENDPOINT, collectWindow, callback);
+    fixture.emit(endpoint, collectWindow, callback);
     assert.deepEqual(operations, []);
     fixture.emit(CAS, collectWindow, profile);
     fixture.emit(CAS, collectWindow, profile);
@@ -327,7 +333,7 @@ async function verifyNativeDirectApi(status) {
     assert.equal(stepUpFrame().title, 'Autenticación bancaria');
     challengeWindow = stepUpFrame().contentWindow;
     fixture.emit(CAS, collectWindow, profile);
-    fixture.emit(ENDPOINT, collectWindow, callback);
+    fixture.emit(endpoint, collectWindow, callback);
     fixture.emit(CAS, challengeWindow, callback);
     await tick();
     assert.deepEqual(operations, ['lookup']);
@@ -335,15 +341,23 @@ async function verifyNativeDirectApi(status) {
       { id: 'cardinal_collection_form', action: COLLECTION_URL, fields: [['JWT', directHandoff().continuation.payload]] },
       { id: 'step-up-form', action: STEP_UP_URL, fields: [['JWT', directLookupResponse.data.continue_payload]] },
     ]);
-    fixture.emit(ENDPOINT, challengeWindow, callback);
-    fixture.emit(ENDPOINT, challengeWindow, callback);
-    assert.equal(await result, pending);
-    assert.deepEqual(operations, ['lookup', 'retry', 'status']);
+    const terminalCallback = callbackError || callback;
+    fixture.emit(endpoint, challengeWindow, terminalCallback);
+    fixture.emit(endpoint, challengeWindow, terminalCallback);
+    const expectedOperations = callbackError ? ['lookup']
+      : payment ? ['lookup', 'retry'] : ['lookup', 'retry', 'status'];
+    const projection = await result;
+    assert.deepEqual(operations, expectedOperations);
+    if (callbackError) {
+      assert.deepEqual(projection, { processed: false, booking_confirmed: false,
+        estado_intent_codigo: 'pendiente_confirmacion', pending_confirmation: true, public_3ds_pending: true });
+    } else assert.equal(projection, payment ?? pending);
+    assert.deepEqual(challengeStates, [true, false]);
     assert.equal(collectionFrame(), null);
     assert.equal(stepUpFrame(), null);
     assert.equal(window.document.getElementById('step-up-form'), null);
-    fixture.emit(ENDPOINT, challengeWindow, callback);
-    assert.deepEqual(operations, ['lookup', 'retry', 'status']);
+    fixture.emit(endpoint, challengeWindow, callback);
+    assert.deepEqual(operations, expectedOperations);
   } finally {
     host.remove();
     fixture.close();
@@ -476,7 +490,16 @@ try {
   loadSongbird = true;
   await verifyDuplicateSetup(await import(`${bundleUrl}#duplicate`));
   for (const reason of ['mismatch', 'cancel', 'expiry']) await verifyClosedLookup(reason);
-  for (const status of [200, 202]) await verifyNativeDirectApi(status);
+  await verifyNativeDirectApi('qa-200', { status: 200 });
+  await verifyNativeDirectApi('qa-202');
+  await verifyNativeDirectApi('live-booking', { live: true, payment: {
+    processed: true, booking_confirmed: true, estado_intent_codigo: 'confirmado',
+  } });
+  await verifyNativeDirectApi('live-vip', { live: true, payment: {
+    processed: true, estado_intent_codigo: 'confirmado', id_suscripcion: 'synthetic-subscription',
+  } });
+  await verifyNativeDirectApi('live-error', { live: true, callbackError: { ...callback, error: 'synthetic-error' } });
+  await verifyNativeDirectApi('live-missing-identifier', { live: true, callbackError: { name: callback.name } });
   for (const reason of ['abort', 'abort-after-stepup', 'expiry']) await verifyDirectCancellation(reason);
   await verifyInvalidDirectHandoffs();
   await verifyDirectFrictionlessTransportFailure();

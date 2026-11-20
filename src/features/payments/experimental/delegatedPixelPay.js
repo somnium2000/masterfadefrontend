@@ -62,6 +62,7 @@ export function validateDirectHandoff(handoff) {
     || continuation.status !== 202 || continuation.transaction_type !== 'songbird'
     || typeof continuation.payload !== 'string' || !continuation.payload) code = 'PIXELPAY_3DS_CONTINUATION_INVALID';
   if (code) throw browserFailure(code);
+  return new URL(sdk.endpoint).origin;
 }
 
 function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin, armNativeRetry) {
@@ -139,7 +140,7 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
   });
   // AM: Attach the race before any transport or SDK await; SDK async event handlers need not catch our failures.
   const task = (async () => {
-    if (suppliedHandoff) validateDirectHandoff(suppliedHandoff);
+    const directOrigin = suppliedHandoff ? validateDirectHandoff(suppliedHandoff) : null;
     let sdk;
     try {
       ({ sdk, Manager } = await loadSdk());
@@ -164,12 +165,13 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
       Object.assign(clientRequest, { order_id: handoff.order.id, order_amount: handoff.order.amount,
         order_currency: handoff.order.currency });
       const settings = new sdk.Models.Settings();
-      settings.setupEndpoint(handoff.sdk.endpoint);
+      // AM: The native Direct listener compares MessageEvent.origin to settings.endpoint verbatim.
+      settings.setupEndpoint(directOrigin ?? handoff.sdk.endpoint);
       settings.setupEnvironment(handoff.sdk.environment);
       manager = new Manager(settings, clientRequest);
       if (typeof manager.validationLookupResponse !== 'function') throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
       if (suppliedHandoff) closeDirectApi = bindDirectApiFrames(
-        manager, isClosed, stop, new URL(handoff.sdk.endpoint).origin,
+        manager, isClosed, stop, directOrigin,
         () => { nativeRetryAuthorized = true; });
     } catch {
       throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
