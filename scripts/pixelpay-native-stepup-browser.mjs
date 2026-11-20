@@ -17,7 +17,7 @@ const { output } = await build({
       import React from 'react';
       import { createRoot } from 'react-dom/client';
       import Challenge from '${root}/src/features/payments/PublicPixelPayChallenge.jsx';
-      import { runDelegatedPixelPay } from '${root}/src/features/payments/experimental/delegatedPixelPay.js';
+      import { runDelegatedPixelPay, loadDelegatedSdk } from '${root}/src/features/payments/experimental/delegatedPixelPay.js';
       import '${root}/src/index.css';
       const root = createRoot(document.querySelector('#checkout'));
       let active = false, revision = 0;
@@ -34,7 +34,27 @@ const { output } = await build({
       document.querySelector('#pay').onclick = async () => {
         active = true; render();
         try {
+          // AM: A/B desktop only: inject a fake SDK Settings.auth_key into an isolated
+          // subclass. Never use a merchant credential or send this configuration to Live.
+          const loadSdk = window.syntheticMdEnabled
+            ? async () => {
+                const native = await loadDelegatedSdk();
+                const BaseSettings = native.sdk.Models.Settings;
+                class SyntheticMdSettings extends BaseSettings {
+                  setupEnvironment(environment) {
+                    const result = super.setupEnvironment(environment);
+                    this.auth_key = 'MF_DESKTOP_TEST_ONLY_MD';
+                    return result;
+                  }
+                }
+                return { ...native, sdk: {
+                  ...native.sdk,
+                  Models: { ...native.sdk.Models, Settings: SyntheticMdSettings },
+                } };
+              }
+            : loadDelegatedSdk;
           const outcome = await runDelegatedPixelPay({
+            loadSdk,
             signal: controller.signal,
             handoff: { state: 'challenge', continuation_mode: 'direct_api', expiresAt: Date.now() + 20000,
               order: { id: 'synthetic-order', amount: 1, currency: 'HNL' },
@@ -70,8 +90,9 @@ try {
     { viewport: { width: 1280, height: 800 } },
     { viewport: { width: 360, height: 640 }, cancel: true },
     { viewport: { width: 360, height: 640 }, rejectedReturn: true },
+    { viewport: { width: 360, height: 640 }, rejectedReturn: true, syntheticMd: true },
   ];
-  for (const { viewport, cancel, rejectedReturn } of scenarios) {
+  for (const { viewport, cancel, rejectedReturn, syntheticMd } of scenarios) {
     const page = await browser.newPage({ viewport, serviceWorkers: 'block' });
     const fixtureErrors = [];
     page.on('pageerror', error => fixtureErrors.push(error.message));
@@ -113,6 +134,7 @@ try {
       return route.abort();
     });
     try {
+      if (syntheticMd) await page.addInitScript(() => { window.syntheticMdEnabled = true; });
       await page.goto('https://checkout.invalid/');
       for (const css of styles) await page.addStyleTag({ content: css.source });
       await page.addScriptTag({ type: 'module', content: script });
@@ -152,7 +174,12 @@ try {
       assert.equal(await frame.evaluate((node, before) => node === before, original), true);
       assert.equal(await issuer.getByRole('textbox').inputValue(), '1234');
       if (rejectedReturn) {
-        assert.deepEqual(stepUpFieldNames, ['JWT'], 'The delegated manager emits no MD with its current settings');
+        assert.ok(stepUpFieldNames.includes('JWT'));
+        assert.equal(stepUpFieldNames.includes('MD'), Boolean(syntheticMd),
+          'MD must follow SDK Settings.auth_key, not the provider signature');
+        if (!syntheticMd) assert.deepEqual(stepUpFieldNames, ['JWT']);
+        // Both variants receive the same synthetic HTTP 400: this does NOT prove
+        // that the real PixelPay endpoint accepts MD or that MD equals KEY.
         const responsePromise = page.waitForResponse(response => response.url() === issuerReturn);
         await issuer.getByRole('button', { name: 'Completar desafío' }).click();
         const response = await responsePromise;
@@ -174,7 +201,7 @@ try {
         assert.equal(await frame.count(), 0);
         assert.deepEqual(fixtureErrors, []);
         assert.deepEqual(blocked, []);
-        process.stdout.write('Native StepUp: return HTTP 400, no callback or retry, expired safely.\n');
+        process.stdout.write(`Native StepUp A/B: MD ${syntheticMd ? 'present (synthetic key)' : 'absent'}; return fixture HTTP 400; no retry.\n`);
         continue;
       }
       await page.waitForFunction(() => window.stepUpTrace.some(event =>
