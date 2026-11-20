@@ -327,7 +327,7 @@ function persistRewardBookingContext(context) {
   window.sessionStorage.setItem(REWARD_BOOKING_CONTEXT_STORAGE_KEY, JSON.stringify(context));
 }
 
-export default function PublicBookingFlow({ pixelpaySale } = {}) {
+export default function PublicBookingFlow({ pixelpaySale, pixelpayPublic3ds, pixelpayPublic3dsRequired } = {}) {
   const { user: rewardUser } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -918,6 +918,8 @@ const agendaAutoLoadKeyRef = useRef('');
     completeMockPaymentOnce,
     completeSimulatorPaymentOnce,
     salePixelPayOnce,
+    cancelPublic3ds,
+    public3dsActive,
     queryPixelPayStatusOnce,
     isCurrentPaymentGroup,
   } = useBookingPayment({
@@ -3592,6 +3594,7 @@ const agendaAutoLoadKeyRef = useRef('');
       // provider Status. Explicitly prefer the local intent state.
       const threeDsLocalOnly = [paymentIntent, paymentResult, storedContext?.paymentIntent].some(
         state => state?.qa_3ds_delegated === true || state?.live_3ds_delegated === true
+          || state?.public_3ds_pending === true
           || state?.code === 'PIXELPAY_3DS_AUTH_PENDING'
       );
       const payload = options?.queryPixelPayProvider === true && !threeDsLocalOnly && (delegatedRecovery
@@ -3838,8 +3841,11 @@ const agendaAutoLoadKeyRef = useRef('');
       && payment.id_intent === paymentExecutionContext.intentId
       && payment.id_grupo_cita === paymentExecutionContext.groupId);
   const paymentUsesDelegated = paymentUsesQaDelegated || paymentUsesLiveDelegated;
+  const paymentUsesPublic3ds = canUseClienteHold && pixelpayPublic3ds === true;
+  const public3dsUnavailable = pixelpayPublic3dsRequired === true && !paymentUsesPublic3ds;
   const paymentCanExecuteSale = Boolean(
-    (paymentUsesDelegated || isPixelPaySaleAuthorized(pixelpaySale))
+    !public3dsUnavailable &&
+    (paymentUsesDelegated || paymentUsesPublic3ds || isPixelPaySaleAuthorized(pixelpaySale))
     && (!diagnosticPaymentContext || paymentUsesDelegated)
     && !paymentRestoring
     && !paymentResult?.booking_confirmed
@@ -3863,7 +3869,8 @@ const agendaAutoLoadKeyRef = useRef('');
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
     try {
       const result = await salePixelPayOnce({ groupId, intentId, titularEmail, card, billing,
-        ...(paymentUsesDelegated ? { delegated: true, liveDelegated: paymentUsesLiveDelegated } : {}) });
+        ...(paymentUsesDelegated ? { delegated: true, liveDelegated: paymentUsesLiveDelegated } : {}),
+        ...(paymentUsesPublic3ds ? { public3ds: true } : {}) });
       if (result?.booking_confirmed) {
         await refreshPaymentStatus();
       }
@@ -3888,9 +3895,9 @@ const agendaAutoLoadKeyRef = useRef('');
   }, [
     notifications,
     paymentCanExecuteSale,
-    paymentUsesQaDelegated,
     paymentUsesLiveDelegated,
     paymentUsesDelegated,
+    paymentUsesPublic3ds,
     paymentExecutionContext,
     refreshPaymentStatus,
     salePixelPayOnce,
@@ -4149,6 +4156,10 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentCanExecuteSale,
       paymentUsesQaDelegated,
       paymentUsesLiveDelegated,
+      paymentUsesPublic3ds,
+      public3dsUnavailable,
+      cancelPublic3ds,
+      public3dsActive,
       paymentCanObserve3ds,
       observePixelPay3ds,
       pixelpaySale,
@@ -4304,6 +4315,10 @@ const agendaAutoLoadKeyRef = useRef('');
       paymentCanExecuteSale,
       paymentUsesQaDelegated,
       paymentUsesLiveDelegated,
+      paymentUsesPublic3ds,
+      public3dsUnavailable,
+      cancelPublic3ds,
+      public3dsActive,
       paymentCanObserve3ds,
       observePixelPay3ds,
       pixelpaySale,

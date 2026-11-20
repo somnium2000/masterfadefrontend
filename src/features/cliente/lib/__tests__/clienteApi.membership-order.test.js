@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { confirmMembershipPayment, createMembershipOrder } from '../clienteApi.js';
 
+import { preparePublicPixelPay3ds } from '../../../payments/publicPixelPay3ds.js';
+
+vi.mock('../../../payments/publicPixelPay3ds.js', async importOriginal => ({
+  ...await importOriginal(),
+  preparePublicPixelPay3ds: vi.fn(),
+}));
+
 const http = vi.hoisted(() => ({ post: vi.fn() }));
 const simulation = vi.hoisted(() => ({ enabled: false }));
 vi.mock('../../../../services/httpClient.js', () => ({ http }));
@@ -72,4 +79,46 @@ test('simulación VIP envía solo intent y escenario, sin tarjeta ni facturació
     id_payment_intent: KEY,
     monto_prueba_hnl: 1,
   }, undefined);
+});
+
+
+test('VIP reusa el contexto 3DS y espera la confirmación financiera autenticada', async () => {
+  const handoff = { token: 'opaque-membership-token', expiresAt: Date.now() + 60000 };
+  const payment = { processed: true, estado_intent_codigo: 'confirmado', confirmation: { estado: 'activa' } };
+  const onChallenge = vi.fn();
+  preparePublicPixelPay3ds.mockResolvedValueOnce(async ({ transport }) => {
+    await transport('lookup', { reference: 'opaque-reference' });
+    await transport('retry', {});
+    return transport('status', {});
+  });
+  http.post.mockResolvedValueOnce({ data: { public_3ds_handoff: handoff, pending_confirmation: true } })
+    .mockResolvedValueOnce({ data: { status: 200, success: true } })
+    .mockResolvedValueOnce({ data: { status: 200, success: true, payment } });
+  await expect(confirmMembershipPayment(KEY, { public3ds: true, onChallenge })).resolves.toEqual(payment);
+  expect(http.post.mock.calls.map(([path]) => path)).toEqual([
+    '/v1/cliente/planes/confirmar-pago', '/v1/cliente/planes/pixelpay/3ds/continuar', '/v1/cliente/planes/pixelpay/3ds/continuar',
+  ]);
+  expect(http.post.mock.calls[0][1]).toHaveProperty('supports_public_3ds', true);
+  expect(http.post.mock.calls[1][1]).toEqual({
+    id_payment_intent: KEY, token: handoff.token, operation: 'lookup', data: { reference: 'opaque-reference' },
+  });
+  expect(onChallenge.mock.calls).toEqual([[true], [false]]);
+});
+
+test('VIP conserva una continuación fallida como pendiente sin reenviar venta', async () => {
+  const handoff = { token: 'opaque-membership-token', expiresAt: Date.now() + 60000 };
+  preparePublicPixelPay3ds.mockResolvedValueOnce(async ({ transport }) => transport('retry', {}));
+  http.post.mockResolvedValueOnce({ data: { public_3ds_handoff: handoff, pending_confirmation: true } })
+    .mockRejectedValueOnce({ code: 'PIXELPAY_PUBLIC_3DS_PROOF_UNAVAILABLE' });
+  await expect(confirmMembershipPayment(KEY, { public3ds: true })).resolves.toEqual({
+    processed: false, booking_confirmed: false, estado_intent_codigo: 'pendiente_confirmacion',
+    pending_confirmation: true, public_3ds_pending: true,
+  });
+  expect(http.post).toHaveBeenCalledTimes(2);
+});
+
+test('VIP sin SDK no inicia la venta pública', async () => {
+  preparePublicPixelPay3ds.mockRejectedValueOnce(Object.assign(new Error(), { code: 'PIXELPAY_3DS_SDK_LOAD_FAILED' }));
+  await expect(confirmMembershipPayment(KEY, { public3ds: true })).rejects.toMatchObject({ code: 'PIXELPAY_3DS_SDK_LOAD_FAILED' });
+  expect(http.post).not.toHaveBeenCalled();
 });

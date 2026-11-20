@@ -7,6 +7,7 @@ const COLLECTION_PATHS = ['/centinelapi/V1/Cruise/Collect', '/centinelapi/V2/Cru
 const STEP_UP_PATHS = ['/centinelapi/V2/Cruise/StepUp'];
 const STEP_UP_FRAME = 'iframe[name="step-up-iframe"]';
 let active = false;
+export const isDelegatedPixelPayBusy = () => active;
 const unwrap = module => module.default || module;
 
 // AM: Native manager is an internal SDK import, enabled only by server-authorized QA or private Live checkout.
@@ -110,6 +111,7 @@ function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin, armNativeR
       stop();
     } finally {
       challengeFrame = document.querySelector(STEP_UP_FRAME);
+      challengeFrame?.setAttribute('title', 'Autenticación bancaria');
     }
     if (!challengeFrame) stop();
   };

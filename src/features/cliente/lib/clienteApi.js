@@ -1,3 +1,4 @@
+import { completePublicPixelPay3ds, preparePublicPixelPay3ds } from '../../payments/publicPixelPay3ds.js';
 import { supabase } from '../../../config/supabaseClient.js';
 import { http } from '../../../services/httpClient.js';
 import { isQaVipPurchaseSimulationEnabled } from '../../plans/lib/qaVipPurchaseSimulation.js';
@@ -196,22 +197,41 @@ export async function createMembershipPaymentIntent(id_order) {
 }
 
 export async function confirmMembershipPayment(id_payment_intent, options = {}) {
-  const endpoint = shouldUseMembershipPaymentSimulator()
-    ? `${BASE}/planes/simulator/event`
-    : `${BASE}/planes/confirmar-pago`;
-  const testAmount = Number(options?.monto_prueba_hnl);
+  const simulated = shouldUseMembershipPaymentSimulator();
+  const endpoint = simulated ? `${BASE}/planes/simulator/event` : `${BASE}/planes/confirmar-pago`;
+  const run = !simulated && options.public3ds ? await preparePublicPixelPay3ds() : null;
+  if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  const testAmount = Number(options.monto_prueba_hnl);
   const response = await http.post(endpoint, {
     id_payment_intent,
-    ...(!shouldUseMembershipPaymentSimulator() ? { card: options.card, billing: options.billing } : {}),
-    ...(shouldUseMembershipPaymentSimulator() && Number.isFinite(testAmount) && testAmount > 0
-      ? { monto_prueba_hnl: testAmount }
-      : {}),
-  }, shouldUseMembershipPaymentSimulator() ? undefined : {
+    ...(!simulated ? { card: options.card, billing: options.billing } : {}),
+    ...(run ? { supports_public_3ds: true } : {}),
+    ...(simulated && Number.isFinite(testAmount) && testAmount > 0 ? { monto_prueba_hnl: testAmount } : {}),
+  }, simulated ? undefined : {
+    ...(options.signal ? { signal: options.signal } : {}),
     sensitiveBody: true,
     dedupe: false,
     cache: false,
   });
-  const payload = normalizeResponsePayload(response);
+  const started = normalizeResponsePayload(response);
+  const payload = await completePublicPixelPay3ds(started, {
+    run,
+    signal: options.signal,
+    onChallenge: options.onChallenge,
+    advance: async (operation, signal) => normalizeResponsePayload(await http.post(
+      `${BASE}/planes/pixelpay/3ds/continuar`, { id_payment_intent, ...operation },
+      { signal, sensitiveBody: true, dedupe: false, cache: false },
+    )),
+    readLocalStatus: signal => queryMembershipPaymentStatus(id_payment_intent, { signal }),
+  });
+  if (run || started?.public_3ds_handoff) {
+    if (payload?.estado_intent_codigo === 'fallido' || payload?.normalized_status === 'RECHAZADO') {
+      return { ...payload, estado_intent_codigo: 'fallido' };
+    }
+    if (payload?.estado_intent_codigo === 'confirmado' && (payload.processed === true || payload.duplicate === true
+      || (payload.normalized_status === 'PAGADO' && payload.id_suscripcion))) return payload;
+    return { ...payload, processed: false, pending_confirmation: true };
+  }
   const normalizedStatus = String(payload?.normalized_status || '').trim().toUpperCase();
   if (normalizedStatus && normalizedStatus !== 'PAID') {
     throw new Error(String(payload?.message || 'El pago del plan no fue aprobado.'));
@@ -219,7 +239,7 @@ export async function confirmMembershipPayment(id_payment_intent, options = {}) 
   return payload;
 }
 
-export async function queryMembershipPaymentStatus(id_payment_intent) {
+export async function queryMembershipPaymentStatus(id_payment_intent, { signal } = {}) {
   const safeIntentId = String(id_payment_intent || '').trim();
   if (!PURCHASE_UUID_REGEX.test(safeIntentId)) {
     throw new Error('No se pudo identificar el pago pendiente.');
@@ -227,7 +247,7 @@ export async function queryMembershipPaymentStatus(id_payment_intent) {
   const response = await http.post(
     `${BASE}/planes/pago-intent/${encodeURIComponent(safeIntentId)}/estado`,
     {},
-    { dedupe: false, cache: false }
+    { ...(signal ? { signal } : {}), dedupe: false, cache: false }
   );
   return normalizeResponsePayload(response);
 }

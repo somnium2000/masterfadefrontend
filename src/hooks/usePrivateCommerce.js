@@ -52,5 +52,9 @@ export default function usePrivateCommerce() {
     pixelpay3dsDiagnostic: false,
     ...(explicitSaleRequired ? { pixelpaySale: !checking && Boolean(identity) && data?.booking === true && data?.pixelpaySale === true }
       : identity && typeof data?.pixelpaySale === 'boolean' ? { pixelpaySale: data.pixelpaySale } : {}),
+    ...(identity && typeof data?.pixelpayPublic3dsRequired === 'boolean'
+      ? { pixelpayPublic3dsRequired: data.pixelpayPublic3dsRequired } : {}),
+    ...(identity && typeof data?.pixelpayPublic3ds === 'boolean'
+      ? { pixelpayPublic3ds: !checking && data.pixelpayPublic3ds } : {}),
     checking };
 }

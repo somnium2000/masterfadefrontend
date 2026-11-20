@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { completePublicPixelPay3ds, preparePublicPixelPay3ds } from '../../../payments/publicPixelPay3ds.js';
 import { isDelegatedContinuationError } from '../../../payments/experimental/delegatedContinuationCodes.js';
 import {
   completePublicMockPayment,
@@ -7,6 +8,7 @@ import {
   getPublicPaymentStatus,
   queryPublicPixelPayStatus,
   requestQaDelegatedPayment,
+  requestPublicPixelPay3ds,
   salePublicPixelPay,
 } from '../publicBookingApi.js';
 import {
@@ -76,6 +78,7 @@ function isAbortError(error) {
 
 export function isPixelPaySalePreflightRejection(error) {
   const code = String(error?.data?.error?.code || error?.error?.code || error?.code || '').trim().toUpperCase();
+  if (code === 'PIXELPAY_3DS_SDK_LOAD_FAILED') return true;
   if (Number(error?.status) === 422 && code === 'PIXELPAY_SANDBOX_CARD_NOT_ALLOWED') return true;
   // AM: This exact backend guard runs before claiming an attempt or contacting PixelPay.
   if (Number(error?.status) === 503 && code === 'PIXELPAY_3DS_INTEGRATION_UNAVAILABLE') return true;
@@ -119,6 +122,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
   const [bookingSuccessResultState, setBookingSuccessResultState] = useState(null);
   const [creatingPaymentIntent, setCreatingPaymentIntent] = useState(false);
   const [checkingPaymentStatus, setCheckingPaymentStatus] = useState(false);
+  const [public3dsActive, setPublic3dsActive] = useState(false);
 
   const mountedRef = useRef(false);
   const currentGroupIdRef = useRef('');
@@ -151,6 +155,10 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     const groupId = safeText(currentGroupId);
     const previousGroupId = safeText(currentGroupIdRef.current);
     const groupChanged = Boolean(groupId && previousGroupId && groupId !== previousGroupId);
+    if (groupChanged) {
+      pixelPaySaleRef.current?.challengeController.abort();
+      setPublic3dsActive(false);
+    }
     currentGroupIdRef.current = groupId || safeText(paymentIntentRef.current?.id_grupo_cita);
     if (!groupId) return;
     const incompatible = (value) => value && safeText(value.id_grupo_cita) !== groupId;
@@ -225,6 +233,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     setBookingSuccessResultState(null);
     setCreatingPaymentIntent(false);
     setCheckingPaymentStatus(false);
+    setPublic3dsActive(false);
   }, []);
 
   const restorePaymentContext = useCallback((groupId = '', fallbackContext = null) => {
@@ -441,7 +450,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     return payload || true;
   }, [authenticated, isCurrentPaymentGroup]);
 
-  const salePixelPayOnce = useCallback(async ({ groupId, intentId, titularEmail, card, billing, diagnostic = false, delegated = false, liveDelegated = false }) => {
+  const salePixelPayOnce = useCallback(async ({ groupId, intentId, titularEmail, card, billing, diagnostic = false, delegated = false, liveDelegated = false, public3ds = false }) => {
     // AM: A stale diagnostic callback cannot start the retired Node-to-Songbird flow.
     if (diagnostic) return null;
     const normalizedGroupId = safeText(groupId);
@@ -471,6 +480,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
         ...previousIntent,
         ...(diagnostic ? { qa_3ds_diagnostic: true } : {}),
         pending_confirmation: pending,
+        ...(public3ds ? { public_3ds_pending: pending } : {}),
         ...(terminal ? {
           estado_intent_codigo: terminal.estado_intent_codigo,
           booking_confirmed: terminal.booking_confirmed === true,
@@ -488,18 +498,22 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
       }
       return stored;
     };
-    // AM: Persistir antes del envío protege también una recarga sin catch; nunca incluye tarjeta.
-    if (!persistSaleState(true)) {
-      throw Object.assign(new Error('No fue posible guardar el contexto del pago. Revisa el almacenamiento del navegador.'), {
-        code: 'PIXELPAY_RECOVERY_CONTEXT_UNAVAILABLE', status: 409,
-      });
-    }
     const controller = new AbortController();
+    const challengeController = new AbortController();
     const promise = (async () => {
+      const run = authenticated && public3ds ? await preparePublicPixelPay3ds() : null;
+      if (controller.signal.aborted) return null;
+      // AM: Guardar recuperación antes de enviar permite consultar tras una recarga sin reenviar tarjeta.
+      if (!persistSaleState(true)) {
+        throw Object.assign(new Error('No fue posible guardar el contexto del pago. Revisa el almacenamiento del navegador.'), {
+          code: 'PIXELPAY_RECOVERY_CONTEXT_UNAVAILABLE', status: 409,
+        });
+      }
       let response = await salePublicPixelPay({
         id_grupo_cita: normalizedGroupId,
         id_intent: normalizedIntentId,
         titular_email: normalizedEmail,
+        ...(run ? { supports_public_3ds: true } : {}),
         card_number: safeText(card?.number),
         card_holder: safeText(card?.holder),
         card_expire: safeText(card?.expire),
@@ -510,6 +524,30 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
         billing_city: safeText(billing?.city),
         billing_phone: safeText(billing?.phone),
       }, { authenticated, signal: controller.signal });
+      if (response?.public_3ds_handoff) {
+        const scope = { id_grupo_cita: normalizedGroupId, id_intent: normalizedIntentId, titular_email: normalizedEmail };
+        const abortChallenge = () => challengeController.abort();
+        controller.signal.addEventListener('abort', abortChallenge, { once: true });
+        if (controller.signal.aborted) abortChallenge();
+        try {
+          response = await completePublicPixelPay3ds(response, {
+            run,
+            signal: challengeController.signal,
+            onChallenge: active => {
+              if (!mountedRef.current || paymentStateSeqRef.current !== saleStateSeq
+                || !isCurrentPaymentGroup(normalizedGroupId)) return;
+              setPublic3dsActive(active);
+            },
+            advance: (operation, signal) => requestPublicPixelPay3ds({ ...scope, ...operation }, { signal }),
+            readLocalStatus: async signal => {
+              const result = await getPublicPaymentStatus(scope, { authenticated, signal });
+              return result?.data ?? result;
+            },
+          });
+        } finally {
+          controller.signal.removeEventListener('abort', abortChallenge);
+        }
+      }
       if (response?.qa_3ds_handoff) {
         const requestId = response.__meta?.headers?.get?.('x-request-id');
         const { qa_3ds_handoff: handoff, ...pending } = response;
@@ -568,7 +606,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
       }
       return result;
     })();
-    pixelPaySaleRef.current = { controller, promise };
+    pixelPaySaleRef.current = { controller, promise, challengeController };
     try {
       return await promise;
     } catch (error) {
@@ -579,6 +617,8 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     }
   }, [authenticated, isCurrentPaymentGroup]);
 
+  const cancelPublic3ds = useCallback(() => pixelPaySaleRef.current?.challengeController.abort(), []);
+
   const observePixelPay3dsOnce = useCallback(args => salePixelPayOnce({ ...args, diagnostic: true }), [salePixelPayOnce]);
 
   const queryPixelPayStatusOnce = useCallback(async ({ groupId, intentId, titularEmail }) => {
@@ -587,8 +627,9 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     const normalizedEmail = safeText(titularEmail).toLowerCase();
     if (!normalizedGroupId || !normalizedIntentId || !normalizedEmail) return null;
     if (!isCurrentPaymentGroup(normalizedGroupId)) return null;
-    if (paymentIntentRef.current?.id_intent === normalizedIntentId && paymentIntentRef.current?.qa_3ds_diagnostic === true
-      && paymentIntentRef.current?.qa_3ds_delegated !== true) {
+    if (paymentIntentRef.current?.id_intent === normalizedIntentId
+      && (paymentIntentRef.current.public_3ds_pending === true
+        || (paymentIntentRef.current.qa_3ds_diagnostic === true && paymentIntentRef.current.qa_3ds_delegated !== true))) {
       return fetchPaymentStatusOnce({ groupId: normalizedGroupId, intentId: normalizedIntentId, titularEmail: normalizedEmail });
     }
     const requestKey = `${normalizedGroupId}|${normalizedIntentId}|${normalizedEmail}`;
@@ -617,7 +658,7 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
       return await promise;
     } catch (error) {
       // AM: A tab without browser storage can learn the durable QA marker from the server denial.
-      if (error?.code === 'QA_3DS_EXTERNAL_STATUS_DISABLED') return await fetchPaymentStatusOnce({
+      if (['QA_3DS_EXTERNAL_STATUS_DISABLED', 'PIXELPAY_PUBLIC_3DS_EXTERNAL_STATUS_DISABLED'].includes(error?.code)) return await fetchPaymentStatusOnce({
         groupId: normalizedGroupId, intentId: normalizedIntentId, titularEmail: normalizedEmail,
       });
       throw error;
@@ -644,6 +685,8 @@ export default function useBookingPayment({ currentGroupId = '', authenticated =
     completeSimulatorPaymentOnce,
     salePixelPayOnce,
     observePixelPay3dsOnce,
+    cancelPublic3ds,
+    public3dsActive,
     queryPixelPayStatusOnce,
     isCurrentPaymentGroup,
   };

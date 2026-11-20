@@ -4,12 +4,22 @@ import { JSDOM } from 'jsdom';
 import { build } from 'vite';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const entry = fileURLToPath(new URL('../src/features/payments/experimental/delegatedPixelPay.js', import.meta.url));
+const delegatedEntry = fileURLToPath(new URL('../src/features/payments/experimental/delegatedPixelPay.js', import.meta.url));
+const publicEntry = fileURLToPath(new URL('../src/features/payments/publicPixelPay3ds.js', import.meta.url));
+const entry = 'virtual:pixelpay-browser-fixtures';
 // AM: Vite's client build selects the SDK browser entry. Import the emitted module, not its source.
 const bundle = await build({
   root,
   configFile: false,
   logLevel: 'silent',
+  plugins: [{
+    name: 'pixelpay-browser-fixtures',
+    resolveId(id) { return id === entry ? '\0' + entry : null; },
+    load(id) {
+      if (id !== '\0' + entry) return null;
+      return `export * from ${JSON.stringify(delegatedEntry)}; export * from ${JSON.stringify(publicEntry)};`;
+    },
+  }],
   build: {
     write: false,
     rollupOptions: {
@@ -250,20 +260,33 @@ async function verifyNativeDirectApi(status) {
   const fixture = directFixture();
   const operations = [];
   let challengeWindow;
+  // AM: The public checkout hosts the native frame inside its own dialog.
+  const host = window.document.createElement('section');
+  host.setAttribute('without-sdk-modal', '');
+  const frameContainer = window.document.createElement('div');
+  frameContainer.className = 'pixelpay-modal-container';
+  host.appendChild(frameContainer);
+  window.document.body.appendChild(host);
   try {
-    const result = adapter.runDelegatedPixelPay({ handoff: directHandoff(), transport: async (operation, data) => {
-      operations.push(operation);
-      if (operation === 'lookup') {
-        assert.equal(data.reference, profile.SessionId);
-        return { ...directLookupResponse, status };
-      }
-      if (operation === 'retry') {
-        assert.deepEqual(data, {});
-        return { status: 200, success: true, data: {} };
-      }
-      if (operation === 'status') return pending;
-      throw new Error('Unexpected Direct API operation');
-    } });
+    const token = 'synthetic-operation-token';
+    const run = await adapter.preparePublicPixelPay3ds();
+    const result = adapter.completePublicPixelPay3ds({ public_3ds_handoff: { ...directHandoff(), token } }, {
+      run,
+      advance: async ({ token: currentToken, operation, data }) => {
+        assert.equal(currentToken, token);
+        operations.push(operation);
+        if (operation === 'lookup') {
+          assert.equal(data.reference, profile.SessionId);
+          return { ...directLookupResponse, status };
+        }
+        if (operation === 'retry') {
+          assert.deepEqual(data, {});
+          return { status: 200, success: true, data: {} };
+        }
+        throw new Error('Unexpected Direct API operation');
+      },
+      readLocalStatus: () => { operations.push('status'); return pending; },
+    });
     await fixture.collection;
     const collectWindow = collectionFrame().contentWindow;
     fixture.emit(CAS, window, profile);
@@ -272,6 +295,8 @@ async function verifyNativeDirectApi(status) {
     fixture.emit(CAS, collectWindow, profile);
     fixture.emit(CAS, collectWindow, profile);
     await fixture.challenge;
+    assert.equal(stepUpFrame().parentNode, frameContainer);
+    assert.equal(stepUpFrame().title, 'Autenticación bancaria');
     challengeWindow = stepUpFrame().contentWindow;
     fixture.emit(CAS, collectWindow, profile);
     fixture.emit(ENDPOINT, collectWindow, callback);
@@ -292,6 +317,7 @@ async function verifyNativeDirectApi(status) {
     fixture.emit(ENDPOINT, challengeWindow, callback);
     assert.deepEqual(operations, ['lookup', 'retry', 'status']);
   } finally {
+    host.remove();
     fixture.close();
   }
 }
