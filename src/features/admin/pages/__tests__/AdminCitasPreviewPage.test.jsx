@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import AdminCitasPreviewPage from '../AdminCitasPreviewPage.jsx';
@@ -119,9 +119,14 @@ afterEach(() => {
 });
 
 async function renderReadyPreview() {
-  render(<AdminCitasPreviewPage />);
+  // AM: Settle context and its initial branch-reset effects before choosing a branch.
+  await act(async () => { render(<AdminCitasPreviewPage />); });
   await screen.findByRole('option', { name: 'Sucursal Centro' });
-  fireEvent.change(screen.getByLabelText(/Sucursal/i), { target: { value: BRANCH_A } });
+  await act(async () => {
+    fireEvent.change(screen.getByLabelText(/Sucursal/i), { target: { value: BRANCH_A } });
+  });
+  expect(screen.getByLabelText(/Sucursal/i)).toHaveValue(BRANCH_A);
+  expect(apiMock.listPublicAgendaBarberos).toHaveBeenCalledWith({ id_sucursal: BRANCH_A });
   expect(await screen.findByRole('button', { name: /Seleccionar a Ada/i })).toBeInTheDocument();
 }
 
