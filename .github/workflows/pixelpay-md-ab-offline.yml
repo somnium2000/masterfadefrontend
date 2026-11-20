@@ -1,0 +1,27 @@
+name: PixelPay SDK StepUp MD A/B (offline)
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  md-ab-chromium:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install disposable Chromium fixture
+        run: |
+          npm install --prefix "$RUNNER_TEMP/mf-md-browser" --no-package-lock --no-audit --no-fund --ignore-scripts playwright@1.64.1
+          node "$RUNNER_TEMP/mf-md-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Native PixelPay SDK 2.5.8 MD absent/present, fully intercepted
+        env:
+          MASTERFADE_PLAYWRIGHT_MODULE: ${{ runner.temp }}/mf-md-browser/node_modules/playwright
+        run: node scripts/pixelpay-native-stepup-browser.mjs
+      - run: git diff --check
