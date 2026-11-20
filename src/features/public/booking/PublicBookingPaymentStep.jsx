@@ -731,7 +731,7 @@ export default function PublicBookingPaymentStep() {
         ) : null}
         {qaDelegated && paymentResult?.qa_3ds_challenge_active === true ? <QaPixelPayChallengeNotice /> : null}
         {paymentUsesPublic3ds || public3dsActive ? (
-          <PublicPixelPayChallenge active={public3dsActive} onCancel={cancelPublic3ds} />
+          <PublicPixelPayChallenge active={public3dsActive} onCancel={cancelPublic3ds} overlay />
         ) : null}
         {membershipUxMessage ? (
           <div className="public-booking-payment-note mt-3">
