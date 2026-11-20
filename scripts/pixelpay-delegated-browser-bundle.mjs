@@ -285,6 +285,18 @@ async function verifyDirectCallbackIdentifier(sdk, Manager) {
   }
 }
 
+function stepUpTrace(enabled) {
+  const name = 'masterfade:pixelpay-stepup';
+  const records = [];
+  const record = event => records.push(event.detail);
+  window.addEventListener(name, record);
+  if (enabled) window.sessionStorage.setItem('mf_pixelpay_stepup_trace', '1');
+  return { records, phase: phase => records.filter(record => record.phase === phase), close() {
+    window.removeEventListener(name, record);
+    window.sessionStorage.removeItem('mf_pixelpay_stepup_trace');
+  } };
+}
+
 async function verifyNativeDirectApi(scenario, { status = 202, live = false, payment, callbackError, invalidStepUp } = {}) {
   const adapter = await import(`${bundleUrl}#direct-${scenario}`);
   const fixture = directFixture();
@@ -296,6 +308,7 @@ async function verifyNativeDirectApi(scenario, { status = 202, live = false, pay
   suppliedHandoff.continuation.collection_url = COLLECTION_URL.replace(CAS, cardinalOrigin);
   const stepUpUrl = invalidStepUp ?? STEP_UP_URL.replace(CAS, cardinalOrigin);
   if (live) suppliedHandoff.sdk = { endpoint: 'https://MERCHANT.offline.invalid:443', environment: 'live' };
+  const trace = stepUpTrace(live);
   let challengeWindow;
   // AM: The public checkout hosts the native frame inside its own dialog.
   const host = window.document.createElement('section');
@@ -344,6 +357,8 @@ async function verifyNativeDirectApi(scenario, { status = 202, live = false, pay
     assert.equal(stepUpFrame().parentNode, frameContainer);
     assert.equal(stepUpFrame().title, 'Autenticación bancaria');
     challengeWindow = stepUpFrame().contentWindow;
+    stepUpFrame().dispatchEvent(new window.Event('load'));
+    stepUpFrame().dispatchEvent(new window.Event('error'));
     fixture.emit(cardinalOrigin, collectWindow, profile);
     fixture.emit(endpoint, collectWindow, callback);
     fixture.emit(live ? CAS : LIVE_CARDINAL, collectWindow, profile);
@@ -354,7 +369,17 @@ async function verifyNativeDirectApi(scenario, { status = 202, live = false, pay
       { id: 'cardinal_collection_form', action: suppliedHandoff.continuation.collection_url, fields: [['JWT', directHandoff().continuation.payload]] },
       { id: 'step-up-form', action: stepUpUrl, fields: [['JWT', directLookupResponse.data.continue_payload]] },
     ]);
-    const terminalCallback = callbackError || callback;
+    if (live) {
+      assert.equal(trace.phase('iframe_created').length, 1);
+      assert.equal(trace.phase('form_submit_returned').length, 1);
+      assert.ok(trace.phase('iframe_load').length);
+      assert.equal(trace.phase('iframe_error').length, 1);
+      const observations = trace.phase('callback_observed');
+      assert.ok(observations.some(event => event.originMatches && !event.frameMatches));
+      assert.ok(observations.some(event => !event.originMatches && event.frameMatches));
+      assert.equal(trace.phase('retry_armed').length, 0);
+    }
+    const terminalCallback = callbackError || { ...callback, payload: 'never-trace-JWT.opaque.signature' };
     fixture.emit(endpoint, challengeWindow, terminalCallback);
     fixture.emit(endpoint, challengeWindow, terminalCallback);
     const expectedOperations = callbackError ? ['lookup']
@@ -367,12 +392,26 @@ async function verifyNativeDirectApi(scenario, { status = 202, live = false, pay
         public_3ds_browser_diagnostic: { code: 'PIXELPAY_3DS_CHALLENGE_INTERRUPTED' } });
     } else assert.equal(projection, payment ?? pending);
     assert.deepEqual(challengeStates, [true, false]);
+    if (live) {
+      assert.equal(trace.phase('callback_accepted').length, 1);
+      assert.equal(trace.phase('retry_armed').length, 1);
+      assert.equal(trace.phase('retry_transport_started').length, callbackError ? 0 : 1);
+      assert.equal(trace.phase('sdk_init_rejected').length, callbackError ? 1 : 0);
+      assert.equal(trace.phase('context_closed').length, 1);
+      const observations = trace.phase('callback_observed');
+      assert.ok(observations.some(event => event.originMatches && event.frameMatches && !event.duplicate));
+      assert.ok(observations.some(event => event.originMatches && event.frameMatches && event.duplicate));
+      assert.doesNotMatch(JSON.stringify(trace.records), /never-trace|synthetic|merchant\.offline|local-identifier/);
+      assert.ok(trace.records.every(record => Object.entries(record).every(([key, value]) =>
+        key === 'phase' ? /^[a-z_]+$/.test(value) : key === 'at' ? Number.isFinite(value) : typeof value === 'boolean')));
+    } else assert.deepEqual(trace.records, []);
     assert.equal(collectionFrame(), null);
     assert.equal(stepUpFrame(), null);
     assert.equal(window.document.getElementById('step-up-form'), null);
     fixture.emit(endpoint, challengeWindow, callback);
     assert.deepEqual(operations, expectedOperations);
   } finally {
+    trace.close();
     host.remove();
     fixture.close();
   }
@@ -430,6 +469,7 @@ async function verifyDirectCancellation(reason) {
   const lookup = Promise.withResolvers();
   const operations = [];
   const payment = directHandoff();
+  const trace = stepUpTrace(true);
   if (reason === 'expiry') payment.expiresAt = Date.now() + 1000;
   try {
     const rejected = assert.rejects(adapter.runDelegatedPixelPay({
@@ -456,10 +496,14 @@ async function verifyDirectCancellation(reason) {
     if (challengeSource) fixture.emit(ENDPOINT, challengeSource, callback);
     await tick();
     assert.deepEqual(operations, ['lookup']);
+    assert.equal(trace.phase(reason === 'expiry' ? 'context_expired' : 'context_aborted').length, 1);
+    assert.equal(trace.phase('context_closed').length, 1);
+    assert.equal(trace.phase('retry_transport_started').length, 0);
     assert.equal(fixture.forms.length, challengeSource ? 2 : 1);
     assert.equal(collectionFrame(), null);
     assert.equal(stepUpFrame(), null);
   } finally {
+    trace.close();
     fixture.close();
   }
 }

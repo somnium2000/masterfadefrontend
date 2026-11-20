@@ -140,7 +140,26 @@ function bindSongbird(manager, isClosed, stop) {
   };
 }
 
-function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin, collectionOrigin, armNativeRetry) {
+function createStepUpTrace() {
+  try {
+    if (window.sessionStorage.getItem('mf_pixelpay_stepup_trace') !== '1') return null;
+  } catch { return null; }
+
+  const counts = new Map();
+  return (phase, checks) => {
+    const count = counts.get(phase) ?? 0;
+    if (count >= 8) return;
+    counts.set(phase, count + 1);
+    const detail = Object.freeze({ phase, at: Date.now(), ...checks });
+    // AM: Observers run outside the synchronous callback validation and SDK dispatch.
+    queueMicrotask(() => {
+      try { window.dispatchEvent(new CustomEvent('masterfade:pixelpay-stepup', { detail })); }
+      catch { /* AM: Local instrumentation cannot interrupt payment. */ }
+    });
+  };
+}
+
+function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin, collectionOrigin, armNativeRetry, trace) {
   if (typeof manager.startCardinalDirectApiTransaction !== 'function' || typeof manager.submitChallengeForm !== 'function'
     || typeof manager.handleDirectApiLookup !== 'function'
     || document.getElementById('cardinal_collection_iframe') || document.getElementById('cardinal_collection_form')
@@ -151,11 +170,13 @@ function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin, collection
   const submit = manager.submitChallengeForm.bind(manager);
   const lookup = manager.handleDirectApiLookup.bind(manager);
   let challengeFrame, callbackAccepted = false, nativeSettled = false;
+  const onLoad = () => trace?.('iframe_load');
+  const onError = () => trace?.('iframe_error');
   // AM: The SDK polls collection without awaiting this callback.
   manager.handleDirectApiLookup = async data => {
     if (isClosed()) { stop(); return; }
     try { await lookup(data); }
-    catch { stop(); }
+    catch { trace?.('sdk_lookup_failed'); stop(); }
   };
   manager.startCardinalDirectApiTransaction = secureForm => {
     const collectionFrame = document.getElementById('cardinal_collection_iframe');
@@ -166,11 +187,25 @@ function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin, collection
     // AM: Native init owns the forms and listener. Restrict this instance's messages to its own frames.
     window.removeEventListener('message', nativeListener, false);
     manager.listen_direct_message = event => {
-      if (isClosed()) { stop(); return; }
+      const closed = isClosed();
+      const callback = event.data?.name === 'pixelpay_continue';
+      if (callback && trace) {
+        trace('callback_observed', {
+          closed,
+          originMatches: event.origin === callbackOrigin,
+          sourcePresent: !!event.source,
+          frameMatches: !!event.source && event.source === challengeFrame?.contentWindow,
+          duplicate: callbackAccepted,
+          hasError: !!event.data.error,
+          hasIdentifier: !!event.data.identifier,
+        });
+      }
+      if (closed) { stop(); return; }
       if (!event.source) return;
-      if (event.data?.name === 'pixelpay_continue') {
+      if (callback) {
         if (callbackAccepted || event.origin !== callbackOrigin || event.source !== challengeFrame?.contentWindow) return;
         callbackAccepted = true;
+        trace?.('callback_accepted');
         armNativeRetry();
       } else if (event.origin !== collectionOrigin || event.source !== collectionFrame?.contentWindow) return;
       return nativeListener(event);
@@ -181,19 +216,35 @@ function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin, collection
   manager.submitChallengeForm = (...args) => {
     if (isClosed()) { stop(); return; }
     if (challengeFrame) return;
+    trace?.('stepup_started');
+    let returned = false;
     try {
       submit(...args);
+      returned = true;
     } catch {
+      trace?.('sdk_stepup_failed');
       stop();
     } finally {
       challengeFrame = document.querySelector(STEP_UP_FRAME);
       challengeFrame?.setAttribute('title', 'Autenticación bancaria');
+      if (trace) {
+        trace(challengeFrame ? 'iframe_created' : 'iframe_missing');
+        challengeFrame?.addEventListener('load', onLoad);
+        challengeFrame?.addEventListener('error', onError);
+        // AM: SDK 2.5.8 creates the form immediately before its synchronous submit().
+        const form = document.getElementById('step-up-form');
+        if (returned) trace(form ? 'form_submit_returned' : 'form_missing');
+      }
     }
     if (!challengeFrame) stop();
   };
   return () => {
     // AM: Settle native init so its finally removes the listener and forms on abort/expiry too.
     if (!nativeSettled) manager.direct_api_reject?.(new Error('PROTOTYPE_UNCERTAIN'));
+    if (trace) {
+      challengeFrame?.removeEventListener('load', onLoad);
+      challengeFrame?.removeEventListener('error', onError);
+    }
     challengeFrame?.remove();
   };
 }
@@ -203,9 +254,23 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
   if (active || signal?.aborted) throw new Error('PROTOTYPE_BUSY');
   active = true;
   const transportAbort = new AbortController();
+  const trace = suppliedHandoff?.continuation_mode === 'direct_api' ? createStepUpTrace() : null;
   let Manager, timer, abort, stop, firstLookup, closeDirectApi, closeSongbird, nativeStarted = false, halted = false, finished = false;
   let nativeRetryAuthorized = false;
-  const isClosed = () => halted || signal?.aborted || (suppliedHandoff && now() >= suppliedHandoff.expiresAt);
+  let expired = false;
+  const markExpired = () => {
+    if (expired) return;
+    expired = true;
+    trace?.('context_expired');
+  };
+  const isClosed = () => {
+    if (halted || signal?.aborted) return true;
+    if (suppliedHandoff && now() >= suppliedHandoff.expiresAt) {
+      markExpired();
+      return true;
+    }
+    return false;
+  };
   const stopped = new Promise((_, reject) => {
     stop = () => {
       if (halted) return;
@@ -221,6 +286,7 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
     try {
       ({ sdk, Manager } = await loadSdk());
     } catch {
+      trace?.('sdk_load_failed');
       throw browserFailure('PIXELPAY_3DS_SDK_LOAD_FAILED');
     }
     if (isClosed()) throw new Error('PROTOTYPE_UNCERTAIN');
@@ -248,9 +314,10 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
       if (typeof manager.validationLookupResponse !== 'function') throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
       if (direct) closeDirectApi = bindDirectApiFrames(
         manager, isClosed, stop, endpointOrigin, new URL(handoff.continuation.collection_url).origin,
-        () => { nativeRetryAuthorized = true; });
+        () => { nativeRetryAuthorized = true; trace?.('retry_armed'); }, trace);
       else if (suppliedHandoff) closeSongbird = bindSongbird(manager, isClosed, stop);
     } catch {
+      trace?.('sdk_setup_failed');
       throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
     }
     // AM: Native setup assigns identifier before validation. Preserve it when settling a skipped lookup.
@@ -270,6 +337,7 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
       nativeTransportStarted = true;
       try {
         if (isClosed()) throw new Error('PROTOTYPE_UNCERTAIN');
+        if (operation === 'retry') trace?.('retry_transport_started');
         const result = await transport(operation, data, transportAbort.signal);
         if (isClosed()) throw new Error('PROTOTYPE_UNCERTAIN');
         if (suppliedHandoff && operation === 'lookup' && result.status === 200
@@ -291,6 +359,7 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
           : result.status === 202 ? sdk.Responses.PayloadResponse : sdk.Responses.FailureResponse;
         return Object.assign(new Type(), result);
       } catch {
+        if (operation === 'retry' && !isClosed()) trace?.('retry_transport_failed');
         stop();
         if (operation === 'lookup') return skippedLookup;
         if (suppliedHandoff) throw new Error('PROTOTYPE_UNCERTAIN');
@@ -320,6 +389,7 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
       retryTransaction: () => {
         // A failed/cancelled challenge must never trigger the SDK's second Sale.
         if (suppliedHandoff && !nativeRetryAuthorized) {
+          trace?.('retry_denied');
           stop();
           return Promise.reject(new Error('PIXELPAY_3DS_RETRY_NOT_AUTHORIZED'));
         }
@@ -330,6 +400,7 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
     try {
       await manager.init(handoff.continuation.payload, handoff.continuation.collection_url);
     } catch (error) {
+      if (!halted) trace?.('sdk_init_rejected');
       if (nativeTransportStarted) throw error;
       throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
     }
@@ -338,9 +409,12 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
     return await transport('status', {}, transportAbort.signal);
   })();
   try {
-    abort = stop;
+    abort = () => { trace?.('context_aborted'); stop(); };
     signal?.addEventListener('abort', abort, { once: true });
-    timer = setTimeout(stop, suppliedHandoff ? Math.max(0, suppliedHandoff.expiresAt - now()) : timeoutMs);
+    timer = setTimeout(() => {
+      if (suppliedHandoff) markExpired();
+      stop();
+    }, suppliedHandoff ? Math.max(0, suppliedHandoff.expiresAt - now()) : timeoutMs);
     const result = await Promise.race([task, stopped]);
     finished = true;
     return result;
@@ -360,5 +434,6 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
     }
     // AM: An uncertain native async handler has no abort API; require reload before another session on this page.
     if (finished || !nativeStarted) active = false;
+    trace?.('context_closed', { finished });
   }
 }
