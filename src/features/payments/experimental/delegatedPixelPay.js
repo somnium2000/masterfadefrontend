@@ -63,7 +63,7 @@ export function validateDirectHandoff(handoff) {
   if (code) throw browserFailure(code);
 }
 
-function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin) {
+function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin, armNativeRetry) {
   if (typeof manager.startCardinalDirectApiTransaction !== 'function' || typeof manager.submitChallengeForm !== 'function'
     || typeof manager.handleDirectApiLookup !== 'function'
     || document.getElementById('cardinal_collection_iframe') || document.getElementById('cardinal_collection_form')
@@ -94,6 +94,7 @@ function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin) {
       if (event.data?.name === 'pixelpay_continue') {
         if (callbackAccepted || event.origin !== callbackOrigin || event.source !== challengeFrame?.contentWindow) return;
         callbackAccepted = true;
+        armNativeRetry();
       } else if (event.origin !== CAS_ORIGIN || event.source !== collectionFrame?.contentWindow) return;
       return nativeListener(event);
     };
@@ -125,6 +126,7 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
   active = true;
   const transportAbort = new AbortController();
   let Manager, timer, abort, stop, firstLookup, closeDirectApi, nativeStarted = false, halted = false, finished = false;
+  let nativeRetryAuthorized = false;
   const isClosed = () => halted || signal?.aborted || (suppliedHandoff && now() >= suppliedHandoff.expiresAt);
   const stopped = new Promise((_, reject) => {
     stop = () => {
@@ -165,7 +167,8 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
       manager = new Manager(settings, clientRequest);
       if (typeof manager.validationLookupResponse !== 'function') throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
       if (suppliedHandoff) closeDirectApi = bindDirectApiFrames(
-        manager, isClosed, stop, new URL(handoff.sdk.endpoint).origin);
+        manager, isClosed, stop, new URL(handoff.sdk.endpoint).origin,
+        () => { nativeRetryAuthorized = true; });
     } catch {
       throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
     }
@@ -185,6 +188,10 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
         if (isClosed()) throw new Error('PROTOTYPE_UNCERTAIN');
         const result = await transport(operation, data, transportAbort.signal);
         if (isClosed()) throw new Error('PROTOTYPE_UNCERTAIN');
+        if (suppliedHandoff && operation === 'lookup' && result.status === 200
+          && result.success === true && result.action === null && result.data?.identifier) {
+          nativeRetryAuthorized = true; // Frictionless native 3DS; no challenge required.
+        }
         if (suppliedHandoff && operation === 'lookup' && result.action === 'continue'
           && (![200, 202].includes(result.status) || result.success !== true || !isCasUrl(result.data?.continue_url, STEP_UP_PATHS)
             || typeof result.data?.continue_payload !== 'string' || !result.data.continue_payload)) {
@@ -215,7 +222,14 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
         return invoke('lookup', data);
       },
       authenticationContinue: request => invoke('continue', { payload: request.payload }),
-      retryTransaction: () => invoke('retry', {}),
+      retryTransaction: () => {
+        // A failed/cancelled challenge must never trigger the SDK's second Sale.
+        if (suppliedHandoff && !nativeRetryAuthorized) {
+          stop();
+          return Promise.reject(new Error('PIXELPAY_3DS_RETRY_NOT_AUTHORIZED'));
+        }
+        return invoke('retry', {});
+      },
     };
     nativeStarted = true;
     try {
