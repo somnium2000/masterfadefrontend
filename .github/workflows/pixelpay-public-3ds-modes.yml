@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: somnium2000/masterfadebackend
-          ref: 7e9e171726a4ed92ab5504fef623837dea0124ba
+          ref: 004cfe6da00507a4f302d1aeba960ae428c42d66
           path: backend
           persist-credentials: false
       - uses: actions/setup-node@v4
