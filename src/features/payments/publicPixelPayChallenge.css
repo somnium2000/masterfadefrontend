@@ -1,0 +1,44 @@
+.mf-stepup-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  box-sizing: border-box;
+  inline-size: max-content;
+  max-inline-size: calc(100% - 1rem);
+  max-block-size: calc(100dvh - 1rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background: #fff;
+  color: #101828;
+}
+
+.mf-stepup-dialog::backdrop {
+  background: rgb(0 0 0 / 65%);
+}
+
+html:has(.mf-stepup-dialog:modal) {
+  overflow: hidden;
+}
+
+.mf-stepup-dialog h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.mf-stepup-dialog p {
+  margin: 0.25rem 0 0.75rem;
+}
+
+.mf-stepup-dialog iframe {
+  display: block;
+  margin-inline: auto;
+  max-inline-size: 100%;
+}
+
+.mf-stepup-dialog button {
+  margin-block-start: 0.75rem;
+}

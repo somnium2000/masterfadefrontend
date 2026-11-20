@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   frontend:
-    if: startsWith(github.head_ref, 'release/prod-') || github.head_ref == 'release/reconcile-main-dev-20261119' || github.head_ref == 'codex/pixelpay-public-3ds-integrated-20261120' || github.head_ref == 'codex/pixelpay-cardinal-origins-20261120' || github.head_ref == 'codex/pixelpay-stepup-diagnostics-20261120'
+    if: startsWith(github.head_ref, 'release/prod-') || github.head_ref == 'release/reconcile-main-dev-20261119' || github.head_ref == 'codex/pixelpay-public-3ds-integrated-20261120' || github.head_ref == 'codex/pixelpay-cardinal-origins-20261120' || github.head_ref == 'codex/pixelpay-stepup-diagnostics-20261120' || github.head_ref == 'codex/pixelpay-stepup-viewport'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -57,6 +57,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/mf-legal-browser" --no-package-lock --no-audit --no-fund --ignore-scripts playwright@1.64.1
           node "$RUNNER_TEMP/mf-legal-browser/node_modules/playwright/cli.js" install --with-deps chromium
           export MASTERFADE_PLAYWRIGHT_MODULE="$RUNNER_TEMP/mf-legal-browser/node_modules/playwright"
+          node scripts/pixelpay-stepup-viewport.mjs
           npm run preview -- --host 127.0.0.1 --port 4211 --strictPort > "$RUNNER_TEMP/mf-legal-preview.log" 2>&1 &
           preview_pid=$!
           trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
