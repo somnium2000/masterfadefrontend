@@ -3591,7 +3591,8 @@ const agendaAutoLoadKeyRef = useRef('');
       // PixelPay #9834: an unfinished 3DS HTTP 202 has no consultable
       // provider Status. Explicitly prefer the local intent state.
       const threeDsLocalOnly = [paymentIntent, paymentResult, storedContext?.paymentIntent].some(
-        state => state?.qa_3ds_delegated === true || state?.code === 'PIXELPAY_3DS_AUTH_PENDING'
+        state => state?.qa_3ds_delegated === true || state?.live_3ds_delegated === true
+          || state?.code === 'PIXELPAY_3DS_AUTH_PENDING'
       );
       const payload = options?.queryPixelPayProvider === true && !threeDsLocalOnly && (delegatedRecovery
         || (!diagnosticPaymentContext && storedContext?.paymentIntent?.qa_3ds_diagnostic !== true))
@@ -3831,9 +3832,15 @@ const agendaAutoLoadKeyRef = useRef('');
       && payment.id_intent === paymentExecutionContext.intentId
       && payment.id_grupo_cita === paymentExecutionContext.groupId),
   );
+  const paymentUsesLiveDelegated = canUseClienteHold
+    && String(import.meta.env.VITE_PIXELPAY_ENV || '').trim().toLowerCase() === 'live'
+    && [paymentResult, paymentIntent].some(payment => payment?.live_3ds_delegated === true
+      && payment.id_intent === paymentExecutionContext.intentId
+      && payment.id_grupo_cita === paymentExecutionContext.groupId);
+  const paymentUsesDelegated = paymentUsesQaDelegated || paymentUsesLiveDelegated;
   const paymentCanExecuteSale = Boolean(
-    (paymentUsesQaDelegated || isPixelPaySaleAuthorized(pixelpaySale))
-    && (!diagnosticPaymentContext || paymentUsesQaDelegated)
+    (paymentUsesDelegated || isPixelPaySaleAuthorized(pixelpaySale))
+    && (!diagnosticPaymentContext || paymentUsesDelegated)
     && !paymentRestoring
     && !paymentResult?.booking_confirmed
     && !hasUnresolvedPaymentEvidence(paymentResult)
@@ -3856,7 +3863,7 @@ const agendaAutoLoadKeyRef = useRef('');
     if (!groupId || !intentId || !isValidEmail(titularEmail)) return null;
     try {
       const result = await salePixelPayOnce({ groupId, intentId, titularEmail, card, billing,
-        ...(paymentUsesQaDelegated ? { delegated: true } : {}) });
+        ...(paymentUsesDelegated ? { delegated: true, liveDelegated: paymentUsesLiveDelegated } : {}) });
       if (result?.booking_confirmed) {
         await refreshPaymentStatus();
       }
@@ -3882,6 +3889,8 @@ const agendaAutoLoadKeyRef = useRef('');
     notifications,
     paymentCanExecuteSale,
     paymentUsesQaDelegated,
+    paymentUsesLiveDelegated,
+    paymentUsesDelegated,
     paymentExecutionContext,
     refreshPaymentStatus,
     salePixelPayOnce,
