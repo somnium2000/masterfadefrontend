@@ -154,6 +154,12 @@ async function verify(scenario) {
     const blocked = scenario === 'collection-untrusted';
     const continueFailed = scenario === 'songbird-continue-false';
     const approved = !blocked && !continueFailed && scenario !== 'bad-hash';
+    const start = state.phases.find(row => row.phase === 'start_result');
+    assert.equal(start?.state, blocked ? 'unsupported' : 'challenge');
+    assert.equal(start?.continuation_diagnostic?.code, blocked ? 'PIXELPAY_3DS_COLLECTION_URL_INVALID'
+      : songbird ? 'PIXELPAY_3DS_SONGBIRD_READY' : 'PIXELPAY_3DS_COLLECTION_READY');
+    assert.equal(start.continuation_diagnostic.sdk_data.collection_url.type, songbird ? 'absent' : 'string');
+    if (continueFailed) assert.deepEqual(result.public_3ds_browser_diagnostic, { code: 'PIXELPAY_3DS_CHALLENGE_INTERRUPTED' });
     assert.equal(counts.saleRequests, 1);
     assert.equal(counts.init, blocked ? 0 : 1, JSON.stringify({ scenario, counts, result, state }));
     assert.equal(counts.setup, songbird ? 1 : 0);

@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: somnium2000/masterfadebackend
-          ref: 38dc6269d1301af3d2a3c9faaac9f9e6149ca53e
+          ref: 1cde82e8a9cb720c6c23b397cc3d55031b9a4f92
           path: backend
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -29,6 +29,8 @@ jobs:
         working-directory: frontend
         run: >-
           npx vitest run src/features/payments/__tests__/publicPixelPayModes.test.jsx
+          src/features/payments/__tests__/publicPixelPay3dsDiagnostics.test.js
+          src/features/payments/__tests__/publicPixelPayUrlContract.test.jsx
           src/features/payments/__tests__/delegatedPixelPay.test.jsx
           src/features/payments/__tests__/songbirdSession.test.jsx
           src/features/public/booking/__tests__/useBookingPayment.pixelpay.test.jsx
