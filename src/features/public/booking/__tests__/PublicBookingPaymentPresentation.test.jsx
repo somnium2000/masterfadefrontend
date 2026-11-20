@@ -239,7 +239,7 @@ it('monta el desafío público y permite cancelarlo manteniendo bloqueado el pag
     paymentResult: { public_3ds_pending: true, pending_confirmation: true },
     cancelPublic3ds: vi.fn(),
   });
-  const region = screen.getByRole('region', { name: 'Autenticación 3DS' });
+  const region = screen.getByRole('dialog', { name: 'Autenticación 3DS' });
   expect(region.querySelector('.pixelpay-modal-container')).toBeTruthy();
   fireEvent.click(within(region).getByRole('button', { name: 'Cancelar autenticación' }));
   expect(context.cancelPublic3ds).toHaveBeenCalledOnce();

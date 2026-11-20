@@ -90,7 +90,7 @@ async function verify(scenario) {
   };
   window.XMLHttpRequest.prototype.send = block;
   document.cookie = 'mf_csrf=synthetic-csrf; path=/';
-  const active = () => document.querySelector('[aria-label="Autenticación 3DS"]')?.hidden === false;
+  const active = () => document.querySelector('dialog[without-sdk-modal]')?.open === true;
   const handlers = new Map();
   window.Cardinal = {
     configure() {}, off: name => handlers.delete(name), on: (name, fn) => handlers.set(name, fn),
