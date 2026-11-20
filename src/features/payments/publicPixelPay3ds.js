@@ -6,7 +6,7 @@ export async function preparePublicPixelPay3ds() {
   try {
     const { isDelegatedPixelPayBusy, loadDelegatedSdk, runDelegatedPixelPay } = await import('./experimental/delegatedPixelPay.js');
     const nativeSdk = await loadDelegatedSdk();
-    if (isDelegatedPixelPayBusy() || ['startCardinalDirectApiTransaction', 'submitChallengeForm', 'handleDirectApiLookup']
+    if (isDelegatedPixelPayBusy() || ['startCardinalTransaction', 'startCardinalDirectApiTransaction', 'submitChallengeForm', 'handleDirectApiLookup']
       .some(method => typeof nativeSdk.Manager.prototype[method] !== 'function')) throw new Error();
     new nativeSdk.sdk.Requests.SaleTransaction().withAuthenticationRequest();
     return options => runDelegatedPixelPay({ ...options, loadSdk: () => nativeSdk });
