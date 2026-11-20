@@ -3832,7 +3832,7 @@ const agendaAutoLoadKeyRef = useRef('');
       && payment.id_intent === paymentExecutionContext.intentId
       && payment.id_grupo_cita === paymentExecutionContext.groupId),
   );
-  const paymentUsesLiveDelegated = canUseClienteHold
+  const paymentUsesLiveDelegated = canUseClienteHold && pixelpaySale === true
     && String(import.meta.env.VITE_PIXELPAY_ENV || '').trim().toLowerCase() === 'live'
     && [paymentResult, paymentIntent].some(payment => payment?.live_3ds_delegated === true
       && payment.id_intent === paymentExecutionContext.intentId
