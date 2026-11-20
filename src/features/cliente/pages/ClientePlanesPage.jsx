@@ -35,6 +35,7 @@ import {
   listClientePlanConsumosPorCita,
   queryMembershipPaymentStatus,
 } from "../lib/clienteApi.js";
+import useMembership3ds from "../../plans/hooks/useMembership3ds.js";
 import PlanPurchaseFlowDialog from "../../plans/components/PlanPurchaseFlowDialog.jsx";
 import { isQaVipCommercialVideoModeEnabled } from "../../plans/lib/qaVipCommercialVideoMode.js";
 import { isQaVipPurchaseSimulationEnabled } from "../../plans/lib/qaVipPurchaseSimulation.js";
@@ -344,7 +345,7 @@ function PlanCard({
 }
 
 export default function ClientePlanesPage() {
-  const { vipPurchase: CLIENT_PLAN_PURCHASE_ENABLED } = usePrivateCommerce();
+  const { vipPurchase: CLIENT_PLAN_PURCHASE_ENABLED, pixelpayPublic3ds, pixelpayPublic3dsRequired } = usePrivateCommerce();
   const { user, clienteId } = useAuth();
   const notifications = useNotifications();
   const { error: notifyError, success: notifySuccess, warning: notifyWarning } = notifications;
@@ -395,6 +396,8 @@ export default function ClientePlanesPage() {
   const consumptionPage = consumptionSnapshot?.identity === purchaseIdentity ? consumptionSnapshot : null;
   const showMembershipSimulator = isQaVipPurchaseSimulationEnabled();
   const showVipCommercialVideo = showMembershipSimulator && isQaVipCommercialVideoModeEnabled();
+  const membership3ds = useMembership3ds(purchaseIdentity);
+  const public3dsUnavailable = !showMembershipSimulator && pixelpayPublic3dsRequired === true && pixelpayPublic3ds !== true;
 
   const fetchPlans = useCallback(async (selectedBranchId) => {
     const request = ++catalogRequestRef.current;
@@ -593,7 +596,7 @@ export default function ClientePlanesPage() {
   }
 
   async function handleContinueToPayment() {
-    if (!CLIENT_PLAN_PURCHASE_ENABLED) {
+    if (!CLIENT_PLAN_PURCHASE_ENABLED || public3dsUnavailable) {
       notifyPlanPurchaseLocked();
       return;
     }
@@ -624,7 +627,7 @@ export default function ClientePlanesPage() {
   }
 
   async function handleConfirmPayment(paymentDetails = {}) {
-    if (!CLIENT_PLAN_PURCHASE_ENABLED) {
+    if (!CLIENT_PLAN_PURCHASE_ENABLED || public3dsUnavailable) {
       notifyPlanPurchaseLocked();
       return;
     }
@@ -635,15 +638,19 @@ export default function ClientePlanesPage() {
       return;
     }
 
+    const isCurrent = () => readIdentityRef.current === purchaseIdentity;
+
     setPurchaseLoading(true);
     setPurchaseErrorMessage("");
     try {
       const paymentResult = await confirmMembershipPayment(paymentIntentId, {
         ...paymentDetails,
+        ...(pixelpayPublic3ds === true && !showMembershipSimulator ? { public3ds: true, ...membership3ds.begin() } : {}),
         monto_prueba_hnl: showMembershipSimulator
           ? (showVipCommercialVideo ? APPROVED_MEMBERSHIP_SIMULATION_AMOUNT : selectedSimulationAmount)
           : undefined,
       });
+      if (!isCurrent()) return;
       if (paymentResult?.pending_confirmation) {
         setPurchasePendingConfirmation(true);
         setPurchaseErrorMessage(PIXELPAY_PENDING_MESSAGE);
@@ -661,15 +668,16 @@ export default function ClientePlanesPage() {
         fetchPlans(branchId),
       ]);
     } catch (error) {
+      if (!isCurrent()) return;
       if (isPixelPayUncertainError(error)) {
         setPurchasePendingConfirmation(true);
         setPurchaseErrorMessage(getPixelPayCustomerMessage(error));
         // AM: El polling existente consulta el estado persistido sin solapar otra solicitud.
         return;
       }
-      setPurchaseErrorMessage(getPixelPayCustomerMessage(error));
+      setPurchaseErrorMessage(error?.code === 'PIXELPAY_3DS_SDK_LOAD_FAILED' ? error.message : getPixelPayCustomerMessage(error));
     } finally {
-      setPurchaseLoading(false);
+      if (isCurrent()) setPurchaseLoading(false);
     }
   }
 
@@ -1114,6 +1122,10 @@ export default function ClientePlanesPage() {
         errorMessage={purchaseErrorMessage}
         disableClose={purchaseLoading || purchasePendingConfirmation}
         pendingConfirmation={purchasePendingConfirmation}
+        public3ds={pixelpayPublic3ds === true}
+        public3dsUnavailable={public3dsUnavailable}
+        authenticating={membership3ds.active}
+        onCancelAuthentication={membership3ds.cancel}
         paymentConfirmation={purchaseConfirmation}
         simulatorMode={showMembershipSimulator}
         videoDemoMode={showVipCommercialVideo}

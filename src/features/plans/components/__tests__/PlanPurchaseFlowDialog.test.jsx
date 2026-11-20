@@ -164,3 +164,29 @@ describe("formulario de pago VIP", () => {
     releasePayment();
   });
 });
+
+
+it('VIP aloja el marco 3DS nativo dentro del diálogo y cancela solo la autenticación', () => {
+  const onCancelAuthentication = vi.fn();
+  const onConfirmPayment = vi.fn();
+  render(<PlanPurchaseFlowDialog open step="payment" orderSummary={orderSummary} public3ds authenticating
+    loading disableClose onCancelAuthentication={onCancelAuthentication} onConfirmPayment={onConfirmPayment} />);
+  const dialog = screen.getByRole('dialog');
+  const host = screen.getByRole('region', { name: 'Autenticación 3DS' });
+  expect(dialog.contains(host)).toBe(true);
+  expect(host.querySelector('.pixelpay-modal-container')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar autenticación' }));
+  expect(onCancelAuthentication).toHaveBeenCalledOnce();
+  expect(onConfirmPayment).not.toHaveBeenCalled();
+});
+
+it('VIP sin autenticación autorizada no puede comenzar el pago', () => {
+  const onContinueToPayment = vi.fn();
+  render(<PlanPurchaseFlowDialog open step="summary" orderSummary={orderSummary}
+    public3dsUnavailable onContinueToPayment={onContinueToPayment} />);
+  expect(screen.getByRole('alert').textContent).toMatch(/autenticación del pago no está disponible/);
+  const continueButton = screen.getByRole('button', { name: /continuar.*pag/i });
+  expect(continueButton.disabled).toBe(true);
+  fireEvent.click(continueButton);
+  expect(onContinueToPayment).not.toHaveBeenCalled();
+});

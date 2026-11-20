@@ -160,3 +160,20 @@ test.each(['allowed','denied','error'])('focus revalidation never reopens the re
   expect(view.result.current.checking).toBe(false);
   expect(view.result.current.pixelpaySongbirdBridge).toBe(false);
 });
+
+
+test('public 3DS grant follows the authenticated identity and keeps checkout closed during refresh', async () => {
+  login();
+  state.get.mockResolvedValue({ data: { booking: true, vipPurchase: true, pixelpayPublic3dsRequired: true, pixelpayPublic3ds: true } });
+  const view = renderHook(usePrivateCommerce);
+  await waitFor(() => expect(view.result.current.pixelpayPublic3ds).toBe(true));
+  let finish;
+  state.get.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  await act(async () => window.dispatchEvent(new Event('focus')));
+  expect(view.result.current).toMatchObject({ pixelpayPublic3dsRequired: true, pixelpayPublic3ds: false });
+  await act(async () => finish({ data: { booking: true, vipPurchase: true, pixelpayPublic3dsRequired: true, pixelpayPublic3ds: false } }));
+  expect(view.result.current).toMatchObject({ pixelpayPublic3dsRequired: true, pixelpayPublic3ds: false });
+  state.auth = { isAuthenticated: false };
+  view.rerender();
+  expect(view.result.current).not.toHaveProperty('pixelpayPublic3ds');
+});

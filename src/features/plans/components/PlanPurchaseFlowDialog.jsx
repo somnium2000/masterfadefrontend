@@ -1,3 +1,5 @@
+import PublicPixelPayChallenge from '../../payments/PublicPixelPayChallenge.jsx';
+import { PUBLIC_3DS_UNAVAILABLE } from '../../payments/publicPixelPay3ds.js';
 import { useRef, useState } from "react";
 import { CreditCard, Loader2, LockKeyhole } from "lucide-react";
 import { useConfirmationSound } from "../../../components/feedback/ConfirmationCard.jsx";
@@ -107,6 +109,10 @@ export default function PlanPurchaseFlowDialog({
   errorMessage = "",
   disableClose = false,
   pendingConfirmation = false,
+  public3ds = false,
+  public3dsUnavailable = false,
+  authenticating = false,
+  onCancelAuthentication,
   paymentIntent = null,
   paymentConfirmation = null,
   simulatorMode = false,
@@ -139,6 +145,7 @@ export default function PlanPurchaseFlowDialog({
   const onCheckDrawn = useConfirmationSound(confirmationVisible, operationId);
   const displayStep = step === 'success' && !confirmationVisible ? 'payment' : step;
   const safeErrorMessages = ['PIXELPAY_PAYMENT_DECLINED', 'PIXELPAY_PAYMENT_DATA_INVALID', 'PIXELPAY_PRECONDITION_FAILED', 'PIXELPAY_PAYMENT_PROCESSING_FAILED'].map(code => getPixelPayCustomerMessage({ code }));
+  safeErrorMessages.push(PUBLIC_3DS_UNAVAILABLE);
   const safeErrorDescription = safeErrorMessages.includes(errorMessage) ? errorMessage : getPixelPayCustomerMessage({ code: 'PIXELPAY_PAYMENT_PROCESSING_FAILED' });
 
   const setPaymentField = (field) => (event) => {
@@ -182,7 +189,7 @@ export default function PlanPurchaseFlowDialog({
       if (!reconciling && dispatchPayment({})) clearPaymentForm();
       return;
     }
-    if (!commercialVideoMode && !pixelPayPresentation.canPay) return;
+    if (authenticating || public3dsUnavailable || (!commercialVideoMode && !pixelPayPresentation.canPay)) return;
     const validationErrors = validateVipPaymentForm(paymentForm);
     setFieldErrors(validationErrors);
     if (Object.keys(validationErrors).length || reconciling) return;
@@ -241,7 +248,7 @@ export default function PlanPurchaseFlowDialog({
         ) : (
           <>
             <DialogHeader className="pt-3">
-              <DialogTitle>{displayStep === "payment" ? (simulatorMode && !commercialVideoMode ? "Demostración QA" : commercialVideoMode || pixelPayPresentation.canPay ? "Pago seguro" : "Pago no disponible") : "Resumen de compra"}</DialogTitle>
+              <DialogTitle>{displayStep === "payment" ? (simulatorMode && !commercialVideoMode ? "Demostración QA" : commercialVideoMode || (!public3dsUnavailable && pixelPayPresentation.canPay) ? "Pago seguro" : "Pago no disponible") : "Resumen de compra"}</DialogTitle>
               <DialogDescription>
                 {displayStep === "payment"
                   ? (simulatorMode && !commercialVideoMode
@@ -254,6 +261,10 @@ export default function PlanPurchaseFlowDialog({
             </DialogHeader>
 
             <div className="space-y-4">
+              {public3dsUnavailable && !reconciling ? <p role="alert">{PUBLIC_3DS_UNAVAILABLE}</p> : null}
+              {(public3ds || authenticating) && displayStep === "payment" ? (
+                <PublicPixelPayChallenge active={authenticating} onCancel={onCancelAuthentication} />
+              ) : null}
               {simulatorMode && !commercialVideoMode ? (
                 <div role="note" className="rounded-2xl border border-amber-400/50 bg-amber-500/10 p-4 text-sm text-[var(--mf-text)]">
                   <p className="font-semibold">Demostración QA · Sin cobros reales</p>
@@ -272,7 +283,7 @@ export default function PlanPurchaseFlowDialog({
                   {simulatorMode && !commercialVideoMode ? null : <div className="mf-payment-panel text-sm">
                     <p className="flex items-center gap-2 font-semibold text-[var(--mf-text)]">
                       <LockKeyhole size={14} />
-                      {commercialVideoMode || pixelPayPresentation.canPay ? 'Pago seguro' : 'Pago no disponible'}
+                      {commercialVideoMode || (!public3dsUnavailable && pixelPayPresentation.canPay) ? 'Pago seguro' : 'Pago no disponible'}
                     </p>
                     <p className="mt-1 text-[var(--mf-text-2)]">
                       {commercialVideoMode
@@ -280,10 +291,10 @@ export default function PlanPurchaseFlowDialog({
                         : pixelPayPresentation.canPay ? "Los datos se envían a PixelPay y no se guardan en este navegador." : pixelPayPresentation.privacyNotice}
                     </p>
 
-                    <fieldset className="mf-payment-form min-w-0" disabled={!commercialVideoMode && !pixelPayPresentation.canPay}>
+                    <fieldset className="mf-payment-form min-w-0" disabled={authenticating || public3dsUnavailable || (!commercialVideoMode && !pixelPayPresentation.canPay)}>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         Número de tarjeta
-                        <input ref={cardInputRef} className="mf-input mt-1 w-full" type="text" inputMode="numeric" autoComplete={commercialVideoMode ? "off" : "cc-number"} placeholder="0000 0000 0000 0000" maxLength={23} value={paymentForm.cardNumber} onChange={setPaymentField("cardNumber")} />
+                        <input ref={cardInputRef} className="mf-input mt-1 w-full" type="text" inputMode="numeric" autoComplete={commercialVideoMode || public3ds ? "off" : "cc-number"} placeholder="0000 0000 0000 0000" maxLength={23} value={paymentForm.cardNumber} onChange={setPaymentField("cardNumber")} />
                         {fieldErrors.cardNumber ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.cardNumber}</span> : null}
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
@@ -298,7 +309,7 @@ export default function PlanPurchaseFlowDialog({
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">
                         CVV
-                        <input className="mf-input mt-1 w-full" type="password" inputMode="numeric" autoComplete={commercialVideoMode ? "off" : "cc-csc"} placeholder="CVV" maxLength={4} value={paymentForm.cvv} onChange={setPaymentField("cvv")} />
+                        <input className="mf-input mt-1 w-full" type="password" inputMode="numeric" autoComplete={commercialVideoMode || public3ds ? "off" : "cc-csc"} placeholder="CVV" maxLength={4} value={paymentForm.cvv} onChange={setPaymentField("cvv")} />
                         {fieldErrors.cvv ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.cvv}</span> : null}
                       </label>
                       <label className="text-xs text-[var(--mf-text-2)]">Dirección de facturación<input className="mf-input mt-1 w-full" autoComplete={commercialVideoMode ? "off" : "street-address"} value={paymentForm.address} onChange={setPaymentField("address")} />{fieldErrors.address ? <span className="mt-1 block text-xs text-[var(--mf-danger)]">{fieldErrors.address}</span> : null}</label>
@@ -383,11 +394,11 @@ export default function PlanPurchaseFlowDialog({
 
             {displayStep === "payment" ? (
               <DialogFooter className="mf-payment-footer">
-                <Button type="button" className="mf-payment-submit" onClick={submitPayment} disabled={loading || disableClose || reconciling || (!simulatorMode && !pixelPayPresentation.canPay)}>
+                <Button type="button" className="mf-payment-submit" onClick={submitPayment} disabled={authenticating || loading || disableClose || reconciling || public3dsUnavailable || (!simulatorMode && !pixelPayPresentation.canPay)}>
                   {loading ? <Loader2 size={15} className="animate-spin" /> : <LockKeyhole size={15} />}
                   {commercialVideoMode
                     ? (loading ? "Procesando pago..." : "Pagar")
-                    : simulatorMode ? "Ejecutar simulación" : "Pagar con PixelPay"}
+                    : simulatorMode ? "Ejecutar simulación" : public3dsUnavailable ? "Pago no disponible" : "Pagar con PixelPay"}
                 </Button>
                 <Button type="button" variant="outline" className="mf-payment-back" onClick={() => { onBackToSummary?.(); }} disabled={loading || disableClose}>Volver al resumen</Button>
                 <Button type="button" variant="ghost" onClick={onCancel} disabled={loading || disableClose}>Cancelar</Button>
@@ -395,7 +406,7 @@ export default function PlanPurchaseFlowDialog({
             ) : (
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={onCancel} disabled={loading || disableClose}>Cancelar</Button>
-                <Button ref={summaryContinueRef} type="button" onClick={onContinueToPayment} disabled={loading || disableClose}>
+                <Button ref={summaryContinueRef} type="button" onClick={onContinueToPayment} disabled={loading || disableClose || public3dsUnavailable}>
                   {loading ? <Loader2 size={15} className="animate-spin" /> : null}Continuar al pago
                 </Button>
               </DialogFooter>

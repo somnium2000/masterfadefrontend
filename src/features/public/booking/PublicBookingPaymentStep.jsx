@@ -12,6 +12,8 @@ import { CARD_BRAND_LABELS, detectCardBrand } from './utils/detectCardBrand.js';
 import { getPixelPayPresentation } from '../../payments/pixelPayPresentation.js';
 import { isPixelPaySaleAuthorized } from '../../payments/pixelPaySaleCapability.js';
 import { isDelegatedContinuationError } from '../../payments/experimental/delegatedContinuationCodes.js';
+import PublicPixelPayChallenge from '../../payments/PublicPixelPayChallenge.jsx';
+import { PUBLIC_3DS_UNAVAILABLE } from '../../payments/publicPixelPay3ds.js';
 import QaPixelPayChallengeNotice from '../../payments/experimental/QaPixelPayChallengeNotice.jsx';
 import { PaymentCheckoutHero, PaymentCheckoutSteps } from '../../payments/PaymentCheckoutPresentation.jsx';
 
@@ -363,6 +365,10 @@ export default function PublicBookingPaymentStep() {
     paymentCanExecuteSale = true,
     paymentUsesQaDelegated = false,
     paymentUsesLiveDelegated = false,
+    paymentUsesPublic3ds = false,
+    public3dsUnavailable = false,
+    cancelPublic3ds,
+    public3dsActive = false,
     pixelpaySale,
   } = usePublicBookingFlow();
   const [loadingIntent, setLoadingIntent] = useState(false);
@@ -395,11 +401,11 @@ export default function PublicBookingPaymentStep() {
   const qaDelegated = paymentUsesQaDelegated;
   const liveDelegated = paymentUsesLiveDelegated;
   const qaThreeDsStatusIsLocal = [paymentIntent, paymentResult].some(
-    state => state?.qa_3ds_delegated === true || state?.live_3ds_delegated === true
+    state => state?.qa_3ds_delegated === true || state?.live_3ds_delegated === true || state?.public_3ds_pending === true
       || state?.code === 'PIXELPAY_3DS_AUTH_PENDING'
   );
-  const pixelPaySaleSuspended = isPixelPayProvider && !qaDelegated && !liveDelegated
-    && !isPixelPaySaleAuthorized(pixelpaySale);
+  const pixelPaySaleSuspended = isPixelPayProvider && (public3dsUnavailable
+    || (!qaDelegated && !liveDelegated && !paymentUsesPublic3ds && !isPixelPaySaleAuthorized(pixelpaySale)));
   const diagnosticContext = !qaDelegated
     && (paymentIntent?.qa_3ds_diagnostic === true || paymentResult?.qa_3ds_diagnostic === true);
   const sandboxSession = paymentIntent?.qa_sandbox_session === true || paymentResult?.qa_sandbox_session === true;
@@ -585,7 +591,7 @@ export default function PublicBookingPaymentStep() {
   };
 
   const handleVerifyPaymentStatus = async () => {
-    if (checkingPaymentStatus) return;
+    if (checkingPaymentStatus || public3dsActive) return;
     await refreshPaymentStatus({ queryPixelPayProvider: pixelPayPendingConfirmation && !diagnosticContext && !qaThreeDsStatusIsLocal });
   };
 
@@ -724,6 +730,9 @@ export default function PublicBookingPaymentStep() {
         </div>
         ) : null}
         {qaDelegated && paymentResult?.qa_3ds_challenge_active === true ? <QaPixelPayChallengeNotice /> : null}
+        {paymentUsesPublic3ds || public3dsActive ? (
+          <PublicPixelPayChallenge active={public3dsActive} onCancel={cancelPublic3ds} />
+        ) : null}
         {membershipUxMessage ? (
           <div className="public-booking-payment-note mt-3">
             <ShieldCheck size={14} />
@@ -765,7 +774,7 @@ export default function PublicBookingPaymentStep() {
                 id="pay-card-number"
                 className="mf-input"
                 placeholder="0000 0000 0000 0000"
-                autoComplete="cc-number"
+                autoComplete={paymentUsesPublic3ds ? "off" : "cc-number"}
                 inputMode="numeric"
                 maxLength={23}
                 disabled={processingPayment}
@@ -801,7 +810,7 @@ export default function PublicBookingPaymentStep() {
                   type="password"
                   className="mf-input"
                   placeholder="123"
-                  autoComplete="cc-csc"
+                  autoComplete={paymentUsesPublic3ds ? "off" : "cc-csc"}
                   inputMode="numeric"
                   maxLength={4}
                   disabled={processingPayment}
@@ -878,12 +887,12 @@ export default function PublicBookingPaymentStep() {
             <div className="public-booking-contact-card public-booking-payment-gateway-card">
               <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--mf-border)] bg-[var(--mf-soft)]/50 p-5 text-center">
                 <ShieldCheck size={30} className="text-[var(--mf-accent)]" />
-                <h4 className="citas-confirm-subtitle">{diagnosticContext ? diagnosticPaymentTitle : suspendedBeforePayment ? 'Pago deshabilitado en QA' : qaVideoDemoMode ? 'Confirmando tu pago' : pixelPayPresentation.paymentTitle}</h4>
+                <h4 className="citas-confirm-subtitle">{diagnosticContext ? diagnosticPaymentTitle : suspendedBeforePayment ? (public3dsUnavailable ? 'Pago temporalmente no disponible' : 'Pago deshabilitado en QA') : qaVideoDemoMode ? 'Confirmando tu pago' : pixelPayPresentation.paymentTitle}</h4>
                 <p className="m-0 max-w-md text-sm leading-relaxed text-[var(--mf-text-2)]">
                   {diagnosticContext
                     ? diagnosticPaymentNotice
                     : suspendedBeforePayment
-                    ? suspendedHoldExpired
+                    ? public3dsUnavailable ? PUBLIC_3DS_UNAVAILABLE : suspendedHoldExpired
                       ? 'El pago con PixelPay Sandbox aún no está habilitado. La reserva temporal venció; consulta su estado y vuelve a la agenda para elegir otro horario.'
                       : paymentRestoring
                         ? 'El pago con PixelPay Sandbox aún no está habilitado. Estamos consultando el estado de la reserva temporal; todavía no es una cita confirmada.'
@@ -1016,7 +1025,7 @@ export default function PublicBookingPaymentStep() {
                   className="w-full sm:w-auto"
                   variant="outline"
                   onClick={handleVerifyPaymentStatus}
-                  disabled={!paymentIntent?.id_intent || checkingPaymentStatus}
+                  disabled={!paymentIntent?.id_intent || checkingPaymentStatus || public3dsActive}
                 >
                   {checkingPaymentStatus ? <Loader2 size={16} className="animate-spin" /> : null}
                   {qaThreeDsStatusIsLocal ? 'Consultar estado local' : 'Verificar estado del pago'}

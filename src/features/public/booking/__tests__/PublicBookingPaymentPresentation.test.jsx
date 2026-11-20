@@ -221,3 +221,27 @@ it('3DS HTTP 202 pendiente solo consulta estado local y evita reenvio de Sale', 
   expect(context.refreshPaymentStatus).toHaveBeenCalledWith({ queryPixelPayProvider: false });
   expect(context.completePixelPayPayment).not.toHaveBeenCalled();
 });
+
+it('el checkout Live sin continuación autorizada bloquea el cobro con un aviso claro', () => {
+  vi.stubEnv('VITE_PIXELPAY_ENV', 'live');
+  const context = renderPayment({ public3dsUnavailable: true });
+  expect(screen.getByText('Pago temporalmente no disponible')).toBeTruthy();
+  expect(screen.getByText(/autenticación del pago no está disponible/)).toBeTruthy();
+  expect(screen.queryByLabelText('CVV')).toBeNull();
+  expect(screen.queryByRole('button', { name: /^Pagar con/ })).toBeNull();
+  expect(context.completePixelPayPayment).not.toHaveBeenCalled();
+});
+
+it('monta el desafío público y permite cancelarlo manteniendo bloqueado el pago', () => {
+  const context = renderPayment({
+    paymentUsesPublic3ds: true,
+    public3dsActive: true,
+    paymentResult: { public_3ds_pending: true, pending_confirmation: true },
+    cancelPublic3ds: vi.fn(),
+  });
+  const region = screen.getByRole('region', { name: 'Autenticación 3DS' });
+  expect(region.querySelector('.pixelpay-modal-container')).toBeTruthy();
+  fireEvent.click(within(region).getByRole('button', { name: 'Cancelar autenticación' }));
+  expect(context.cancelPublic3ds).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('button', { name: /^Pagar con/ })).toBeNull();
+});
