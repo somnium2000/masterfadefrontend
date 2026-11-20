@@ -144,9 +144,12 @@ test.each([null, '', {}, 'https://malicious.invalid/Collect'])('present rejected
 
 test('equivalent CAS host case and explicit default port remain Direct API', async () => {
   const native = await adapter();
-  expect(native.validatePublicHandoff({ ...handoff(), continuation_mode: 'direct_api', continuation: {
-    ...handoff().continuation, collection_url: 'https://CAS.CLIENT.CARDINALTRUSTED.COM:443/centinelapi/V2/Cruise/Collect?opaque=1',
-  } })).toBe('https://pixelpay.dev');
+  const collection = 'https://CAS.CLIENT.CARDINALTRUSTED.COM:443/centinelapi/V2/Cruise/Collect';
+  const direct = (collection_url) => ({ ...handoff(), continuation_mode: 'direct_api', continuation: {
+    ...handoff().continuation, collection_url,
+  } });
+  expect(native.validatePublicHandoff(direct(collection))).toBe('https://pixelpay.dev');
+  expect(() => native.validatePublicHandoff(direct(collection + '?opaque=1'))).toThrow('COLLECTION_URL_INVALID');
   expect(() => native.validatePublicHandoff({ ...handoff(), continuation_mode: 'direct_api' })).toThrow('COLLECTION_URL_ABSENT');
 });
 

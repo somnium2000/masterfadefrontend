@@ -115,12 +115,14 @@ async function verify(scenario) {
   window.HTMLFormElement.prototype.submit = function () {
     if (this.id === 'cardinal_collection_form') {
       counts.collect++;
+      assert.equal(this.getAttribute('action'), 'https://client.cardinaltrusted.com/centinelapi/V1/Cruise/Collect');
       setTimeout(() => { assert.equal(active(), true); window.dispatchEvent(new window.MessageEvent('message', {
-        origin: 'https://cas.client.cardinaltrusted.com', source: document.getElementById('cardinal_collection_iframe').contentWindow,
+        origin: 'https://client.cardinaltrusted.com', source: document.getElementById('cardinal_collection_iframe').contentWindow,
         data: { MessageType: 'profile.completed', SessionId: 'synthetic-collection-session' },
       })); }, 20);
     } else if (this.id === 'step-up-form') {
       counts.stepUp++;
+      assert.equal(this.getAttribute('action'), 'https://client.cardinaltrusted.com/centinelapi/V2/Cruise/StepUp');
       queueMicrotask(() => window.dispatchEvent(new window.MessageEvent('message', {
         origin: 'https://offline-pixelpay.invalid', source: document.querySelector('iframe[name="step-up-iframe"]').contentWindow,
         data: { name: 'pixelpay_continue', identifier: 'synthetic-callback' },
@@ -159,6 +161,14 @@ async function verify(scenario) {
     assert.equal(start?.continuation_diagnostic?.code, blocked ? 'PIXELPAY_3DS_COLLECTION_URL_INVALID'
       : songbird ? 'PIXELPAY_3DS_SONGBIRD_READY' : 'PIXELPAY_3DS_COLLECTION_READY');
     assert.equal(start.continuation_diagnostic.sdk_data.collection_url.type, songbird ? 'absent' : 'string');
+    assert.equal(state.phases.some(row => row.phase === 'handoff_ready'), !blocked);
+    if (scenario === 'challenge') {
+      for (const source of ['raw_data', 'sdk_data']) {
+        assert.equal(start.continuation_diagnostic[source].collection_url.origin, 'https://client.cardinaltrusted.com');
+        assert.equal(start.continuation_diagnostic[source].collection_url.length, 64);
+      }
+      assert.equal(start.continuation_diagnostic.raw_to_sdk_equal.collection_url, true);
+    }
     if (continueFailed) assert.deepEqual(result.public_3ds_browser_diagnostic, { code: 'PIXELPAY_3DS_CHALLENGE_INTERRUPTED' });
     assert.equal(counts.saleRequests, 1);
     assert.equal(counts.init, blocked ? 0 : 1, JSON.stringify({ scenario, counts, result, state }));

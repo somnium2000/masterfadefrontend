@@ -88,10 +88,11 @@ const lookupResponse = {
 };
 const pending = { state: 'pending', booking_confirmed: false };
 const CAS = 'https://cas.client.cardinaltrusted.com';
+const LIVE_CARDINAL = 'https://client.cardinaltrusted.com';
 const ENDPOINT = 'https://pixelpay.dev';
 const LIVE_ENDPOINT = 'https://merchant.offline.invalid';
-const COLLECTION_URL = `${CAS}/centinelapi/V1/Cruise/Collect?fixture=%2B%3D`;
-const STEP_UP_URL = `${CAS}/centinelapi/V2/Cruise/StepUp?fixture=%25`;
+const COLLECTION_URL = `${CAS}/centinelapi/V1/Cruise/Collect`;
+const STEP_UP_URL = `${CAS}/centinelapi/V2/Cruise/StepUp`;
 const directHandoff = () => ({
   ...handoff(), continuation_mode: 'direct_api', sdk: { endpoint: ENDPOINT, environment: 'sandbox' },
   continuation: { ...handoff().continuation, status: 202, collection_url: COLLECTION_URL },
@@ -284,13 +285,16 @@ async function verifyDirectCallbackIdentifier(sdk, Manager) {
   }
 }
 
-async function verifyNativeDirectApi(scenario, { status = 202, live = false, payment, callbackError } = {}) {
+async function verifyNativeDirectApi(scenario, { status = 202, live = false, payment, callbackError, invalidStepUp } = {}) {
   const adapter = await import(`${bundleUrl}#direct-${scenario}`);
   const fixture = directFixture();
   const operations = [];
   const challengeStates = [];
   const endpoint = live ? LIVE_ENDPOINT : ENDPOINT;
   const suppliedHandoff = directHandoff();
+  const cardinalOrigin = live ? LIVE_CARDINAL : CAS;
+  suppliedHandoff.continuation.collection_url = COLLECTION_URL.replace(CAS, cardinalOrigin);
+  const stepUpUrl = invalidStepUp ?? STEP_UP_URL.replace(CAS, cardinalOrigin);
   if (live) suppliedHandoff.sdk = { endpoint: 'https://MERCHANT.offline.invalid:443', environment: 'live' };
   let challengeWindow;
   // AM: The public checkout hosts the native frame inside its own dialog.
@@ -311,7 +315,7 @@ async function verifyNativeDirectApi(scenario, { status = 202, live = false, pay
         operations.push(operation);
         if (operation === 'lookup') {
           assert.equal(data.reference, profile.SessionId);
-          return { ...directLookupResponse, status };
+          return { ...directLookupResponse, status, data: { ...directLookupResponse.data, continue_url: stepUpUrl } };
         }
         if (operation === 'retry') {
           assert.deepEqual(data, {});
@@ -325,21 +329,30 @@ async function verifyNativeDirectApi(scenario, { status = 202, live = false, pay
     const collectWindow = collectionFrame().contentWindow;
     fixture.emit(CAS, window, profile);
     fixture.emit(endpoint, collectWindow, callback);
+    fixture.emit(live ? CAS : LIVE_CARDINAL, collectWindow, profile);
     assert.deepEqual(operations, []);
-    fixture.emit(CAS, collectWindow, profile);
-    fixture.emit(CAS, collectWindow, profile);
+    fixture.emit(cardinalOrigin, collectWindow, profile);
+    fixture.emit(cardinalOrigin, collectWindow, profile);
+    if (invalidStepUp) {
+      assert.equal((await result).public_3ds_browser_diagnostic.code, 'PIXELPAY_3DS_CHALLENGE_INTERRUPTED');
+      assert.deepEqual(operations, ['lookup']);
+      assert.equal(fixture.forms.length, 1);
+      assert.equal(stepUpFrame(), null);
+      return;
+    }
     await fixture.challenge;
     assert.equal(stepUpFrame().parentNode, frameContainer);
     assert.equal(stepUpFrame().title, 'Autenticación bancaria');
     challengeWindow = stepUpFrame().contentWindow;
-    fixture.emit(CAS, collectWindow, profile);
+    fixture.emit(cardinalOrigin, collectWindow, profile);
     fixture.emit(endpoint, collectWindow, callback);
+    fixture.emit(live ? CAS : LIVE_CARDINAL, collectWindow, profile);
     fixture.emit(CAS, challengeWindow, callback);
     await tick();
     assert.deepEqual(operations, ['lookup']);
     assert.deepEqual(fixture.forms, [
-      { id: 'cardinal_collection_form', action: COLLECTION_URL, fields: [['JWT', directHandoff().continuation.payload]] },
-      { id: 'step-up-form', action: STEP_UP_URL, fields: [['JWT', directLookupResponse.data.continue_payload]] },
+      { id: 'cardinal_collection_form', action: suppliedHandoff.continuation.collection_url, fields: [['JWT', directHandoff().continuation.payload]] },
+      { id: 'step-up-form', action: stepUpUrl, fields: [['JWT', directLookupResponse.data.continue_payload]] },
     ]);
     const terminalCallback = callbackError || callback;
     fixture.emit(endpoint, challengeWindow, terminalCallback);
@@ -544,6 +557,10 @@ try {
   await verifyNativeDirectApi('live-vip', { live: true, payment: {
     processed: true, estado_intent_codigo: 'confirmado', id_suscripcion: 'synthetic-subscription',
   } });
+  await verifyNativeDirectApi('live-cas-step-up', { live: true, invalidStepUp: STEP_UP_URL });
+  await verifyNativeDirectApi('live-redirect-query', {
+    live: true, invalidStepUp: STEP_UP_URL.replace(CAS, LIVE_CARDINAL) + '?return=https://redirect.invalid',
+  });
   await verifyNativeDirectApi('live-error', { live: true, callbackError: { ...callback, error: 'synthetic-error' } });
   await verifyNativeDirectApi('live-missing-identifier', { live: true, callbackError: { name: callback.name } });
   for (const reason of ['abort', 'abort-after-stepup', 'expiry']) await verifyDirectCancellation(reason);

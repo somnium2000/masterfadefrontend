@@ -6,13 +6,27 @@ const handoff = {
   sdk: { endpoint: 'https://pixelpay.app', environment: 'live' },
   continuation: {
     status: 202, transaction_type: 'songbird', payload: 'opaque-token',
-    collection_url: 'https://cas.client.cardinaltrusted.com/centinelapi/V2/Cruise/Collect',
+    collection_url: 'https://client.cardinaltrusted.com/centinelapi/V2/Cruise/Collect',
   },
 };
 
 describe('Live 3DS SDK handoff is restricted to verified server-originated shapes', () => {
-  it('accepts a Live endpoint with an official Cardinal collection URL', () => {
-    expect(() => validateDirectHandoff(handoff)).not.toThrow();
+  it.each(['V1', 'V2'])('accepts a Live endpoint with official Collect %s', version => {
+    const collection_url = handoff.continuation.collection_url.replace('V2', version);
+    expect(collection_url).toHaveLength(64);
+    expect(validateDirectHandoff({ ...handoff, continuation: { ...handoff.continuation, collection_url } }))
+      .toBe('https://pixelpay.app');
+  });
+  it.each([
+    'https://cas.client.cardinaltrusted.com/centinelapi/V2/Cruise/Collect',
+    'https://client.cardinaltrusted.com/centinelapi/V2/Cruise/StepUp',
+    'https://client.cardinaltrusted.com/other/../centinelapi/V2/Cruise/Collect',
+    'https://client.cardinaltrusted.com/centinelapi/V2/Cruise/Collect?redirect=https://redirect.invalid',
+    'https://@client.cardinaltrusted.com/centinelapi/V2/Cruise/Collect',
+    'https://client.cardinaltrusted.com:444/centinelapi/V2/Cruise/Collect',
+  ])('rejects a mismatched or ambiguous Live collection %s', collection_url => {
+    expect(() => validateDirectHandoff({ ...handoff, continuation: { ...handoff.continuation, collection_url } }))
+      .toThrow('PIXELPAY_3DS_COLLECTION_URL_INVALID');
   });
   it.each([
     { ...handoff, sdk: { ...handoff.sdk, environment: 'sandbox' } },
@@ -28,6 +42,7 @@ describe('Live 3DS SDK handoff is restricted to verified server-originated shape
   it('QA still accepts the original Sandbox shapes without Live configuration', () => {
     expect(() => validateDirectHandoff({
       ...handoff, sdk: { endpoint: 'https://pixelpay.dev', environment: 'sandbox' },
+      continuation: { ...handoff.continuation, collection_url: handoff.continuation.collection_url.replace('client.', 'cas.client.') },
     })).not.toThrow();
   });
 });
