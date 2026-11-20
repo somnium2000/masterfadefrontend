@@ -350,7 +350,8 @@ async function verifyNativeDirectApi(scenario, { status = 202, live = false, pay
     assert.deepEqual(operations, expectedOperations);
     if (callbackError) {
       assert.deepEqual(projection, { processed: false, booking_confirmed: false,
-        estado_intent_codigo: 'pendiente_confirmacion', pending_confirmation: true, public_3ds_pending: true });
+        estado_intent_codigo: 'pendiente_confirmacion', pending_confirmation: true, public_3ds_pending: true,
+        public_3ds_browser_diagnostic: { code: 'PIXELPAY_3DS_CHALLENGE_INTERRUPTED' } });
     } else assert.equal(projection, payment ?? pending);
     assert.deepEqual(challengeStates, [true, false]);
     assert.equal(collectionFrame(), null);
