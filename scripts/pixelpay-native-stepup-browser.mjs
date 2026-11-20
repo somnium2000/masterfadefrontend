@@ -61,6 +61,7 @@ const { output } = await build({
 const script = output.find(item => item.type === 'chunk').code;
 const styles = output.filter(item => item.type === 'asset' && item.fileName.endsWith('.css'));
 const callback = "parent.postMessage({name:'pixelpay_continue',identifier:'fixture-callback'}, 'https://checkout.invalid')";
+const issuerReturn = 'https://offline-pixelpay.invalid/api/v2/cardinal/authentication/continue';
 const browser = await chromium.launch({ executablePath: process.env.MF_CHROMIUM_PATH });
 try {
   const scenarios = [
@@ -68,13 +69,15 @@ try {
     { viewport: { width: 768, height: 820 } },
     { viewport: { width: 1280, height: 800 } },
     { viewport: { width: 360, height: 640 }, cancel: true },
+    { viewport: { width: 360, height: 640 }, rejectedReturn: true },
   ];
-  for (const { viewport, cancel } of scenarios) {
+  for (const { viewport, cancel, rejectedReturn } of scenarios) {
     const page = await browser.newPage({ viewport, serviceWorkers: 'block' });
     const fixtureErrors = [];
     page.on('pageerror', error => fixtureErrors.push(error.message));
     const requests = [];
     const blocked = [];
+    let stepUpFieldNames;
     await page.route('**/*', async route => {
       const req = route.request();
       const url = req.url();
@@ -86,12 +89,23 @@ try {
       }
       if (url === 'https://client.cardinaltrusted.com/centinelapi/V2/Cruise/StepUp' && req.method() === 'POST') {
         requests.push('stepup');
+        stepUpFieldNames = [...new URLSearchParams(req.postData()).keys()];
+        if (rejectedReturn) {
+          // AM: Replay the observed response as an iframe navigation without a success message.
+          return html(`<form method="post" action="${issuerReturn}">
+            <label>Código sintético<input required></label><button>Completar desafío</button>
+          </form>`);
+        }
         return html(`<main style="min-height:calc(100vh - 16px);display:flex;flex-direction:column;align-items:start;justify-content:space-between">
           <label>Código sintético<input></label><button>Completar desafío</button>
         </main><script>
           ${callback};
           document.querySelector('button').onclick=()=>{if(document.querySelector('input').value==='1234') location.replace('https://offline-pixelpay.invalid/callback');};
         </script>`);
+      }
+      if (rejectedReturn && url === issuerReturn && req.method() === 'POST' && req.isNavigationRequest()) {
+        requests.push('issuer-return');
+        return route.fulfill({ status: 400, json: { success: false, message: 'El valor KEY es inválido' } });
       }
       if (url === 'https://offline-pixelpay.invalid/callback') return html(`<script>${callback};${callback};</script>`);
       if (url === 'https://checkout.invalid/favicon.ico') return route.fulfill({ status: 204 });
@@ -103,6 +117,7 @@ try {
       for (const css of styles) await page.addStyleTag({ content: css.source });
       await page.addScriptTag({ type: 'module', content: script });
       await page.locator('[without-sdk-modal]').waitFor({ state: 'attached' });
+      if (rejectedReturn) await page.clock.install();
       await page.evaluate(() => window.scrollTo(0, 1550));
       await page.locator('#pay').click();
       const dialog = page.getByRole('dialog', { name: 'Autenticación 3DS' });
@@ -136,6 +151,32 @@ try {
       await page.waitForFunction(() => document.querySelector('#revision').textContent === '1');
       assert.equal(await frame.evaluate((node, before) => node === before, original), true);
       assert.equal(await issuer.getByRole('textbox').inputValue(), '1234');
+      if (rejectedReturn) {
+        assert.deepEqual(stepUpFieldNames, ['JWT'], 'The delegated manager emits no MD with its current settings');
+        const responsePromise = page.waitForResponse(response => response.url() === issuerReturn);
+        await issuer.getByRole('button', { name: 'Completar desafío' }).click();
+        const response = await responsePromise;
+        assert.equal(response.status(), 400);
+        assert.equal(response.request().frame().name(), 'step-up-iframe');
+        assert.deepEqual(requests, ['collect', 'stepup', 'issuer-return']);
+        await page.clock.fastForward(21000);
+        await dialog.waitFor({ state: 'hidden' });
+        const result = await page.evaluate(() => ({
+          outcome: window.outcome,
+          operations: window.operations,
+          phases: window.stepUpTrace.map(event => event.phase),
+        }));
+        assert.equal(result.outcome, 'PROTOTYPE_UNCERTAIN');
+        assert.deepEqual(result.operations, ['lookup']);
+        assert.ok(result.phases.includes('context_expired'));
+        assert.ok(result.phases.includes('context_closed'));
+        assert.ok(!result.phases.includes('callback_observed'));
+        assert.equal(await frame.count(), 0);
+        assert.deepEqual(fixtureErrors, []);
+        assert.deepEqual(blocked, []);
+        process.stdout.write('Native StepUp: return HTTP 400, no callback or retry, expired safely.\n');
+        continue;
+      }
       await page.waitForFunction(() => window.stepUpTrace.some(event =>
         event.phase === 'callback_observed' && !event.originMatches && event.frameMatches));
       // A callback from the allowed origin must still come from the StepUp frame.
