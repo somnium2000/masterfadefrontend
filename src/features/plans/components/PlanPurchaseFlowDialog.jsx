@@ -263,7 +263,7 @@ export default function PlanPurchaseFlowDialog({
             <div className="space-y-4">
               {public3dsUnavailable && !reconciling ? <p role="alert">{PUBLIC_3DS_UNAVAILABLE}</p> : null}
               {(public3ds || authenticating) && displayStep === "payment" ? (
-                <PublicPixelPayChallenge active={authenticating} onCancel={onCancelAuthentication} />
+                <PublicPixelPayChallenge embedded active={authenticating} onCancel={onCancelAuthentication} />
               ) : null}
               {simulatorMode && !commercialVideoMode ? (
                 <div role="note" className="rounded-2xl border border-amber-400/50 bg-amber-500/10 p-4 text-sm text-[var(--mf-text)]">

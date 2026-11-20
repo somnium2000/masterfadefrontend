@@ -37,6 +37,7 @@ jobs:
           src/features/payments/__tests__/songbirdSession.test.jsx
           src/features/public/booking/__tests__/useBookingPayment.pixelpay.test.jsx
           src/features/public/booking/__tests__/PublicBookingPaymentPresentation.test.jsx
+          src/features/plans/components/__tests__/PlanPurchaseFlowDialog.test.jsx
           src/features/public/booking/__tests__/PublicBookingFlow.pixelpaySaleContract.test.jsx
           --maxWorkers=2
       - name: Compiled browser SDK contracts
