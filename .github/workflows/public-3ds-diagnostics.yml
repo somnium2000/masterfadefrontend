@@ -1,0 +1,19 @@
+name: Public 3DS safe diagnostics
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  diagnostics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node node_modules/vitest/vitest.mjs run src/features/payments/__tests__/publicPixelPay3dsDiagnostics.test.js --maxWorkers=1
+      - run: node node_modules/eslint/bin/eslint.js src/features/payments/publicPixelPay3ds.js src/features/payments/__tests__/publicPixelPay3dsDiagnostics.test.js
+      - run: git diff --check

@@ -35,34 +35,104 @@ export async function loadDelegatedSdk() {
 const browserFailure = code => Object.assign(new Error(code), { code });
 
 function isCasUrl(value, paths) {
-  return typeof value === 'string' && value.length <= 2048 && !/[\s\\#]/u.test(value)
-    && paths.some(path => value.split('?', 1)[0] === CAS_ORIGIN + path);
+  if (typeof value !== 'string' || value.length > 2048 || !/^https:\/\/[^/]/i.test(value) || /[\p{Cc}\s\\#]/u.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.origin === CAS_ORIGIN && !url.username && !url.password && paths.includes(url.pathname);
+  } catch { return false; }
+}
+
+const validPayload = value => typeof value === 'string' && value.length > 0 && value.length <= 32768;
+function isSongbirdChallengeUrl(value) {
+  if (typeof value !== 'string' || value.length > 2048 || !/^https:\/\/[^/]/i.test(value) || /[\p{Cc}\s\\#]/u.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password;
+  } catch { return false; }
 }
 
 function isAllowedLiveEndpoint(value) {
+  if (typeof value !== 'string' || !/^https:\/\/[^/]/i.test(value) || /[\p{Cc}\s\\#]/u.test(value)) return false;
   try {
-    const url = new URL(String(value || ''));
+    const url = new URL(value);
     return url.protocol === 'https:' && url.pathname === '/' && !url.username
       && !url.password && !url.search && !url.hash && url.hostname !== 'pixelpay.dev'
       && url.hostname !== 'localhost';
   } catch { return false; }
 }
 
-export function validateDirectHandoff(handoff) {
+export function validatePublicHandoff(handoff) {
   const continuation = handoff?.continuation;
   const sdk = handoff?.sdk;
   const validEnvironment = (sdk?.environment === 'sandbox' && sdk.endpoint === QA_ENDPOINT)
     || (sdk?.environment === 'live' && isAllowedLiveEndpoint(sdk.endpoint));
   let code;
-  if (!continuation || !Object.hasOwn(continuation, 'collection_url')) code = 'PIXELPAY_3DS_COLLECTION_URL_ABSENT';
+  const songbird = handoff?.continuation_mode === 'songbird';
+  if (songbird && continuation && Object.hasOwn(continuation, 'collection_url')) code = 'PIXELPAY_3DS_CONTINUATION_INVALID';
+  else if (songbird) {
+    if (handoff.state !== 'challenge' || !validEnvironment || continuation?.status !== 202
+      || continuation.transaction_type !== 'songbird' || !validPayload(continuation.payload)) code = 'PIXELPAY_3DS_CONTINUATION_INVALID';
+  } else if (!continuation || !Object.hasOwn(continuation, 'collection_url')) code = 'PIXELPAY_3DS_COLLECTION_URL_ABSENT';
   else if (continuation.collection_url === null) code = 'PIXELPAY_3DS_COLLECTION_URL_NULL';
   else if (continuation.collection_url === '') code = 'PIXELPAY_3DS_COLLECTION_URL_EMPTY';
   else if (!isCasUrl(continuation.collection_url, COLLECTION_PATHS)) code = 'PIXELPAY_3DS_COLLECTION_URL_INVALID';
   else if (handoff.state !== 'challenge' || handoff.continuation_mode !== 'direct_api' || !validEnvironment
     || continuation.status !== 202 || continuation.transaction_type !== 'songbird'
-    || typeof continuation.payload !== 'string' || !continuation.payload) code = 'PIXELPAY_3DS_CONTINUATION_INVALID';
+    || !validPayload(continuation.payload)) code = 'PIXELPAY_3DS_CONTINUATION_INVALID';
   if (code) throw browserFailure(code);
   return new URL(sdk.endpoint).origin;
+}
+
+export function validateDirectHandoff(handoff) {
+  if (handoff?.continuation_mode !== 'direct_api') throw browserFailure('PIXELPAY_3DS_CONTINUATION_INVALID');
+  return validatePublicHandoff(handoff);
+}
+
+function bindSongbird(manager, isClosed, stop) {
+  const start = manager.startCardinalTransaction?.bind(manager);
+  if (!start) throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
+  let previous, facade, reference, validated = false;
+  const handlers = new Set();
+  manager.startCardinalTransaction = (...args) => {
+    previous = window.Cardinal;
+    if (!previous || ['configure', 'on', 'off', 'setup', 'continue'].some(method => typeof previous[method] !== 'function')) {
+      throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
+    }
+    previous.configure({ logging: { level: 'off' } });
+    facade = new Proxy(previous, { get(target, name) {
+      if (name === 'on') return (event, callback) => {
+        handlers.add(event);
+        return target.on(event, (...values) => {
+          if (isClosed()) { stop(); return; }
+          if (event === 'payments.setupComplete') {
+            const current = values[0]?.sessionId;
+            if (typeof current !== 'string' || !current || current.length > 160) { stop(); return; }
+            if (reference !== undefined) {
+              if (reference !== current) stop();
+              return;
+            }
+            reference = current;
+          }
+          if (event === 'payments.validated') {
+            if (validated) return;
+            validated = true;
+            if (values[0]?.ActionCode !== 'SUCCESS' || !validPayload(values[1])) { stop(); return; }
+          }
+          if (event === 'ui.close') { stop(); return; }
+          try { return Promise.resolve(callback(...values)).catch(() => stop()); }
+          catch { stop(); }
+        });
+      };
+      return typeof target[name] === 'function' ? target[name].bind(target) : target[name];
+    }, set(target, name, value) { target[name] = value; return true; } });
+    window.Cardinal = facade;
+    return start(...args);
+  };
+  return () => {
+    if (!previous) return;
+    for (const name of handlers) previous.off(name);
+    if (window.Cardinal === facade) window.Cardinal = previous;
+  };
 }
 
 function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin, armNativeRetry) {
@@ -128,7 +198,7 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
   if (active || signal?.aborted) throw new Error('PROTOTYPE_BUSY');
   active = true;
   const transportAbort = new AbortController();
-  let Manager, timer, abort, stop, firstLookup, closeDirectApi, nativeStarted = false, halted = false, finished = false;
+  let Manager, timer, abort, stop, firstLookup, closeDirectApi, closeSongbird, nativeStarted = false, halted = false, finished = false;
   let nativeRetryAuthorized = false;
   const isClosed = () => halted || signal?.aborted || (suppliedHandoff && now() >= suppliedHandoff.expiresAt);
   const stopped = new Promise((_, reject) => {
@@ -140,7 +210,8 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
   });
   // AM: Attach the race before any transport or SDK await; SDK async event handlers need not catch our failures.
   const task = (async () => {
-    const directOrigin = suppliedHandoff ? validateDirectHandoff(suppliedHandoff) : null;
+    const endpointOrigin = suppliedHandoff ? validatePublicHandoff(suppliedHandoff) : null;
+    const direct = suppliedHandoff?.continuation_mode === 'direct_api';
     let sdk;
     try {
       ({ sdk, Manager } = await loadSdk());
@@ -166,13 +237,14 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
         order_currency: handoff.order.currency });
       const settings = new sdk.Models.Settings();
       // AM: The native Direct listener compares MessageEvent.origin to settings.endpoint verbatim.
-      settings.setupEndpoint(directOrigin ?? handoff.sdk.endpoint);
+      settings.setupEndpoint(endpointOrigin ?? handoff.sdk.endpoint);
       settings.setupEnvironment(handoff.sdk.environment);
       manager = new Manager(settings, clientRequest);
       if (typeof manager.validationLookupResponse !== 'function') throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
-      if (suppliedHandoff) closeDirectApi = bindDirectApiFrames(
-        manager, isClosed, stop, directOrigin,
+      if (direct) closeDirectApi = bindDirectApiFrames(
+        manager, isClosed, stop, endpointOrigin,
         () => { nativeRetryAuthorized = true; });
+      else if (suppliedHandoff) closeSongbird = bindSongbird(manager, isClosed, stop);
     } catch {
       throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
     }
@@ -182,7 +254,10 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
     manager.validationLookupResponse = (response, resolve) => {
       if (isClosed()) { stop(); return; }
       // AM: Do not feed a synthetic response to native validation or close the original challenge.
-      if (response !== skippedLookup) return validateLookup(response, resolve);
+      if (response !== skippedLookup) {
+        try { return Promise.resolve(validateLookup(response, resolve)).catch(() => stop()); }
+        catch { stop(); }
+      }
     };
 
     let nativeTransportStarted = false;
@@ -197,9 +272,14 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
           nativeRetryAuthorized = true; // Frictionless native 3DS; no challenge required.
         }
         if (suppliedHandoff && operation === 'lookup' && result.action === 'continue'
-          && (![200, 202].includes(result.status) || result.success !== true || !isCasUrl(result.data?.continue_url, STEP_UP_PATHS)
-            || typeof result.data?.continue_payload !== 'string' || !result.data.continue_payload)) {
+          && (![200, 202].includes(result.status) || result.success !== true
+            || !(direct ? isCasUrl(result.data?.continue_url, STEP_UP_PATHS) : isSongbirdChallengeUrl(result.data?.continue_url))
+            || !validPayload(result.data?.continue_payload))) {
           throw new Error('PROTOTYPE_UNCERTAIN');
+        }
+        if (suppliedHandoff && operation === 'continue') {
+          if (direct || result.status !== 200 || result.success !== true || result.action !== null) throw new Error('PROTOTYPE_UNCERTAIN');
+          nativeRetryAuthorized = true;
         }
         // AM: Rehydrate only the actual Node SDK response envelope; never invent an authentication result.
         const Type = result.status === 200 ? sdk.Responses.SuccessResponse
@@ -225,7 +305,13 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
         firstLookup = data;
         return invoke('lookup', data);
       },
-      authenticationContinue: request => invoke('continue', { payload: request.payload }),
+      authenticationContinue: request => {
+        if (suppliedHandoff && (direct || !validPayload(request.payload))) {
+          stop();
+          return Promise.reject(new Error('PIXELPAY_3DS_CONTINUATION_INVALID'));
+        }
+        return invoke('continue', { payload: request.payload });
+      },
       retryTransaction: () => {
         // A failed/cancelled challenge must never trigger the SDK's second Sale.
         if (suppliedHandoff && !nativeRetryAuthorized) {
@@ -262,11 +348,12 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
     try {
       if (closeDirectApi) closeDirectApi();
       else if (nativeStarted) Manager.clearAllEvents();
+      closeSongbird?.();
     } catch {
       // AM: A partially loaded Cardinal script must not replace the initialization error.
       finished = false;
     }
     // AM: An uncertain native async handler has no abort API; require reload before another session on this page.
-    if (finished) active = false;
+    if (finished || !nativeStarted) active = false;
   }
 }

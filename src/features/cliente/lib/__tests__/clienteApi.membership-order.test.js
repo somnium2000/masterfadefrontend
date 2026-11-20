@@ -113,6 +113,7 @@ test('VIP conserva una continuación fallida como pendiente sin reenviar venta',
   await expect(confirmMembershipPayment(KEY, { public3ds: true })).resolves.toEqual({
     processed: false, booking_confirmed: false, estado_intent_codigo: 'pendiente_confirmacion',
     pending_confirmation: true, public_3ds_pending: true,
+    public_3ds_browser_diagnostic: { code: 'PIXELPAY_3DS_CHALLENGE_INTERRUPTED' },
   });
   expect(http.post).toHaveBeenCalledTimes(2);
 });

@@ -1,10 +1,12 @@
+import { isDelegatedContinuationError } from './experimental/delegatedContinuationCodes.js';
+
 export const PUBLIC_3DS_UNAVAILABLE = 'La autenticación del pago no está disponible en este momento. Intenta más tarde.';
 
 export async function preparePublicPixelPay3ds() {
   try {
     const { isDelegatedPixelPayBusy, loadDelegatedSdk, runDelegatedPixelPay } = await import('./experimental/delegatedPixelPay.js');
     const nativeSdk = await loadDelegatedSdk();
-    if (isDelegatedPixelPayBusy() || ['startCardinalDirectApiTransaction', 'submitChallengeForm', 'handleDirectApiLookup']
+    if (isDelegatedPixelPayBusy() || ['startCardinalTransaction', 'startCardinalDirectApiTransaction', 'submitChallengeForm', 'handleDirectApiLookup']
       .some(method => typeof nativeSdk.Manager.prototype[method] !== 'function')) throw new Error();
     new nativeSdk.sdk.Requests.SaleTransaction().withAuthenticationRequest();
     return options => runDelegatedPixelPay({ ...options, loadSdk: () => nativeSdk });
@@ -20,8 +22,11 @@ export async function completePublicPixelPay3ds(response, { run, signal, onChall
     ...pending, processed: false, booking_confirmed: false, estado_intent_codigo: 'pendiente_confirmacion',
     pending_confirmation: true, public_3ds_pending: true,
   };
+  const diagnostic = code => ({ ...unresolved, public_3ds_browser_diagnostic: { code } });
   if (!run || signal?.aborted || typeof handoff.token !== 'string'
-    || !handoff.token || !Number.isFinite(handoff.expiresAt) || handoff.expiresAt <= Date.now()) return unresolved;
+    || !handoff.token || !Number.isFinite(handoff.expiresAt) || handoff.expiresAt <= Date.now()) {
+    return diagnostic('PIXELPAY_3DS_HANDOFF_UNAVAILABLE');
+  }
   let terminalPayment;
   onChallenge?.(true);
   try {
@@ -36,8 +41,11 @@ export async function completePublicPixelPay3ds(response, { run, signal, onChall
       },
     });
     return payment ?? unresolved;
-  } catch {
-    return unresolved;
+  } catch (error) {
+    const code = isDelegatedContinuationError(error?.code)
+      || ['PIXELPAY_3DS_SDK_LOAD_FAILED', 'PIXELPAY_3DS_SDK_INIT_FAILED'].includes(error?.code)
+      ? error.code : 'PIXELPAY_3DS_CHALLENGE_INTERRUPTED';
+    return diagnostic(code);
   } finally {
     onChallenge?.(false);
   }

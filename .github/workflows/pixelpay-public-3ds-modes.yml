@@ -1,0 +1,55 @@
+name: Public PixelPay 3DS modes
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  browser-and-integrated-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: frontend
+      - uses: actions/checkout@v4
+        with:
+          repository: somnium2000/masterfadebackend
+          ref: 1cde82e8a9cb720c6c23b397cc3d55031b9a4f92
+          path: backend
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: frontend
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: backend
+      - name: React payment regressions
+        working-directory: frontend
+        run: >-
+          npx vitest run src/features/payments/__tests__/publicPixelPayModes.test.jsx
+          src/features/payments/__tests__/publicPixelPay3dsDiagnostics.test.js
+          src/features/payments/__tests__/publicPixelPayUrlContract.test.jsx
+          src/features/cliente/lib/__tests__/clienteApi.membership-order.test.js
+          src/features/payments/__tests__/delegatedPixelPay.test.jsx
+          src/features/payments/__tests__/songbirdSession.test.jsx
+          src/features/public/booking/__tests__/useBookingPayment.pixelpay.test.jsx
+          src/features/public/booking/__tests__/PublicBookingPaymentPresentation.test.jsx
+          src/features/public/booking/__tests__/PublicBookingFlow.pixelpaySaleContract.test.jsx
+          --maxWorkers=2
+      - name: Compiled browser SDK contracts
+        working-directory: frontend
+        run: node scripts/pixelpay-delegated-browser-bundle.mjs
+      - name: React to real API to application worker to native browser and Node SDK
+        working-directory: frontend
+        env:
+          PIXELPAY_INTEGRATION_BACKEND: ${{ github.workspace }}/backend
+        run: node scripts/pixelpay-public-integration.mjs
+      - run: npm run lint
+        working-directory: frontend
+      - name: Build with no production telemetry plugin
+        working-directory: frontend
+        run: npm run build -- --mode test
+      - run: git diff --check
+        working-directory: frontend

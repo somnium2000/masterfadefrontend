@@ -350,7 +350,8 @@ async function verifyNativeDirectApi(scenario, { status = 202, live = false, pay
     assert.deepEqual(operations, expectedOperations);
     if (callbackError) {
       assert.deepEqual(projection, { processed: false, booking_confirmed: false,
-        estado_intent_codigo: 'pendiente_confirmacion', pending_confirmation: true, public_3ds_pending: true });
+        estado_intent_codigo: 'pendiente_confirmacion', pending_confirmation: true, public_3ds_pending: true,
+        public_3ds_browser_diagnostic: { code: 'PIXELPAY_3DS_CHALLENGE_INTERRUPTED' } });
     } else assert.equal(projection, payment ?? pending);
     assert.deepEqual(challengeStates, [true, false]);
     assert.equal(collectionFrame(), null);
@@ -362,6 +363,51 @@ async function verifyNativeDirectApi(scenario, { status = 202, live = false, pay
     host.remove();
     fixture.close();
   }
+}
+
+async function verifyPublicSongbird(status, frictionless = false) {
+  const adapter = await import(`${bundleUrl}#public-songbird-${status}-${frictionless}`);
+  const fixture = challengeFixture();
+  const operations = [], ui = [];
+  const suppliedHandoff = { ...handoff(), token: 'synthetic-operation-token', continuation_mode: 'songbird',
+    sdk: { endpoint: ENDPOINT, environment: 'sandbox' },
+    continuation: { status: 202, transaction_type: 'songbird', payload: 'synthetic.setup.signature' } };
+  const payment = { processed: true, booking_confirmed: true };
+  const run = await adapter.preparePublicPixelPay3ds();
+  const result = adapter.completePublicPixelPay3ds({ public_3ds_handoff: suppliedHandoff }, {
+    run, onChallenge: value => ui.push(value),
+    advance: async ({ operation, data, token }) => {
+      assert.equal(token, suppliedHandoff.token);
+      operations.push(operation);
+      if (operation === 'lookup') return frictionless
+        ? { status: 200, success: true, action: null, data: { identifier: 'synthetic-frictionless' } }
+        : { ...lookupResponse, status };
+      if (operation === 'continue') {
+        assert.deepEqual(data, { payload: 'synthetic.validated.signature' });
+        return { status: 200, success: true, action: null, data: {} };
+      }
+      if (operation === 'retry') return { status: 200, success: true, action: null, data: {}, payment };
+      throw new Error('Unexpected public Songbird operation');
+    },
+    readLocalStatus: () => { throw new Error('Terminal backend evidence already available'); },
+  });
+  await fixture.ready;
+  const setup = fixture.callbacks.get('payments.setupComplete');
+  await setup({ sessionId: 'synthetic-reference' });
+  await setup({ sessionId: 'synthetic-reference' });
+  if (!frictionless) {
+    assert.equal(fixture.continuations.length, 1);
+    assert.equal(fixture.continuations[0][0], 'cca');
+    const validated = fixture.callbacks.get('payments.validated');
+    await validated({ ActionCode: 'SUCCESS' }, 'synthetic.validated.signature');
+    await validated({ ActionCode: 'SUCCESS' }, 'synthetic.validated.signature');
+  }
+  assert.equal(await result, payment);
+  assert.deepEqual(operations, frictionless ? ['lookup', 'retry'] : ['lookup', 'continue', 'retry']);
+  assert.deepEqual(ui, [true, false]);
+  assert.equal(collectionFrame(), null);
+  assert.equal(stepUpFrame(), null);
+  assert.equal(fixture.callbacks.size, 0);
 }
 
 async function verifyDirectCancellation(reason) {
@@ -503,6 +549,9 @@ try {
   for (const reason of ['abort', 'abort-after-stepup', 'expiry']) await verifyDirectCancellation(reason);
   await verifyInvalidDirectHandoffs();
   await verifyDirectFrictionlessTransportFailure();
+  await verifyPublicSongbird(200);
+  await verifyPublicSongbird(202);
+  await verifyPublicSongbird(200, true);
   assert.equal(outboundCalls, 0);
   process.stdout.write('PixelPay Vite browser bundle: native Songbird and Direct collection, single continuation, attempt isolation and shutdown verified offline.\n');
 } finally {
