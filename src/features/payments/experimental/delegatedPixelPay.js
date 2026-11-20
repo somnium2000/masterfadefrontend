@@ -2,7 +2,10 @@ const EMV = ['browser_java_enabled', 'browser_language', 'browser_color_depth', 
   'browser_screen_width', 'browser_time_zone', 'user_agent', 'browser_javascript_enabled'];
 const LOOKUP_FIELDS = ['reference', ...EMV];
 const QA_ENDPOINT = 'https://pixelpay.dev';
-const CAS_ORIGIN = 'https://cas.client.cardinaltrusted.com';
+const CARDINAL_HOSTS = new Map([
+  ['sandbox', 'cas.client.cardinaltrusted.com'],
+  ['live', 'client.cardinaltrusted.com'],
+]);
 const COLLECTION_PATHS = ['/centinelapi/V1/Cruise/Collect', '/centinelapi/V2/Cruise/Collect'];
 const STEP_UP_PATHS = ['/centinelapi/V2/Cruise/StepUp'];
 const STEP_UP_FRAME = 'iframe[name="step-up-iframe"]';
@@ -34,12 +37,14 @@ export async function loadDelegatedSdk() {
 
 const browserFailure = code => Object.assign(new Error(code), { code });
 
-function isCasUrl(value, paths) {
-  if (typeof value !== 'string' || value.length > 2048 || !/^https:\/\/[^/]/i.test(value) || /[\p{Cc}\s\\#]/u.test(value)) return false;
-  try {
-    const url = new URL(value);
-    return url.origin === CAS_ORIGIN && !url.username && !url.password && paths.includes(url.pathname);
-  } catch { return false; }
+function isCardinalUrl(value, paths, environment) {
+  if (typeof value !== 'string' || value.length > 2048 || /[\p{Cc}\s\\#]/u.test(value)) return false;
+  // AM: Match the documented POST target before URL normalization can rewrite the path.
+  const parts = /^https:\/\/([^/?#]+)(\/[^?#]*)$/i.exec(value);
+  const host = CARDINAL_HOSTS.get(environment);
+  if (!parts || !host) return false;
+  const authority = parts[1].toLowerCase();
+  return (authority === host || authority === `${host}:443`) && paths.includes(parts[2]);
 }
 
 const validPayload = value => typeof value === 'string' && value.length > 0 && value.length <= 32768;
@@ -75,7 +80,7 @@ export function validatePublicHandoff(handoff) {
   } else if (!continuation || !Object.hasOwn(continuation, 'collection_url')) code = 'PIXELPAY_3DS_COLLECTION_URL_ABSENT';
   else if (continuation.collection_url === null) code = 'PIXELPAY_3DS_COLLECTION_URL_NULL';
   else if (continuation.collection_url === '') code = 'PIXELPAY_3DS_COLLECTION_URL_EMPTY';
-  else if (!isCasUrl(continuation.collection_url, COLLECTION_PATHS)) code = 'PIXELPAY_3DS_COLLECTION_URL_INVALID';
+  else if (!isCardinalUrl(continuation.collection_url, COLLECTION_PATHS, sdk?.environment)) code = 'PIXELPAY_3DS_COLLECTION_URL_INVALID';
   else if (handoff.state !== 'challenge' || handoff.continuation_mode !== 'direct_api' || !validEnvironment
     || continuation.status !== 202 || continuation.transaction_type !== 'songbird'
     || !validPayload(continuation.payload)) code = 'PIXELPAY_3DS_CONTINUATION_INVALID';
@@ -135,7 +140,7 @@ function bindSongbird(manager, isClosed, stop) {
   };
 }
 
-function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin, armNativeRetry) {
+function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin, collectionOrigin, armNativeRetry) {
   if (typeof manager.startCardinalDirectApiTransaction !== 'function' || typeof manager.submitChallengeForm !== 'function'
     || typeof manager.handleDirectApiLookup !== 'function'
     || document.getElementById('cardinal_collection_iframe') || document.getElementById('cardinal_collection_form')
@@ -167,7 +172,7 @@ function bindDirectApiFrames(manager, isClosed, stop, callbackOrigin, armNativeR
         if (callbackAccepted || event.origin !== callbackOrigin || event.source !== challengeFrame?.contentWindow) return;
         callbackAccepted = true;
         armNativeRetry();
-      } else if (event.origin !== CAS_ORIGIN || event.source !== collectionFrame?.contentWindow) return;
+      } else if (event.origin !== collectionOrigin || event.source !== collectionFrame?.contentWindow) return;
       return nativeListener(event);
     };
     window.addEventListener('message', manager.listen_direct_message, false);
@@ -242,7 +247,7 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
       manager = new Manager(settings, clientRequest);
       if (typeof manager.validationLookupResponse !== 'function') throw browserFailure('PIXELPAY_3DS_SDK_INIT_FAILED');
       if (direct) closeDirectApi = bindDirectApiFrames(
-        manager, isClosed, stop, endpointOrigin,
+        manager, isClosed, stop, endpointOrigin, new URL(handoff.continuation.collection_url).origin,
         () => { nativeRetryAuthorized = true; });
       else if (suppliedHandoff) closeSongbird = bindSongbird(manager, isClosed, stop);
     } catch {
@@ -273,7 +278,7 @@ export async function runDelegatedPixelPay({ transport, handoff: suppliedHandoff
         }
         if (suppliedHandoff && operation === 'lookup' && result.action === 'continue'
           && (![200, 202].includes(result.status) || result.success !== true
-            || !(direct ? isCasUrl(result.data?.continue_url, STEP_UP_PATHS) : isSongbirdChallengeUrl(result.data?.continue_url))
+            || !(direct ? isCardinalUrl(result.data?.continue_url, STEP_UP_PATHS, handoff.sdk.environment) : isSongbirdChallengeUrl(result.data?.continue_url))
             || !validPayload(result.data?.continue_payload))) {
           throw new Error('PROTOTYPE_UNCERTAIN');
         }

@@ -4,7 +4,7 @@ El handoff backend declara `continuation_mode=direct_api` o `songbird`. El adapt
 
 | Modalidad | Inicio nativo | Desafío | Transporte al backend |
 | --- | --- | --- | --- |
-| Direct API | `manager.init(payload, collection_url)` con colección CAS válida | Collect y StepUp, si procede | lookup, retry, resultado financiero backend |
+| Direct API | `manager.init(payload, collection_url)` con colección Cardinal válida para el entorno | Collect y StepUp, si procede | lookup, retry, resultado financiero backend |
 | Songbird | `manager.init(payload)` exclusivamente sin propiedad collection_url | Cardinal.setup init y Cardinal.continue, si procede | lookup, continue con JWT validado, retry, resultado financiero backend |
 
 Un valor presente null/vacío/rechazado no selecciona Songbird. Se conserva el arreglo de namespaces window de PR123 (`0b741a8`): el bundle browser del SDK obtiene Requests, Models y Responses de exports o de window. No se introduce una bandera VITE para forzar Init.
