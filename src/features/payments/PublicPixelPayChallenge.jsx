@@ -28,7 +28,7 @@ export default function PublicPixelPayChallenge({ active, onCancel, overlay = fa
       onCancel={overlay ? (event) => { event.preventDefault(); onCancel?.(); } : undefined}
       className={overlay
         ? active
-          ? 'fixed inset-0 m-0 h-full max-h-none w-full max-w-none items-center justify-center overflow-y-auto border-0 bg-black/85 p-3 open:flex sm:p-6'
+          ? 'fixed inset-0 m-0 h-full max-h-none w-full max-w-none items-center justify-center overflow-y-auto border-0 bg-black/85 p-3 open:flex sm:p-6 [&_iframe]:bg-white'
           : 'hidden'
         : 'w-full [&_iframe]:mx-auto [&_iframe]:max-w-full'}>
       <div className={overlay

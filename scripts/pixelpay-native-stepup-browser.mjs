@@ -113,6 +113,8 @@ try {
       });
       assert.equal(await dialog.evaluate(node => node.parentElement === document.body), true);
       assert.equal(await frame.evaluate(node => node.parentElement.classList.contains('pixelpay-modal-container')), true);
+      assert.equal(await frame.evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(255, 255, 255)',
+        'A transparent issuer document needs a readable background');
       assert.deepEqual(requests, ['collect', 'stepup']);
       const rect = await frame.boundingBox();
       assert.ok(rect && rect.y >= 0 && rect.y < viewport.height && rect.x >= 0 && rect.x + rect.width <= viewport.width,

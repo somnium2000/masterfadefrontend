@@ -38,6 +38,7 @@ export default defineConfig(({ mode, command }) => {
   const isProduction = mode === "production";
 
   return {
+    test: { setupFiles: ["./test/setupHtmlDialog.js"] },
     plugins: [
       ...(isProduction ? [million.vite({ auto: true })] : []),
       react(),

@@ -26,21 +26,8 @@ function renderPayment(overrides) {
   return context;
 }
 
-beforeEach(() => {
-  vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay');
-  vi.stubEnv('VITE_PIXELPAY_ENV', 'sandbox');
-  // jsdom exposes HTMLDialogElement without implementing the native methods.
-  Object.defineProperties(window.HTMLDialogElement.prototype, {
-    showModal: { configurable: true, value() { this.setAttribute('open', ''); } },
-    close: { configurable: true, value() { this.removeAttribute('open'); } },
-  });
-});
-afterEach(() => {
-  cleanup();
-  delete window.HTMLDialogElement.prototype.showModal;
-  delete window.HTMLDialogElement.prototype.close;
-  vi.unstubAllEnvs();
-});
+beforeEach(() => { vi.stubEnv('VITE_PAYMENT_PROVIDER', 'pixelpay'); vi.stubEnv('VITE_PIXELPAY_ENV', 'sandbox'); });
+afterEach(() => { cleanup(); vi.unstubAllEnvs(); });
 
 it('oculta el CVV y conserva la entrada numérica de hasta cuatro dígitos', () => {
   const context = renderPayment();
