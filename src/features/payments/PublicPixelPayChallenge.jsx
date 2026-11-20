@@ -1,25 +1,34 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../../components/ui/button.jsx';
 
 // AM: Las reservas necesitan un desafío bancario visible; VIP conserva su propio diálogo.
 export default function PublicPixelPayChallenge({ active, onCancel, overlay = false }) {
   const headingRef = useRef(null);
+  const dialogRef = useRef(null);
 
-  useEffect(() => {
-    if (!overlay || !active || typeof document === 'undefined') return undefined;
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog || !active) return undefined;
     const previousOverflow = document.body.style.overflow;
+    dialog.showModal();
     document.body.style.overflow = 'hidden';
     headingRef.current?.focus({ preventScroll: true });
-    return () => { document.body.style.overflow = previousOverflow; };
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      dialog.close();
+    };
   }, [active, overlay]);
 
+  const Container = overlay ? 'dialog' : 'section';
+
   const challenge = (
-    <section without-sdk-modal="" hidden={!active} aria-label="Autenticación 3DS"
+    <Container ref={overlay ? dialogRef : undefined} without-sdk-modal="" hidden={!active} aria-label="Autenticación 3DS"
       role={overlay ? 'dialog' : 'region'} aria-modal={overlay && active ? true : undefined}
+      onCancel={overlay ? (event) => { event.preventDefault(); onCancel?.(); } : undefined}
       className={overlay
         ? active
-          ? 'fixed inset-0 z-[9999] flex items-center justify-center overflow-y-auto bg-black/85 p-3 sm:p-6'
+          ? 'fixed inset-0 m-0 h-full max-h-none w-full max-w-none items-center justify-center overflow-y-auto border-0 bg-black/85 p-3 open:flex sm:p-6 [&_iframe]:bg-white'
           : 'hidden'
         : 'w-full [&_iframe]:mx-auto [&_iframe]:max-w-full'}>
       <div className={overlay
@@ -38,7 +47,7 @@ export default function PublicPixelPayChallenge({ active, onCancel, overlay = fa
         <div className="pixelpay-modal-container w-full [&_iframe]:mx-auto [&_iframe]:max-w-full" />
         {active ? <Button type="button" variant="outline" onClick={onCancel}>Cancelar autenticación</Button> : null}
       </div>
-    </section>
+    </Container>
   );
 
   return overlay && typeof document !== 'undefined' ? createPortal(challenge, document.body) : challenge;

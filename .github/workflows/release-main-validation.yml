@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   frontend:
-    if: startsWith(github.head_ref, 'release/prod-') || github.head_ref == 'release/reconcile-main-dev-20261119' || github.head_ref == 'codex/pixelpay-public-3ds-integrated-20261120' || github.head_ref == 'codex/pixelpay-cardinal-origins-20261120' || github.head_ref == 'codex/pixelpay-stepup-diagnostics-20261120'
+    if: startsWith(github.head_ref, 'release/prod-') || github.head_ref == 'release/reconcile-main-dev-20261119' || github.head_ref == 'codex/pixelpay-public-3ds-integrated-20261120' || github.head_ref == 'codex/pixelpay-cardinal-origins-20261120' || github.head_ref == 'codex/pixelpay-stepup-diagnostics-20261120' || github.head_ref == 'codex/pixelpay-stepup-focus-cert'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -48,7 +48,7 @@ jobs:
           VITE_VIP_MEMBERSHIPS_ENABLED: 'true'
           VITE_VIP_MEMBERSHIPS_PURCHASE_ENABLED: 'false'
       - run: git diff --check
-      - name: Chromium legal and consent review
+      - name: Chromium StepUp, legal and consent review
         env:
           MASTERFADE_BROWSER_URL: http://127.0.0.1:4211
           MASTERFADE_BROWSER_ENGINES: chromium
@@ -57,6 +57,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/mf-legal-browser" --no-package-lock --no-audit --no-fund --ignore-scripts playwright@1.64.1
           node "$RUNNER_TEMP/mf-legal-browser/node_modules/playwright/cli.js" install --with-deps chromium
           export MASTERFADE_PLAYWRIGHT_MODULE="$RUNNER_TEMP/mf-legal-browser/node_modules/playwright"
+          node scripts/pixelpay-native-stepup-browser.mjs
           npm run preview -- --host 127.0.0.1 --port 4211 --strictPort > "$RUNNER_TEMP/mf-legal-preview.log" 2>&1 &
           preview_pid=$!
           trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
