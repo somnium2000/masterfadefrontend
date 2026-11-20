@@ -146,6 +146,13 @@ function createStepUpTrace() {
   } catch { return null; }
 
   const counts = new Map();
+  const records = [];
+  const save = () => {
+    try {
+      window.sessionStorage.setItem('mf_pixelpay_stepup_trace_latest', JSON.stringify(records));
+    } catch { /* AM: Blocked storage cannot interrupt payment. */ }
+  };
+  save();
   return (phase, checks) => {
     const count = counts.get(phase) ?? 0;
     if (count >= 8) return;
@@ -153,6 +160,9 @@ function createStepUpTrace() {
     const detail = Object.freeze({ phase, at: Date.now(), ...checks });
     // AM: Observers run outside the synchronous callback validation and SDK dispatch.
     queueMicrotask(() => {
+      records.push(detail);
+      if (records.length > 64) records.shift();
+      save();
       try { window.dispatchEvent(new CustomEvent('masterfade:pixelpay-stepup', { detail })); }
       catch { /* AM: Local instrumentation cannot interrupt payment. */ }
     });

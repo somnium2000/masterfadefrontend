@@ -287,6 +287,8 @@ async function verifyDirectCallbackIdentifier(sdk, Manager) {
 
 function stepUpTrace(enabled) {
   const name = 'masterfade:pixelpay-stepup';
+  const snapshotKey = 'mf_pixelpay_stepup_trace_latest';
+  window.sessionStorage.removeItem(snapshotKey);
   const records = [];
   const record = event => records.push(event.detail);
   window.addEventListener(name, record);
@@ -398,13 +400,18 @@ async function verifyNativeDirectApi(scenario, { status = 202, live = false, pay
       assert.equal(trace.phase('retry_transport_started').length, callbackError ? 0 : 1);
       assert.equal(trace.phase('sdk_init_rejected').length, callbackError ? 1 : 0);
       assert.equal(trace.phase('context_closed').length, 1);
+      trace.close();
+      assert.deepEqual(JSON.parse(window.sessionStorage.getItem('mf_pixelpay_stepup_trace_latest')), trace.records);
       const observations = trace.phase('callback_observed');
       assert.ok(observations.some(event => event.originMatches && event.frameMatches && !event.duplicate));
       assert.ok(observations.some(event => event.originMatches && event.frameMatches && event.duplicate));
       assert.doesNotMatch(JSON.stringify(trace.records), /never-trace|synthetic|merchant\.offline|local-identifier/);
       assert.ok(trace.records.every(record => Object.entries(record).every(([key, value]) =>
         key === 'phase' ? /^[a-z_]+$/.test(value) : key === 'at' ? Number.isFinite(value) : typeof value === 'boolean')));
-    } else assert.deepEqual(trace.records, []);
+    } else {
+      assert.deepEqual(trace.records, []);
+      assert.equal(window.sessionStorage.getItem('mf_pixelpay_stepup_trace_latest'), null);
+    }
     assert.equal(collectionFrame(), null);
     assert.equal(stepUpFrame(), null);
     assert.equal(window.document.getElementById('step-up-form'), null);

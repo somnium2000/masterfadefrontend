@@ -39,12 +39,22 @@ window.addEventListener('masterfade:pixelpay-stepup', collectStepUpTrace);
 sessionStorage.setItem('mf_pixelpay_stepup_trace', '1');
 ```
 
-Lee `stepUpTrace` tras finalizar. Para desactivar la captura, elimina el
-listener y la clave en esa pestaña.
+Tras cerrar el diálogo, navegar dentro de la aplicación o recargar en la
+misma pestaña, consulta las últimas 64 fases del intento en DevTools:
+
+```js
+JSON.parse(sessionStorage.getItem('mf_pixelpay_stepup_trace_latest') ?? '[]')
+```
+
+Se conserva solo la captura más reciente de esa pestaña. Cuando comienza
+otro intento con la traza habilitada, se sustituye el anterior. Cerrar la
+pestaña termina el almacenamiento de sesión. Para borrar y desactivar
+la captura, retira el listener y las dos claves en esa pestaña.
 
 ```js
 window.removeEventListener('masterfade:pixelpay-stepup', collectStepUpTrace);
 sessionStorage.removeItem('mf_pixelpay_stepup_trace');
+sessionStorage.removeItem('mf_pixelpay_stepup_trace_latest');
 ```
 
 - `iframe_created` indica que se encontró el iframe al retornar del SDK.
@@ -63,7 +73,30 @@ sessionStorage.removeItem('mf_pixelpay_stepup_trace');
 - `context_expired`, `context_aborted`, `context_closed` y las fases
   `sdk_*` o `retry_transport_failed` ayudan a localizar el corte.
 
-La aplicación limita la emisión a ocho eventos por fase e intento. El
-colector de arriba vive en memoria local. La aplicación no envía la traza
-a servicios ni guarda sus detalles. No se deben compartir HAR, cuerpos
-de POST ni capturas que expongan datos de pago.
+La aplicación limita la emisión a ocho eventos por fase e intento y guarda
+solo los campos seguros en el almacenamiento de sesión. La traza no se
+envía a un servicio. El listener del ejemplo es opcional; la captura local
+se puede consultar después de que se desmonte la vista de pago.
+
+## Tercer intento Live y CSP
+
+El CReq HTTP 200 indica que el navegador alcanzó un documento del desafío.
+El checkout montaba el host del SDK en el flujo normal de la página. Con
+el viewport desplazado, Chromium reprodujo un iframe completamente fuera
+de pantalla. El registro Live disponible no contiene sus coordenadas.
+
+La URL bloqueada identifica el destino de una petición, no el documento
+que impuso la política. Para atribuir el bloqueo de writer, en una sesión
+ya autorizada selecciona el frame que emitió la violación en DevTools y
+compara el origen y la directiva con la cabecera CSP o meta del documento
+correspondiente. Conserva solo origen, directiva efectiva y si la política
+es de bloqueo o de informe. El listener de la página no puede observar
+violaciones de documentos de otro origen. El mensaje disponible no
+identifica el documento que aplicó la política. No se cambia ninguna CSP.
+
+El servidor fija la caducidad a la menor de la protección de la reserva
+y los 120 segundos desde el inicio. El despacho comprueba además que
+el intent siga vigente y consume un registro único antes del retry.
+Al caducar se cierra el contexto. La conciliación existente conserva la
+autoridad sobre el estado financiero y no rehabilita ese contexto.
+Estos cambios conservan todos los plazos y la protección de los holds.
