@@ -255,6 +255,34 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const profile = { MessageType: 'profile.completed', SessionId: 'direct-collection-reference' };
 const callback = { name: 'pixelpay_continue', identifier: 'direct-callback-identifier' };
 
+async function verifyDirectCallbackIdentifier(sdk, Manager) {
+  const request = new sdk.Requests.SaleTransaction();
+  const manager = new Manager(new sdk.Models.Settings(), request);
+  manager.direct_api = true;
+  manager.identifier = directLookupResponse.data.identifier;
+  manager.direct_api_resolve = value => value;
+  const host = window.document.createElement('div');
+  host.setAttribute('without-sdk-modal', '');
+  window.document.body.appendChild(host);
+  let serialized;
+  manager.service = {
+    retryTransaction(transaction) {
+      assert.equal(transaction, request);
+      serialized = JSON.parse(transaction.toJson());
+      return { status: 200 };
+    },
+  };
+  try {
+    await manager.validationLookupResponse(directLookupResponse, manager.direct_api_resolve);
+    await manager.handleDirectApiContinue({ data: callback });
+    assert.equal(manager.identifier, callback.identifier);
+    assert.equal(serialized.authentication_identifier, directLookupResponse.data.identifier);
+    assert.equal(Object.hasOwn(serialized, 'identifier'), false);
+  } finally {
+    host.remove();
+  }
+}
+
 async function verifyNativeDirectApi(status) {
   const adapter = await import(`${bundleUrl}#direct-${status}`);
   const fixture = directFixture();
@@ -418,6 +446,7 @@ try {
   }
   assert.equal(typeof Manager?.prototype?.init, 'function');
   assert.equal(typeof Manager.clearAllEvents, 'function');
+  await verifyDirectCallbackIdentifier(sdk, Manager);
 
   const operations = [];
   const transport = async (operation, data) => {

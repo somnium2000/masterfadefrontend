@@ -68,7 +68,8 @@ function mount(pixelpaySale = true) {
 function EligibilityFlow() {
   const current = usePrivateCommerce();
   useEffect(() => { eligibility = current; }, [current]);
-  return <Flow pixelpaySale={current.pixelpaySale} />;
+  return <Flow pixelpaySale={current.pixelpaySale} pixelpayPublic3ds={current.pixelpayPublic3ds}
+    pixelpayPublic3dsRequired={current.pixelpayPublic3dsRequired} />;
 }
 function mountEligibility({ entorno = 'qa', environment = 'sandbox' } = {}) {
   mocks.auth = {
@@ -299,6 +300,31 @@ test('QA revoca formulario y callback si falla la renovación tras autorización
   expect(flow.paymentCanExecuteSale).toBe(false);
   await act(async () => { await flow.completePixelPayPayment({ card: {}, billing: {} }); });
   expect(salePublicPixelPay).not.toHaveBeenCalled();
+  expect(JSON.parse(sessionStorage.getItem(KEY))).toMatchObject({ id_grupo_cita: GROUP, id_intent: INTENT });
+});
+
+test('QA revoca 3DS público tras fallar la revalidación y conserva la reserva', async () => {
+  mocks.eligibilityGet.mockResolvedValueOnce({
+    data: { booking: true, pixelpaySale: false, pixelpayPublic3ds: true, pixelpayPublic3dsRequired: true },
+  });
+  mountEligibility();
+  await waitFor(() => expect(flow.paymentCanExecuteSale).toBe(true));
+  expect(screen.getByLabelText('Numero de tarjeta')).toBeInTheDocument();
+
+  let fail;
+  mocks.eligibilityGet.mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject; }));
+  act(() => window.dispatchEvent(new Event('focus')));
+  expect(eligibility).toMatchObject({ booking: true, checking: true, pixelpayPublic3ds: false, pixelpayPublic3dsRequired: true });
+  expect(flow.paymentCanExecuteSale).toBe(false);
+
+  await act(async () => { fail(new Error('Eligibility unavailable')); });
+  expect(eligibility).toMatchObject({ booking: true, checking: false, pixelpayPublic3ds: false, pixelpayPublic3dsRequired: true });
+  expect(flow.paymentCanExecuteSale).toBe(false);
+  expect(screen.queryByLabelText('Numero de tarjeta')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Pagar con PixelPay Sandbox' })).not.toBeInTheDocument();
+  await act(async () => { await flow.completePixelPayPayment({ card: {}, billing: {} }); });
+  expect(salePublicPixelPay).not.toHaveBeenCalled();
+  expect(queryPublicPixelPayStatus).not.toHaveBeenCalled();
   expect(JSON.parse(sessionStorage.getItem(KEY))).toMatchObject({ id_grupo_cita: GROUP, id_intent: INTENT });
 });
 

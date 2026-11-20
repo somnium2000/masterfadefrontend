@@ -27,7 +27,13 @@ export default function usePrivateCommerce() {
         if (!controller.signal.aborted && current === generation) {
           // AM: Preserve QA checkout context on refresh failure, but revoke any Sale grant.
           setConfirmed(previous => ({ identity: identityKey, data: explicitSaleRequired && previous?.identity === identityKey
-            && previous.data?.booking === true ? { ...previous.data, pixelpaySale: false, pixelpay3dsDiagnostic: false, pixelpaySongbirdBridge: false } : null }));
+            && previous.data?.booking === true ? {
+              ...previous.data,
+              pixelpaySale: false,
+              pixelpayPublic3ds: false,
+              pixelpay3dsDiagnostic: false,
+              pixelpaySongbirdBridge: false,
+            } : null }));
         }
       } finally {
         if (!controller.signal.aborted) {
