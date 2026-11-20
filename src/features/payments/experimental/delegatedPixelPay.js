@@ -35,7 +35,7 @@ export async function loadDelegatedSdk() {
 const browserFailure = code => Object.assign(new Error(code), { code });
 
 function isCasUrl(value, paths) {
-  if (typeof value !== 'string' || value.length > 2048 || /[\s\\#]/u.test(value)) return false;
+  if (typeof value !== 'string' || value.length > 2048 || !/^https:\/\/[^/]/i.test(value) || /[\p{Cc}\s\\#]/u.test(value)) return false;
   try {
     const url = new URL(value);
     return url.origin === CAS_ORIGIN && !url.username && !url.password && paths.includes(url.pathname);
@@ -44,7 +44,7 @@ function isCasUrl(value, paths) {
 
 const validPayload = value => typeof value === 'string' && value.length > 0 && value.length <= 32768;
 function isSongbirdChallengeUrl(value) {
-  if (typeof value !== 'string' || value.length > 2048 || /[\s\\#]/u.test(value)) return false;
+  if (typeof value !== 'string' || value.length > 2048 || !/^https:\/\/[^/]/i.test(value) || /[\p{Cc}\s\\#]/u.test(value)) return false;
   try {
     const url = new URL(value);
     return url.protocol === 'https:' && !url.username && !url.password;
@@ -52,8 +52,9 @@ function isSongbirdChallengeUrl(value) {
 }
 
 function isAllowedLiveEndpoint(value) {
+  if (typeof value !== 'string' || !/^https:\/\/[^/]/i.test(value) || /[\p{Cc}\s\\#]/u.test(value)) return false;
   try {
-    const url = new URL(String(value || ''));
+    const url = new URL(value);
     return url.protocol === 'https:' && url.pathname === '/' && !url.username
       && !url.password && !url.search && !url.hash && url.hostname !== 'pixelpay.dev'
       && url.hostname !== 'localhost';
